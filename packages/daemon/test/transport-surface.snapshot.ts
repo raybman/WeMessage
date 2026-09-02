@@ -24,10 +24,13 @@
  * enabling auto-HEAD is itself a surface change and must show up here).
  *
  * S2 surface per s2-execution §1.6: the S1 three routes plus rule CRUD +
- * rules test (routes 1-6, Scenario 7). Routes 7-9 (dry-run + audit reads)
- * land in Scenarios 9/10/11 with further deliberate updates here.
+ * rules test (routes 1-6, Scenario 7) plus dry-run replay (route 7,
+ * Scenario 10). Routes 8-9 (audit reads) land in Scenario 11 with a
+ * further deliberate update here.
  * (Deliberate update #1 of this file, F-17's demonstrated workflow: the
- * seed commit pinned the S1 three-route surface.)
+ * seed commit pinned the S1 three-route surface. Deliberate update #4,
+ * Scenario 10: GET /v1/rules/:id/dry-run + auto-HEAD twin — §1.6 route
+ * table row 7, read-only replay over the mirrored inbound window.)
  */
 export const ROUTE_TABLE: readonly string[] = [
   'DELETE /v1/rules/:id',
@@ -35,11 +38,13 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/health',
   'GET /v1/rules',
   'GET /v1/rules/:id',
+  'GET /v1/rules/:id/dry-run',
   'GET /v1/status',
   'HEAD /v1/events',
   'HEAD /v1/health',
   'HEAD /v1/rules',
   'HEAD /v1/rules/:id',
+  'HEAD /v1/rules/:id/dry-run',
   'HEAD /v1/status',
   'PATCH /v1/rules/:id',
   'POST /v1/rules',

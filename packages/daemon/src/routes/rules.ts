@@ -1,5 +1,6 @@
 /**
- * §1.6 routes 1-6: rule CRUD + POST /v1/rules/:id/test (S2 Scenario 7).
+ * §1.6 routes 1-7: rule CRUD + POST /v1/rules/:id/test (S2 Scenario 7)
+ * + GET /v1/rules/:id/dry-run (S2 Scenario 10).
  *
  * Validation contract (§1.6 "zod-validated bodies; errors as
  * { error, detail? }"):
@@ -23,12 +24,13 @@
  * Audit (§1.8): create/update/delete/enable/disable append exactly ONE row
  * with actor {kind:'human', via:'api'}; PATCH audits rule.enabled /
  * rule.disabled when ONLY `enabled` changed, else rule.updated. The test
- * route is read-only: zero audit rows, zero WS events.
+ * and dry-run routes are read-only: zero audit rows, zero WS events.
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import {
+  dryRun,
   evaluateRules,
   humanApiActor,
   validateSafeRegex,
@@ -177,6 +179,12 @@ const testBody = z.strictObject({
   kind: z
     .enum(['text', 'tapback', 'edit', 'unsend', 'audio', 'attachment-only'])
     .optional(),
+});
+
+// §1.6 route 7: window default 50, max 500 — 400 above, never silently
+// clamped. strictObject: unknown query params are surface too (fail closed).
+const dryRunQuery = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 });
 
 // ---------------------------------------------------------------------------
@@ -341,5 +349,26 @@ export function registerRuleRoutes(
       matched: matches.length > 0,
       detail: { matchedRuleIds: matches.map((m) => m.id) },
     };
+  });
+
+  // §1.6 route 7: dry-run replay (§1.3.2 "Dry run" affordance) — replays
+  // the rule over the last N mirrored messages (default 50, max 500), most
+  // recent first (store.listRecentInboundMessages, received_at DESC).
+  // READ-ONLY like route 6: zero audit rows, zero WS events, mirror/rules/
+  // settings untouched (teeth in the spec). Disabled rules are still
+  // dry-runnable (editor affordance, UI §3 S3): core dryRun overrides only
+  // rule-level `enabled`; message eligibility and matcher semantics stay
+  // live-identical (verdict fidelity).
+  app.get<{ Params: { id: string } }>('/v1/rules/:id/dry-run', (req, reply) => {
+    const rule = store.getRule(req.params.id);
+    if (rule === null) return reply.code(404).send({ error: 'not-found' });
+    const parsed = dryRunQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-query',
+        detail: { issues: parsed.error.issues },
+      });
+    }
+    return dryRun(rule, store.listRecentInboundMessages(parsed.data.limit));
   });
 }

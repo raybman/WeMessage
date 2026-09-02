@@ -61,6 +61,26 @@ export interface SendingDraft {
   ledgerStartedAt: IsoUtc | null;
 }
 
+/** Result of a hash-chained audit append (§2.3 audit_log; s2-execution §1.5). */
+export interface AuditAppendResult {
+  seq: number;
+  hash: string;
+}
+
+/**
+ * One stored audit_log row (§2.3). `eventJson`/`actorJson` are the TEXT
+ * columns VERBATIM — they are the exact bytes that were hashed (F-13:
+ * hash-what-is-stored; verification never re-serializes).
+ */
+export interface AuditRow {
+  seq: number;
+  at: IsoUtc;
+  eventJson: string;
+  actorJson: string;
+  prevHash: string;
+  hash: string;
+}
+
 /**
  * Read-only chat.db access (§2.1). Implemented by `@wemessage/ingest`; opens
  * `mode=ro&immutable=1` and never writes.

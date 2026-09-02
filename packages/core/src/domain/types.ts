@@ -86,7 +86,12 @@ export type Actor =
   | { kind: 'agent'; adapterId: string }
   | { kind: 'system';
       reason: 'expiry' | 'supersede' | 'kill-switch' | 'circuit-breaker'
-            | 'auto-respond' | 'inbound-unsent' | 'disconnect' };
+            | 'auto-respond' | 'inbound-unsent' | 'disconnect'
+            // F-16 (s2-execution Open flags, coordinator-confirmed): additive
+            // extension for the persisted audit log's system actors
+            // (recovery/ingest/rule-engine events, §2.4.4). No pre-existing
+            // variant touched.
+            | 'recovery' | 'ingest' | 'rule-engine' };
 
 export interface Approval {
   id: Ulid; draftId: Ulid;

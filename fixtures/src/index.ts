@@ -1,3 +1,11 @@
-// @wemessage/fixtures — chatdb-builder + typedstream corpus (Part 3). Full builder
-// lands in Scenario 6 (out of this scope). Private: never ships (§2.1).
-export {};
+// @wemessage/fixtures — fixture chat.db builder + typedstream corpus (Part 3).
+// Test-only library; never ships (§2.1).
+export {
+  createChatDb,
+  appleEpochNs,
+  APPLE_EPOCH_OFFSET_SECONDS,
+  type ChatDbFixture,
+  type AddMessageOptions,
+  type MessageRef,
+  type AttachmentOptions,
+} from './chatdb-builder.js';

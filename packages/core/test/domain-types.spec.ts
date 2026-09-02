@@ -290,6 +290,9 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       setSetting: () => undefined,
       hasInboundMessage: () => false,
       insertInboundMessage: () => undefined,
+      listSendingDrafts: () => [],
+      markDraftSent: () => undefined,
+      markDraftFailed: () => undefined,
       close: () => undefined,
     };
     const reader: ChatDbReader = { readSince: () => Promise.resolve([]) };

@@ -8,7 +8,14 @@
  * scope), SendBackend (interface only, must-not-call fake, F-2), AdapterTransport /
  * Classifier (interface declarations only, S5 / S2+).
  */
-import type { ChatGuid, IsoUtc, Message } from '../domain/types.js';
+import type {
+  ChatGuid,
+  DraftError,
+  IsoUtc,
+  Message,
+  MessageGuid,
+  Ulid,
+} from '../domain/types.js';
 
 /** Injected time source — "never Date.now in core" (§3.2 GateContext comment). */
 export interface Clock {
@@ -34,7 +41,22 @@ export interface Store {
   hasInboundMessage(guid: string): boolean;
   /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
   insertInboundMessage(message: Message): void;
+  /** Drafts stuck in 'sending' + their ledger row (T-9.3 reconciliation). */
+  listSendingDrafts(): SendingDraft[];
+  /** sending -> sent: records the verified guid on draft + ledger (§2.2.2). */
+  markDraftSent(id: Ulid, sentMessageGuid: MessageGuid, at: IsoUtc): void;
+  /** sending -> failed (F-2 park, e.g. code 'unverified'); closes the ledger. */
+  markDraftFailed(id: Ulid, error: DraftError, at: IsoUtc): void;
   close(): void;
+}
+
+/** A draft in state 'sending' joined with its send-ledger attempt (§2.3). */
+export interface SendingDraft {
+  id: Ulid;
+  chatGuid: ChatGuid;
+  body: string;
+  /** Ledger `started_at`; null when no ledger row exists. */
+  ledgerStartedAt: IsoUtc | null;
 }
 
 /**

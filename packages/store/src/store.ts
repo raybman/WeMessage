@@ -1,7 +1,14 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import type { Clock, CursorState, Message, Store } from '@wemessage/core';
+import type {
+  Clock,
+  CursorState,
+  DraftError,
+  Message,
+  SendingDraft,
+  Store,
+} from '@wemessage/core';
 import { applyMigrations } from './migrate.js';
 
 /** Our store filename inside the WeMessage config dir (§2.3). */
@@ -93,6 +100,50 @@ export class SqliteStore implements Store {
 
   setSetting(key: string, value: string): void {
     this.#setSetting.run(key, value, this.#clock.now());
+  }
+
+  listSendingDrafts(): SendingDraft[] {
+    const rows = this.db
+      .prepare(
+        'SELECT d.id, d.chat_guid, d.body, l.started_at FROM drafts d ' +
+          "LEFT JOIN send_ledger l ON l.draft_id = d.id WHERE d.state = 'sending'",
+      )
+      .all() as {
+      id: string;
+      chat_guid: string;
+      body: string;
+      started_at: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      chatGuid: r.chat_guid,
+      body: r.body,
+      ledgerStartedAt: r.started_at,
+    }));
+  }
+
+  markDraftSent(id: string, sentMessageGuid: string, at: string): void {
+    this.db
+      .prepare(
+        "UPDATE drafts SET state = 'sent', sent_message_guid = ?, state_changed_at = ? WHERE id = ?",
+      )
+      .run(sentMessageGuid, at, id);
+    this.db
+      .prepare(
+        'UPDATE send_ledger SET verified_guid = ?, finished_at = ? WHERE draft_id = ?',
+      )
+      .run(sentMessageGuid, at, id);
+  }
+
+  markDraftFailed(id: string, error: DraftError, at: string): void {
+    this.db
+      .prepare(
+        "UPDATE drafts SET state = 'failed', error = ?, state_changed_at = ? WHERE id = ?",
+      )
+      .run(JSON.stringify(error), at, id);
+    this.db
+      .prepare('UPDATE send_ledger SET finished_at = ? WHERE draft_id = ?')
+      .run(at, id);
   }
 
   hasInboundMessage(guid: string): boolean {

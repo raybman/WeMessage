@@ -306,6 +306,12 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       appendAudit: () => ({ seq: 1, hash: '0'.repeat(64) }),
       listAudit: () => [],
       readAuditRows: () => [],
+      // S3 additive body extensions (s3-execution §1.5, Scenario 5).
+      insertDraft: () => undefined,
+      getDraft: () => null,
+      insertApproval: () => undefined,
+      beginSendAttempt: () => ({ attempt: 1 }),
+      clearAdapterTokens: () => 0,
       close: () => undefined,
     };
     const reader: ChatDbReader = {

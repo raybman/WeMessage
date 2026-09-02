@@ -30,6 +30,7 @@
  */
 import type {
   Actor,
+  Draft,
   DraftError,
   MessageGuid,
   Rule,
@@ -69,7 +70,22 @@ export type AuditEvent =
       outcome: 'sent' | 'failed';
       sentMessageGuid?: MessageGuid;
       code?: DraftError['code'];
-    };
+    }
+  // S3 §1.5 audit variants (s3-execution Scenario 5). Shapes echo the plan's
+  // §3.4 GatewayEventPayload WS twins where one exists (draft.sent,
+  // draft.failed) — a different, unrelated type (that one's the live-event
+  // wire frame; this is the persisted, hash-chained record) but there is no
+  // reason for the payload fields to diverge.
+  | { type: 'draft.created'; draftId: Ulid; draft: Draft } // full snapshot, mirrors rule.created
+  | {
+      type: 'draft.approved';
+      draftId: Ulid;
+      approvalId: Ulid;
+      actor: Actor;
+    }
+  | { type: 'send.attempted'; draftId: Ulid; attempt: number; backend: string }
+  | { type: 'draft.sent'; draftId: Ulid; sentMessageGuid: MessageGuid }
+  | { type: 'draft.failed'; draftId: Ulid; error: DraftError };
 
 export type AuditEventType = AuditEvent['type'];
 

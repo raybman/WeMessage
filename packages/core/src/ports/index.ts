@@ -9,7 +9,9 @@
  * Classifier (interface declarations only, S5 / S2+).
  */
 import type {
+  Approval,
   ChatGuid,
+  Draft,
   DraftError,
   Handle,
   IsoUtc,
@@ -97,6 +99,39 @@ export interface Store {
   }): AuditRow[];
   /** Chain-walk pagination: seq > afterSeq, seq ASC, at most `limit` rows. */
   readAuditRows(afterSeq: number, limit: number): AuditRow[];
+
+  // --- drafts, approvals, send ledger (§2.3; s3-execution §1.5 body
+  // extensions, Scenario 5). The §2.3 schema already has every table these
+  // need (drafts/approvals/send_ledger/adapters, all S1) — no migration. ---
+  /** Insert a new §3.2 `Draft` (verbatim) row. */
+  insertDraft(draft: Draft): void;
+  /** Null when absent. */
+  getDraft(id: Ulid): Draft | null;
+  /**
+   * Requires an existing draft (FK); records `actor` JSON verbatim (mirrors
+   * the audit_log actor convention, F-13).
+   */
+  insertApproval(approval: Approval): void;
+  /**
+   * approved -> sending: mints the `send_ledger` row (attempt 1; S3 specs no
+   * retry path, so attempt never advances past 1) and flips draft state.
+   * Throws if the draft is not currently 'approved' — most notably a second
+   * call on a draft already 'sending' — via a state assertion made INSIDE
+   * the same transaction as the write, the persistent backstop against a
+   * double-begin racing the in-memory send mutex.
+   */
+  beginSendAttempt(
+    draftId: Ulid,
+    backend: string,
+    at: IsoUtc,
+  ): { attempt: number };
+  /**
+   * F-22: NULLs `token_hash` on every adapter row that currently has one set
+   * (adapter rows themselves are never deleted — audit trail keeps adapter
+   * identity). Returns the count of rows actually cleared; the reserved
+   * 'human' row (already NULL, §2.6 fail-closed) is never counted.
+   */
+  clearAdapterTokens(): number;
 
   close(): void;
 }

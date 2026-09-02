@@ -3,12 +3,15 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { chainHash, GENESIS_HASH } from '@wemessage/core';
 import type {
+  Approval,
   AttachmentRef,
   AuditAppendResult,
   AuditRow,
   Clock,
   CursorState,
+  Draft,
   DraftError,
+  DraftState,
   IsoUtc,
   Message,
   MessageGuid,
@@ -67,6 +70,59 @@ interface InboundRow {
   received_at: string;
   edited_at: string | null;
   meta: string | null;
+}
+
+interface DraftRow {
+  id: string;
+  inbound_guid: string | null;
+  chat_guid: string;
+  rule_id: string | null;
+  adapter_id: string;
+  idempotency_key: string;
+  body: string;
+  original_body: string;
+  state: string;
+  state_changed_at: string;
+  expires_at: string;
+  send_not_before: string | null;
+  sent_message_guid: string | null;
+  proactive_reason: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+/**
+ * Rebuild a full `Draft` from its row (s3 Scenario 5). Optional keys are
+ * OMITTED, never set to `undefined` (exactOptionalPropertyTypes round-trip
+ * fidelity — same convention as `messageFromRow`).
+ */
+function draftFromRow(row: DraftRow): Draft {
+  return {
+    id: row.id,
+    inboundGuid: row.inbound_guid,
+    chatGuid: row.chat_guid,
+    ruleId: row.rule_id,
+    adapterId: row.adapter_id,
+    idempotencyKey: row.idempotency_key,
+    body: row.body,
+    originalBody: row.original_body,
+    state: row.state as DraftState,
+    stateChangedAt: row.state_changed_at,
+    expiresAt: row.expires_at,
+    ...(row.send_not_before !== null
+      ? { sendNotBefore: row.send_not_before }
+      : {}),
+    ...(row.sent_message_guid !== null
+      ? { sentMessageGuid: row.sent_message_guid }
+      : {}),
+    ...(row.proactive_reason !== null
+      ? { proactiveReason: row.proactive_reason }
+      : {}),
+    ...(row.error !== null
+      ? { error: JSON.parse(row.error) as DraftError }
+      : {}),
+    createdAt: row.created_at,
+  };
 }
 
 interface AuditLogRow {
@@ -200,6 +256,16 @@ export class SqliteStore implements Store {
       actorJson: string;
     }) => AuditAppendResult
   >;
+  readonly #insertDraft: Database.Statement;
+  readonly #getDraft: Database.Statement;
+  readonly #insertApproval: Database.Statement;
+  readonly #getDraftState: Database.Statement;
+  readonly #setDraftSending: Database.Statement;
+  readonly #insertLedger: Database.Statement;
+  readonly #beginSendAttemptTxn: Database.Transaction<
+    (draftId: Ulid, backend: string, at: IsoUtc) => { attempt: number }
+  >;
+  readonly #clearAdapterTokensStmt: Database.Statement;
 
   constructor(opts: OpenStoreOptions) {
     mkdirSync(opts.dir, { recursive: true });
@@ -208,6 +274,18 @@ export class SqliteStore implements Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     applyMigrations(this.db, opts.clock.now());
+    // F-22 (s3-execution Scenario 5): idempotent boot-time seed of the
+    // reserved 'human' adapter row — humans can hold drafts (adapter_id is
+    // NOT NULL, §2.3) without relaxing the FK. token_hash stays NULL
+    // permanently: §2.6 fail-closed, this "adapter" can never be used as a
+    // transport. ON CONFLICT DO NOTHING keeps repeated opens a no-op.
+    this.db
+      .prepare(
+        'INSERT INTO adapters (id, kind, display_name, token_hash) ' +
+          "VALUES ('human', 'generic', 'Human (direct send)', NULL) " +
+          'ON CONFLICT(id) DO NOTHING',
+      )
+      .run();
     chmodSync(this.path, 0o600);
 
     this.#clock = opts.clock;
@@ -303,6 +381,48 @@ export class SqliteStore implements Store {
         );
         return { seq: Number(info.lastInsertRowid), hash };
       },
+    );
+    this.#insertDraft = this.db.prepare(
+      'INSERT INTO drafts (id, inbound_guid, chat_guid, rule_id, adapter_id, ' +
+        'idempotency_key, body, original_body, state, state_changed_at, ' +
+        'expires_at, send_not_before, sent_message_guid, proactive_reason, ' +
+        'error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    this.#getDraft = this.db.prepare('SELECT * FROM drafts WHERE id = ?');
+    this.#insertApproval = this.db.prepare(
+      'INSERT INTO approvals (id, draft_id, action, actor, batch_id, ' +
+        'edited_body, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    this.#getDraftState = this.db.prepare(
+      'SELECT state FROM drafts WHERE id = ?',
+    );
+    this.#setDraftSending = this.db.prepare(
+      "UPDATE drafts SET state = 'sending', state_changed_at = ? WHERE id = ?",
+    );
+    this.#insertLedger = this.db.prepare(
+      'INSERT INTO send_ledger (draft_id, attempt, backend, started_at) ' +
+        'VALUES (?, 1, ?, ?)',
+    );
+    // s3-execution Scenario 5 teeth: the state check below is the
+    // persistent double-begin backstop, made INSIDE the same immediate
+    // transaction as the write so it can never race a concurrent caller.
+    this.#beginSendAttemptTxn = this.db.transaction(
+      (draftId: Ulid, backend: string, at: IsoUtc): { attempt: number } => {
+        const row = this.#getDraftState.get(draftId) as
+          { state: string } | undefined;
+        if (!row || row.state !== 'approved') {
+          throw new Error(
+            `beginSendAttempt: draft ${draftId} is not approved ` +
+              `(state=${row ? row.state : 'missing'})`,
+          );
+        }
+        this.#setDraftSending.run(at, draftId);
+        this.#insertLedger.run(draftId, backend, at);
+        return { attempt: 1 };
+      },
+    );
+    this.#clearAdapterTokensStmt = this.db.prepare(
+      'UPDATE adapters SET token_hash = NULL WHERE token_hash IS NOT NULL',
     );
   }
 
@@ -530,6 +650,56 @@ export class SqliteStore implements Store {
     return (this.#readAuditRows.all(afterSeq, limit) as AuditLogRow[]).map(
       auditRowFromDb,
     );
+  }
+
+  insertDraft(draft: Draft): void {
+    this.#insertDraft.run(
+      draft.id,
+      draft.inboundGuid,
+      draft.chatGuid,
+      draft.ruleId,
+      draft.adapterId,
+      draft.idempotencyKey,
+      draft.body,
+      draft.originalBody,
+      draft.state,
+      draft.stateChangedAt,
+      draft.expiresAt,
+      draft.sendNotBefore ?? null,
+      draft.sentMessageGuid ?? null,
+      draft.proactiveReason ?? null,
+      draft.error ? JSON.stringify(draft.error) : null,
+      draft.createdAt,
+    );
+  }
+
+  getDraft(id: Ulid): Draft | null {
+    const row = this.#getDraft.get(id) as DraftRow | undefined;
+    return row ? draftFromRow(row) : null;
+  }
+
+  insertApproval(approval: Approval): void {
+    this.#insertApproval.run(
+      approval.id,
+      approval.draftId,
+      approval.action,
+      JSON.stringify(approval.actor),
+      approval.batchId ?? null,
+      approval.editedBody ?? null,
+      approval.at,
+    );
+  }
+
+  beginSendAttempt(
+    draftId: Ulid,
+    backend: string,
+    at: IsoUtc,
+  ): { attempt: number } {
+    return this.#beginSendAttemptTxn.immediate(draftId, backend, at);
+  }
+
+  clearAdapterTokens(): number {
+    return this.#clearAdapterTokensStmt.run().changes;
   }
 
   close(): void {

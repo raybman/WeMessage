@@ -68,6 +68,34 @@ export interface Store {
   /** Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). */
   updateInboundMessage(message: Message): void;
 
+  // --- audit (§2.3 `audit_log`; §2.4.4; s2 §1.5) ---
+  /**
+   * Hash-chained append. prev_hash/hash are computed internally with
+   * core/audit's pure `chainHash` (F-13 frozen encoding) inside ONE
+   * transaction (read-last + insert atomically; the daemon is the single
+   * writer, §2.1). The Store exposes NO update/delete path for audit_log —
+   * append-only is an API property, not a convention.
+   */
+  appendAudit(entry: {
+    at: IsoUtc;
+    eventJson: string;
+    actorJson: string;
+  }): AuditAppendResult;
+  /**
+   * F-19 pagination: reverse-chron (seq DESC); `sinceSeq` exclusive lower
+   * bound, `sinceAt` inclusive ISO lower bound, `event` exact type filter
+   * (the stored event JSON's "type"); filters AND-compose. Route-level
+   * default 100 / max 1000 live in the daemon (§1.6 route 8).
+   */
+  listAudit(filter: {
+    sinceSeq?: number;
+    sinceAt?: IsoUtc;
+    event?: string;
+    limit: number;
+  }): AuditRow[];
+  /** Chain-walk pagination: seq > afterSeq, seq ASC, at most `limit` rows. */
+  readAuditRows(afterSeq: number, limit: number): AuditRow[];
+
   close(): void;
 }
 

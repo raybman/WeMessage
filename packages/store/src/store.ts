@@ -1,8 +1,11 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { chainHash, GENESIS_HASH } from '@wemessage/core';
 import type {
   AttachmentRef,
+  AuditAppendResult,
+  AuditRow,
   Clock,
   CursorState,
   DraftError,
@@ -64,6 +67,27 @@ interface InboundRow {
   received_at: string;
   edited_at: string | null;
   meta: string | null;
+}
+
+interface AuditLogRow {
+  seq: number;
+  at: string;
+  event: string;
+  actor: string;
+  prev_hash: string;
+  hash: string;
+}
+
+/** `event`/`actor` map to eventJson/actorJson VERBATIM (F-13). */
+function auditRowFromDb(row: AuditLogRow): AuditRow {
+  return {
+    seq: row.seq,
+    at: row.at,
+    eventJson: row.event,
+    actorJson: row.actor,
+    prevHash: row.prev_hash,
+    hash: row.hash,
+  };
 }
 
 /**
@@ -166,6 +190,16 @@ export class SqliteStore implements Store {
   readonly #listRecentInbound: Database.Statement;
   readonly #getInbound: Database.Statement;
   readonly #updateInbound: Database.Statement;
+  readonly #lastAudit: Database.Statement;
+  readonly #insertAudit: Database.Statement;
+  readonly #readAuditRows: Database.Statement;
+  readonly #appendAuditTxn: Database.Transaction<
+    (entry: {
+      at: IsoUtc;
+      eventJson: string;
+      actorJson: string;
+    }) => AuditAppendResult
+  >;
 
   constructor(opts: OpenStoreOptions) {
     mkdirSync(opts.dir, { recursive: true });
@@ -235,6 +269,40 @@ export class SqliteStore implements Store {
       'UPDATE inbound_messages SET rowid_src = ?, chat_guid = ?, handle = ?, ' +
         'is_from_me = ?, is_group = ?, service = ?, kind = ?, text = ?, ' +
         'sent_at = ?, received_at = ?, edited_at = ?, meta = ? WHERE guid = ?',
+    );
+    this.#lastAudit = this.db.prepare(
+      'SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1',
+    );
+    this.#insertAudit = this.db.prepare(
+      'INSERT INTO audit_log (at, event, actor, prev_hash, hash) ' +
+        'VALUES (?, ?, ?, ?, ?)',
+    );
+    this.#readAuditRows = this.db.prepare(
+      'SELECT * FROM audit_log WHERE seq > ? ORDER BY seq ASC LIMIT ?',
+    );
+    // F-13 / s2 §1.5: read-last + insert are ONE immediate transaction —
+    // the prev_hash read MUST NOT move outside it (interleaving proof,
+    // Scenario 6 teeth). Hash inputs are the stored strings VERBATIM.
+    this.#appendAuditTxn = this.db.transaction(
+      (entry: { at: IsoUtc; eventJson: string; actorJson: string }) => {
+        const prev = this.#lastAudit.get() as
+          { seq: number; hash: string } | undefined;
+        const prevHash = prev ? prev.hash : GENESIS_HASH;
+        const hash = chainHash(
+          prevHash,
+          entry.at,
+          entry.eventJson,
+          entry.actorJson,
+        );
+        const info = this.#insertAudit.run(
+          entry.at,
+          entry.eventJson,
+          entry.actorJson,
+          prevHash,
+          hash,
+        );
+        return { seq: Number(info.lastInsertRowid), hash };
+      },
     );
   }
 
@@ -415,6 +483,52 @@ export class SqliteStore implements Store {
         attachments: message.attachments,
       }),
       message.guid,
+    );
+  }
+
+  appendAudit(entry: {
+    at: IsoUtc;
+    eventJson: string;
+    actorJson: string;
+  }): AuditAppendResult {
+    return this.#appendAuditTxn.immediate(entry);
+  }
+
+  listAudit(filter: {
+    sinceSeq?: number;
+    sinceAt?: IsoUtc;
+    event?: string;
+    limit: number;
+  }): AuditRow[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filter.sinceSeq !== undefined) {
+      where.push('seq > ?');
+      params.push(filter.sinceSeq);
+    }
+    if (filter.sinceAt !== undefined) {
+      where.push('at >= ?');
+      params.push(filter.sinceAt);
+    }
+    if (filter.event !== undefined) {
+      // Exact type filter over the stored event JSON (F-19). Read-only
+      // extraction for filtering — hashing never touches re-serialization.
+      where.push("json_extract(event, '$.type') = ?");
+      params.push(filter.event);
+    }
+    const sql =
+      'SELECT * FROM audit_log' +
+      (where.length > 0 ? ' WHERE ' + where.join(' AND ') : '') +
+      ' ORDER BY seq DESC LIMIT ?';
+    params.push(filter.limit);
+    return (this.db.prepare(sql).all(...params) as AuditLogRow[]).map(
+      auditRowFromDb,
+    );
+  }
+
+  readAuditRows(afterSeq: number, limit: number): AuditRow[] {
+    return (this.#readAuditRows.all(afterSeq, limit) as AuditLogRow[]).map(
+      auditRowFromDb,
     );
   }
 

@@ -7,3 +7,4 @@ export {
   openStore,
   type OpenStoreOptions,
 } from './store.js';
+export { verifyAuditChain, type AuditRowsSource } from './verify-audit.js';

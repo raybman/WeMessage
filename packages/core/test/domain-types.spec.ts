@@ -303,6 +303,9 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       listRecentInboundMessages: () => [],
       getInboundMessage: () => null,
       updateInboundMessage: () => undefined,
+      appendAudit: () => ({ seq: 1, hash: '0'.repeat(64) }),
+      listAudit: () => [],
+      readAuditRows: () => [],
       close: () => undefined,
     };
     const reader: ChatDbReader = { readSince: () => Promise.resolve([]) };

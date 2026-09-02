@@ -294,6 +294,15 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       listSendingDrafts: () => [],
       markDraftSent: () => undefined,
       markDraftFailed: () => undefined,
+      // S2 additive body extensions (s2-execution §1.5): rules CRUD + mirror.
+      listRules: () => [],
+      getRule: () => null,
+      insertRule: () => undefined,
+      updateRule: () => undefined,
+      deleteRule: () => false,
+      listRecentInboundMessages: () => [],
+      getInboundMessage: () => null,
+      updateInboundMessage: () => undefined,
       close: () => undefined,
     };
     const reader: ChatDbReader = { readSince: () => Promise.resolve([]) };

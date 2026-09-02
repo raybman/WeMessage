@@ -14,6 +14,7 @@ import type {
   IsoUtc,
   Message,
   MessageGuid,
+  Rule,
   Ulid,
 } from '../domain/types.js';
 
@@ -49,6 +50,24 @@ export interface Store {
   markDraftSent(id: Ulid, sentMessageGuid: MessageGuid, at: IsoUtc): void;
   /** sending -> failed (F-2 park, e.g. code 'unverified'); closes the ledger. */
   markDraftFailed(id: Ulid, error: DraftError, at: IsoUtc): void;
+
+  // --- rules (§2.3 `rules`; CRUD surface §3.8; s2-execution §1.5) ---
+  /** All rules, priority ASC, id ASC tiebreak (F-12 deterministic order). */
+  listRules(): Rule[];
+  getRule(id: Ulid): Rule | null;
+  insertRule(rule: Rule): void;
+  /** Full-row update keyed on id; throws if absent. */
+  updateRule(rule: Rule): void;
+  /** False when absent. */
+  deleteRule(id: Ulid): boolean;
+
+  // --- inbound mirror (dry-run replay + mutation visibility; s2 §1.5) ---
+  /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */
+  listRecentInboundMessages(limit: number): Message[];
+  getInboundMessage(guid: MessageGuid): Message | null;
+  /** Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). */
+  updateInboundMessage(message: Message): void;
+
   close(): void;
 }
 

@@ -2,13 +2,18 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type {
+  AttachmentRef,
   Clock,
   CursorState,
   DraftError,
   IsoUtc,
   Message,
+  MessageGuid,
+  Rule,
+  RuleMatcher,
   SendingDraft,
   Store,
+  Ulid,
 } from '@wemessage/core';
 import { applyMigrations } from './migrate.js';
 
@@ -29,6 +34,114 @@ interface SettingRow {
   value: string;
 }
 
+interface RuleRow {
+  id: string;
+  name: string;
+  enabled: number;
+  matcher: string;
+  adapter_id: string;
+  respond_mode: string;
+  schedule_id: string | null;
+  outside_window: string;
+  allow_group_drafts: number;
+  draft_ttl_minutes: number;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface InboundRow {
+  guid: string;
+  rowid_src: number;
+  chat_guid: string;
+  handle: string;
+  is_from_me: number;
+  is_group: number;
+  service: string;
+  kind: string;
+  text: string | null;
+  sent_at: string;
+  received_at: string;
+  edited_at: string | null;
+  meta: string | null;
+}
+
+/**
+ * Persisted shape of the `rules.matcher` TEXT column. The §2.3 DDL has no
+ * `match_attachment_only` column and S2 adds no migration (s2-execution §1.1),
+ * so `matchAttachmentOnly` travels "through the JSON matcher column"
+ * (s2-execution Part 2 Scenario 5) inside this envelope. Reads also accept a
+ * bare `RuleMatcher` object (distinguished by its `kind` key) defensively.
+ */
+interface MatcherColumn {
+  matcher: RuleMatcher;
+  matchAttachmentOnly: boolean;
+}
+
+function parseMatcherColumn(json: string): MatcherColumn {
+  const parsed = JSON.parse(json) as MatcherColumn | RuleMatcher;
+  if ('kind' in parsed) {
+    return { matcher: parsed, matchAttachmentOnly: false };
+  }
+  return parsed;
+}
+
+function ruleFromRow(row: RuleRow): Rule {
+  const col = parseMatcherColumn(row.matcher);
+  return {
+    id: row.id,
+    name: row.name,
+    enabled: row.enabled === 1,
+    matcher: col.matcher,
+    adapterId: row.adapter_id,
+    respondMode: row.respond_mode as Rule['respondMode'],
+    scheduleId: row.schedule_id,
+    outsideWindow: row.outside_window as Rule['outsideWindow'],
+    allowGroupDrafts: row.allow_group_drafts === 1,
+    matchAttachmentOnly: col.matchAttachmentOnly,
+    draftTtlMinutes: row.draft_ttl_minutes,
+    priority: row.priority,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+interface InboundMeta {
+  tapback: Message['tapback'] | null;
+  threadOriginatorGuid: string | null;
+  attachments: AttachmentRef[];
+}
+
+/**
+ * Rebuild a full `Message` from mirror row + `meta` JSON (s2 Scenario 5:
+ * load-bearing for dry-run fidelity). Optional keys are OMITTED, never set to
+ * `undefined` (exactOptionalPropertyTypes round-trip fidelity).
+ */
+function messageFromRow(row: InboundRow): Message {
+  const meta: InboundMeta = row.meta
+    ? (JSON.parse(row.meta) as InboundMeta)
+    : { tapback: null, threadOriginatorGuid: null, attachments: [] };
+  return {
+    guid: row.guid,
+    sourceRowid: row.rowid_src,
+    chatGuid: row.chat_guid,
+    handle: row.handle,
+    isFromMe: row.is_from_me === 1,
+    isGroup: row.is_group === 1,
+    service: row.service as Message['service'],
+    kind: row.kind as Message['kind'],
+    text: row.text,
+    attachments: meta.attachments,
+    sentAt: row.sent_at,
+    receivedAt: row.received_at,
+    ...(row.edited_at !== null ? { editedAt: row.edited_at } : {}),
+    ...(meta.tapback ? { tapback: meta.tapback } : {}),
+    ...(meta.threadOriginatorGuid
+      ? { threadOriginatorGuid: meta.threadOriginatorGuid }
+      : {}),
+  };
+}
+
 /**
  * SQLite-backed `Store` (§2.1). WAL mode, `foreign_keys` on, DB file mode `0600`
  * (§2.3). The raw `db` handle is exposed for wiring and tests; the `Store` port
@@ -45,6 +158,14 @@ export class SqliteStore implements Store {
   readonly #hasInbound: Database.Statement;
   readonly #insertInbound: Database.Statement;
   readonly #countInboundSince: Database.Statement;
+  readonly #listRules: Database.Statement;
+  readonly #getRule: Database.Statement;
+  readonly #insertRule: Database.Statement;
+  readonly #updateRule: Database.Statement;
+  readonly #deleteRule: Database.Statement;
+  readonly #listRecentInbound: Database.Statement;
+  readonly #getInbound: Database.Statement;
+  readonly #updateInbound: Database.Statement;
 
   constructor(opts: OpenStoreOptions) {
     mkdirSync(opts.dir, { recursive: true });
@@ -84,6 +205,36 @@ export class SqliteStore implements Store {
     );
     this.#countInboundSince = this.db.prepare(
       'SELECT COUNT(*) AS n FROM inbound_messages WHERE received_at >= ?',
+    );
+    // Deterministic order: priority ASC, id ASC tiebreak (s2 §1.5, F-12).
+    this.#listRules = this.db.prepare(
+      'SELECT * FROM rules ORDER BY priority ASC, id ASC',
+    );
+    this.#getRule = this.db.prepare('SELECT * FROM rules WHERE id = ?');
+    this.#insertRule = this.db.prepare(
+      'INSERT INTO rules (id, name, enabled, matcher, adapter_id, ' +
+        'respond_mode, schedule_id, outside_window, allow_group_drafts, ' +
+        'draft_ttl_minutes, priority, created_at, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    this.#updateRule = this.db.prepare(
+      'UPDATE rules SET name = ?, enabled = ?, matcher = ?, adapter_id = ?, ' +
+        'respond_mode = ?, schedule_id = ?, outside_window = ?, ' +
+        'allow_group_drafts = ?, draft_ttl_minutes = ?, priority = ?, ' +
+        'created_at = ?, updated_at = ? WHERE id = ?',
+    );
+    this.#deleteRule = this.db.prepare('DELETE FROM rules WHERE id = ?');
+    this.#listRecentInbound = this.db.prepare(
+      'SELECT * FROM inbound_messages ORDER BY received_at DESC LIMIT ?',
+    );
+    this.#getInbound = this.db.prepare(
+      'SELECT * FROM inbound_messages WHERE guid = ?',
+    );
+    // Edit/unsend refresh (s2 §1.5): full-row refresh in place, guid stable.
+    this.#updateInbound = this.db.prepare(
+      'UPDATE inbound_messages SET rowid_src = ?, chat_guid = ?, handle = ?, ' +
+        'is_from_me = ?, is_group = ?, service = ?, kind = ?, text = ?, ' +
+        'sent_at = ?, received_at = ?, edited_at = ?, meta = ? WHERE guid = ?',
     );
   }
 
@@ -182,9 +333,102 @@ export class SqliteStore implements Store {
     );
   }
 
+  listRules(): Rule[] {
+    return (this.#listRules.all() as RuleRow[]).map(ruleFromRow);
+  }
+
+  getRule(id: Ulid): Rule | null {
+    const row = this.#getRule.get(id) as RuleRow | undefined;
+    return row ? ruleFromRow(row) : null;
+  }
+
+  insertRule(rule: Rule): void {
+    this.#insertRule.run(
+      rule.id,
+      rule.name,
+      rule.enabled ? 1 : 0,
+      serializeMatcherColumn(rule),
+      rule.adapterId,
+      rule.respondMode,
+      rule.scheduleId,
+      rule.outsideWindow,
+      rule.allowGroupDrafts ? 1 : 0,
+      rule.draftTtlMinutes,
+      rule.priority,
+      rule.createdAt,
+      rule.updatedAt,
+    );
+  }
+
+  updateRule(rule: Rule): void {
+    const info = this.#updateRule.run(
+      rule.name,
+      rule.enabled ? 1 : 0,
+      serializeMatcherColumn(rule),
+      rule.adapterId,
+      rule.respondMode,
+      rule.scheduleId,
+      rule.outsideWindow,
+      rule.allowGroupDrafts ? 1 : 0,
+      rule.draftTtlMinutes,
+      rule.priority,
+      rule.createdAt,
+      rule.updatedAt,
+      rule.id,
+    );
+    if (info.changes === 0) {
+      throw new Error(`updateRule: no such rule: ${rule.id}`);
+    }
+  }
+
+  deleteRule(id: Ulid): boolean {
+    return this.#deleteRule.run(id).changes > 0;
+  }
+
+  listRecentInboundMessages(limit: number): Message[] {
+    return (this.#listRecentInbound.all(limit) as InboundRow[]).map(
+      messageFromRow,
+    );
+  }
+
+  getInboundMessage(guid: MessageGuid): Message | null {
+    const row = this.#getInbound.get(guid) as InboundRow | undefined;
+    return row ? messageFromRow(row) : null;
+  }
+
+  updateInboundMessage(message: Message): void {
+    this.#updateInbound.run(
+      message.sourceRowid,
+      message.chatGuid,
+      message.handle,
+      message.isFromMe ? 1 : 0,
+      message.isGroup ? 1 : 0,
+      message.service,
+      message.kind,
+      message.text,
+      message.sentAt,
+      message.receivedAt,
+      message.editedAt ?? null,
+      JSON.stringify({
+        tapback: message.tapback ?? null,
+        threadOriginatorGuid: message.threadOriginatorGuid ?? null,
+        attachments: message.attachments,
+      }),
+      message.guid,
+    );
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+function serializeMatcherColumn(rule: Rule): string {
+  const col: MatcherColumn = {
+    matcher: rule.matcher,
+    matchAttachmentOnly: rule.matchAttachmentOnly,
+  };
+  return JSON.stringify(col);
 }
 
 export function openStore(opts: OpenStoreOptions): SqliteStore {

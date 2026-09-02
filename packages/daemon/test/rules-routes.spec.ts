@@ -615,7 +615,7 @@ describe('POST /v1/rules/:id/test (§1.6 route 6 — read-only)', () => {
       ).matched,
     ).toBe(true);
     expect(
-      (await verdict(contact.id, { text: null, handle: '+19998887777' }))
+      (await verdict(contact.id, { text: null, handle: '+15559998887' }))
         .matched,
     ).toBe(false);
     // §1.7 eligibility: tapbacks never match

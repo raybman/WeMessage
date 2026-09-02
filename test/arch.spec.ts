@@ -10,7 +10,14 @@
  *     catch bad imports, not merely "nothing bad exists yet".
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -181,6 +188,199 @@ describe('arch invariants (dependency-cruiser)', () => {
         forbidden.test(readFileSync(join(repoRoot, f), 'utf8')),
       );
       expect(offenders).toEqual([]);
+    });
+  });
+
+  /**
+   * S3 Scenario 1 — architecture guards for the send era (s3-execution
+   * §1.4 checklist + Part 2 Scenario 1). Structural-only: no production
+   * code lands this scenario.
+   *
+   * (a) `osascript` (the string) is confined to packages/sendkit/src — the
+   *     one place S3 is allowed to shell out to Messages.
+   * (b) no test/fixture file spawns a REAL osascript or names the LIVE
+   *     chat.db path — S3's "no real iMessages in any test, ever" rule
+   *     (§ Non-negotiables #2) made structural, not just a review norm.
+   * (c) dependency-cruiser re-proof, sendkit-specific: sendkit may import
+   *     node:child_process (it needs execFile for osascript); core may not
+   *     (core-no-node-io-builtins, already proven for node:fs in the S1
+   *     block above — this re-proves it for the exact builtin sendkit uses).
+   * (d) public-repo sweep (§ Non-negotiables #3): no brand string, no +1
+   *     number outside the +15550/+15551/+15555 fiction blocks the fixture
+   *     corpus already uses (test/store/core specs), across every tracked
+   *     source/test/fixture file. Kept forever per the spec's own wording.
+   *
+   * SPEC ADAPTATION: the spec's teeth wording says "plant osascript in
+   * packages/daemon/src/doctor.ts" — doctor.ts does not exist until
+   * Scenario 7. A scratch probe file under packages/daemon/src/ (same
+   * convention as the S1/S2 __arch_*_probe__.ts files above) stands in;
+   * the property being proven (a daemon-side production file mentioning
+   * osascript is caught) is identical.
+   */
+  describe('S3 extensions (s3-execution Scenario 1: send-era guards)', () => {
+    const skipDirs = new Set([
+      'node_modules',
+      'dist',
+      '.git',
+      'coverage',
+      '.turbo',
+    ]);
+    const binaryIsh = /\.(bin|blob|db|png|ico|svg)$/;
+    const codeIsh = /\.(ts|tsx|js|mjs|cjs)$/;
+
+    function listFiles(root: string): string[] {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (skipDirs.has(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else out.push(full);
+        }
+      };
+      walk(root);
+      return out;
+    }
+
+    const relOf = (abs: string): string =>
+      abs.slice(repoRoot.length + 1).replace(/\\/g, '/');
+
+    // (a) production source = packages/*/src or apps/*/src, dist excluded.
+    function osascriptOutsideSendkit(): string[] {
+      const roots = ['packages', 'apps'].map((p) => join(repoRoot, p));
+      return roots
+        .flatMap((r) => listFiles(r))
+        .map(relOf)
+        .filter((f) => /^(packages|apps)\/[^/]+\/src\//.test(f))
+        .filter((f) => codeIsh.test(f))
+        .filter((f) => !f.startsWith('packages/sendkit/src/'))
+        .filter((f) =>
+          /osascript/.test(readFileSync(join(repoRoot, f), 'utf8')),
+        );
+    }
+
+    // (b) test/fixture trees: no real osascript spawn, no live chat.db path.
+    function realOsascriptOrLiveChatDbOffenders(): string[] {
+      const roots = [
+        ...listFiles(join(repoRoot, 'packages')),
+        ...listFiles(join(repoRoot, 'apps')),
+        ...listFiles(join(repoRoot, 'fixtures')),
+      ]
+        .map(relOf)
+        .filter(
+          (f) => /(^|\/)(test|fixtures)\//.test(f) || f.startsWith('fixtures/'),
+        )
+        .filter((f) => codeIsh.test(f) && !binaryIsh.test(f));
+      return roots.filter((f) => {
+        const content = readFileSync(join(repoRoot, f), 'utf8');
+        return (
+          /(execFile|spawn)\(\s*['"]osascript/.test(content) ||
+          content.includes('Library/Messages/chat.db')
+        );
+      });
+    }
+
+    it('(a) osascript appears in production source only under packages/sendkit/src', () => {
+      expect(osascriptOutsideSendkit()).toEqual([]);
+    });
+
+    it('(b) no test/fixture file spawns real osascript or names the live chat.db path', () => {
+      expect(realOsascriptOrLiveChatDbOffenders()).toEqual([]);
+    });
+
+    describe('(c) sendkit may use node builtins; core may not (re-proof, node:child_process)', () => {
+      const sendkitProbe = join(
+        repoRoot,
+        'packages/sendkit/src/__arch_s3_teeth_probe__.ts',
+      );
+      const coreProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s3_teeth_probe__.ts',
+      );
+
+      afterEach(() => {
+        rmSync(sendkitProbe, { force: true });
+        rmSync(coreProbe, { force: true });
+      });
+
+      it('sendkit -> node:child_process cruises clean', () => {
+        writeFileSync(
+          sendkitProbe,
+          "import 'node:child_process';\nexport {};\n",
+        );
+        const result = cruise(['packages/sendkit']);
+        expect(result.summary.violations).toEqual([]);
+        expect(result.summary.error).toBe(0);
+      });
+
+      it('the identical import from core is flagged (core-no-node-io-builtins)', () => {
+        writeFileSync(coreProbe, "import 'node:child_process';\nexport {};\n");
+        const result = cruise(['packages/core']);
+        const names = result.summary.violations.map((v) => v.rule.name);
+        expect(names).toContain('core-no-node-io-builtins');
+        expect(result.summary.error).toBeGreaterThan(0);
+      });
+    });
+
+    it('(d) public-repo sweep: no brand strings, no +1 numbers outside the +1555 fiction block', () => {
+      const bannedBrand = /flowstay|flowverse|flowindustries|vivaepic/i;
+      const phoneRe = /\+1\d{10}/g;
+      const tracked = execFileSync('git', ['ls-files'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0)
+        .filter((f) => codeIsh.test(f) || f.endsWith('.json'))
+        .filter((f) => !binaryIsh.test(f))
+        // this file IS the denylist source (has to spell the banned words
+        // out to grep for them) — self-referential, not a real fixture.
+        .filter((f) => f !== 'test/arch.spec.ts');
+
+      const offenders: string[] = [];
+      for (const f of tracked) {
+        const content = readFileSync(join(repoRoot, f), 'utf8');
+        if (bannedBrand.test(content)) offenders.push(`${f}: brand string`);
+        for (const n of content.match(phoneRe) ?? []) {
+          if (!n.startsWith('+1555')) offenders.push(`${f}: ${n}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    describe('proven teeth', () => {
+      const daemonProbe = join(
+        repoRoot,
+        'packages/daemon/src/__arch_s3_teeth_probe__.ts',
+      );
+      const fixtureProbeDir = join(repoRoot, 'fixtures/test/__s3_teeth__');
+      const fixtureProbe = join(fixtureProbeDir, 'probe.spec.ts');
+
+      afterEach(() => {
+        rmSync(daemonProbe, { force: true });
+        rmSync(fixtureProbeDir, { recursive: true, force: true });
+      });
+
+      it('planting osascript in a daemon-side production file fails gate (a)', () => {
+        writeFileSync(
+          daemonProbe,
+          "export const cmd = 'osascript -e tell app Messages';\n",
+        );
+        expect(osascriptOutsideSendkit()).toContain(
+          'packages/daemon/src/__arch_s3_teeth_probe__.ts',
+        );
+      });
+
+      it('planting a live chat.db path in a fixture file fails gate (b)', () => {
+        mkdirSync(fixtureProbeDir, { recursive: true });
+        writeFileSync(
+          fixtureProbe,
+          "export const p = '~/Library/Messages/chat.db';\n",
+        );
+        expect(realOsascriptOrLiveChatDbOffenders()).toContain(
+          'fixtures/test/__s3_teeth__/probe.spec.ts',
+        );
+      });
     });
   });
 

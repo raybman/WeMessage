@@ -132,6 +132,9 @@ importers:
       '@wemessage/fixtures':
         specifier: workspace:*
         version: link:../../fixtures
+      '@wemessage/store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/protocol:
     dependencies:

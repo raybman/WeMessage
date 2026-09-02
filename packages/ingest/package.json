@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@wemessage/fixtures": "workspace:*",
-    "@types/better-sqlite3": "^7.6.0"
+    "@types/better-sqlite3": "^7.6.0",
+    "@wemessage/store": "workspace:*"
   }
 }

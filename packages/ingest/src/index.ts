@@ -19,6 +19,12 @@ export {
 } from './normalize/index.js';
 export {
   createChatDbReader,
+  type ChatDbOpenMode,
   type ChatDbReaderOptions,
   type IngestChatDbReader,
 } from './chatdb/index.js';
+export {
+  createScanLoop,
+  type ScanLoop,
+  type ScanLoopOptions,
+} from './scan/index.js';

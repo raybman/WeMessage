@@ -3,8 +3,12 @@
  *
  * Opens strictly read-only and never writes. Rows with ROWID > lastRowid are
  * joined against chat/handle/attachment and normalized into §3.2 Message.
- * Busy/backoff, immutable-URI reopen-per-burst, and cursor persistence are
- * Scenario 8 concerns; this layer is the read+normalize substrate.
+ *
+ * Open strategy (§2.2.1): attempt `file:...?mode=ro&immutable=1` first, fall
+ * back to plain read-only + `PRAGMA query_only = 1`. better-sqlite3 does not
+ * accept URI filenames today, so the fallback is the live path on this
+ * driver; the attempt stays so a driver upgrade picks immutable up for free.
+ * Busy/backoff and cursor persistence live in the scan loop (Scenario 8).
  */
 import Database from 'better-sqlite3';
 import type {
@@ -25,9 +29,16 @@ export interface ChatDbReaderOptions {
   onDecodeFailed?: (signal: DecodeFailedSignal) => void;
 }
 
+/** Which §2.2.1 open path actually engaged. */
+export type ChatDbOpenMode = 'immutable' | 'readonly-fallback';
+
 export interface IngestChatDbReader extends ChatDbReader {
   /** True when the underlying SQLite handle was opened read-only. */
   isReadonly(): boolean;
+  /** Which §2.2.1 open path engaged (immutable URI vs plain ro fallback). */
+  readonly openMode: ChatDbOpenMode;
+  /** Underlying handle, exposed so tests can prove writes are impossible. */
+  readonly rawDb: Database.Database;
   close(): void;
 }
 
@@ -105,8 +116,20 @@ export function createChatDbReader(
   path: string,
   options: ChatDbReaderOptions,
 ): IngestChatDbReader {
-  // Never writable (§2.2.1): readonly open + query_only belt-and-suspenders.
-  const db = new Database(path, { readonly: true, fileMustExist: true });
+  // Never writable (§2.2.1): immutable URI attempt, then readonly +
+  // query_only fallback (see header comment).
+  let db: Database.Database;
+  let openMode: ChatDbOpenMode;
+  try {
+    db = new Database(`file:${path}?mode=ro&immutable=1`, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    openMode = 'immutable';
+  } catch {
+    db = new Database(path, { readonly: true, fileMustExist: true });
+    openMode = 'readonly-fallback';
+  }
   db.pragma('query_only = 1');
 
   const messagesStmt = db.prepare(MESSAGES_SQL);
@@ -123,6 +146,8 @@ export function createChatDbReader(
     }));
 
   return {
+    openMode,
+    rawDb: db,
     isReadonly: () => db.readonly,
 
     readSince(lastRowid: number): Promise<Message[]> {

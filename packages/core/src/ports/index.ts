@@ -30,6 +30,10 @@ export interface Store {
   setCursor(next: CursorState): void;
   getSetting(key: string): string | null;
   setSetting(key: string, value: string): void;
+  /** §2.3 `inbound_messages` mirror (minimal; chat.db stays canonical). */
+  hasInboundMessage(guid: string): boolean;
+  /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
+  insertInboundMessage(message: Message): void;
   close(): void;
 }
 

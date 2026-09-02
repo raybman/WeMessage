@@ -12,3 +12,4 @@ fixtures/typedstream/
 packages/core/src/domain/types.ts
 packages/protocol/src/index.ts
 packages/store/migrations/
+vercel.json

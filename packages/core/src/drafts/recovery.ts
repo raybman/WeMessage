@@ -13,7 +13,8 @@
  *   sending->sent with the guid recorded; otherwise sending->failed with
  *   error.code='unverified'. NEVER re-sent: SendBackend is present only so
  *   S4 subsumes this signature; this function must not call it (§4.0).
- * - Outcomes are audited in-memory on the result; persistence is S2.
+ * - Outcomes are audited in-memory on the result; the daemon persists them
+ *   to audit_log since S2 Scenario 9.
  */
 import type { DraftError, IsoUtc, MessageGuid, Ulid } from '../domain/types.js';
 import type {
@@ -54,7 +55,7 @@ export interface RecoveryAuditEvent {
 export interface StartupRecoveryResult {
   cursor: CursorRecovery;
   drafts: DraftRecoveryOutcome[];
-  /** In-memory audit trail; S2's audit log persists these. */
+  /** In-memory audit trail; persisted by the daemon since S2 Scenario 9. */
   audit: RecoveryAuditEvent[];
 }
 

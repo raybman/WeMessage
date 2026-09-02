@@ -34,7 +34,7 @@ export interface ScanLoopOptions {
    * sweep is skipped entirely.
    */
   onMutation?: (message: Message) => void;
-  /** §2.2.1 degrade signal sink (audit persistence is S2). */
+  /** §2.2.1 degrade signal sink (persisted to audit since S2 Scenario 9). */
   onDecodeFailed?: (signal: DecodeFailedSignal) => void;
   /** Injectable for tests; defaults to a real setTimeout sleep. */
   sleep?: (ms: number) => Promise<void>;

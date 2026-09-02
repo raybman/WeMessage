@@ -20,7 +20,7 @@ export function appleNsToIso(ns: bigint): string {
   return new Date(Number(ns / 1_000_000n) + APPLE_EPOCH_UNIX_MS).toISOString();
 }
 
-/** §2.2.1 degrade signal, emitted now, persisted to audit in S2. */
+/** §2.2.1 degrade signal; persisted to audit since S2 Scenario 9. */
 export interface DecodeFailedSignal {
   guid: string;
   sourceRowid: number;

@@ -26,7 +26,7 @@ import {
 
 export interface ChatDbReaderOptions {
   clock: Clock;
-  /** §2.2.1 degrade signal sink (audit persistence is S2). */
+  /** §2.2.1 degrade signal sink (persisted to audit since S2 Scenario 9). */
   onDecodeFailed?: (signal: DecodeFailedSignal) => void;
 }
 

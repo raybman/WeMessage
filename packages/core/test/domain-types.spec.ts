@@ -308,7 +308,10 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       readAuditRows: () => [],
       close: () => undefined,
     };
-    const reader: ChatDbReader = { readSince: () => Promise.resolve([]) };
+    const reader: ChatDbReader = {
+      readSince: () => Promise.resolve([]),
+      readMutatedSince: () => Promise.resolve([]),
+    };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {
       isAvailable: () => Promise.resolve(false),

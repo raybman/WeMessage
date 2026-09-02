@@ -16,6 +16,7 @@ import type {
   ChatDbReader,
   Clock,
   Message,
+  MutatedMessage,
 } from '@wemessage/core';
 import {
   normalizeRow,
@@ -42,7 +43,7 @@ export interface IngestChatDbReader extends ChatDbReader {
   close(): void;
 }
 
-const MESSAGES_SQL = `
+const MESSAGE_SELECT_SQL = `
   SELECT
     m.ROWID                    AS rowid,
     m.guid                     AS guid,
@@ -67,7 +68,20 @@ const MESSAGES_SQL = `
   JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
   JOIN chat c ON c.ROWID = cmj.chat_id
   LEFT JOIN handle h ON h.ROWID = m.handle_id
+`;
+
+const MESSAGES_SQL = `${MESSAGE_SELECT_SQL}
   WHERE m.ROWID > ?
+  ORDER BY m.ROWID ASC
+`;
+
+/**
+ * Rows mutated in place strictly after the ns watermark (S2 Scenario 8).
+ * Strictly greater on BOTH columns: \`>=\` would re-emit the watermark row
+ * itself forever. Params are the same watermark bound twice.
+ */
+const MUTATIONS_SQL = `${MESSAGE_SELECT_SQL}
+  WHERE (m.date_edited > ? OR m.date_retracted > ?)
   ORDER BY m.ROWID ASC
 `;
 
@@ -134,6 +148,8 @@ export function createChatDbReader(
 
   const messagesStmt = db.prepare(MESSAGES_SQL);
   messagesStmt.safeIntegers(true); // Apple-epoch ns exceed 2^53
+  const mutationsStmt = db.prepare(MUTATIONS_SQL);
+  mutationsStmt.safeIntegers(true);
   const attachmentsStmt = db.prepare(ATTACHMENTS_SQL);
   attachmentsStmt.safeIntegers(true);
 
@@ -145,6 +161,36 @@ export function createChatDbReader(
       transferName: a.transferName ?? '',
     }));
 
+  const toMessage = (r: DbMessageRow): Message => {
+    const raw: RawMessageRow = {
+      rowid: Number(r.rowid),
+      guid: r.guid,
+      text: r.text,
+      attributedBody: r.attributedBody,
+      date: r.date ?? 0n,
+      dateEdited: r.dateEdited ?? 0n,
+      dateRetracted: r.dateRetracted ?? 0n,
+      isFromMe: r.isFromMe === 1n,
+      isAudioMessage: r.isAudioMessage === 1n,
+      service: r.service,
+      associatedMessageGuid: r.associatedMessageGuid,
+      associatedMessageType: Number(r.associatedMessageType),
+      threadOriginatorGuid: r.threadOriginatorGuid,
+      messageSummaryInfo: r.messageSummaryInfo,
+      cacheHasAttachments: r.cacheHasAttachments === 1n,
+      chatGuid: r.chatGuid,
+      chatStyle: Number(r.chatStyle),
+      chatIdentifier: r.chatIdentifier,
+      handle: r.handle,
+      attachments: readAttachments(r.rowid),
+    };
+    const { message, decodeFailed } = normalizeRow(raw, {
+      clock: options.clock,
+    });
+    if (decodeFailed !== undefined) options.onDecodeFailed?.(decodeFailed);
+    return message;
+  };
+
   return {
     openMode,
     rawDb: db,
@@ -152,36 +198,22 @@ export function createChatDbReader(
 
     readSince(lastRowid: number): Promise<Message[]> {
       const rows = messagesStmt.all(BigInt(lastRowid)) as DbMessageRow[];
-      const messages = rows.map((r) => {
-        const raw: RawMessageRow = {
-          rowid: Number(r.rowid),
-          guid: r.guid,
-          text: r.text,
-          attributedBody: r.attributedBody,
-          date: r.date ?? 0n,
-          dateEdited: r.dateEdited ?? 0n,
-          dateRetracted: r.dateRetracted ?? 0n,
-          isFromMe: r.isFromMe === 1n,
-          isAudioMessage: r.isAudioMessage === 1n,
-          service: r.service,
-          associatedMessageGuid: r.associatedMessageGuid,
-          associatedMessageType: Number(r.associatedMessageType),
-          threadOriginatorGuid: r.threadOriginatorGuid,
-          messageSummaryInfo: r.messageSummaryInfo,
-          cacheHasAttachments: r.cacheHasAttachments === 1n,
-          chatGuid: r.chatGuid,
-          chatStyle: Number(r.chatStyle),
-          chatIdentifier: r.chatIdentifier,
-          handle: r.handle,
-          attachments: readAttachments(r.rowid),
-        };
-        const { message, decodeFailed } = normalizeRow(raw, {
-          clock: options.clock,
-        });
-        if (decodeFailed !== undefined) options.onDecodeFailed?.(decodeFailed);
-        return message;
-      });
-      return Promise.resolve(messages);
+      return Promise.resolve(rows.map(toMessage));
+    },
+
+    readMutatedSince(sinceNs: string): Promise<MutatedMessage[]> {
+      // Decimal-string watermark -> BigInt bind: Number(sinceNs) would
+      // truncate past 2^53 and conflate 1ns-apart mutations (Scenario 8).
+      const bound = BigInt(sinceNs);
+      const rows = mutationsStmt.all(bound, bound) as DbMessageRow[];
+      return Promise.resolve(
+        rows.map((r) => {
+          const edited = r.dateEdited ?? 0n;
+          const retracted = r.dateRetracted ?? 0n;
+          const mutationNs = edited > retracted ? edited : retracted;
+          return { message: toMessage(r), mutationNs: mutationNs.toString() };
+        }),
+      );
     },
 
     close() {

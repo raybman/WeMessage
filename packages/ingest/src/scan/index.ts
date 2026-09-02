@@ -16,6 +16,9 @@ import {
 } from '../chatdb/index.js';
 import type { DecodeFailedSignal } from '../normalize/index.js';
 
+/** settings key for the mutation-sweep ns watermark (S2 Scenario 8). */
+export const MUTATION_WATERMARK_KEY = 'ingest.mutationWatermarkNs';
+
 const BUSY_BACKOFF_START_MS = 50;
 const BUSY_BACKOFF_CAP_MS = 2000;
 const DEFAULT_MAX_BUSY_RETRIES = 10;
@@ -25,6 +28,12 @@ export interface ScanLoopOptions {
   store: Store;
   clock: Clock;
   onMessage: (message: Message) => void;
+  /**
+   * In-place mutation sink (S2 Scenario 8): edits/unsends of already-scanned
+   * rows, which the ROWID cursor can never see. When absent the mutation
+   * sweep is skipped entirely.
+   */
+  onMutation?: (message: Message) => void;
   /** §2.2.1 degrade signal sink (audit persistence is S2). */
   onDecodeFailed?: (signal: DecodeFailedSignal) => void;
   /** Injectable for tests; defaults to a real setTimeout sleep. */
@@ -69,6 +78,7 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
     try {
       const rows = await reader.readSince(lastRowid);
       const emitted: Message[] = [];
+      const justEmitted = new Set<string>();
       let maxRowid = lastRowid;
       for (const message of rows) {
         if (message.sourceRowid > maxRowid) maxRowid = message.sourceRowid;
@@ -78,11 +88,39 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
         options.store.insertInboundMessage(message);
         options.onMessage(message);
         emitted.push(message);
+        justEmitted.add(message.guid);
       }
       options.store.setCursor({
         lastRowid: maxRowid,
         lastScanAt: options.clock.now(),
       });
+
+      // Step 2 (Scenario 8): mutation sweep. Same burst, same reader, same
+      // busy/backoff envelope as the ROWID pass above.
+      if (options.onMutation !== undefined) {
+        const sinceNs = options.store.getSetting(MUTATION_WATERMARK_KEY) ?? '0';
+        const sinceNsBig = BigInt(sinceNs);
+        const mutated = await reader.readMutatedSince(sinceNs);
+        let maxNs = sinceNsBig;
+        for (const { message, mutationNs } of mutated) {
+          // Rows that arrived ALREADY mutated were just delivered (post-
+          // mutation state) by the ROWID pass — emitting here would double.
+          if (!justEmitted.has(message.guid)) {
+            // At-least-once ordering: emit, refresh the mirror, and only
+            // AFTER the whole sweep advance the watermark. A crash anywhere
+            // in between re-delivers on restart; advancing the watermark
+            // first would silently drop the mutation forever.
+            options.onMutation(message);
+            options.store.updateInboundMessage(message);
+          }
+          const ns = BigInt(mutationNs);
+          if (ns > maxNs) maxNs = ns;
+        }
+        if (maxNs > sinceNsBig) {
+          // Decimal string, never Number(): real Apple-epoch ns exceed 2^53.
+          options.store.setSetting(MUTATION_WATERMARK_KEY, maxNs.toString());
+        }
+      }
       return emitted;
     } finally {
       // Re-open per scan burst (§2.2.1): never hold the handle across bursts.

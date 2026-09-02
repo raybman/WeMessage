@@ -135,6 +135,21 @@ export interface AuditRow {
 export interface ChatDbReader {
   /** Normalized messages with ROWID strictly greater than `lastRowid`, ROWID order. */
   readSince(lastRowid: number): Promise<Message[]>;
+  /**
+   * Rows mutated in place (edit/unsend) strictly after the given watermark
+   * (S2 Scenario 8; §1.3.8). `sinceNs` and `mutationNs` are Apple-epoch ns
+   * as DECIMAL STRINGS: real values (~8e17) exceed 2^53, so a number here
+   * silently conflates adjacent mutations.
+   */
+  readMutatedSince(sinceNs: string): Promise<MutatedMessage[]>;
+}
+
+/** One in-place mutation surfaced by {@link ChatDbReader.readMutatedSince}. */
+export interface MutatedMessage {
+  /** Re-normalized message reflecting the post-mutation row. */
+  message: Message;
+  /** max(date_edited, date_retracted) for the row, decimal Apple-epoch ns. */
+  mutationNs: string;
 }
 
 /**

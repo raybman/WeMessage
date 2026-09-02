@@ -27,6 +27,12 @@ export interface DaemonServer {
   token: string | null;
   /** Test observability: route-handler executions (must stay 0 in 503 mode). */
   counters: { handlerCalls: number };
+  /**
+   * INV-3/F-17 observability: every registered route as `METHOD url`
+   * (auto-HEAD twins included). The transport-surface ratchet pins this
+   * list — see test/transport-surface.snapshot.ts before adding routes.
+   */
+  routes: string[];
 }
 
 const HEALTH_PATH = '/v1/health';
@@ -34,6 +40,15 @@ const HEALTH_PATH = '/v1/health';
 export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   const bootToken = loadOrCreateToken(opts.configDir);
   const app = Fastify({ logger: false });
+
+  // INV-3/F-17: record the full reachable surface. Registered before any
+  // route (hooks only see routes added after them).
+  const routes: string[] = [];
+  app.addHook('onRoute', (route) => {
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+    for (const method of methods) routes.push(`${method} ${route.url}`);
+  });
+
   await app.register(websocket);
   const counters = { handlerCalls: 0 };
 
@@ -90,7 +105,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     opts.onEventsClient?.(socket);
   });
 
-  return { app, token: bootToken, counters };
+  return { app, token: bootToken, counters, routes };
 }
 
 /**

@@ -8,3 +8,4 @@ import type { SendBackend } from '@wemessage/core';
 export type { SendBackend };
 export * from './applescript.js';
 export * from './probes.js';
+export * from './verify.js';

@@ -20,6 +20,15 @@ export function appleNsToIso(ns: bigint): string {
   return new Date(Number(ns / 1_000_000n) + APPLE_EPOCH_UNIX_MS).toISOString();
 }
 
+/**
+ * ISO-8601 UTC -> Apple-epoch nanoseconds (inverse of {@link appleNsToIso}).
+ * Scenario 4's `findOutboundMessage` binds `sinceIso` against chat.db's
+ * `message.date` column, which is Apple-epoch ns, not Unix ms.
+ */
+export function isoToAppleNs(iso: string): bigint {
+  return BigInt(Date.parse(iso) - APPLE_EPOCH_UNIX_MS) * 1_000_000n;
+}
+
 /** §2.2.1 degrade signal; persisted to audit since S2 Scenario 9. */
 export interface DecodeFailedSignal {
   guid: string;

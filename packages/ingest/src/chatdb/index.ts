@@ -18,11 +18,13 @@ import type {
   Clock,
   Handle,
   Message,
+  MessageGuid,
   MutatedMessage,
   Service,
 } from '@wemessage/core';
 import { normalizeHandle } from '@wemessage/core';
 import {
+  isoToAppleNs,
   mapService,
   normalizeRow,
   type DecodeFailedSignal,
@@ -130,6 +132,25 @@ const LAST_MESSAGE_DATE_SQL = `
   SELECT MAX(message_date) AS lastDate FROM chat_message_join WHERE chat_id = ?
 `;
 
+/**
+ * findOutboundMessage (Scenario 4, §1.5): every predicate is independently
+ * load-bearing — chat scope, direction, exact text, and the since-watermark
+ * (teeth: relaxing text to a LIKE prefix or dropping the date bound must
+ * each fail their respective negative-case tests).
+ */
+const FIND_OUTBOUND_SQL = `
+  SELECT m.guid AS guid
+  FROM message m
+  JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+  JOIN chat c ON c.ROWID = cmj.chat_id
+  WHERE c.guid = ?
+    AND m.is_from_me = 1
+    AND m.text = ?
+    AND m.date >= ?
+  ORDER BY m.ROWID DESC
+  LIMIT 1
+`;
+
 interface DbMessageRow {
   rowid: bigint;
   guid: string;
@@ -196,6 +217,7 @@ export function createChatDbReader(
   const participantCountStmt = db.prepare(PARTICIPANT_COUNT_SQL);
   const lastMessageDateStmt = db.prepare(LAST_MESSAGE_DATE_SQL);
   lastMessageDateStmt.safeIntegers(true);
+  const findOutboundStmt = db.prepare(FIND_OUTBOUND_SQL);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -297,6 +319,17 @@ export function createChatDbReader(
         service: mapService(best.service),
         isGroup: countRow.n > 1,
       });
+    },
+
+    findOutboundMessage(q: {
+      chatGuid: ChatGuid;
+      text: string;
+      sinceIso: string;
+    }): Promise<{ guid: MessageGuid } | null> {
+      const sinceNs = isoToAppleNs(q.sinceIso);
+      const row = findOutboundStmt.get(q.chatGuid, q.text, sinceNs) as
+        { guid: string } | undefined;
+      return Promise.resolve(row === undefined ? null : { guid: row.guid });
     },
 
     close() {

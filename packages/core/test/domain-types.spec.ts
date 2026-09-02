@@ -312,6 +312,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       readSince: () => Promise.resolve([]),
       readMutatedSince: () => Promise.resolve([]),
       resolveChat: () => Promise.resolve(null),
+      findOutboundMessage: () => Promise.resolve(null),
     };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {

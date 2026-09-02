@@ -155,6 +155,18 @@ export interface ChatDbReader {
   resolveChat(
     handle: Handle,
   ): Promise<{ chatGuid: ChatGuid; service: Service; isGroup: boolean } | null>;
+  /**
+   * S3 §1.5 body extension (Scenario 4): does an outbound copy of this exact
+   * text already exist in this chat, at/after `sinceIso`? The read half of
+   * post-send verification (§2.2.2 pinned) — the send backend's `accepted`
+   * flag is never trusted as proof of delivery; only a real row is. `null`
+   * means no match yet (caller keeps polling or gives up on budget).
+   */
+  findOutboundMessage(q: {
+    chatGuid: ChatGuid;
+    text: string;
+    sinceIso: IsoUtc;
+  }): Promise<{ guid: MessageGuid } | null>;
 }
 
 /** One in-place mutation surfaced by {@link ChatDbReader.readMutatedSince}. */

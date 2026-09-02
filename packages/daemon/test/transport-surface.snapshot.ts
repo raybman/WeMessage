@@ -93,6 +93,11 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
  * NotImplementedSendBackend stub is retired) — it implements SendBackend
  * and consumes SendInput/SendOutcome directly, so it now legitimately
  * mentions the port too, alongside index.ts's re-export.
+ *
+ * Deliberate update #2 of this array, s3-execution Scenario 4:
+ * packages/sendkit/src/verify.ts takes a `Pick<ChatDbReader,
+ * 'findOutboundMessage'>` — post-send verification polls chat.db through
+ * the same port, so it legitimately mentions ChatDbReader too.
  */
 export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/core/src/drafts/recovery.ts',
@@ -103,4 +108,5 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/ingest/src/scan/index.ts',
   'packages/sendkit/src/applescript.ts',
   'packages/sendkit/src/index.ts',
+  'packages/sendkit/src/verify.ts',
 ];

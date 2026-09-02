@@ -148,6 +148,8 @@ export async function startDaemon(
   };
   const server = await buildServer({
     configDir: options.configDir,
+    // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
+    rules: { store, clock: options.clock },
     getStatus: () => ({
       // S1 can read but not send: read-only once a scan has succeeded (§3.4).
       connectionState: scanHealthy ? 'read-only' : 'disconnected',

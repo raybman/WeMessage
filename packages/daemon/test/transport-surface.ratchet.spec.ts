@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { openStore, type SqliteStore } from '@wemessage/store';
 import { buildServer, type DaemonServer } from '@wemessage/daemon';
 import {
   EMITTED_WS_EVENTS,
@@ -35,6 +36,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 const dirs: string[] = [];
 const servers: DaemonServer[] = [];
+const stores: SqliteStore[] = [];
 
 function tempDir(): string {
   const d = mkdtempSync(join(tmpdir(), 'wemessage-ratchet-'));
@@ -44,6 +46,7 @@ function tempDir(): string {
 
 afterEach(async () => {
   for (const s of servers.splice(0)) await s.app.close();
+  for (const s of stores.splice(0)) s.close();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -70,7 +73,19 @@ function productionSourceFiles(): string[] {
 
 describe('transport-surface ratchet (INV-3, F-17)', () => {
   it('live fastify route table equals the snapshot exactly', async () => {
-    const server = await buildServer({ configDir: tempDir() });
+    // Full production surface: the composed daemon passes `rules`, so the
+    // ratchet must too (a bare buildServer would only see the S1 routes).
+    const dir = tempDir();
+    const clock = {
+      now: () => new Date(0).toISOString(),
+      nowMs: () => 0,
+    };
+    const store = openStore({ dir, clock });
+    stores.push(store);
+    const server = await buildServer({
+      configDir: dir,
+      rules: { store, clock },
+    });
     servers.push(server);
     expect([...server.routes].sort()).toEqual([...ROUTE_TABLE]);
   });

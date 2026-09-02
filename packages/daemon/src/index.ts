@@ -7,6 +7,8 @@ export {
   type DaemonOptions,
   type DaemonServer,
 } from './server.js';
+export { createAuditSink, type AuditSink } from './audit-sink.js';
+export { registerRuleRoutes, type RuleRouteDeps } from './routes/rules.js';
 export {
   generateToken,
   loadOrCreateToken,

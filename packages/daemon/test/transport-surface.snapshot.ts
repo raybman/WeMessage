@@ -23,16 +23,27 @@
  * part of the reachable surface, so the ratchet pins them too (disabling or
  * enabling auto-HEAD is itself a surface change and must show up here).
  *
- * S1 surface per s2-execution §1.6: GET /v1/health, GET /v1/status,
- * WS GET /v1/events.
+ * S2 surface per s2-execution §1.6: the S1 three routes plus rule CRUD +
+ * rules test (routes 1-6, Scenario 7). Routes 7-9 (dry-run + audit reads)
+ * land in Scenarios 9/10/11 with further deliberate updates here.
+ * (Deliberate update #1 of this file, F-17's demonstrated workflow: the
+ * seed commit pinned the S1 three-route surface.)
  */
 export const ROUTE_TABLE: readonly string[] = [
+  'DELETE /v1/rules/:id',
   'GET /v1/events',
   'GET /v1/health',
+  'GET /v1/rules',
+  'GET /v1/rules/:id',
   'GET /v1/status',
   'HEAD /v1/events',
   'HEAD /v1/health',
+  'HEAD /v1/rules',
+  'HEAD /v1/rules/:id',
   'HEAD /v1/status',
+  'PATCH /v1/rules/:id',
+  'POST /v1/rules',
+  'POST /v1/rules/:id/test',
 ];
 
 /**
@@ -45,6 +56,7 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'message.edited',
   'message.received',
   'message.unsent',
+  'rule.matched', // §1.6 post-S2 vocabulary; emission wired in Scenario 9
 ];
 
 /**

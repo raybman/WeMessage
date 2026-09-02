@@ -10,7 +10,10 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
+import type { Clock, Store } from '@wemessage/core';
+import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
+import { registerRuleRoutes } from './routes/rules.js';
 
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
@@ -19,6 +22,11 @@ export interface DaemonOptions {
   getStatus?: () => unknown;
   /** Called with each authenticated WS /v1/events socket (event fan-out). */
   onEventsClient?: (socket: WebSocket) => void;
+  /**
+   * When provided, registers the S2 rule routes (§1.6 routes 1-6) and the
+   * audit sink. Optional so S1 transport harnesses keep booting bare.
+   */
+  rules?: { store: Store; clock: Clock };
 }
 
 export interface DaemonServer {
@@ -33,6 +41,8 @@ export interface DaemonServer {
    * list — see test/transport-surface.snapshot.ts before adding routes.
    */
   routes: string[];
+  /** Present when opts.rules was given; Scenario 9 emits through it. */
+  sink?: AuditSink;
 }
 
 const HEALTH_PATH = '/v1/health';
@@ -99,13 +109,28 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     );
   });
 
+  const sink = opts.rules ? createAuditSink(opts.rules) : undefined;
+
   app.get('/v1/events', { websocket: true }, (socket) => {
     counters.handlerCalls += 1;
     // auth already enforced at upgrade by the onRequest hook (§2.6)
+    sink?.addClient(socket);
     opts.onEventsClient?.(socket);
   });
 
-  return { app, token: bootToken, counters, routes };
+  if (opts.rules && sink) {
+    // §1.6 routes 1-6 (S2 Scenario 7). The transport-surface ratchet pins
+    // the resulting route table — update the snapshot deliberately.
+    registerRuleRoutes(app, { ...opts.rules, sink });
+  }
+
+  return {
+    app,
+    token: bootToken,
+    counters,
+    routes,
+    ...(sink ? { sink } : {}),
+  };
 }
 
 /**

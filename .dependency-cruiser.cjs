@@ -21,10 +21,27 @@ module.exports = {
     {
       severity: 'error',
       name: 'core-no-node-io-builtins',
+      // `crypto` is deliberately absent: sha256 is a pure deterministic
+      // function and core/audit chain math needs it (s2-execution §1.2).
+      // `randomBytes`-style entropy use in core is a review-level catch
+      // (INV-1 "ulid at the I/O edge" precedent), not a cruiser rule.
       from: { path: '^packages/core/src' },
       to: {
         path: '^(node:)?(fs|net|http|https|child_process|worker_threads|dgram|tls|os)$',
       },
+    },
+    {
+      severity: 'error',
+      name: 'core-no-unresolvable-imports',
+      comment:
+        'S2 §1.2 closed dependency list: an import of a package that is not ' +
+        'installed for core (e.g. re2, ulid — pnpm isolation means nothing ' +
+        'external resolves from core) never reaches core-no-io, because ' +
+        'that rule matches resolved ^node_modules paths only. Any ' +
+        'unresolvable import from core is therefore an attempted external ' +
+        'dependency and an INV-1 violation.',
+      from: { path: '^packages/core/src' },
+      to: { couldNotResolve: true },
     },
 
     // INV-1 electron clause (§2.7): no electron in core|store|ingest|sendkit|...

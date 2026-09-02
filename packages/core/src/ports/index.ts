@@ -169,6 +169,14 @@ export interface SendInput {
 export interface SendOutcome {
   /** True when the backend accepted the send (verification is core's concern). */
   accepted: boolean;
+  /**
+   * S3 §1.5 body extension: failure vocabulary, a subset of DraftError's
+   * codes (§3.2 is verbatim-locked; this is additive to the port, not the
+   * locked type). Present only when accepted is false.
+   */
+  errorCode?: 'messages-not-running' | 'backend-error';
+  /** Sanitized stderr tail (home-dir paths stripped, length-capped). */
+  detail?: string;
 }
 
 /**

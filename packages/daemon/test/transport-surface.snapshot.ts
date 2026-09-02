@@ -87,6 +87,12 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
  * Production files (packages/<pkg>/src) allowed to mention the SendBackend
  * or ChatDbReader ports. INV-2/F-2: sending capability must not leak into
  * new call sites without a reviewed diff here. Paths relative to repo root.
+ *
+ * Deliberate update #1 of this array, s3-execution Scenario 2: packages/sendkit/src/
+ * applescript.ts is the real SendBackend implementation (S1's
+ * NotImplementedSendBackend stub is retired) — it implements SendBackend
+ * and consumes SendInput/SendOutcome directly, so it now legitimately
+ * mentions the port too, alongside index.ts's re-export.
  */
 export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/core/src/drafts/recovery.ts',
@@ -95,5 +101,6 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/ingest/src/chatdb/index.ts',
   'packages/ingest/src/index.ts',
   'packages/ingest/src/scan/index.ts',
+  'packages/sendkit/src/applescript.ts',
   'packages/sendkit/src/index.ts',
 ];

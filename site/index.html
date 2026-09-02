@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wemessage — your AI can answer your texts. Nothing sends without your green light.</title>
+<meta name="description" content="An open-source macOS gateway that lets AI agents draft replies to your iMessages. Every draft waits for your approval. Local-only, no cloud, kill switch always on top.">
+<meta property="og:title" content="wemessage">
+<meta property="og:description" content="Your AI can answer your texts. Nothing sends without your green light. Open-source, local-only, macOS.">
+<meta name="theme-color" content="#0b0b0d">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root{
+    --bg:#0b0b0d;
+    --surface:rgba(28,28,30,.55);
+    --raised:rgba(38,38,42,.6);
+    --stroke:rgba(255,255,255,.08);
+    --stroke-strong:rgba(255,255,255,.16);
+    --tint:#34C759;
+    --text-1:rgba(255,255,255,.92);
+    --text-2:rgba(255,255,255,.55);
+    --text-3:rgba(255,255,255,.32);
+    --ease:cubic-bezier(.2,0,0,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--text-1);
+    font-family:-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:grid;place-items:center;
+    overflow:hidden;
+  }
+  .aurora{
+    position:fixed;inset:0;pointer-events:none;
+    background:
+      radial-gradient(60% 45% at 50% -8%, rgba(52,199,89,.13), transparent 62%),
+      radial-gradient(40% 32% at 82% 108%, rgba(52,199,89,.05), transparent 60%);
+  }
+  .grain{position:fixed;inset:0;pointer-events:none;opacity:.35;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .04 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");}
+  main{
+    position:relative;z-index:1;
+    text-align:center;
+    padding:56px 48px 44px;
+    max-width:640px;margin:20px;
+    background:var(--surface);
+    border:1px solid var(--stroke);
+    border-radius:24px;
+    backdrop-filter:blur(24px) saturate(180%);
+    -webkit-backdrop-filter:blur(24px) saturate(180%);
+    box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .mark{width:96px;height:96px;margin:0 auto 28px;display:block}
+  @keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+  .glow{animation:breathe 3.2s var(--ease) infinite}
+  @media (prefers-reduced-motion: reduce){.glow{animation:none;opacity:.85}}
+  @media (prefers-reduced-transparency: reduce){
+    main{background:#1C1C1E;backdrop-filter:none;-webkit-backdrop-filter:none}
+  }
+  h1{
+    font-size:44px;line-height:1;letter-spacing:-.03em;font-weight:700;
+    margin-bottom:18px;
+  }
+  h1 .we{color:var(--text-2);font-weight:600}
+  .tagline{
+    font-size:19px;line-height:1.45;color:var(--text-1);
+    max-width:44ch;margin:0 auto 10px;letter-spacing:-.01em;
+  }
+  .tagline b{color:var(--tint);font-weight:600}
+  .sub{font-size:14px;color:var(--text-2);margin-bottom:30px}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .badge{
+    font-size:12px;letter-spacing:.02em;color:var(--text-2);
+    border:1px solid var(--stroke);border-radius:999px;
+    padding:6px 12px;background:var(--raised);
+  }
+  .badge .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--tint);margin-right:6px;vertical-align:1px}
+  footer{
+    position:fixed;bottom:18px;left:0;right:0;text-align:center;
+    font-size:11px;color:var(--text-3);z-index:1;padding:0 20px;
+  }
+  @media (max-width:480px){
+    main{padding:44px 26px 36px}
+    h1{font-size:34px}
+    .tagline{font-size:16px}
+  }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="grain"></div>
+<main>
+  <!-- wemessage mark: green light inside a thin-outline bubble on dark glass -->
+  <svg class="mark" viewBox="0 0 96 96" role="img" aria-label="wemessage logo">
+    <defs>
+      <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#232327"/><stop offset="1" stop-color="#141416"/>
+      </linearGradient>
+      <radialGradient id="halo" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#34C759" stop-opacity=".55"/>
+        <stop offset=".55" stop-color="#34C759" stop-opacity=".14"/>
+        <stop offset="1" stop-color="#34C759" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="core" cx=".38" cy=".34" r=".8">
+        <stop offset="0" stop-color="#7CE7A0"/><stop offset=".55" stop-color="#34C759"/>
+        <stop offset="1" stop-color="#1F9E45"/>
+      </radialGradient>
+    </defs>
+    <rect x="2" y="2" width="92" height="92" rx="22" fill="url(#tile)"/>
+    <rect x="2.5" y="2.5" width="91" height="91" rx="21.5" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+    <path d="M27 30h42a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H44l-9.5 8.2c-1.3 1.1-3.3.2-3.3-1.5V62h-4.2a8 8 0 0 1-8-8V38a8 8 0 0 1 8-8Z"
+          fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle class="glow" cx="48" cy="46" r="22" fill="url(#halo)"/>
+    <circle cx="48" cy="46" r="8" fill="url(#core)"/>
+    <circle cx="48" cy="46" r="10.5" fill="none" stroke="#34C759" stroke-opacity=".35" stroke-width="1.5"/>
+  </svg>
+
+  <h1><span class="we">we</span>message</h1>
+  <p class="tagline">Your AI can answer your texts.<br>Nothing sends without your <b>green light</b>.</p>
+  <p class="sub">An open-source iMessage gateway for AI agents. Local-only. Drafts by default.</p>
+  <div class="badges">
+    <span class="badge"><span class="dot"></span>In development</span>
+    <span class="badge">macOS</span>
+    <span class="badge">Open source</span>
+    <span class="badge">No cloud</span>
+    <span class="badge">CLI + GUI</span>
+  </div>
+</main>
+<footer>Works with your agents — OpenClaw, Hermes, Sol, Luna, or bring your own. Not affiliated with Apple. iMessage is a trademark of Apple Inc.</footer>
+</body>
+</html>

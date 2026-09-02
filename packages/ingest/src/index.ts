@@ -28,3 +28,13 @@ export {
   type ScanLoop,
   type ScanLoopOptions,
 } from './scan/index.js';
+export {
+  createClockSkewWakeSignal,
+  createNodeFsWatcher,
+  createWatchTrigger,
+  type ClockSkewWakeSignal,
+  type ClockSkewWakeSignalOptions,
+  type WakeSignal,
+  type WatchTrigger,
+  type WatchTriggerOptions,
+} from './watch/index.js';

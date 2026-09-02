@@ -1,0 +1,68 @@
+{
+  "plain-ascii.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-001 plain ascii body",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format"
+  },
+  "emoji.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-002 emoji 👍🏽🔥",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format"
+  },
+  "multiline.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-003\nmultiline second line",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format"
+  },
+  "url-with-linkmeta.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-004 https://example.com",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format; __kIMLinkAttributeName + __kIMLinkIsRichLinkAttributeName runs"
+  },
+  "edited-summary-info.bin": {
+    "kind": "summary-info",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-005 edited body (v2)",
+    "note": "message_summary_info bplist ({amc, ec}) with two typedstream revisions; expected = latest"
+  },
+  "attachment-caption.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "￼ GL-FIX-006 attachment caption",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format; U+FFFC + __kIMFileTransferGUIDAttributeName run"
+  },
+  "mention.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-007 hey @Test Mention are you there",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format; __kIMMentionConfirmedMention run"
+  },
+  "long-4k.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectedText": "GL-FIX-008 long body lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor GL-FIX filler ",
+    "note": "synthetic content archived with NSArchiver (fixtures/harvest/generate-corpus.jxa.js); attributedBody wire format; >4KB body exercises the 0x81 two-byte length prefix"
+  },
+  "malformed-truncated.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectFailure": true,
+    "note": "plain-ascii.bin truncated to 40 bytes (fixtures/harvest/synthesize-malformed.ts)"
+  },
+  "malformed-header.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectFailure": true,
+    "note": "byte-flipped \"streamtyped\" signature (fixtures/harvest/synthesize-malformed.ts)"
+  },
+  "malformed-random.bin": {
+    "kind": "typedstream",
+    "sourceOs": "macOS 26.5.1",
+    "expectFailure": true,
+    "note": "deterministic xorshift32 random bytes (fixtures/harvest/synthesize-malformed.ts)"
+  }
+}

@@ -1,8 +1,8 @@
-# wemessage
+# WeMessage
 
 **Your AI can answer your texts. Nothing sends without your green light.**
 
-wemessage is an open-source macOS gateway that connects AI agents to iMessage —
+WeMessage is an open-source macOS gateway that connects AI agents to iMessage —
 safely. It watches incoming texts against rules you define (keywords, regex,
 LLM-classified themes), routes matches to the agent of your choice (OpenClaw,
 Hermes, Sol, Luna, or your own), and puts **every draft behind a human approval

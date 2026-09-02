@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- WeMessage square mark: WM monoline ligature + green light. Canonical asset. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232327"/><stop offset="1" stop-color="#141416"/>
+    </linearGradient>
+    <radialGradient id="halo" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#34C759" stop-opacity=".55"/>
+      <stop offset=".55" stop-color="#34C759" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#34C759" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx=".38" cy=".34" r=".8">
+      <stop offset="0" stop-color="#7CE7A0"/><stop offset=".55" stop-color="#34C759"/>
+      <stop offset="1" stop-color="#1F9E45"/>
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="92" height="92" rx="22" fill="url(#tile)"/>
+  <rect x="2.5" y="2.5" width="91" height="91" rx="21.5" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+  <path d="M16 42 L26 72 L34 53 L42 72 L52 42"
+        fill="none" stroke="rgba(255,255,255,.92)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M52 72 L52 42 L66 61 L80 42 L80 72"
+        fill="none" stroke="rgba(255,255,255,.92)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="52" cy="25" r="13" fill="url(#halo)" opacity=".85"/>
+  <circle cx="52" cy="25" r="5.5" fill="url(#core)"/>
+  <circle cx="52" cy="25" r="7.5" fill="none" stroke="#34C759" stroke-opacity=".35" stroke-width="1.5"/>
+</svg>

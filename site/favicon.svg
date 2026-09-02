@@ -1,16 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <defs>
-    <radialGradient id="halo" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#34C759" stop-opacity=".5"/>
-      <stop offset="1" stop-color="#34C759" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="core" cx=".38" cy=".34" r=".8">
-      <stop offset="0" stop-color="#7CE7A0"/>
-      <stop offset=".55" stop-color="#34C759"/>
-      <stop offset="1" stop-color="#1F9E45"/>
-    </radialGradient>
-  </defs>
-  <circle cx="16" cy="16" r="16" fill="url(#halo)"/>
-  <circle cx="16" cy="16" r="7" fill="url(#core)"/>
-  <circle cx="16" cy="16" r="9.5" fill="none" stroke="#34C759" stroke-opacity=".4" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- favicon: the blue bubble alone, no tail below 16px legibility concerns.
+       Flat fill, straight tail, non-capsule radius: deliberately not Apple's geometry. -->
+  <rect x="4" y="10" width="88" height="64" rx="21" fill="#0A84FF"/>
+  <path d="M58 72 L88 88 L78 58 Z" fill="#0A84FF"/>
 </svg>

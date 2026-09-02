@@ -18,7 +18,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     // Type-aware linting only for package source (composite tsconfigs cover these).
-    files: ['packages/**/src/**/*.ts', 'fixtures/*.ts'],
+    files: ['packages/**/src/**/*.ts', 'fixtures/src/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {

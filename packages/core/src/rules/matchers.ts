@@ -18,6 +18,20 @@ export interface MatcherInput {
 
 type KeywordMatcher = Extract<RuleMatcher, { kind: 'keyword' }>;
 type RegexMatcher = Extract<RuleMatcher, { kind: 'regex' }>;
+type ContactMatcher = Extract<RuleMatcher, { kind: 'contact' }>;
+
+/**
+ * §1.7 contact matcher normalization (E.164 or lowercase email, §2.3
+ * contact_policies comment): trim; lowercase emails; strip `space ( ) - .`
+ * from phone-shaped strings, preserving the leading `+`.
+ */
+export function normalizeHandle(handle: string): Handle {
+  const trimmed = handle.trim();
+  if (trimmed.includes('@')) return trimmed.toLowerCase();
+  const stripped = trimmed.replace(/[\s().-]/g, '');
+  if (/^\+?[0-9]+$/.test(stripped)) return stripped;
+  return trimmed;
+}
 
 /**
  * §1.7 wholeWord boundary: the keyword occurrence must not be adjacent to
@@ -71,6 +85,11 @@ function matchRegex(matcher: RegexMatcher, text: string | null): boolean {
   return new RegExp(matcher.pattern, 'u').test(text);
 }
 
+function matchContact(matcher: ContactMatcher, handle: Handle): boolean {
+  const normalized = normalizeHandle(handle);
+  return matcher.handles.some((h) => normalizeHandle(h) === normalized);
+}
+
 export function evaluateMatcher(
   matcher: RuleMatcher,
   input: MatcherInput,
@@ -85,9 +104,14 @@ export function evaluateMatcher(
       // rejects theme matchers with 400 theme-unavailable-v1 (Scenario 7).
       return false;
     case 'contact':
+      return matchContact(matcher, input.handle);
     case 'all-of':
+      // Empty combinator: defensive no-match (§1.7 — CRUD rejects with 400).
+      return (
+        matcher.matchers.length > 0 &&
+        matcher.matchers.every((m) => evaluateMatcher(m, input))
+      );
     case 'any-of':
-      // Implemented in S2 Scenario 3 (contact matcher + combinators).
-      return false;
+      return matcher.matchers.some((m) => evaluateMatcher(m, input));
   }
 }

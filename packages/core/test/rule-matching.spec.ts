@@ -14,9 +14,11 @@
  * so an ASCII-\b implementation fails them (the Scenario 2 teeth proof).
  */
 import { describe, expect, it } from 'vitest';
-import type { Message, RuleMatcher } from '@wemessage/core';
+import type { Message, Rule, RuleMatcher } from '@wemessage/core';
 import {
   evaluateMatcher,
+  evaluateRules,
+  normalizeHandle,
   SAFE_REGEX_MAX_LENGTH,
   validateSafeRegex,
 } from '@wemessage/core';
@@ -247,5 +249,298 @@ describe('regex matcher (§1.3.2; F-11 defense in depth)', () => {
 
   it('never matches when text is null (§1.7)', () => {
     expect(evaluateMatcher(regex('.*'), input(null))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------------ *
+ * Scenario 3 — contact matcher, combinators, eligibility & priority
+ * (checkpoint part 2 — INV-6 becomes behavior). s2-execution Part 2
+ * Scenario 3; §1.7 eligibility table; F-12 (engine returns the full ordered
+ * match list; single-winner enforcement is the daemon pipeline's, Scenario 9).
+ * ------------------------------------------------------------------------ */
+
+function makeMessage(partial: Partial<Message> = {}): Message {
+  return {
+    guid: 'GL-FIX-MSG-001',
+    sourceRowid: 1,
+    chatGuid: 'iMessage;-;+15551234567',
+    handle: '+15551234567',
+    isFromMe: false,
+    isGroup: false,
+    service: 'imessage',
+    kind: 'text',
+    text: 'tacos at noon',
+    attachments: [],
+    sentAt: '2026-09-01T00:00:00.000Z',
+    receivedAt: '2026-09-01T00:00:01.000Z',
+    ...partial,
+  };
+}
+
+function makeRule(partial: Partial<Rule> & Pick<Rule, 'id' | 'matcher'>): Rule {
+  return {
+    name: 'rule',
+    enabled: true,
+    adapterId: 'echo',
+    respondMode: 'draft-only',
+    scheduleId: null,
+    outsideWindow: 'draft-only',
+    allowGroupDrafts: false,
+    matchAttachmentOnly: false,
+    draftTtlMinutes: 60,
+    priority: 100,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    ...partial,
+  };
+}
+
+const noDrafts = { hasDraftForMessage: () => false };
+
+describe('normalizeHandle (§1.7 contact matcher; §2.3 contact_policies comment)', () => {
+  it('collapses E.164 formatting variants (strip space ( ) - . keep leading +)', () => {
+    expect(normalizeHandle('+1 (555) 123-4567')).toBe('+15551234567');
+    expect(normalizeHandle('+15551234567')).toBe('+15551234567');
+    expect(normalizeHandle('555.123.4567')).toBe('5551234567');
+    expect(normalizeHandle(' +44 20 7946 0958 ')).toBe('+442079460958');
+  });
+
+  it('casefolds emails and trims', () => {
+    expect(normalizeHandle(' Eric.Test@Example.COM ')).toBe(
+      'eric.test@example.com',
+    );
+  });
+});
+
+describe('contact matcher (§1.3.2 — a matcher, not the S4 contact-policy gate)', () => {
+  it('matches when formatting variants of the same number collapse equal', () => {
+    const m: RuleMatcher = { kind: 'contact', handles: ['+1 (555) 123-4567'] };
+    expect(evaluateMatcher(m, input('hi', '+15551234567'))).toBe(true);
+    const m2: RuleMatcher = { kind: 'contact', handles: ['+15551234567'] };
+    expect(evaluateMatcher(m2, input('hi', '+1 (555) 123-4567'))).toBe(true);
+  });
+
+  it('casefolds email handles on both sides', () => {
+    const m: RuleMatcher = { kind: 'contact', handles: ['QA@Example.com'] };
+    expect(evaluateMatcher(m, input('hi', 'qa@example.com'))).toBe(true);
+  });
+
+  it('does not match a non-listed handle', () => {
+    const m: RuleMatcher = { kind: 'contact', handles: ['+15551234567'] };
+    expect(evaluateMatcher(m, input('hi', '+15559999999'))).toBe(false);
+  });
+
+  it('matches independent of text (works with null text)', () => {
+    const m: RuleMatcher = { kind: 'contact', handles: ['+15551234567'] };
+    expect(evaluateMatcher(m, input(null, '+15551234567'))).toBe(true);
+  });
+});
+
+describe('all-of / any-of combinators (§1.3.2 recursive composition)', () => {
+  const contact = (h: string): RuleMatcher => ({
+    kind: 'contact',
+    handles: [h],
+  });
+
+  it('composes three deep', () => {
+    const m: RuleMatcher = {
+      kind: 'any-of',
+      matchers: [
+        contact('+15550000000'), // no
+        {
+          kind: 'all-of',
+          matchers: [
+            keyword(['tacos']),
+            {
+              kind: 'any-of',
+              matchers: [contact('+15551234567'), keyword(['nomatch-word'])],
+            },
+          ],
+        },
+      ],
+    };
+    expect(evaluateMatcher(m, input('tacos at noon', '+15551234567'))).toBe(
+      true,
+    );
+    // Break the innermost leg: wrong handle AND missing keyword
+    expect(evaluateMatcher(m, input('salad at noon', '+15551234567'))).toBe(
+      false,
+    );
+  });
+
+  it('all-of requires every branch; any-of requires at least one', () => {
+    const all: RuleMatcher = {
+      kind: 'all-of',
+      matchers: [keyword(['tacos']), keyword(['noon'])],
+    };
+    expect(evaluateMatcher(all, input('tacos at noon'))).toBe(true);
+    expect(evaluateMatcher(all, input('tacos tonight'))).toBe(false);
+    const any: RuleMatcher = {
+      kind: 'any-of',
+      matchers: [keyword(['tacos']), keyword(['pizza'])],
+    };
+    expect(evaluateMatcher(any, input('pizza tonight'))).toBe(true);
+    expect(evaluateMatcher(any, input('salad'))).toBe(false);
+  });
+
+  it('empty matchers arrays are a defensive no-match (CRUD rejects them with 400)', () => {
+    expect(
+      evaluateMatcher({ kind: 'all-of', matchers: [] }, input('anything')),
+    ).toBe(false);
+    expect(
+      evaluateMatcher({ kind: 'any-of', matchers: [] }, input('anything')),
+    ).toBe(false);
+  });
+});
+
+describe('theme matcher is inert (§1.4.1 #6 — fail closed for the stubbed Classifier seam)', () => {
+  it('never matches, even when the text plainly mentions the theme', () => {
+    const m: RuleMatcher = {
+      kind: 'theme',
+      themes: ['dinner'],
+      minConfidence: 0.1,
+    };
+    expect(evaluateMatcher(m, input('dinner plans for dinner tonight'))).toBe(
+      false,
+    );
+  });
+
+  it('is inert inside combinators too', () => {
+    const m: RuleMatcher = {
+      kind: 'any-of',
+      matchers: [{ kind: 'theme', themes: ['dinner'], minConfidence: 0.1 }],
+    };
+    expect(evaluateMatcher(m, input('dinner tonight'))).toBe(false);
+  });
+});
+
+describe('evaluateRules — eligibility (§1.7) & ordering (F-12)', () => {
+  const tacoRule = (id: string, partial: Partial<Rule> = {}): Rule =>
+    makeRule({ id, matcher: keyword(['tacos']), ...partial });
+
+  it('isFromMe messages never match — INV-6 becomes behavior', () => {
+    const rules = [tacoRule('01A')];
+    const message = makeMessage({ isFromMe: true });
+    expect(evaluateRules(rules, message, noDrafts)).toEqual([]);
+    // Control: the identical message with isFromMe false matches.
+    expect(
+      evaluateRules(rules, makeMessage({ isFromMe: false }), noDrafts),
+    ).toHaveLength(1);
+  });
+
+  it('tapbacks never match (§1.3.8: a "loved" tapback must not trigger an auto-reply)', () => {
+    const message = makeMessage({
+      kind: 'tapback',
+      text: 'tacos', // even with matching text along for the ride
+      tapback: { targetGuid: 'GL-FIX-MSG-000', type: 2000 },
+    });
+    expect(evaluateRules([tacoRule('01A')], message, noDrafts)).toEqual([]);
+  });
+
+  it('unsends never match', () => {
+    const message = makeMessage({ kind: 'unsend', text: null });
+    expect(
+      evaluateRules(
+        [
+          makeRule({
+            id: '01A',
+            matcher: { kind: 'contact', handles: ['+15551234567'] },
+          }),
+        ],
+        message,
+        noDrafts,
+      ),
+    ).toEqual([]);
+  });
+
+  it('audio/attachment-only messages match only rules with matchAttachmentOnly: true', () => {
+    const audio = makeMessage({ kind: 'audio', text: null });
+    const attach = makeMessage({ kind: 'attachment-only', text: 'tacos pic' });
+    const contactRule = makeRule({
+      id: '01A',
+      matcher: { kind: 'contact', handles: ['+15551234567'] },
+      matchAttachmentOnly: true,
+    });
+    // Gated off without the flag:
+    expect(
+      evaluateRules(
+        [
+          makeRule({
+            id: '01B',
+            matcher: { kind: 'contact', handles: ['+15551234567'] },
+          }),
+        ],
+        audio,
+        noDrafts,
+      ),
+    ).toEqual([]);
+    // With the flag, text-independent matchers reach null-text messages:
+    expect(evaluateRules([contactRule], audio, noDrafts)).toHaveLength(1);
+    // And text-dependent matchers see the caption (§1.3.8):
+    expect(
+      evaluateRules(
+        [tacoRule('01C', { matchAttachmentOnly: true })],
+        attach,
+        noDrafts,
+      ),
+    ).toHaveLength(1);
+    // Caption absent -> keyword cannot match even with the flag:
+    expect(
+      evaluateRules(
+        [tacoRule('01D', { matchAttachmentOnly: true })],
+        audio,
+        noDrafts,
+      ),
+    ).toEqual([]);
+  });
+
+  it('edits are re-matched only when no draft exists yet (§1.3.8; both branches)', () => {
+    const edited = makeMessage({
+      kind: 'edit',
+      text: 'tacos actually',
+      editedAt: '2026-09-01T00:05:00.000Z',
+    });
+    const rules = [tacoRule('01A')];
+    expect(
+      evaluateRules(rules, edited, { hasDraftForMessage: () => false }),
+    ).toHaveLength(1);
+    expect(
+      evaluateRules(rules, edited, { hasDraftForMessage: () => true }),
+    ).toEqual([]);
+  });
+
+  it('group messages ARE matched (§1.3.8: ingested, matched, surfaced as events/audit only)', () => {
+    const group = makeMessage({
+      isGroup: true,
+      chatGuid: 'chat123456789',
+    });
+    expect(evaluateRules([tacoRule('01A')], group, noDrafts)).toHaveLength(1);
+  });
+
+  it('disabled rules are skipped entirely (UI §3 S3: dimmed, editable, skipped)', () => {
+    const rules = [tacoRule('01A', { enabled: false }), tacoRule('01B')];
+    const matched = evaluateRules(rules, makeMessage(), noDrafts);
+    expect(matched.map((r) => r.id)).toEqual(['01B']);
+  });
+
+  it('returns ALL matches ordered priority ASC, id ASC tiebreak (F-12: winner policy is the pipeline)', () => {
+    const rules = [
+      tacoRule('01Z', { priority: 20 }),
+      tacoRule('01B', { priority: 10 }),
+      tacoRule('01A', { priority: 10 }),
+      tacoRule('01C', { priority: 5, matcher: keyword(['pizza']) }), // no match
+    ];
+    const matched = evaluateRules(rules, makeMessage(), noDrafts);
+    expect(matched.map((r) => r.id)).toEqual(['01A', '01B', '01Z']);
+  });
+
+  it('does not mutate the input rules array', () => {
+    const rules = [
+      tacoRule('01Z', { priority: 20 }),
+      tacoRule('01A', { priority: 10 }),
+    ];
+    const before = rules.map((r) => r.id);
+    void evaluateRules(rules, makeMessage(), noDrafts);
+    expect(rules.map((r) => r.id)).toEqual(before);
   });
 });

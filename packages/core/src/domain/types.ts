@@ -58,7 +58,15 @@ export type DraftState =
 
 export interface DraftError { code:
   | 'no-conversation' | 'messages-not-running' | 'unverified'
-  | 'backend-error' | 'rate-limited' | 'circuit-open' | 'group-send-disabled';
+  | 'backend-error' | 'rate-limited' | 'circuit-open' | 'group-send-disabled'
+  // F-30 (s3-execution Scenario 6, coordinator-confirmed): additive per the
+  // F-16/F-28 precedent (§2.3 `drafts.error` is uncheck'd JSON; protocol
+  // re-exports DraftError type-only, so widening here has zero SQL/wire
+  // impact). Dispatch-time gate denial (kill-switch/disconnected/read-only,
+  // §2.4.1) parks a draft the backend never saw — none of the seven
+  // pre-existing literals describes that. message carries the
+  // GateDenyReason verbatim, e.g. "gate denied: kill-switch".
+  | 'gate-denied';
   message: string; at: IsoUtc;
 }
 

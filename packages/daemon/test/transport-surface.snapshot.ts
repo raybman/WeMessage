@@ -98,10 +98,17 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
  * packages/sendkit/src/verify.ts takes a `Pick<ChatDbReader,
  * 'findOutboundMessage'>` — post-send verification polls chat.db through
  * the same port, so it legitimately mentions ChatDbReader too.
+ *
+ * Deliberate update #3 of this array, s3-execution Scenario 6:
+ * packages/core/src/sending/dispatcher.ts's dispatchApproved takes both
+ * SendBackend and ChatDbReader directly (calls backend.send and duplicates
+ * sendkit's verify-poll in-process, per INV-1: core cannot import sendkit),
+ * so it legitimately mentions both ports too.
  */
 export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/core/src/drafts/recovery.ts',
   'packages/core/src/ports/index.ts',
+  'packages/core/src/sending/dispatcher.ts',
   'packages/daemon/src/daemon.ts',
   'packages/ingest/src/chatdb/index.ts',
   'packages/ingest/src/index.ts',

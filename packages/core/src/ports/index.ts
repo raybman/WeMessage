@@ -113,6 +113,15 @@ export interface Store {
    */
   insertApproval(approval: Approval): void;
   /**
+   * S3 Scenario 6 body extension (spec adaptation: the §1.5 list omitted the
+   * read half that §1.7 step 3a requires — "load + validate Approval").
+   * The dispatcher's INV-2 validation reads the row back: exists, action
+   * 'approve', draftId matches. Null when absent. Without this,
+   * `insertApproval` is write-only and approval validation collapses into
+   * the draft-state check, which cannot detect a mismatched approval id.
+   */
+  getApproval(id: Ulid): Approval | null;
+  /**
    * approved -> sending: mints the `send_ledger` row (attempt 1; S3 specs no
    * retry path, so attempt never advances past 1) and flips draft state.
    * Throws if the draft is not currently 'approved' — most notably a second

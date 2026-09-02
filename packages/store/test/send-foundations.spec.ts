@@ -189,6 +189,40 @@ describe('store send foundations (s3 Scenario 5)', () => {
     });
   });
 
+  describe('getApproval (s3 Scenario 6 body extension, §1.7 step 3a)', () => {
+    it('round-trips a full Approval (batchId + editedBody present)', () => {
+      store.insertDraft(makeDraft({ id: 'D5a' }));
+      const approval: Approval = {
+        id: 'A3',
+        draftId: 'D5a',
+        action: 'approve',
+        actor: { kind: 'human', via: 'gui' },
+        batchId: 'batch-1',
+        editedBody: 'edited text',
+        at: '2026-09-01T12:05:00.000Z',
+      };
+      store.insertApproval(approval);
+      expect(store.getApproval('A3')).toEqual(approval);
+    });
+
+    it('round-trips a minimal Approval (batchId/editedBody absent)', () => {
+      store.insertDraft(makeDraft({ id: 'D5b' }));
+      const approval: Approval = {
+        id: 'A4',
+        draftId: 'D5b',
+        action: 'reject',
+        actor: { kind: 'system', reason: 'kill-switch' },
+        at: '2026-09-01T12:06:00.000Z',
+      };
+      store.insertApproval(approval);
+      expect(store.getApproval('A4')).toEqual(approval);
+    });
+
+    it('returns null when absent', () => {
+      expect(store.getApproval('nonexistent-id')).toBeNull();
+    });
+  });
+
   describe('beginSendAttempt', () => {
     it('approved -> sending: returns {attempt:1}, draft flips state, send_ledger row exists with started_at', () => {
       insertApprovedDraft(store, 'D6');

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { chainHash, GENESIS_HASH } from '@wemessage/core';
 import type {
+  Actor,
   Approval,
   AttachmentRef,
   AuditAppendResult,
@@ -122,6 +123,32 @@ function draftFromRow(row: DraftRow): Draft {
       ? { error: JSON.parse(row.error) as DraftError }
       : {}),
     createdAt: row.created_at,
+  };
+}
+
+interface ApprovalRow {
+  id: string;
+  draft_id: string;
+  action: string;
+  actor: string;
+  batch_id: string | null;
+  edited_body: string | null;
+  at: string;
+}
+
+/**
+ * Rebuild a full `Approval` from its row (s3 Scenario 6 body extension,
+ * §1.7 step 3a). Same optional-key-omission convention as `draftFromRow`.
+ */
+function approvalFromRow(row: ApprovalRow): Approval {
+  return {
+    id: row.id,
+    draftId: row.draft_id,
+    action: row.action as Approval['action'],
+    actor: JSON.parse(row.actor) as Actor,
+    ...(row.batch_id !== null ? { batchId: row.batch_id } : {}),
+    ...(row.edited_body !== null ? { editedBody: row.edited_body } : {}),
+    at: row.at,
   };
 }
 
@@ -259,6 +286,7 @@ export class SqliteStore implements Store {
   readonly #insertDraft: Database.Statement;
   readonly #getDraft: Database.Statement;
   readonly #insertApproval: Database.Statement;
+  readonly #getApproval: Database.Statement;
   readonly #getDraftState: Database.Statement;
   readonly #setDraftSending: Database.Statement;
   readonly #insertLedger: Database.Statement;
@@ -392,6 +420,10 @@ export class SqliteStore implements Store {
     this.#insertApproval = this.db.prepare(
       'INSERT INTO approvals (id, draft_id, action, actor, batch_id, ' +
         'edited_body, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    this.#getApproval = this.db.prepare(
+      'SELECT id, draft_id, action, actor, batch_id, edited_body, at ' +
+        'FROM approvals WHERE id = ?',
     );
     this.#getDraftState = this.db.prepare(
       'SELECT state FROM drafts WHERE id = ?',
@@ -688,6 +720,11 @@ export class SqliteStore implements Store {
       approval.editedBody ?? null,
       approval.at,
     );
+  }
+
+  getApproval(id: Ulid): Approval | null {
+    const row = this.#getApproval.get(id) as ApprovalRow | undefined;
+    return row ? approvalFromRow(row) : null;
   }
 
   beginSendAttempt(

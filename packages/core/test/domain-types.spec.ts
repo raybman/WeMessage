@@ -179,6 +179,14 @@ describe('§3.2 domain types (verbatim contract)', () => {
       message: 'no matching is_from_me row',
       at,
     };
+    // F-30 (s3-execution Scenario 6, coordinator-confirmed): DraftError code
+    // gained 'gate-denied' additively — pre-existing literals untouched.
+    const gateDenied: DraftError = {
+      code: 'gate-denied',
+      message: 'gate denied: kill-switch',
+      at,
+    };
+    expect(gateDenied.code).toBe('gate-denied');
     const draft: Draft = {
       id: 'd1',
       inboundGuid: null,
@@ -310,6 +318,8 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       insertDraft: () => undefined,
       getDraft: () => null,
       insertApproval: () => undefined,
+      // S3 Scenario 6 body extension (spec adaptation, §1.7 step 3a).
+      getApproval: () => null,
       beginSendAttempt: () => ({ attempt: 1 }),
       clearAdapterTokens: () => 0,
       close: () => undefined,

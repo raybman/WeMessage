@@ -13,6 +13,7 @@ import type { WebSocket } from 'ws';
 import type { Clock, Store } from '@wemessage/core';
 import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
+import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 
 export interface DaemonOptions {
@@ -130,6 +131,9 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       clock: opts.rules.clock,
       sink,
     });
+    // §1.6 routes 8-9 (S2 Scenario 11): audit reads share the rules gate —
+    // there is no standalone opt-in, audit only exists where rules do.
+    registerAuditRoutes(app, { store: opts.rules.store });
   }
 
   return {

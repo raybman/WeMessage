@@ -25,21 +25,26 @@
  *
  * S2 surface per s2-execution §1.6: the S1 three routes plus rule CRUD +
  * rules test (routes 1-6, Scenario 7) plus dry-run replay (route 7,
- * Scenario 10). Routes 8-9 (audit reads) land in Scenario 11 with a
- * further deliberate update here.
+ * Scenario 10) plus audit reads (routes 8-9, Scenario 11).
  * (Deliberate update #1 of this file, F-17's demonstrated workflow: the
  * seed commit pinned the S1 three-route surface. Deliberate update #4,
  * Scenario 10: GET /v1/rules/:id/dry-run + auto-HEAD twin — §1.6 route
- * table row 7, read-only replay over the mirrored inbound window.)
+ * table row 7, read-only replay over the mirrored inbound window.
+ * Deliberate update #5, Scenario 11: GET /v1/audit + GET /v1/audit/verify
+ * + auto-HEAD twins — §1.6 route table rows 8-9, read-only audit reads.)
  */
 export const ROUTE_TABLE: readonly string[] = [
   'DELETE /v1/rules/:id',
+  'GET /v1/audit',
+  'GET /v1/audit/verify',
   'GET /v1/events',
   'GET /v1/health',
   'GET /v1/rules',
   'GET /v1/rules/:id',
   'GET /v1/rules/:id/dry-run',
   'GET /v1/status',
+  'HEAD /v1/audit',
+  'HEAD /v1/audit/verify',
   'HEAD /v1/events',
   'HEAD /v1/health',
   'HEAD /v1/rules',

@@ -93,6 +93,118 @@ export interface EventSubscription {
   close(): void;
 }
 
+/**
+ * S2 rule/audit DTOs (Scenario 11) — client-local, same pattern as
+ * `StatusPayload`: @wemessage/client has no @wemessage/core dependency
+ * (protocol untouched), so the §3.2 domain shapes are redeclared here.
+ */
+export type RuleMatcher =
+  | {
+      kind: 'keyword';
+      keywords: string[];
+      mode: 'any' | 'all';
+      caseSensitive?: boolean;
+      wholeWord?: boolean;
+    }
+  | { kind: 'regex'; pattern: string }
+  | { kind: 'theme'; themes: string[]; minConfidence: number }
+  | { kind: 'contact'; handles: string[] }
+  | { kind: 'all-of'; matchers: RuleMatcher[] }
+  | { kind: 'any-of'; matchers: RuleMatcher[] };
+
+export interface RulePayload {
+  id: string;
+  name: string;
+  enabled: boolean;
+  matcher: RuleMatcher;
+  adapterId: string;
+  respondMode: 'draft-only' | 'auto';
+  scheduleId: string | null;
+  outsideWindow: 'draft-only' | 'queue' | 'ignore';
+  allowGroupDrafts: boolean;
+  matchAttachmentOnly: boolean;
+  draftTtlMinutes: number;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** §1.6 routes 2/4 request body — every field but `matcher` has a §2.3 DDL default. */
+export interface RuleInput {
+  name: string;
+  matcher: RuleMatcher;
+  adapterId: string;
+  respondMode?: 'draft-only' | 'auto';
+  scheduleId?: string | null;
+  outsideWindow?: 'draft-only' | 'queue' | 'ignore';
+  allowGroupDrafts?: boolean;
+  matchAttachmentOnly?: boolean;
+  draftTtlMinutes?: number;
+  priority?: number;
+  enabled?: boolean;
+}
+
+/** §1.6 routes 2/4 response envelope (F-14 `adapterKnown` advisory). */
+export interface RuleWriteResult {
+  rule: RulePayload;
+  adapterKnown: boolean;
+}
+
+export interface RuleTestInput {
+  text: string | null;
+  handle?: string;
+  isGroup?: boolean;
+  kind?: 'text' | 'tapback' | 'edit' | 'unsend' | 'audio' | 'attachment-only';
+}
+
+export interface RuleTestResult {
+  matched: boolean;
+  detail: { matchedRuleIds: string[] };
+}
+
+export interface DryRunRow {
+  guid: string;
+  handle: string;
+  textPreview: string | null;
+  matched: boolean;
+}
+
+export interface DryRunResult {
+  total: number;
+  matched: number;
+  rows: DryRunRow[];
+}
+
+/** One §2.3 `audit_log` row, transport-shaped (route 8). */
+export interface AuditRowPayload {
+  seq: number;
+  at: string;
+  eventJson: string;
+  actorJson: string;
+  prevHash: string;
+  hash: string;
+}
+
+export interface AuditListParams {
+  /** ISO-8601, inclusive lower bound (F-19 `sinceAt`). */
+  since?: string;
+  /** Exact audit-event type filter. */
+  event?: string;
+  limit?: number;
+}
+
+/** Route 9 response — mirrors core's `VerifyChainResult` exactly (F-13). */
+export type AuditVerifyResult =
+  | { ok: true; length: number }
+  | {
+      ok: false;
+      brokenAtSeq: number;
+      reason: 'seq-gap' | 'link-broken' | 'hash-mismatch';
+      length: number;
+      expectedHash?: string;
+      actualHash?: string;
+    };
+
 export interface WeMessageClient {
   health(): Promise<{ status: string }>;
   status(): Promise<StatusPayload>;
@@ -100,14 +212,40 @@ export interface WeMessageClient {
   events(
     onEvent: (event: GatewayEventPayload) => void,
   ): Promise<EventSubscription>;
+
+  // §1.6 routes 1-7 (S2 Scenario 11)
+  listRules(): Promise<RulePayload[]>;
+  getRule(id: string): Promise<RulePayload>;
+  createRule(input: RuleInput): Promise<RuleWriteResult>;
+  updateRule(id: string, patch: Partial<RuleInput>): Promise<RuleWriteResult>;
+  deleteRule(id: string): Promise<{ deleted: string }>;
+  testRule(id: string, input: RuleTestInput): Promise<RuleTestResult>;
+  dryRunRule(id: string, limit?: number): Promise<DryRunResult>;
+
+  // §1.6 routes 8-9 (S2 Scenario 11)
+  listAudit(params?: AuditListParams): Promise<AuditRowPayload[]>;
+  verifyAudit(): Promise<AuditVerifyResult>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
-  const get = async (path: string): Promise<unknown> => {
+  // Shared transport for every REST verb (§2.5 "zero business logic
+  // duplicated"): identical auth-error mapping regardless of method, a
+  // JSON body when one is given, and 204 (route 5 delete) resolving to
+  // `undefined` rather than an empty-body JSON.parse crash.
+  const request = async (
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> => {
     let res: Response;
     try {
       res = await fetch(`${options.baseUrl}${path}`, {
-        headers: { authorization: `Bearer ${options.token}` },
+        method,
+        headers: {
+          authorization: `Bearer ${options.token}`,
+          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch (cause) {
       throw new DaemonUnreachableError(options.baseUrl, cause);
@@ -118,12 +256,55 @@ export function createClient(options: ClientOptions): WeMessageClient {
     if (!res.ok) {
       throw new DaemonRequestError(res.status, await res.text());
     }
+    if (res.status === 204) return undefined;
     return res.json();
   };
+
+  const get = (path: string): Promise<unknown> => request('GET', path);
+  const post = (path: string, body?: unknown): Promise<unknown> =>
+    request('POST', path, body);
+  const patch = (path: string, body?: unknown): Promise<unknown> =>
+    request('PATCH', path, body);
+  const del = (path: string): Promise<unknown> => request('DELETE', path);
+
+  const rulePath = (id: string): string =>
+    `/v1/rules/${encodeURIComponent(id)}`;
 
   return {
     health: () => get('/v1/health') as Promise<{ status: string }>,
     status: () => get('/v1/status') as Promise<StatusPayload>,
+
+    listRules: () => get('/v1/rules') as Promise<RulePayload[]>,
+    getRule: (id) => get(rulePath(id)) as Promise<RulePayload>,
+    createRule: (input) => post('/v1/rules', input) as Promise<RuleWriteResult>,
+    updateRule: (id, patchBody) =>
+      patch(rulePath(id), patchBody) as Promise<RuleWriteResult>,
+    deleteRule: async (id) => {
+      await del(rulePath(id));
+      return { deleted: id };
+    },
+    testRule: (id, input) =>
+      post(`${rulePath(id)}/test`, input) as Promise<RuleTestResult>,
+    dryRunRule: (id, limit) => {
+      const qs =
+        limit !== undefined
+          ? `?limit=${encodeURIComponent(String(limit))}`
+          : '';
+      return get(`${rulePath(id)}/dry-run${qs}`) as Promise<DryRunResult>;
+    },
+
+    listAudit: (params) => {
+      const qs = new URLSearchParams();
+      if (params?.since !== undefined) qs.set('since', params.since);
+      if (params?.event !== undefined) qs.set('event', params.event);
+      if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+      const suffix = qs.toString();
+      return get(
+        `/v1/audit${suffix.length > 0 ? `?${suffix}` : ''}`,
+      ) as Promise<AuditRowPayload[]>;
+    },
+    verifyAudit: () => get('/v1/audit/verify') as Promise<AuditVerifyResult>,
+
     events(onEvent) {
       const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events`;
       return new Promise<EventSubscription>((resolve, reject) => {

@@ -2,3 +2,4 @@
 export * from './domain/types.js';
 export * from './ports/index.js';
 export * from './drafts/index.js';
+export * from './rules/index.js';

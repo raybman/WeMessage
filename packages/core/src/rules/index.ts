@@ -1,2 +1,4 @@
-// @wemessage/core/rules — stub (S1 scaffold; implemented in a later slice per §3.1).
-export {};
+// @wemessage/core/rules — matcher evaluation (S2 Scenarios 2-3) + safe-regex
+// validator (F-11). Pure per INV-1; concept home per §3.12 (matching only here).
+export * from './matchers.js';
+export * from './safe-regex.js';

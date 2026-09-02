@@ -16,3 +16,12 @@ dist/
 # env
 .env
 .env.*
+
+# monorepo build / test artifacts (§1.9)
+*.tsbuildinfo
+coverage/
+*.log
+# unscrubbed harvest staging — raw blobs from a real chat.db must NEVER be committed (Part 3)
+fixtures/typedstream/staging/
+# local runtime artifacts if a dev runs the daemon from the repo
+.wemessage-dev/

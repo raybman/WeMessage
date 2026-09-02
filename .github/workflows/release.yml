@@ -1,0 +1,11 @@
+name: release
+
+# STUB (§1.8). Signing / notarization / distribution is S9 (§3.11.3).
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: macos-latest
+    steps:
+      - run: echo "Release signing + notarization is S9 — see plan §3.11.3"

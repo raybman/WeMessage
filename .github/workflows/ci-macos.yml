@@ -1,0 +1,22 @@
+name: ci-macos
+
+# STUB (§1.8). macOS smoke (doctor/send, live chat.db) lands in S3. Every S1 test is
+# Linux-fixture-driven by design, so there is nothing macOS-specific to gate in S1.
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    steps:
+      - run: echo "macOS smoke lands in S3 (doctor/send) per plan §4.0"
+
+# Eventual matrix (§2.7 Compat, §4.0), commented out until S3:
+#   strategy:
+#     matrix:
+#       os: [macos-14, macos-15]
+#   steps:
+#     - uses: actions/checkout@v4
+#     - # ... pnpm install + build
+#     - # live chat.db read-only smoke: pragma table_info drift check (Scenario 6 [macOS smoke])
+#     - # sendkit availability probe + post-send verification (S3)

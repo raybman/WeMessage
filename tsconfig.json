@@ -1,0 +1,21 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/protocol" },
+    { "path": "packages/store" },
+    { "path": "packages/ingest" },
+    { "path": "packages/sendkit" },
+    { "path": "packages/daemon" },
+    { "path": "packages/client" },
+    { "path": "packages/cli" },
+    { "path": "packages/adapter-testkit" },
+    { "path": "packages/adapters/sol" },
+    { "path": "packages/adapters/hermes" },
+    { "path": "packages/adapters/luna" },
+    { "path": "packages/adapters/openclaw" },
+    { "path": "packages/adapters/echo" },
+    { "path": "apps/desktop" },
+    { "path": "fixtures" }
+  ]
+}

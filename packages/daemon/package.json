@@ -1,0 +1,29 @@
+{
+  "name": "@wemessage/daemon",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wemessage/core": "workspace:*",
+    "@wemessage/ingest": "workspace:*",
+    "@wemessage/store": "workspace:*",
+    "@wemessage/sendkit": "workspace:*",
+    "@wemessage/protocol": "workspace:*",
+    "fastify": "^5.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "zod": "^4.0.0",
+    "ulid": "^3.0.0"
+  }
+}

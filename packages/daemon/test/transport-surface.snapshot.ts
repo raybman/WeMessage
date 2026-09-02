@@ -61,14 +61,16 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
 
 /**
  * WS `event` values the daemon src actually constructs today (scanned as
- * `event: '<value>'` literals under packages/daemon/src). S1 set; Scenario 9
- * adds 'rule.matched'.
+ * `event: '<value>'` literals under packages/daemon/src).
+ * (Deliberate update #3: Scenario 9 wires the match pipeline, so the daemon
+ * now constructs 'rule.matched' — already in the allowed vocabulary above.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
   'message.edited',
   'message.received',
   'message.unsent',
+  'rule.matched',
 ];
 
 /**

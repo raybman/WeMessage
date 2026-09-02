@@ -10,11 +10,29 @@
  *
  * F-1: foreground process, no launchd packaging in S1.
  */
-import type { Message, Clock, FsWatcher, SendBackend } from '@wemessage/core';
+import type {
+  AuditEvent,
+  Clock,
+  CursorHealReason,
+  DraftError,
+  FsWatcher,
+  Message,
+  MessageGuid,
+  RecoveryAuditEvent,
+  Rule,
+  SendBackend,
+  Store,
+} from '@wemessage/core';
 import {
+  evaluateRules,
   runStartupRecovery,
+  systemActor,
   type StartupRecoveryResult,
 } from '@wemessage/core';
+import {
+  createAuditSink as defaultCreateAuditSink,
+  type AuditSink,
+} from './audit-sink.js';
 import {
   createChatDbReader,
   createScanLoop,
@@ -41,6 +59,42 @@ export interface StartDaemonOptions {
   port?: number;
   /** Pipeline errors (scan failures etc.); loop stays alive regardless. */
   onError?: (error: unknown) => void;
+  /**
+   * §1.8 chokepoint factory — test seam (Scenario 9 asserts append-before-
+   * broadcast via an injected recording sink). Production omits it.
+   */
+  createAuditSink?: (deps: { store: Store; clock: Clock }) => AuditSink;
+}
+
+/**
+ * S1's in-memory recovery trail -> the persisted §2.4.4 audit vocabulary
+ * (Scenario 9, S1 deviation #1). Field shapes are pinned by the push sites
+ * in core/drafts/recovery.ts; the casts narrow that structural contract.
+ */
+function toRecoveryAuditEvent(entry: RecoveryAuditEvent): AuditEvent {
+  const detail = entry.detail;
+  if (entry.event === 'cursor.recovery') {
+    return {
+      type: 'recovery.cursor',
+      reason: detail['reason'] as CursorHealReason,
+      lastRowid: detail['lastRowid'] as number,
+    };
+  }
+  const draftId = detail['draftId'] as string;
+  if (detail['outcome'] === 'sent') {
+    return {
+      type: 'recovery.draft',
+      draftId,
+      outcome: 'sent',
+      sentMessageGuid: detail['sentMessageGuid'] as MessageGuid,
+    };
+  }
+  return {
+    type: 'recovery.draft',
+    draftId,
+    outcome: 'failed',
+    code: detail['code'] as DraftError['code'],
+  };
 }
 
 export interface RunningDaemon {
@@ -87,6 +141,12 @@ export async function startDaemon(
     dir: options.configDir,
     clock: options.clock,
   });
+  // ONE §1.8 chokepoint for the whole daemon: recovery trail, pipeline
+  // events, and the rule CRUD routes all append/broadcast through it.
+  const sink = (options.createAuditSink ?? defaultCreateAuditSink)({
+    store,
+    clock: options.clock,
+  });
 
   // ---- phase 1: recovery (T-9.3) before anything serves (§2.5) ----
   const recoveryReader = createChatDbReader(options.chatDbPath, {
@@ -103,27 +163,94 @@ export async function startDaemon(
   } finally {
     recoveryReader.close();
   }
+  // Persist the S1 in-memory trail NOW — phase 1, before the watcher arms
+  // and before listen (§2.5; S1 deviation #1 resolved). F-16 system actor.
+  for (const entry of recovery.audit) {
+    sink.append(toRecoveryAuditEvent(entry), systemActor('recovery'));
+  }
   bootLog.push('recovery');
 
   // ---- phase 2: watch trigger + scan loop (Scenarios 8/10) ----
+  // sockets tracked here only for the greeting frame + stop(); event fan-out
+  // goes through the sink (whose client set the server populates).
   const sockets = new Set<WebSocket>();
-  const broadcast = (payload: GatewayEventPayload): void => {
-    const frame = JSON.stringify(payload);
-    for (const socket of sockets) {
-      if (socket.readyState === socket.OPEN) socket.send(frame);
+
+  // Scenario 9 match pipeline. Rules load per burst from store.listRules()
+  // (recorded decision: no cache layer — small table, zero invalidation
+  // bugs). F-15: in-process (ruleId, guid) seen-set; a restart may re-audit
+  // a match (accepted in S2).
+  let burstRules: Rule[] = [];
+  const seenMatches = new Set<string>();
+  const emitWinner = (message: Message): void => {
+    // F-12: core returns the FULL ordered list (priority ASC, id ASC);
+    // the daemon enforces single winner by taking the head.
+    const winner = evaluateRules(burstRules, message, {
+      // §1.3.8 edit re-match predicate; drafts do not exist until S4.
+      hasDraftForMessage: () => false,
+    })[0];
+    if (winner === undefined) return;
+    const seenKey = `${winner.id}\u0000${message.guid}`;
+    if (seenMatches.has(seenKey)) return;
+    seenMatches.add(seenKey);
+    // §1.8: the log is the record, the event is the courtesy — append first.
+    sink.append(
+      {
+        type: 'rule.matched',
+        guid: message.guid,
+        ruleId: winner.id,
+        adapterId: winner.adapterId,
+        ruleName: winner.name,
+      },
+      systemActor('rule-engine'),
+    );
+    sink.broadcast({
+      event: 'rule.matched',
+      guid: message.guid,
+      ruleId: winner.id,
+      adapterId: winner.adapterId,
+    });
+  };
+  // Both ingest paths (new rows + Scenario 8 mutation sweep) deliver here.
+  const deliver = (message: Message): void => {
+    const payload = toGatewayEvent(message);
+    // §2.4.4: mutation occurrences are audit material now that audit exists.
+    if (payload.event === 'message.edited') {
+      sink.append(
+        { type: 'message.edited', guid: message.guid },
+        systemActor('ingest'),
+      );
+    } else if (payload.event === 'message.unsent') {
+      sink.append(
+        { type: 'message.unsent', guid: message.guid },
+        systemActor('ingest'),
+      );
     }
+    sink.broadcast(payload);
+    emitWinner(message);
   };
 
   const scanLoop = createScanLoop({
     chatDbPath: options.chatDbPath,
     store,
     clock: options.clock,
-    onMessage: (message) => {
-      broadcast(toGatewayEvent(message));
+    onMessage: deliver,
+    onMutation: deliver,
+    onDecodeFailed: (signal) => {
+      // §2.2.1 degrade signal, persisted since Scenario 9 (S1 deviation #1).
+      sink.append(
+        {
+          type: 'ingest.decode-failed',
+          guid: signal.guid,
+          sourceRowid: signal.sourceRowid,
+          reason: signal.reason,
+        },
+        systemActor('ingest'),
+      );
     },
   });
   let scanHealthy = false;
   const scan = async (): Promise<void> => {
+    burstRules = store.listRules();
     await scanLoop.scanOnce();
     scanHealthy = true;
   };
@@ -149,7 +276,7 @@ export async function startDaemon(
   const server = await buildServer({
     configDir: options.configDir,
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
-    rules: { store, clock: options.clock },
+    rules: { store, clock: options.clock, sink },
     getStatus: () => ({
       // S1 can read but not send: read-only once a scan has succeeded (§3.4).
       connectionState: scanHealthy ? 'read-only' : 'disconnected',

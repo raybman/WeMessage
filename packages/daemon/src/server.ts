@@ -25,8 +25,10 @@ export interface DaemonOptions {
   /**
    * When provided, registers the S2 rule routes (§1.6 routes 1-6) and the
    * audit sink. Optional so S1 transport harnesses keep booting bare.
+   * `sink` lets the composed daemon share ONE §1.8 chokepoint between the
+   * routes and the match pipeline (Scenario 9); omitted, one is created.
    */
-  rules?: { store: Store; clock: Clock };
+  rules?: { store: Store; clock: Clock; sink?: AuditSink };
 }
 
 export interface DaemonServer {
@@ -109,7 +111,9 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     );
   });
 
-  const sink = opts.rules ? createAuditSink(opts.rules) : undefined;
+  const sink = opts.rules
+    ? (opts.rules.sink ?? createAuditSink(opts.rules))
+    : undefined;
 
   app.get('/v1/events', { websocket: true }, (socket) => {
     counters.handlerCalls += 1;
@@ -121,7 +125,11 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   if (opts.rules && sink) {
     // §1.6 routes 1-6 (S2 Scenario 7). The transport-surface ratchet pins
     // the resulting route table — update the snapshot deliberately.
-    registerRuleRoutes(app, { ...opts.rules, sink });
+    registerRuleRoutes(app, {
+      store: opts.rules.store,
+      clock: opts.rules.clock,
+      sink,
+    });
   }
 
   return {

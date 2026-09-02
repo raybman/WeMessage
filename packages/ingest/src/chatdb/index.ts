@@ -14,11 +14,16 @@ import Database from 'better-sqlite3';
 import type {
   AttachmentRef,
   ChatDbReader,
+  ChatGuid,
   Clock,
+  Handle,
   Message,
   MutatedMessage,
+  Service,
 } from '@wemessage/core';
+import { normalizeHandle } from '@wemessage/core';
 import {
+  mapService,
   normalizeRow,
   type DecodeFailedSignal,
   type RawMessageRow,
@@ -97,6 +102,34 @@ const ATTACHMENTS_SQL = `
   ORDER BY a.ROWID ASC
 `;
 
+/**
+ * resolveChat (Scenario 3, §1.5): every (handle, chat) pairing via
+ * chat_handle_join, joined out to the owning chat's guid/service. Filtering
+ * by normalized-handle equality happens in JS (normalizeHandle mirrors the
+ * §1.7 contact-matcher rules; doing it in SQL would mean reimplementing that
+ * logic a second time in SQL string functions).
+ */
+const RESOLVE_CANDIDATES_SQL = `
+  SELECT
+    h.id           AS handleId,
+    c.ROWID        AS chatRowid,
+    c.guid         AS chatGuid,
+    c.service_name AS service
+  FROM chat_handle_join chj
+  JOIN handle h ON h.ROWID = chj.handle_id
+  JOIN chat c ON c.ROWID = chj.chat_id
+`;
+
+/** isGroup is a participant count, not chat.style (teeth: dropping this must fail the group-chat row). */
+const PARTICIPANT_COUNT_SQL = `
+  SELECT COUNT(*) AS n FROM chat_handle_join WHERE chat_id = ?
+`;
+
+/** Apple-epoch ns; exceeds 2^53, so this stmt reads with safeIntegers on. */
+const LAST_MESSAGE_DATE_SQL = `
+  SELECT MAX(message_date) AS lastDate FROM chat_message_join WHERE chat_id = ?
+`;
+
 interface DbMessageRow {
   rowid: bigint;
   guid: string;
@@ -126,6 +159,13 @@ interface DbAttachmentRow {
   transferName: string | null;
 }
 
+interface ResolveCandidateRow {
+  handleId: string;
+  chatRowid: number;
+  chatGuid: string;
+  service: string | null;
+}
+
 export function createChatDbReader(
   path: string,
   options: ChatDbReaderOptions,
@@ -152,6 +192,10 @@ export function createChatDbReader(
   mutationsStmt.safeIntegers(true);
   const attachmentsStmt = db.prepare(ATTACHMENTS_SQL);
   attachmentsStmt.safeIntegers(true);
+  const resolveCandidatesStmt = db.prepare(RESOLVE_CANDIDATES_SQL);
+  const participantCountStmt = db.prepare(PARTICIPANT_COUNT_SQL);
+  const lastMessageDateStmt = db.prepare(LAST_MESSAGE_DATE_SQL);
+  lastMessageDateStmt.safeIntegers(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -214,6 +258,45 @@ export function createChatDbReader(
           return { message: toMessage(r), mutationNs: mutationNs.toString() };
         }),
       );
+    },
+
+    resolveChat(handle: Handle): Promise<{
+      chatGuid: ChatGuid;
+      service: Service;
+      isGroup: boolean;
+    } | null> {
+      const target = normalizeHandle(handle);
+      const candidates = resolveCandidatesStmt.all() as ResolveCandidateRow[];
+      const matches = candidates.filter(
+        (c) => normalizeHandle(c.handleId) === target,
+      );
+      if (matches.length === 0) return Promise.resolve(null);
+
+      const seenChats = new Set<number>();
+      let best: ResolveCandidateRow | null = null;
+      let bestDate = -1n;
+      for (const candidate of matches) {
+        if (seenChats.has(candidate.chatRowid)) continue;
+        seenChats.add(candidate.chatRowid);
+        const row = lastMessageDateStmt.get(candidate.chatRowid) as {
+          lastDate: bigint | null;
+        };
+        const lastDate = row.lastDate ?? 0n;
+        if (best === null || lastDate > bestDate) {
+          best = candidate;
+          bestDate = lastDate;
+        }
+      }
+      if (best === null) return Promise.resolve(null);
+
+      const countRow = participantCountStmt.get(best.chatRowid) as {
+        n: number;
+      };
+      return Promise.resolve({
+        chatGuid: best.chatGuid,
+        service: mapService(best.service),
+        isGroup: countRow.n > 1,
+      });
     },
 
     close() {

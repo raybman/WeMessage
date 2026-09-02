@@ -160,6 +160,13 @@ export interface ChatDbFixture {
     service?: string;
     displayName?: string;
     style?: number;
+    /**
+     * S3 Scenario 3: link participant handle rows via chat_handle_join, the
+     * table `resolveChat` reads (a 1:1 chat has no participants wired up by
+     * default — chat_message_join alone isn't enough to resolve a chat with
+     * no message history yet).
+     */
+    handleIds?: number[];
   }): number;
   addGroupChat(handleIds: number[], opts?: { displayName?: string }): number;
   addMessage(opts: AddMessageOptions): MessageRef;
@@ -242,7 +249,14 @@ export function createChatDb(path: string): ChatDbFixture {
           opts?.displayName ?? null,
           randomUUID(),
         );
-      return Number(info.lastInsertRowid);
+      const chatId = Number(info.lastInsertRowid);
+      if (opts?.handleIds !== undefined) {
+        const link = db.prepare(
+          'INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?, ?)',
+        );
+        for (const h of opts.handleIds) link.run(chatId, h);
+      }
+      return chatId;
     },
 
     addGroupChat(handleIds, opts) {

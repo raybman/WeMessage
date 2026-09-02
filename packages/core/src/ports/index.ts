@@ -11,10 +11,12 @@
 import type {
   ChatGuid,
   DraftError,
+  Handle,
   IsoUtc,
   Message,
   MessageGuid,
   Rule,
+  Service,
   Ulid,
 } from '../domain/types.js';
 
@@ -142,6 +144,17 @@ export interface ChatDbReader {
    * silently conflates adjacent mutations.
    */
   readMutatedSince(sinceNs: string): Promise<MutatedMessage[]>;
+  /**
+   * S3 §1.5 body extension (Scenario 3): resolve a handle to an existing
+   * conversation via chat_handle_join, availability-only (never mints a
+   * chat). `null` means no existing conversation, which the send path
+   * fails fast as `no-conversation` (§2.2.2) — AppleScript cannot start a
+   * new-recipient conversation. Multiple chats sharing one handle resolve
+   * to the most-recently-active chat (by last message date).
+   */
+  resolveChat(
+    handle: Handle,
+  ): Promise<{ chatGuid: ChatGuid; service: Service; isGroup: boolean } | null>;
 }
 
 /** One in-place mutation surfaced by {@link ChatDbReader.readMutatedSince}. */

@@ -311,6 +311,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
     const reader: ChatDbReader = {
       readSince: () => Promise.resolve([]),
       readMutatedSince: () => Promise.resolve([]),
+      resolveChat: () => Promise.resolve(null),
     };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {

@@ -5,6 +5,7 @@ import type {
   Clock,
   CursorState,
   DraftError,
+  IsoUtc,
   Message,
   SendingDraft,
   Store,
@@ -43,6 +44,7 @@ export class SqliteStore implements Store {
   readonly #setSetting: Database.Statement;
   readonly #hasInbound: Database.Statement;
   readonly #insertInbound: Database.Statement;
+  readonly #countInboundSince: Database.Statement;
 
   constructor(opts: OpenStoreOptions) {
     mkdirSync(opts.dir, { recursive: true });
@@ -80,6 +82,9 @@ export class SqliteStore implements Store {
         'edited_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(guid) DO NOTHING',
     );
+    this.#countInboundSince = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM inbound_messages WHERE received_at >= ?',
+    );
   }
 
   getCursor(): CursorState | null {
@@ -100,6 +105,11 @@ export class SqliteStore implements Store {
 
   setSetting(key: string, value: string): void {
     this.#setSetting.run(key, value, this.#clock.now());
+  }
+
+  countInboundMessagesSince(since: IsoUtc): number {
+    const row = this.#countInboundSince.get(since) as { n: number };
+    return row.n;
   }
 
   listSendingDrafts(): SendingDraft[] {

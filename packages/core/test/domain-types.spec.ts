@@ -290,6 +290,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       setSetting: () => undefined,
       hasInboundMessage: () => false,
       insertInboundMessage: () => undefined,
+      countInboundMessagesSince: () => 0,
       listSendingDrafts: () => [],
       markDraftSent: () => undefined,
       markDraftFailed: () => undefined,

@@ -17,18 +17,28 @@ export function generateToken(): string {
 }
 
 /**
+ * Read the current token file; null when absent/empty/unreadable. This is the
+ * live per-request source of truth (§2.6: `auth rotate` rewrites the file and
+ * old bearers must 401 without a daemon restart).
+ */
+export function readToken(configDir: string): string | null {
+  try {
+    const token = readFileSync(join(configDir, TOKEN_FILENAME), 'utf8').trim();
+    return token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the token file, or self-heal first run by generating one (serve-503-only
  * was chosen over exit-at-boot exactly so this can happen, §2.4.2).
  * Returns null when no token exists and none can be written — fail closed.
  */
 export function loadOrCreateToken(configDir: string): string | null {
   const path = join(configDir, TOKEN_FILENAME);
-  try {
-    const existing = readFileSync(path, 'utf8').trim();
-    if (existing.length > 0) return existing;
-  } catch {
-    // absent or unreadable — attempt first-run generation below
-  }
+  const existing = readToken(configDir);
+  if (existing !== null) return existing;
   try {
     mkdirSync(configDir, { recursive: true });
     const token = generateToken();

@@ -116,6 +116,19 @@ importers:
       zod:
         specifier: ^4.0.0
         version: 4.5.4
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
+      '@wemessage/client':
+        specifier: workspace:*
+        version: link:../client
+      '@wemessage/fixtures':
+        specifier: workspace:*
+        version: link:../../fixtures
+      ws:
+        specifier: ^8.0.0
+        version: 8.21.3
 
   packages/ingest:
     dependencies:

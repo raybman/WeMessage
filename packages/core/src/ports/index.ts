@@ -41,6 +41,8 @@ export interface Store {
   hasInboundMessage(guid: string): boolean;
   /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
   insertInboundMessage(message: Message): void;
+  /** Mirror rows received at/after `since` — F-5 status `counts.messagesToday`. */
+  countInboundMessagesSince(since: IsoUtc): number;
   /** Drafts stuck in 'sending' + their ledger row (T-9.3 reconciliation). */
   listSendingDrafts(): SendingDraft[];
   /** sending -> sent: records the verified guid on draft + ledger (§2.2.2). */

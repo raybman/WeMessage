@@ -1,15 +1,24 @@
 /**
- * Daemon HTTP/WS skeleton (S1): token auth, /v1/health, /v1/status,
+ * Daemon HTTP/WS surface (S1): token auth, /v1/health, /v1/status,
  * WS /v1/events. Fail-closed per §2.4.2 row 1; bearer auth per §2.6.
- * Event fan-out and real status wiring land in Scenario 11.
+ *
+ * Auth reads the token FILE per request (§2.6: the CLI manages the file
+ * directly, `auth rotate` rewrites it) so rotation 401s old bearers
+ * immediately without a daemon restart. The boot-time token is only the
+ * first-run generation + fallback when the file vanishes mid-flight.
  */
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
-import { loadOrCreateToken, tokenEquals } from './auth.js';
+import type { WebSocket } from 'ws';
+import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
   configDir: string;
+  /** F-5 status payload provider; Scenario 11 wires the real one. */
+  getStatus?: () => unknown;
+  /** Called with each authenticated WS /v1/events socket (event fan-out). */
+  onEventsClient?: (socket: WebSocket) => void;
 }
 
 export interface DaemonServer {
@@ -23,12 +32,18 @@ export interface DaemonServer {
 const HEALTH_PATH = '/v1/health';
 
 export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
-  const token = loadOrCreateToken(opts.configDir);
+  const bootToken = loadOrCreateToken(opts.configDir);
   const app = Fastify({ logger: false });
   await app.register(websocket);
   const counters = { handlerCalls: 0 };
 
+  // §2.6: the token file is the live source of truth (rotation = rewrite);
+  // fall back to the boot token only if the file disappears mid-flight.
+  const currentToken = (): string | null =>
+    readToken(opts.configDir) ?? bootToken;
+
   app.addHook('onRequest', async (req, reply) => {
+    const token = currentToken();
     // §2.4.2 row 1: no token → 503 everything, health included. Never open.
     if (token === null) {
       return reply.code(503).send({ error: 'no-auth-token' });
@@ -57,23 +72,25 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   app.get('/v1/status', () => {
     counters.handlerCalls += 1;
     // F-5 proposed S1 payload: nulls for S4/S6 concepts, never fake values.
-    // Real cursor/counts wiring lands in Scenario 11.
-    return {
-      connectionState: 'disconnected',
-      cursor: null,
-      counts: { messagesToday: 0 },
-      adapters: [],
-      killSwitch: null,
-      armed: null,
-    };
+    return (
+      opts.getStatus?.() ?? {
+        connectionState: 'disconnected',
+        cursor: null,
+        counts: { messagesToday: 0 },
+        adapters: [],
+        killSwitch: null,
+        armed: null,
+      }
+    );
   });
 
-  app.get('/v1/events', { websocket: true }, () => {
+  app.get('/v1/events', { websocket: true }, (socket) => {
     counters.handlerCalls += 1;
-    // Event bus fan-out lands in Scenario 11; auth already enforced at upgrade.
+    // auth already enforced at upgrade by the onRequest hook (§2.6)
+    opts.onEventsClient?.(socket);
   });
 
-  return { app, token, counters };
+  return { app, token: bootToken, counters };
 }
 
 /**

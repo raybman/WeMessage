@@ -50,10 +50,15 @@ export const ROUTE_TABLE: readonly string[] = [
   // #12 deliberate (s4 Scenario 9): the §1.3.5 kill switch. Synchronous by
   // design — it cancels every in-grace draft before the 200 is written, so
   // "the switch is on" and "nothing more goes out" are one moment.
+  // #13 deliberate (s4 Scenario 10): §2.4.3 contact policies. DELETE
+  // REMOVES the row rather than writing 'deny' — unknown and deny refuse
+  // the same next message, but only one of them is a decision.
+  'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
   'GET /v1/batches/:id',
+  'GET /v1/contacts',
   'GET /v1/doctor',
   'GET /v1/drafts',
   'GET /v1/drafts/:id',
@@ -66,6 +71,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
   'HEAD /v1/batches/:id',
+  'HEAD /v1/contacts',
   'HEAD /v1/doctor',
   'HEAD /v1/drafts',
   'HEAD /v1/drafts/:id',
@@ -89,6 +95,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/rules/:id/test',
   'POST /v1/send',
   'POST /v1/toggles/kill-switch',
+  'PUT /v1/contacts/:handle',
 ];
 
 /**

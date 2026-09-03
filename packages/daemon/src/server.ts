@@ -18,6 +18,7 @@ import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerDraftRoutes } from './routes/drafts.js';
 import { registerToggleRoutes } from './routes/toggles.js';
+import { registerContactRoutes } from './routes/contacts.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import type { DoctorProbes } from './doctor.js';
@@ -231,6 +232,14 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // The kill switch rides with the draft surface: it exists to stop
     // drafts, and there is no configuration in which one is wanted without
     // the other.
+    // Contact policies ride with the draft surface for the same reason the
+    // kill switch does: they are the other half of deciding what may be
+    // said, and there is no configuration that wants one without the other.
+    registerContactRoutes(app, {
+      store: opts.drafts.store,
+      clock: opts.drafts.clock,
+      sink,
+    });
     registerToggleRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,

@@ -148,6 +148,24 @@ export type GateDenyReason =
   | 'circuit-open' | 'loop-detected' | 'unapproved' | 'adapter-disabled'
   | 'sms-auto-forbidden';
 
+/**
+ * s5 Scenario 3 (F-43, additive under the F-16/F-28/F-30 precedent).
+ *
+ * `hasToken` is a boolean and never the hash: the hash does not leave the
+ * store, so no route, DTO or log can leak it by accident. `lastSeenAt` is
+ * omitted, not `undefined`, when the column is NULL (exactOptionalPropertyTypes).
+ */
+export interface AdapterRecord {
+  id: string;
+  kind: 'sol' | 'hermes' | 'luna' | 'openclaw' | 'echo' | 'generic';
+  displayName: string;
+  enabled: boolean;
+  hasToken: boolean;
+  health: 'unknown' | 'connected' | 'disconnected' | 'unhealthy';
+  lastSeenAt?: IsoUtc;
+  config: Record<string, unknown>;
+}
+
 export type GateDecision =
   | { allow: true; mode: RespondMode }
   | { allow: false; reason: GateDenyReason };

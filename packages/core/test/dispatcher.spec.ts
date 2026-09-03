@@ -155,6 +155,16 @@ function makeStore(cfg: {
     deleteContactPolicy: () => false,
     listContactPolicies: () => [],
     getSettingVersion: () => -1,
+    // s5 Scenario 3: adapter registry additions to the Store port.
+    listAdapters: () => [],
+    getAdapter: () => null,
+    insertAdapter: () => undefined,
+    updateAdapter: () => undefined,
+    deleteAdapter: () => false,
+    setAdapterTokenHash: () => undefined,
+    findAdapterByToken: () => null,
+    setAdapterHealth: () => undefined,
+    rawScanForToken: () => [],
     clearAdapterTokens: () => 0,
     close: () => undefined,
   };

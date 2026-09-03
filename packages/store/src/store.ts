@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { chainHash, GENESIS_HASH } from '@wemessage/core';
 import type {
+  AdapterRecord,
   Actor,
   Approval,
   AttachmentRef,
@@ -25,6 +26,40 @@ import type {
   Ulid,
 } from '@wemessage/core';
 import { applyMigrations } from './migrate.js';
+import { verifyAdapterToken } from './token-hash.js';
+
+/** The FK anchor for human-held drafts (F-22). Never an addressable adapter. */
+const RESERVED_HUMAN_ADAPTER = 'human';
+/** Reserved `config` key holding the one carry-over token hash (F-42, C-3). */
+const PREV_TOKEN_KEY = 'prevToken';
+
+interface AdapterRow {
+  id: string;
+  kind: string;
+  display_name: string;
+  enabled: number;
+  token_hash: string | null;
+  config: string;
+  last_seen_at: string | null;
+  health: string;
+}
+
+function adapterFromRow(row: AdapterRow): AdapterRecord {
+  const config = JSON.parse(row.config) as Record<string, unknown>;
+  // The carry-over hash is storage bookkeeping, not adapter configuration:
+  // it is stripped on the way out so no caller can ever see hash material.
+  delete config[PREV_TOKEN_KEY];
+  return {
+    id: row.id,
+    kind: row.kind as AdapterRecord['kind'],
+    displayName: row.display_name,
+    enabled: row.enabled === 1,
+    hasToken: row.token_hash !== null,
+    health: row.health as AdapterRecord['health'],
+    ...(row.last_seen_at !== null ? { lastSeenAt: row.last_seen_at } : {}),
+    config,
+  };
+}
 
 /** Our store filename inside the WeMessage config dir (§2.3). */
 export const DB_FILENAME = 'wemessage.db';
@@ -960,6 +995,153 @@ export class SqliteStore implements Store {
 
   clearAdapterTokens(): number {
     return this.#clearAdapterTokensStmt.run().changes;
+  }
+
+  // --- s5 §1.5 adapter registry (Scenario 3). No migration: the carry-over
+  // token hash lives in the existing `config` JSON under a reserved
+  // `prevToken` key (F-42, C-3 forbids ALTER TABLE). One slot, never a chain.
+
+  listAdapters(): AdapterRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM adapters WHERE id <> 'human' ORDER BY id ASC")
+      .all() as AdapterRow[];
+    return rows.map(adapterFromRow);
+  }
+
+  getAdapter(id: string): AdapterRecord | null {
+    if (id === RESERVED_HUMAN_ADAPTER) return null;
+    const row = this.db
+      .prepare('SELECT * FROM adapters WHERE id = ?')
+      .get(id) as AdapterRow | undefined;
+    return row ? adapterFromRow(row) : null;
+  }
+
+  insertAdapter(a: AdapterRecord): void {
+    this.db
+      .prepare(
+        'INSERT INTO adapters (id, kind, display_name, enabled, token_hash, ' +
+          'config, last_seen_at, health) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)',
+      )
+      .run(
+        a.id,
+        a.kind,
+        a.displayName,
+        a.enabled ? 1 : 0,
+        JSON.stringify(a.config),
+        a.lastSeenAt ?? null,
+        a.health,
+      );
+  }
+
+  updateAdapter(a: AdapterRecord): void {
+    // Full-row update that deliberately does NOT touch token_hash or the
+    // reserved config key: an edit to a display name must never be able to
+    // revoke or resurrect a credential.
+    const existing = this.db
+      .prepare('SELECT config FROM adapters WHERE id = ?')
+      .get(a.id) as { config: string } | undefined;
+    if (existing === undefined) throw new Error(`unknown adapter: ${a.id}`);
+    const prev = (JSON.parse(existing.config) as Record<string, unknown>)[
+      PREV_TOKEN_KEY
+    ];
+    const config: Record<string, unknown> = { ...a.config };
+    if (prev !== undefined) config[PREV_TOKEN_KEY] = prev;
+    this.db
+      .prepare(
+        'UPDATE adapters SET kind = ?, display_name = ?, enabled = ?, ' +
+          'config = ?, last_seen_at = ?, health = ? WHERE id = ?',
+      )
+      .run(
+        a.kind,
+        a.displayName,
+        a.enabled ? 1 : 0,
+        JSON.stringify(config),
+        a.lastSeenAt ?? null,
+        a.health,
+        a.id,
+      );
+  }
+
+  deleteAdapter(id: string): boolean {
+    const referencing = this.db
+      .prepare('SELECT id FROM rules WHERE adapter_id = ?')
+      .all(id) as Array<{ id: string }>;
+    if (referencing.length > 0) {
+      throw new Error(
+        `adapter-referenced: ${referencing.map((r) => r.id).join(',')}`,
+      );
+    }
+    return (
+      this.db.prepare('DELETE FROM adapters WHERE id = ?').run(id).changes > 0
+    );
+  }
+
+  setAdapterTokenHash(
+    id: string,
+    hash: string | null,
+    prev: { hash: string; expiresAt: IsoUtc } | null,
+  ): void {
+    const row = this.db
+      .prepare('SELECT config FROM adapters WHERE id = ?')
+      .get(id) as { config: string } | undefined;
+    if (row === undefined) throw new Error(`unknown adapter: ${id}`);
+    const config = JSON.parse(row.config) as Record<string, unknown>;
+    // Whatever was parked before is dropped here, whether or not a new
+    // carry-over replaces it: the previous rotation's grace ends the moment
+    // another rotation begins.
+    if (prev === null) delete config[PREV_TOKEN_KEY];
+    else
+      config[PREV_TOKEN_KEY] = { hash: prev.hash, expiresAt: prev.expiresAt };
+    this.db
+      .prepare('UPDATE adapters SET token_hash = ?, config = ? WHERE id = ?')
+      .run(hash, JSON.stringify(config), id);
+  }
+
+  findAdapterByToken(token: string, now: IsoUtc): AdapterRecord | null {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM adapters WHERE id <> 'human' AND token_hash IS NOT NULL",
+      )
+      .all() as AdapterRow[];
+    for (const row of rows) {
+      if (verifyAdapterToken(token, row.token_hash)) return adapterFromRow(row);
+      const prev = (JSON.parse(row.config) as Record<string, unknown>)[
+        PREV_TOKEN_KEY
+      ] as { hash: string; expiresAt: IsoUtc } | undefined;
+      if (
+        prev !== undefined &&
+        Date.parse(now) < Date.parse(prev.expiresAt) &&
+        verifyAdapterToken(token, prev.hash)
+      ) {
+        return adapterFromRow(row);
+      }
+    }
+    return null;
+  }
+
+  setAdapterHealth(
+    id: string,
+    health: AdapterRecord['health'],
+    at: IsoUtc,
+  ): void {
+    const changes = this.db
+      .prepare('UPDATE adapters SET health = ?, last_seen_at = ? WHERE id = ?')
+      .run(health, at, id).changes;
+    if (changes === 0) throw new Error(`unknown adapter: ${id}`);
+  }
+
+  rawScanForToken(needle: string): string[] {
+    const tables = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as Array<{ name: string }>;
+    const hits: string[] = [];
+    for (const { name } of tables) {
+      const rows = this.db.prepare(`SELECT * FROM "${name}"`).all();
+      for (const row of rows) {
+        if (JSON.stringify(row).includes(needle)) hits.push(name);
+      }
+    }
+    return hits;
   }
 
   // --- S4 §1.5 body extensions (s4-execution Scenario 3) ---

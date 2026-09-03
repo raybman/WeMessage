@@ -8,3 +8,4 @@ export {
   type OpenStoreOptions,
 } from './store.js';
 export { verifyAuditChain, type AuditRowsSource } from './verify-audit.js';
+export { hashAdapterToken, verifyAdapterToken } from './token-hash.js';

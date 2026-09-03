@@ -9,6 +9,7 @@
  * Classifier (interface declarations only, S5 / S2+).
  */
 import type {
+  AdapterRecord,
   Approval,
   ChatGuid,
   ContactPolicy,
@@ -257,6 +258,43 @@ export interface Store {
    * identity). Returns the count of rows actually cleared; the reserved
    * 'human' row (already NULL, §2.6 fail-closed) is never counted.
    */
+  // --- s5 §1.5 adapter registry (§2.3 `adapters`; no migration, C-3) ---
+  /** Excludes the reserved 'human' row, ordered by id. */
+  listAdapters(): AdapterRecord[];
+  /** 'human' returns null (F-22 posture): it is a FK anchor, not an adapter. */
+  getAdapter(id: string): AdapterRecord | null;
+  insertAdapter(a: AdapterRecord): void;
+  /** Full-row update; throws when the id is absent. */
+  updateAdapter(a: AdapterRecord): void;
+  /** Throws `adapter-referenced` while a rule points at it (409 upstream). */
+  deleteAdapter(id: string): boolean;
+  /**
+   * Sets the current hash and, on rotation, parks the outgoing hash with its
+   * expiry (F-42, one carry-over slot). `null, null` revokes.
+   */
+  setAdapterTokenHash(
+    id: string,
+    hash: string | null,
+    prev: { hash: string; expiresAt: IsoUtc } | null,
+  ): void;
+  /**
+   * Answers "whose token is this", including for a DISABLED adapter — the
+   * transport refuses it, and it can only audit the refusal if it knows who.
+   * A NULL hash matches nothing, ever (§2.6 fail-closed).
+   */
+  findAdapterByToken(token: string, now: IsoUtc): AdapterRecord | null;
+  setAdapterHealth(
+    id: string,
+    health: AdapterRecord['health'],
+    at: IsoUtc,
+  ): void;
+  /**
+   * Forensic sweep: every row of every table, stringified, filtered by
+   * substring. Exists so "the plaintext token is nowhere in the database" can
+   * be asserted as a property rather than column by column.
+   */
+  rawScanForToken(needle: string): string[];
+
   clearAdapterTokens(): number;
 
   close(): void;

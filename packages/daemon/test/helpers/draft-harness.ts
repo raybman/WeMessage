@@ -80,6 +80,14 @@ export interface Harness {
   server: DaemonServer;
   store: SqliteStore;
   scheduler: Scheduler;
+  /**
+   * The SAME `dispatchApproved` closure the scheduler runs, exposed so the
+   * adversarial suite (Scenario 12) can hand the dispatcher a forged
+   * approval directly. Going through the scheduler would only ever exercise
+   * approvals the product itself minted, which is the opposite of the
+   * threat model. Test-only: no production caller gains this reach.
+   */
+  dispatch: (draftId: Ulid, approvalId: Ulid) => Promise<unknown>;
   backend: LoopbackSendBackend;
   /** The one §1.8 sink the routes and scheduler share. */
   sink: ReturnType<typeof createAuditSink>;
@@ -159,24 +167,26 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   servers.push(server);
   if (server.token === null) throw new Error('harness: no token');
 
+  const dispatch = (draftId: Ulid, approvalId: Ulid) =>
+    dispatchApproved(
+      {
+        store,
+        reader,
+        backend,
+        clock: clockCtl.clock,
+        delay,
+        backendName: 'loopback',
+        emit: () => {},
+      },
+      draftId,
+      approvalId,
+    );
+
   const scheduler = createScheduler({
     store,
     clock: clockCtl.clock,
     sink,
-    dispatch: (draftId: Ulid, approvalId: Ulid) =>
-      dispatchApproved(
-        {
-          store,
-          reader,
-          backend,
-          clock: clockCtl.clock,
-          delay,
-          backendName: 'loopback',
-          emit: () => {},
-        },
-        draftId,
-        approvalId,
-      ),
+    dispatch,
   });
 
   return {
@@ -185,6 +195,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     server,
     store,
     scheduler,
+    dispatch,
     backend,
     sink,
     broadcasts,

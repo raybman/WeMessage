@@ -31,13 +31,18 @@
 import type {
   Actor,
   ConnectionState,
+  ContactMode,
   Draft,
   DraftError,
+  DraftState,
+  GateDenyReason,
+  Handle,
   MessageGuid,
   Rule,
   Ulid,
 } from '../domain/types.js';
 import type { CursorHealReason } from '../drafts/recovery.js';
+import type { DraftEvent } from '../drafts/transitions.js';
 
 export type AuditEvent =
   | {
@@ -108,6 +113,32 @@ export type AuditEvent =
       reason: 'user-disconnect';
       revokedAdapterTokens: number;
       purge: boolean;
+    }
+  // s4-execution §1.7/§1.8 (Part 2 Scenario 2): the pending-draft lifecycle's
+  // remaining audit variants. Emission (the daemon actually calling
+  // sink.append with these) lands scenario-by-scenario as the routes/
+  // scheduler/gate revisions that produce them are built (Sc 4, 5, 6, 8, 9,
+  // 10); the vocabulary itself ships now so the transition table (Scenario 2)
+  // and its tests have somewhere to land every outcome.
+  | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
+  | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
+  | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)
+  | { type: 'draft.superseded'; draftId: Ulid; supersededBy?: Ulid }
+  | { type: 'draft.edited'; draftId: Ulid; approvalId?: Ulid } // body change only, no state change
+  | { type: 'draft.redrafted'; fromDraftId: Ulid; toDraftId: Ulid } // F-40: link lives here, no schema change
+  | {
+      type: 'draft.illegal-transition';
+      draftId: Ulid;
+      from: DraftState;
+      event: DraftEvent;
+    }
+  | { type: 'gate.denied'; draftId: Ulid; reason: GateDenyReason } // F-35: now audited before the throw
+  | { type: 'toggle.changed'; key: string; on: boolean } // kill-switch flips
+  | {
+      type: 'contact.policy-changed';
+      handle: Handle;
+      from: ContactMode | null; // null = was unknown (deny-all default)
+      to: ContactMode | null; // null = deleted back to unknown
     };
 
 export type AuditEventType = AuditEvent['type'];

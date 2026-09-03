@@ -278,9 +278,12 @@ describe('AuditEvent union (S2 vocabulary, §2.4.4 subset) + F-16 Actor extensio
     ];
     expect(events).toHaveLength(13);
 
-    // Unknown event types do not compile (S1 Scenario 2 probe pattern):
-    // @ts-expect-error — 'gate.denied' is S4 vocabulary, not S2
-    const notYet: AuditEvent = { type: 'gate.denied', reason: 'kill-switch' };
+    // Unknown event types do not compile (S1 Scenario 2 probe pattern).
+    // 'gate.denied' shipped as real S4 vocabulary (s4-execution Scenario 2,
+    // audit/events.ts) — a genuinely nonexistent literal replaces it here so
+    // this probe still proves what it always proved.
+    // @ts-expect-error — 'draft.teleported' has never been and will never be a real event
+    const notYet: AuditEvent = { type: 'draft.teleported' };
     void notYet;
   });
 

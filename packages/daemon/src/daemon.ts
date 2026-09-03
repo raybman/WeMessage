@@ -26,6 +26,8 @@ import type {
   Store,
 } from '@wemessage/core';
 import {
+  dispatchApproved,
+  type DispatchGateDenied,
   evaluateRules,
   runStartupRecovery,
   systemActor,
@@ -48,6 +50,7 @@ import type { GatewayEventPayload } from '@wemessage/protocol';
 import { SqliteStore } from '@wemessage/store';
 import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
+import { createScheduler } from './scheduler.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
 import { rotateToken as rotateTokenOnDisk } from './auth.js';
@@ -150,6 +153,12 @@ export interface RunningDaemon {
   bootLog: string[];
   /** T-9.3 result (§2.5: recovery runs before serving). */
   recovery: StartupRecoveryResult;
+  /**
+   * s4 Scenario 6: run the grace/TTL sweep once, now. Exposed so tests can
+   * drive time by hand instead of racing a real interval — production also
+   * calls exactly this, on a loop.
+   */
+  tick(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -449,6 +458,8 @@ export async function startDaemon(
     configDir: options.configDir,
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
     rules: { store, clock: options.clock, sink },
+    // s4-execution Scenario 5: the draft review surface, same shared sink.
+    drafts: { store, clock: options.clock, sink },
     // s3-execution Scenario 8: doctor/send routes, same shared sink.
     send: {
       store,
@@ -499,6 +510,49 @@ export async function startDaemon(
       );
     },
   });
+  // s4-execution Scenario 6: the grace scheduler. It owns WHEN; the core
+  // dispatcher owns HOW, so it gets a dispatch closure rather than the
+  // backend. No interval is armed here — startDaemon's caller drives
+  // `tick()`, which keeps the deadline where it belongs (the DB) and keeps
+  // tests off wall-clock time.
+  const scheduler = createScheduler({
+    store,
+    clock: options.clock,
+    sink,
+    dispatch: (draftId, approvalId) =>
+      dispatchApproved(
+        {
+          store,
+          reader: sendReaderHandle.reader,
+          backend: options.backend,
+          backendName: options.backendName,
+          clock: options.clock,
+          delay: options.delay ?? realDelay,
+          emit: (event: DispatchGateDenied) => {
+            for (const socket of sockets) {
+              socket.send(
+                JSON.stringify({
+                  event: 'gate.denied',
+                  reason: event.reason,
+                  draftId: event.draftId,
+                  chatGuid: store.getDraft(event.draftId)?.chatGuid ?? '',
+                } satisfies GatewayEventPayload),
+              );
+            }
+          },
+        },
+        draftId,
+        approvalId,
+      ),
+    onError: (draftId, err) => {
+      options.onError?.(
+        err instanceof Error
+          ? err
+          : new Error(`scheduler: draft ${draftId}: ${String(err)}`),
+      );
+    },
+  });
+
   const port = await startServer(
     server,
     options.port === undefined ? undefined : { port: options.port },
@@ -511,6 +565,7 @@ export async function startDaemon(
     store,
     bootLog,
     recovery,
+    tick: () => scheduler.tick(),
     stop: async () => {
       trigger.stop();
       for (const socket of sockets) socket.close();

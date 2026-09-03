@@ -218,7 +218,7 @@ export function registerDraftRoutes(
    */
   const decide = (
     draft: Draft,
-    event: 'approve' | 'reject',
+    event: 'approve' | 'reject' | 'recall',
   ): DraftState | null => {
     try {
       return applyDraftTransition({ from: draft.state, event, actor });
@@ -332,6 +332,76 @@ export function registerDraftRoutes(
         actor,
       );
       sink.broadcast({ event: 'draft.approved', draftId: draft.id, actor });
+      return reply.send({ draft: updated, approvalId });
+    },
+  );
+
+  // ---- POST /v1/drafts/:id/recall (the undo window) --------------------
+  app.post<{ Params: { id: string } }>(
+    '/v1/drafts/:id/recall',
+    async (req, reply) => {
+      const draft = store.getDraft(req.params.id);
+      if (draft === null) return reply.code(404).send({ error: 'not-found' });
+
+      const to = decide(draft, 'recall');
+      if (to === null) {
+        return reply.code(409).send({
+          error: 'illegal-transition',
+          from: draft.state,
+          requested: 'recall',
+        });
+      }
+
+      // The window is a fact about time, not about state, so the table
+      // cannot express it: an approved draft whose sendNotBefore has passed
+      // is legally recallable right up until the tick that sends it, and
+      // pretending otherwise would be a lie the moment the scheduler wins
+      // the race. Refuse at the boundary instead. With
+      // send.undoGraceSeconds='0' (F-32) this refuses immediately, which is
+      // the honest reading of "no undo window."
+      const at = clock.now();
+      if (
+        draft.sendNotBefore === undefined ||
+        draft.sendNotBefore === null ||
+        Date.parse(at) >= Date.parse(draft.sendNotBefore)
+      ) {
+        sink.append(
+          {
+            type: 'draft.illegal-transition',
+            draftId: draft.id,
+            from: draft.state,
+            event: 'recall',
+          },
+          actor,
+        );
+        return reply.code(409).send({
+          error: 'grace-elapsed',
+          from: draft.state,
+          requested: 'recall',
+        });
+      }
+
+      const updated = store.applyDraftTransition({
+        id: draft.id,
+        from: draft.state,
+        to,
+        at,
+        // Clearing the stamp is what actually stops the next tick.
+        sendNotBefore: null,
+      });
+      const approvalId = ulid();
+      store.insertApproval({
+        id: approvalId,
+        draftId: draft.id,
+        action: 'recall',
+        actor,
+        at,
+      });
+      sink.append(
+        { type: 'draft.recalled', draftId: draft.id, approvalId },
+        actor,
+      );
+      sink.broadcast({ event: 'draft.recalled', draftId: draft.id, actor });
       return reply.send({ draft: updated, approvalId });
     },
   );

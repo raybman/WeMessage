@@ -72,6 +72,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/disconnect',
   'POST /v1/drafts',
   'POST /v1/drafts/:id/approve',
+  'POST /v1/drafts/:id/recall',
   'POST /v1/drafts/:id/reject',
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
@@ -94,6 +95,7 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'draft.approved',
   'draft.created',
   'draft.failed',
+  'draft.recalled',
   'draft.rejected',
   'draft.sent',
   'gate.denied',
@@ -117,12 +119,15 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * (Deliberate update #8, s4 Scenario 5: routes/drafts.ts constructs
  * 'draft.rejected' — the one new event literal of this slice, added to both
  * lists in the same reviewed diff as the routes that emit it.)
+ * (Deliberate update #9, s4 Scenario 6: the recall route adds
+ * POST /v1/drafts/:id/recall and constructs 'draft.recalled'.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
   'draft.approved',
   'draft.created',
   'draft.failed',
+  'draft.recalled',
   'draft.rejected',
   'draft.sent',
   'gate.denied',

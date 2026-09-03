@@ -83,6 +83,27 @@ module.exports = {
       to: { path: '^packages/daemon' },
     },
 
+    // s5 §3.1: an adapter is a thin client. It speaks the wire protocol and
+    // uses the client, and it reaches nothing else in the monorepo: no store,
+    // no core, no ingest, no sendkit, and above all no daemon. A third
+    // party's adapter code is the first foreign code near our send path, so
+    // the reach is fenced at the import graph, not at review time.
+    {
+      severity: 'error',
+      name: 'adapters-thin-clients',
+      from: { path: '^packages/adapters/[^/]+/src' },
+      // Two shapes, because an adapter that does not declare the dependency
+      // in its package.json still imports it in source: a resolved workspace
+      // path, and the bare unresolvable specifier. Matching only the former
+      // would let the sloppiest possible reach through.
+      to: {
+        path: [
+          '^packages/(?!protocol/|client/|adapters/|adapter-testkit/)',
+          '^@wemessage/(?!protocol$|client$)',
+        ],
+      },
+    },
+
     // §3.1: daemon imports all packages but no app
     {
       severity: 'error',

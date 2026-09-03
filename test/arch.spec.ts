@@ -598,6 +598,143 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
   });
 
+  /**
+   * s5-execution Scenario 1 — arch guards for the agent era.
+   *
+   * The adapter surface is the first place a third party's code reaches our
+   * daemon, so the guards go in BEFORE the surface does. Two of the six rows
+   * are deliberately narrower here than the slice's final form:
+   *
+   *  - (a) is source-scan only. The type-level witness (`Extract<AgentToGateway,
+   *    {type:'send'}>` is `never`) needs the frame union, which lands in
+   *    Scenario 2; putting a compile witness here would mean shipping the
+   *    union in a scenario whose GREEN is "configs and a cruiser rule, no
+   *    production logic". Scenario 2 owns the type half.
+   *  - (e) pins the allowlist at its S3/S4 baseline. It grows by exactly one
+   *    file in Scenario 6 (F-46), as a deliberate reviewed diff.
+   */
+  describe('S5 extensions (s5-execution Scenario 1: agent-era guards)', () => {
+    // Local file-walk helpers. The S3 block has equivalents, but they are
+    // scoped to that describe; duplicating six lines beats hoisting shared
+    // mutable state across four slices' worth of guards.
+    const S5_SKIP = new Set([
+      'node_modules',
+      'dist',
+      '.git',
+      'coverage',
+      '.turbo',
+    ]);
+    const codeIsh = /\.(ts|tsx|js|mjs|cjs)$/;
+    function listFiles(root: string): string[] {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (S5_SKIP.has(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else out.push(full);
+        }
+      };
+      walk(root);
+      return out;
+    }
+    const relOf = (abs: string): string =>
+      abs.slice(repoRoot.length + 1).replace(/\\/g, '/');
+
+    const ADAPTER_PACKAGES = [
+      'packages/adapters/echo',
+      'packages/adapters/hermes',
+      'packages/adapters/luna',
+      'packages/adapters/openclaw',
+      'packages/adapters/sol',
+      'packages/adapter-testkit',
+    ];
+
+    // (a) NO SEND FRAME. An adapter proposes; a human approves; the daemon
+    // sends. A frame named anything like `send` would be the wire admitting
+    // an agent can reach the send path directly, which is INV-2's whole
+    // point. The scan looks at exported type/interface NAMES, not prose:
+    // `draft.submit`'s doc comment says the word "send" and must stay legal.
+    function sendishExportedTypeNames(): string[] {
+      const protocolSrc = join(repoRoot, 'packages/protocol/src');
+      return listFiles(protocolSrc)
+        .filter((f) => codeIsh.test(f))
+        .flatMap((f) => {
+          const content = readFileSync(f, 'utf8');
+          return [...content.matchAll(/export\s+(?:type|interface)\s+(\w+)/g)]
+            .map((m) => m[1] ?? '')
+            .filter((name) => /send/i.test(name))
+            .map((name) => `${relOf(f)}:${name}`);
+        });
+    }
+
+    // (d) secret hygiene. A real shared secret in a fixture is a secret in
+    // the public repo's history, and history is not something we can revoke.
+    const SECRET_ASSIGN = /WS_SECRET\s*[=:]\s*['"`]([^'"`]*)['"`]/g;
+    const PLACEHOLDER =
+      /^(|test|test-secret|placeholder|changeme|<[^>]*>|\$\{[^}]*\})$/i;
+    function realSecretAssignments(): string[] {
+      const roots = ['packages', 'apps', 'test', 'fixtures'].map((p) =>
+        join(repoRoot, p),
+      );
+      return roots
+        .flatMap((r) => listFiles(r))
+        .filter((f) => codeIsh.test(f))
+        .flatMap((f) => {
+          const content = readFileSync(f, 'utf8');
+          return [...content.matchAll(SECRET_ASSIGN)]
+            .filter((m) => !PLACEHOLDER.test(m[1] ?? ''))
+            .map(() => relOf(f));
+        });
+    }
+
+    it('(a) the protocol exports no send-shaped frame type name', () => {
+      expect(sendishExportedTypeNames()).toEqual([]);
+    });
+
+    it('(b) adapters are thin clients: protocol + client only', () => {
+      const result = cruise(['packages', 'apps', 'fixtures']);
+      expect(
+        result.summary.violations.filter(
+          (v) => v.rule.name === 'adapters-thin-clients',
+        ),
+      ).toEqual([]);
+      // The rule must EXIST, not merely find nothing: an absent rule and a
+      // satisfied rule look identical in a violations list.
+      const config = readFileSync(
+        join(repoRoot, '.dependency-cruiser.cjs'),
+        'utf8',
+      );
+      expect(config).toContain("name: 'adapters-thin-clients'");
+    });
+
+    it('(c) protocol keeps zero runtime deps and type-only core reach', () => {
+      const result = cruise(['packages', 'apps', 'fixtures']);
+      const names = result.summary.violations.map((v) => v.rule.name);
+      expect(names).not.toContain('protocol-zero-runtime-deps');
+      expect(names).not.toContain('protocol-core-type-only');
+    });
+
+    it('(d) no real WS_SECRET value is committed anywhere', () => {
+      expect(realSecretAssignments()).toEqual([]);
+    });
+
+    // (e) the port allowlist pin lives in the S3 block, which already
+    // asserts the exact 13-file baseline. Restating it here would be a second
+    // copy of the same list to keep in sync when Scenario 6 grows it by one
+    // file (F-46); one pin, one edit.
+
+    it('(f) every adapter package and the testkit has a vitest project', () => {
+      for (const pkg of ADAPTER_PACKAGES) {
+        const config = join(repoRoot, pkg, 'vitest.config.ts');
+        expect(
+          readFileSync(config, 'utf8'),
+          `${pkg}/vitest.config.ts`,
+        ).toContain('name:');
+      }
+    });
+  });
+
   it('does not flag violations planted outside the cruised tree (sandbox sanity)', () => {
     // Sanity check that the teeth tests above are attributable to the probe
     // file, not ambient noise: an identical import in a temp dir outside the

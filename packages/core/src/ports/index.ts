@@ -11,8 +11,10 @@
 import type {
   Approval,
   ChatGuid,
+  ContactPolicy,
   Draft,
   DraftError,
+  DraftState,
   Handle,
   IsoUtc,
   Message,
@@ -122,8 +124,13 @@ export interface Store {
    */
   getApproval(id: Ulid): Approval | null;
   /**
-   * approved -> sending: mints the `send_ledger` row (attempt 1; S3 specs no
-   * retry path, so attempt never advances past 1) and flips draft state.
+   * approved -> sending: mints the `send_ledger` row and flips draft state.
+   *
+   * S4 body extension (C-10, plan §1.3.3): when a ledger row already exists
+   * for this draft (a failed→approved retry), `attempt` INCREMENTS instead
+   * of throwing, to a ceiling of 3 (1 first try + 2 retries). At the ceiling
+   * it throws `'retry limit exhausted'` and the caller leaves the draft
+   * terminal-`failed`. Signature unchanged.
    * Throws if the draft is not currently 'approved' — most notably a second
    * call on a draft already 'sending' — via a state assertion made INSIDE
    * the same transaction as the write, the persistent backstop against a
@@ -134,6 +141,98 @@ export interface Store {
     backend: string,
     at: IsoUtc,
   ): { attempt: number };
+  // --- S4 draft lifecycle + contact ladder (s4-execution §1.5 body
+  // extensions, Scenario 3). Additive only; §2.3 already has every table
+  // and index these need (drafts UNIQUE(adapter_id, idempotency_key),
+  // contact_policies, settings.version) — no migration. ---
+  /**
+   * Queue + history read (§3.8 filter flags). `contact` filters on the
+   * chat_guid's parsed handle; `batchId` joins through approvals. With NO
+   * filter this returns the QUEUE: terminal states
+   * (sent|rejected|expired|superseded|recalled|failed) are excluded, per
+   * §1.3.3 — "expired stays visible in history, excluded from the queue" is
+   * a filter default, never a delete. An explicit `state` filter overrides
+   * that default (that is how history is read).
+   */
+  listDrafts(filter?: {
+    state?: DraftState;
+    ruleId?: Ulid;
+    contact?: Handle;
+    batchId?: Ulid;
+  }): Draft[];
+  /**
+   * The generalized in-transaction transition (roadmap risk #1). ONE
+   * table-driven method: callers pass the transition they already validated
+   * against core's pure `applyDraftTransition` table; the store re-asserts
+   * `from` INSIDE the transaction and throws on mismatch, so persistence can
+   * never drift from the table and two racing transitions cannot both win.
+   * Returns the post-transition row.
+   */
+  applyDraftTransition(input: {
+    id: Ulid;
+    from: DraftState | DraftState[];
+    to: DraftState;
+    at: IsoUtc;
+    /** Set on approve; explicitly cleared (null) on recall/reject. */
+    sendNotBefore?: IsoUtc | null;
+    /** Set on failed. */
+    error?: DraftError;
+    /** Approve-with-edit; `original_body` is never written. */
+    body?: string;
+  }): Draft;
+  /**
+   * Body edit, legal only while 'pending' (asserted in-transaction).
+   * `original_body` is never written — the pre-edit text is evidence.
+   */
+  updateDraftBody(id: Ulid, body: string, at: IsoUtc): void;
+  /**
+   * F-15 closure read path: "did this (adapter, key) already draft?", asked
+   * before minting. Survives a store close/reopen — cross-restart dedup is
+   * the UNIQUE constraint plus this read, not in-memory state.
+   */
+  findDraftByIdempotencyKey(adapterId: string, key: string): Draft | null;
+  /**
+   * The scheduler needs the real approvalId to hand `dispatchApproved`
+   * (INV-2: never synthesize an approval). Latest `action:'approve'` row for
+   * the draft, or null.
+   */
+  latestApproveApproval(draftId: Ulid): Approval | null;
+  /**
+   * Grace-elapsed sweep: state='approved' AND send_not_before IS NOT NULL
+   * AND send_not_before <= now, oldest first. Direct-send drafts
+   * (send_not_before NULL) are structurally excluded (C-2) — without that
+   * NULL guard the scheduler would double-dispatch a direct send.
+   */
+  listGraceElapsed(now: IsoUtc): Array<{ draftId: Ulid; approvalId: Ulid }>;
+  /** TTL sweep: state='pending' AND expires_at <= now. */
+  listExpiredPending(now: IsoUtc): Draft[];
+  /**
+   * Kill-flip cancel (§1.3.5): every approved draft still inside its grace
+   * (send_not_before IS NOT NULL AND send_not_before > at) → 'rejected' in
+   * ONE transaction. Returns the affected rows so the caller can emit the
+   * per-draft audit/WS. Drafts whose grace already elapsed are deliberately
+   * untouched: they are the scheduler's race to lose, and the mutex-held
+   * re-gate denies them anyway.
+   */
+  cancelGraceApproved(at: IsoUtc, error: DraftError): Draft[];
+  /** Derived by joining approvals(batch_id) → drafts.state; no new table. */
+  batchReport(batchId: Ulid): {
+    sent: number;
+    failed: number;
+    recalled: number;
+    approved: number;
+    sending: number;
+  };
+  // Contact policies (§2.4.3 ladder; handle normalized E.164 / lowercase email).
+  getContactPolicy(handle: Handle): ContactPolicy | null;
+  /** Upsert keyed on the normalized handle. */
+  setContactPolicy(policy: ContactPolicy): void;
+  /** Back to unknown (= deny-all). False when the handle had no policy. */
+  deleteContactPolicy(handle: Handle): boolean;
+  listContactPolicies(): ContactPolicy[];
+  /** Per-key write counter (C-7); -1 when the key has never been set. */
+  getSettingVersion(key: string): number;
+
   /**
    * F-22: NULLs `token_hash` on every adapter row that currently has one set
    * (adapter rows themselves are never deleted — audit trail keeps adapter

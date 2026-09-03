@@ -9,10 +9,12 @@ import type {
   AuditAppendResult,
   AuditRow,
   Clock,
+  ContactPolicy,
   CursorState,
   Draft,
   DraftError,
   DraftState,
+  Handle,
   IsoUtc,
   Message,
   MessageGuid,
@@ -26,6 +28,12 @@ import { applyMigrations } from './migrate.js';
 
 /** Our store filename inside the WeMessage config dir (§2.3). */
 export const DB_FILENAME = 'wemessage.db';
+
+/**
+ * C-10 / plan §1.3.3: 1 first try + 2 retries. `beginSendAttempt` throws
+ * `'retry limit exhausted'` when a fourth attempt is requested.
+ */
+export const MAX_SEND_ATTEMPTS = 3;
 
 export interface OpenStoreOptions {
   /** Directory holding `wemessage.db` (e.g. the WeMessage Application Support dir). */
@@ -149,6 +157,23 @@ function approvalFromRow(row: ApprovalRow): Approval {
     ...(row.batch_id !== null ? { batchId: row.batch_id } : {}),
     ...(row.edited_body !== null ? { editedBody: row.edited_body } : {}),
     at: row.at,
+  };
+}
+
+interface ContactPolicyRow {
+  handle: string;
+  display_name: string | null;
+  mode: string;
+  updated_at: string;
+}
+
+/** §2.4.3 ladder row. Same optional-key-omission convention as draftFromRow. */
+function contactPolicyFromRow(row: ContactPolicyRow): ContactPolicy {
+  return {
+    handle: row.handle,
+    ...(row.display_name !== null ? { displayName: row.display_name } : {}),
+    mode: row.mode as ContactPolicy['mode'],
+    updatedAt: row.updated_at,
   };
 }
 
@@ -290,10 +315,40 @@ export class SqliteStore implements Store {
   readonly #getDraftState: Database.Statement;
   readonly #setDraftSending: Database.Statement;
   readonly #insertLedger: Database.Statement;
+  readonly #getLedgerAttempt: Database.Statement;
+  readonly #bumpLedgerAttempt: Database.Statement;
   readonly #beginSendAttemptTxn: Database.Transaction<
     (draftId: Ulid, backend: string, at: IsoUtc) => { attempt: number }
   >;
   readonly #clearAdapterTokensStmt: Database.Statement;
+  // --- S4 §1.5 (Scenario 3) ---
+  readonly #findDraftByIdem: Database.Statement;
+  readonly #latestApproveApproval: Database.Statement;
+  readonly #listGraceElapsed: Database.Statement;
+  readonly #listExpiredPending: Database.Statement;
+  readonly #batchReport: Database.Statement;
+  readonly #getContactPolicy: Database.Statement;
+  readonly #setContactPolicy: Database.Statement;
+  readonly #deleteContactPolicy: Database.Statement;
+  readonly #listContactPolicies: Database.Statement;
+  readonly #getSettingVersion: Database.Statement;
+  readonly #applyDraftTransitionTxn: Database.Transaction<
+    (input: {
+      id: Ulid;
+      from: DraftState | DraftState[];
+      to: DraftState;
+      at: IsoUtc;
+      sendNotBefore?: IsoUtc | null;
+      error?: DraftError;
+      body?: string;
+    }) => Draft
+  >;
+  readonly #updateDraftBodyTxn: Database.Transaction<
+    (id: Ulid, body: string, at: IsoUtc) => void
+  >;
+  readonly #cancelGraceApprovedTxn: Database.Transaction<
+    (at: IsoUtc, error: DraftError) => Draft[]
+  >;
 
   constructor(opts: OpenStoreOptions) {
     mkdirSync(opts.dir, { recursive: true });
@@ -435,6 +490,15 @@ export class SqliteStore implements Store {
       'INSERT INTO send_ledger (draft_id, attempt, backend, started_at) ' +
         'VALUES (?, 1, ?, ?)',
     );
+    this.#getLedgerAttempt = this.db.prepare(
+      'SELECT attempt FROM send_ledger WHERE draft_id = ?',
+    );
+    // Retry reopens the ledger row: new attempt, fresh start, outcome
+    // columns cleared so a stale verified_guid/finished_at cannot linger.
+    this.#bumpLedgerAttempt = this.db.prepare(
+      'UPDATE send_ledger SET attempt = ?, backend = ?, started_at = ?, ' +
+        'verified_guid = NULL, finished_at = NULL WHERE draft_id = ?',
+    );
     // s3-execution Scenario 5 teeth: the state check below is the
     // persistent double-begin backstop, made INSIDE the same immediate
     // transaction as the write so it can never race a concurrent caller.
@@ -448,13 +512,164 @@ export class SqliteStore implements Store {
               `(state=${row ? row.state : 'missing'})`,
           );
         }
+        // C-10 (s4-execution §1.5): a ledger row already present means this
+        // is a failed->approved retry. Increment rather than throw, to a
+        // ceiling of 3 (1 first try + 2 retries, plan §1.3.3). At the
+        // ceiling the caller leaves the draft terminal-'failed'.
+        const ledger = this.#getLedgerAttempt.get(draftId) as
+          { attempt: number } | undefined;
         this.#setDraftSending.run(at, draftId);
-        this.#insertLedger.run(draftId, backend, at);
-        return { attempt: 1 };
+        if (ledger === undefined) {
+          this.#insertLedger.run(draftId, backend, at);
+          return { attempt: 1 };
+        }
+        const next = ledger.attempt + 1;
+        if (next > MAX_SEND_ATTEMPTS) {
+          throw new Error('retry limit exhausted');
+        }
+        this.#bumpLedgerAttempt.run(next, backend, at, draftId);
+        return { attempt: next };
       },
     );
     this.#clearAdapterTokensStmt = this.db.prepare(
       'UPDATE adapters SET token_hash = NULL WHERE token_hash IS NOT NULL',
+    );
+
+    // --- S4 §1.5 body extensions (s4-execution Scenario 3) ---
+    this.#findDraftByIdem = this.db.prepare(
+      'SELECT * FROM drafts WHERE adapter_id = ? AND idempotency_key = ?',
+    );
+    this.#latestApproveApproval = this.db.prepare(
+      'SELECT id, draft_id, action, actor, batch_id, edited_body, at ' +
+        "FROM approvals WHERE draft_id = ? AND action = 'approve' " +
+        'ORDER BY at DESC, id DESC LIMIT 1',
+    );
+    // C-2: the NULL guard is load-bearing — a direct-send draft has no
+    // grace and must never be swept up by the scheduler.
+    this.#listGraceElapsed = this.db.prepare(
+      'SELECT d.id AS draft_id, a.id AS approval_id FROM drafts d ' +
+        'JOIN approvals a ON a.draft_id = d.id ' +
+        'AND a.id = (SELECT a2.id FROM approvals a2 WHERE a2.draft_id = d.id ' +
+        "AND a2.action = 'approve' ORDER BY a2.at DESC, a2.id DESC LIMIT 1) " +
+        "WHERE d.state = 'approved' AND d.send_not_before IS NOT NULL " +
+        'AND d.send_not_before <= ? ORDER BY d.send_not_before ASC, d.id ASC',
+    );
+    this.#listExpiredPending = this.db.prepare(
+      "SELECT * FROM drafts WHERE state = 'pending' AND expires_at <= ? " +
+        'ORDER BY expires_at ASC, id ASC',
+    );
+    this.#batchReport = this.db.prepare(
+      'SELECT d.state AS state, COUNT(DISTINCT d.id) AS n FROM drafts d ' +
+        'JOIN approvals a ON a.draft_id = d.id WHERE a.batch_id = ? ' +
+        'GROUP BY d.state',
+    );
+    this.#getContactPolicy = this.db.prepare(
+      'SELECT * FROM contact_policies WHERE handle = ?',
+    );
+    this.#setContactPolicy = this.db.prepare(
+      'INSERT INTO contact_policies (handle, display_name, mode, updated_at) ' +
+        'VALUES (?, ?, ?, ?) ON CONFLICT(handle) DO UPDATE SET ' +
+        'display_name = excluded.display_name, mode = excluded.mode, ' +
+        'updated_at = excluded.updated_at',
+    );
+    this.#deleteContactPolicy = this.db.prepare(
+      'DELETE FROM contact_policies WHERE handle = ?',
+    );
+    this.#listContactPolicies = this.db.prepare(
+      'SELECT * FROM contact_policies ORDER BY handle ASC',
+    );
+    this.#getSettingVersion = this.db.prepare(
+      'SELECT version FROM settings WHERE key = ?',
+    );
+
+    // Roadmap risk #1: `from` is re-asserted INSIDE the transaction. Two
+    // racing transitions on one draft cannot both win — the second reads
+    // the already-written state and throws with zero writes.
+    this.#applyDraftTransitionTxn = this.db.transaction(
+      (input: {
+        id: Ulid;
+        from: DraftState | DraftState[];
+        to: DraftState;
+        at: IsoUtc;
+        sendNotBefore?: IsoUtc | null;
+        error?: DraftError;
+        body?: string;
+      }): Draft => {
+        const current = this.#getDraft.get(input.id) as DraftRow | undefined;
+        if (!current) {
+          throw new Error(`applyDraftTransition: no such draft: ${input.id}`);
+        }
+        const allowed = Array.isArray(input.from) ? input.from : [input.from];
+        if (!allowed.includes(current.state as DraftState)) {
+          throw new Error(
+            `applyDraftTransition: draft ${input.id} is '${current.state}', ` +
+              `expected one of [${allowed.join(', ')}]`,
+          );
+        }
+        const sets = ['state = ?', 'state_changed_at = ?'];
+        const params: unknown[] = [input.to, input.at];
+        // `sendNotBefore` is tri-state: absent = leave alone, null = clear
+        // (recall/reject), a value = set (approve).
+        if ('sendNotBefore' in input && input.sendNotBefore !== undefined) {
+          sets.push('send_not_before = ?');
+          params.push(input.sendNotBefore);
+        }
+        if (input.error !== undefined) {
+          sets.push('error = ?');
+          params.push(JSON.stringify(input.error));
+        }
+        if (input.body !== undefined) {
+          // original_body is deliberately NOT in this list.
+          sets.push('body = ?');
+          params.push(input.body);
+        }
+        params.push(input.id);
+        this.db
+          .prepare(`UPDATE drafts SET ${sets.join(', ')} WHERE id = ?`)
+          .run(...params);
+        return draftFromRow(this.#getDraft.get(input.id) as DraftRow);
+      },
+    );
+
+    this.#updateDraftBodyTxn = this.db.transaction(
+      (id: Ulid, body: string, at: IsoUtc): void => {
+        const current = this.#getDraft.get(id) as DraftRow | undefined;
+        if (!current) {
+          throw new Error(`updateDraftBody: no such draft: ${id}`);
+        }
+        if (current.state !== 'pending') {
+          throw new Error(
+            `updateDraftBody: draft ${id} is '${current.state}', not 'pending'`,
+          );
+        }
+        this.db
+          .prepare(
+            'UPDATE drafts SET body = ?, state_changed_at = ? WHERE id = ?',
+          )
+          .run(body, at, id);
+      },
+    );
+
+    // §1.3.5 kill-flip cancel: ONE transaction, in-grace drafts only.
+    this.#cancelGraceApprovedTxn = this.db.transaction(
+      (at: IsoUtc, error: DraftError): Draft[] => {
+        const rows = this.db
+          .prepare(
+            "SELECT * FROM drafts WHERE state = 'approved' " +
+              'AND send_not_before IS NOT NULL AND send_not_before > ? ' +
+              'ORDER BY send_not_before ASC, id ASC',
+          )
+          .all(at) as DraftRow[];
+        const update = this.db.prepare(
+          "UPDATE drafts SET state = 'rejected', state_changed_at = ?, " +
+            'error = ?, send_not_before = NULL WHERE id = ?',
+        );
+        const errJson = JSON.stringify(error);
+        for (const row of rows) update.run(at, errJson, row.id);
+        return rows.map((row) =>
+          draftFromRow(this.#getDraft.get(row.id) as DraftRow),
+        );
+      },
     );
   }
 
@@ -737,6 +952,169 @@ export class SqliteStore implements Store {
 
   clearAdapterTokens(): number {
     return this.#clearAdapterTokensStmt.run().changes;
+  }
+
+  // --- S4 §1.5 body extensions (s4-execution Scenario 3) ---
+
+  /**
+   * Queue + history read. No filter = the QUEUE (terminal states excluded,
+   * §1.3.3). `contact` matches the handle parsed out of `chat_guid`
+   * (`service;flag;handle`); `batchId` joins through approvals.
+   */
+  listDrafts(filter?: {
+    state?: DraftState;
+    ruleId?: Ulid;
+    contact?: Handle;
+    batchId?: Ulid;
+  }): Draft[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filter?.state !== undefined) {
+      where.push('d.state = ?');
+      params.push(filter.state);
+    } else {
+      // Queue default: terminal states are history, not queue.
+      where.push(
+        "d.state NOT IN ('sent','rejected','expired','superseded','recalled','failed')",
+      );
+    }
+    if (filter?.ruleId !== undefined) {
+      where.push('d.rule_id = ?');
+      params.push(filter.ruleId);
+    }
+    if (filter?.contact !== undefined) {
+      // chat_guid is `service;flag;handle` — the handle is the suffix after
+      // the last ';', so a suffix match IS the handle match. LIKE is
+      // ASCII-case-insensitive in SQLite, which is what we want for emails.
+      where.push("d.chat_guid LIKE '%;' || ?");
+      params.push(filter.contact);
+    }
+    if (filter?.batchId !== undefined) {
+      where.push(
+        'EXISTS (SELECT 1 FROM approvals a WHERE a.draft_id = d.id AND a.batch_id = ?)',
+      );
+      params.push(filter.batchId);
+    }
+    const sql =
+      'SELECT d.* FROM drafts d' +
+      (where.length > 0 ? ' WHERE ' + where.join(' AND ') : '') +
+      ' ORDER BY d.created_at ASC, d.id ASC';
+    return (this.db.prepare(sql).all(...params) as DraftRow[]).map(
+      draftFromRow,
+    );
+  }
+
+  /**
+   * The generalized in-transaction transition (roadmap risk #1). The `from`
+   * re-assertion happens INSIDE the transaction, so a second racing caller
+   * reads the already-written state and throws.
+   */
+  applyDraftTransition(input: {
+    id: Ulid;
+    from: DraftState | DraftState[];
+    to: DraftState;
+    at: IsoUtc;
+    sendNotBefore?: IsoUtc | null;
+    error?: DraftError;
+    body?: string;
+  }): Draft {
+    return this.#applyDraftTransitionTxn.immediate(input);
+  }
+
+  /** Body edit, pending-only (asserted in-transaction). original_body untouched. */
+  updateDraftBody(id: Ulid, body: string, at: IsoUtc): void {
+    this.#updateDraftBodyTxn.immediate(id, body, at);
+  }
+
+  findDraftByIdempotencyKey(adapterId: string, key: string): Draft | null {
+    const row = this.#findDraftByIdem.get(adapterId, key) as
+      DraftRow | undefined;
+    return row ? draftFromRow(row) : null;
+  }
+
+  latestApproveApproval(draftId: Ulid): Approval | null {
+    const row = this.#latestApproveApproval.get(draftId) as
+      ApprovalRow | undefined;
+    return row ? approvalFromRow(row) : null;
+  }
+
+  listGraceElapsed(now: IsoUtc): Array<{ draftId: Ulid; approvalId: Ulid }> {
+    // The `send_not_before IS NOT NULL` guard is C-2: a direct-send draft
+    // (no grace) must never be picked up here, or the scheduler dispatches
+    // it a second time behind the send path's back.
+    const rows = this.#listGraceElapsed.all(now) as {
+      draft_id: string;
+      approval_id: string;
+    }[];
+    return rows.map((r) => ({
+      draftId: r.draft_id,
+      approvalId: r.approval_id,
+    }));
+  }
+
+  listExpiredPending(now: IsoUtc): Draft[] {
+    return (this.#listExpiredPending.all(now) as DraftRow[]).map(draftFromRow);
+  }
+
+  cancelGraceApproved(at: IsoUtc, error: DraftError): Draft[] {
+    return this.#cancelGraceApprovedTxn.immediate(at, error);
+  }
+
+  batchReport(batchId: Ulid): {
+    sent: number;
+    failed: number;
+    recalled: number;
+    approved: number;
+    sending: number;
+  } {
+    const rows = this.#batchReport.all(batchId) as {
+      state: string;
+      n: number;
+    }[];
+    const report = {
+      sent: 0,
+      failed: 0,
+      recalled: 0,
+      approved: 0,
+      sending: 0,
+    };
+    for (const r of rows) {
+      if (r.state in report) {
+        report[r.state as keyof typeof report] = r.n;
+      }
+    }
+    return report;
+  }
+
+  getContactPolicy(handle: Handle): ContactPolicy | null {
+    const row = this.#getContactPolicy.get(handle) as
+      ContactPolicyRow | undefined;
+    return row ? contactPolicyFromRow(row) : null;
+  }
+
+  setContactPolicy(policy: ContactPolicy): void {
+    this.#setContactPolicy.run(
+      policy.handle,
+      policy.displayName ?? null,
+      policy.mode,
+      policy.updatedAt,
+    );
+  }
+
+  deleteContactPolicy(handle: Handle): boolean {
+    return this.#deleteContactPolicy.run(handle).changes > 0;
+  }
+
+  listContactPolicies(): ContactPolicy[] {
+    return (this.#listContactPolicies.all() as ContactPolicyRow[]).map(
+      contactPolicyFromRow,
+    );
+  }
+
+  getSettingVersion(key: string): number {
+    const row = this.#getSettingVersion.get(key) as
+      { version: number } | undefined;
+    return row ? row.version : -1;
   }
 
   close(): void {

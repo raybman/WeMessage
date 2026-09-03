@@ -126,6 +126,30 @@ function makeStore(cfg: {
       cfg.calls.push(`beginSendAttempt:${draftId}`);
       return { attempt: 1 };
     },
+    // S4 Scenario 3 body extensions (§1.5). Unused by this suite; present so
+    // the fake stays a real `Store` and the interface keeps its teeth.
+    listDrafts: () => [],
+    applyDraftTransition: () => {
+      throw new Error('not used in this suite');
+    },
+    updateDraftBody: () => undefined,
+    findDraftByIdempotencyKey: () => null,
+    latestApproveApproval: () => null,
+    listGraceElapsed: () => [],
+    listExpiredPending: () => [],
+    cancelGraceApproved: () => [],
+    batchReport: () => ({
+      sent: 0,
+      failed: 0,
+      recalled: 0,
+      approved: 0,
+      sending: 0,
+    }),
+    getContactPolicy: () => null,
+    setContactPolicy: () => undefined,
+    deleteContactPolicy: () => false,
+    listContactPolicies: () => [],
+    getSettingVersion: () => -1,
     clearAdapterTokens: () => 0,
     close: () => undefined,
   };

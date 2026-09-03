@@ -17,6 +17,7 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerDraftRoutes } from './routes/drafts.js';
+import { registerToggleRoutes } from './routes/toggles.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import type { DoctorProbes } from './doctor.js';
@@ -223,6 +224,14 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   if (opts.drafts && sink) {
     // §1.6 routes: the draft queue humans actually review through.
     registerDraftRoutes(app, {
+      store: opts.drafts.store,
+      clock: opts.drafts.clock,
+      sink,
+    });
+    // The kill switch rides with the draft surface: it exists to stop
+    // drafts, and there is no configuration in which one is wanted without
+    // the other.
+    registerToggleRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,

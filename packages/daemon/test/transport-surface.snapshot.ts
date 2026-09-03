@@ -44,6 +44,12 @@
  * and POST /v1/rules/:id/test above, same precedent).
  */
 export const ROUTE_TABLE: readonly string[] = [
+  // #11 deliberate (s4 Scenario 8): redraft an expired/rejected/recalled/
+  // superseded draft into a NEW pending one (F-40). 'failed' is excluded —
+  // it has the retry path, and redrafting it would launder past C-10.
+  // #12 deliberate (s4 Scenario 9): the §1.3.5 kill switch. Synchronous by
+  // design — it cancels every in-grace draft before the 200 is written, so
+  // "the switch is on" and "nothing more goes out" are one moment.
   'DELETE /v1/rules/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
@@ -75,9 +81,6 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/drafts',
   'POST /v1/drafts/:id/approve',
   'POST /v1/drafts/:id/recall',
-  // #11 deliberate (s4 Scenario 8): redraft an expired/rejected/recalled/
-  // superseded draft into a NEW pending one (F-40). 'failed' is excluded —
-  // it has the retry path, and redrafting it would launder past C-10.
   'POST /v1/drafts/:id/redraft',
   'POST /v1/drafts/:id/reject',
   'POST /v1/drafts/:id/retry',
@@ -85,6 +88,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
   'POST /v1/send',
+  'POST /v1/toggles/kill-switch',
 ];
 
 /**
@@ -112,6 +116,9 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'message.received',
   'message.unsent',
   'rule.matched', // §1.6 post-S2 vocabulary; emission wired in Scenario 9
+  // #12 deliberate (s4 Scenario 9): kill-switch flips ride the existing
+  // toggle.changed frame; §1.6 already reserves it, no protocol addition.
+  'toggle.changed',
 ];
 
 /**
@@ -147,6 +154,9 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   'message.received',
   'message.unsent',
   'rule.matched',
+  // #12 deliberate (s4 Scenario 9): kill-switch flips broadcast on the
+  // pre-existing toggle.changed frame — no protocol addition (F-3).
+  'toggle.changed',
 ];
 
 /**

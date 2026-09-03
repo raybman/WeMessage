@@ -83,6 +83,8 @@ export interface Harness {
   backend: LoopbackSendBackend;
   /** The one §1.8 sink the routes and scheduler share. */
   sink: ReturnType<typeof createAuditSink>;
+  /** Every broadcast, with the audit log as it stood when it was sent. */
+  broadcasts: Array<{ frame: unknown; auditAtBroadcast: string[] }>;
   clockCtl: ClockCtl;
   headers: { authorization: string };
 }
@@ -133,7 +135,22 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   };
   // ONE §1.8 sink shared by the routes and the scheduler, exactly as the
   // composed daemon shares it. Two sinks would mean two audit orderings.
-  const sink = createAuditSink({ store, clock: clockCtl.clock });
+  const rawSink = createAuditSink({ store, clock: clockCtl.clock });
+  /**
+   * §1.8 witness. Every broadcast is recorded together with the audit types
+   * that were already durable AT THAT MOMENT, which is the only way a test
+   * can tell "appended then broadcast" from "broadcast then appended" — the
+   * final log looks identical either way, and the difference only shows up
+   * as a lost record on a crash between the two.
+   */
+  const broadcasts: Array<{ frame: unknown; auditAtBroadcast: string[] }> = [];
+  const sink = {
+    ...rawSink,
+    broadcast: (frame: Parameters<typeof rawSink.broadcast>[0]) => {
+      broadcasts.push({ frame, auditAtBroadcast: auditTypes(store) });
+      return rawSink.broadcast(frame);
+    },
+  };
 
   const server = await buildServer({
     configDir: dir,
@@ -170,6 +187,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     scheduler,
     backend,
     sink,
+    broadcasts,
     clockCtl,
     headers: { authorization: `Bearer ${server.token}` },
   };

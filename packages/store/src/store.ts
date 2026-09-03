@@ -324,6 +324,7 @@ export class SqliteStore implements Store {
   // --- S4 §1.5 (Scenario 3) ---
   readonly #findDraftByIdem: Database.Statement;
   readonly #listApprovals: Database.Statement;
+  readonly #sendAttemptOf: Database.Statement;
   readonly #latestApproveApproval: Database.Statement;
   readonly #listGraceElapsed: Database.Statement;
   readonly #listExpiredPending: Database.Statement;
@@ -542,6 +543,9 @@ export class SqliteStore implements Store {
     );
     this.#listApprovals = this.db.prepare(
       'SELECT * FROM approvals WHERE draft_id = ? ORDER BY at ASC, id ASC',
+    );
+    this.#sendAttemptOf = this.db.prepare(
+      'SELECT attempt FROM send_ledger WHERE draft_id = ?',
     );
     this.#latestApproveApproval = this.db.prepare(
       'SELECT id, draft_id, action, actor, batch_id, edited_body, at ' +
@@ -1034,6 +1038,12 @@ export class SqliteStore implements Store {
     const row = this.#findDraftByIdem.get(adapterId, key) as
       DraftRow | undefined;
     return row ? draftFromRow(row) : null;
+  }
+
+  sendAttemptCount(draftId: Ulid): number {
+    const row = this.#sendAttemptOf.get(draftId) as
+      { attempt: number } | undefined;
+    return row?.attempt ?? 0;
   }
 
   listApprovals(draftId: string): Approval[] {

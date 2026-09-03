@@ -50,6 +50,15 @@ export interface Store {
   insertInboundMessage(message: Message): void;
   /** Mirror rows received at/after `since` — F-5 status `counts.messagesToday`. */
   countInboundMessagesSince(since: IsoUtc): number;
+  /**
+   * s4 Scenario 7 (§1.5 extension): attempts already burned against this
+   * draft, 0 when it has never been dispatched. The retry route needs to
+   * refuse at the C-10 ceiling BEFORE it moves the draft back to 'approved'
+   * — otherwise a retry past the limit parks a draft in 'approved' that the
+   * scheduler will pick up and immediately re-fail, which reads to a user
+   * as "retry worked" right up until it didn't.
+   */
+  sendAttemptCount(draftId: Ulid): number;
   /** Drafts stuck in 'sending' + their ledger row (T-9.3 reconciliation). */
   listSendingDrafts(): SendingDraft[];
   /** sending -> sent: records the verified guid on draft + ledger (§2.2.2). */

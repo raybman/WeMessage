@@ -41,9 +41,15 @@ import {
   type Draft,
   type DraftState,
   type Store,
+  type Ulid,
 } from '@wemessage/core';
 import type { DraftSummary } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
+
+/** Outcome of one draft-level operation, shared by the single and bulk paths. */
+type ApplyResult =
+  | { ok: true; draft: Draft; approvalId: Ulid }
+  | { ok: false; status: 403 | 409; body: Record<string, unknown> };
 
 export interface DraftRouteDeps {
   store: Store;
@@ -57,6 +63,8 @@ const HUMAN_ADAPTER_ID = 'human';
 const DEFAULT_TTL_MINUTES = 240;
 /** §1.3.3 default undo window when `send.undoGraceSeconds` is unset. */
 const DEFAULT_UNDO_GRACE_SECONDS = 10;
+/** C-10 (§1.3.3): one first try plus two retries, then the draft is done. */
+const RETRY_CEILING = 3;
 
 const createBody = z.strictObject({
   chatGuid: z.string().min(1),
@@ -67,6 +75,30 @@ const createBody = z.strictObject({
 const approveBody = z.strictObject({
   editedBody: z.string().min(1).optional(),
 });
+
+/**
+ * Bulk selection is EITHER an explicit id list OR a filter, never both: a
+ * request that carries both is ambiguous about which one wins, and guessing
+ * on an operation that can approve dozens of messages is not acceptable.
+ * `{all:true}` is required to be explicit for the same reason — an empty
+ * filter object must not silently mean "everything pending."
+ */
+const bulkBody = z
+  .strictObject({
+    action: z.enum(['approve', 'recall']),
+    ids: z.array(z.string().min(1)).min(1).optional(),
+    filter: z
+      .strictObject({
+        all: z.literal(true).optional(),
+        rule: z.string().min(1).optional(),
+        contact: z.string().min(1).optional(),
+      })
+      .optional(),
+  })
+  .refine(
+    (b) => (b.ids === undefined) !== (b.filter === undefined),
+    'exactly one of ids or filter',
+  );
 
 const rejectBody = z.strictObject({
   reason: z.string().min(1).optional(),
@@ -218,10 +250,20 @@ export function registerDraftRoutes(
    */
   const decide = (
     draft: Draft,
-    event: 'approve' | 'reject' | 'recall',
+    event: 'approve' | 'reject' | 'recall' | 'retry',
+    retriesUsed?: number,
   ): DraftState | null => {
     try {
-      return applyDraftTransition({ from: draft.state, event, actor });
+      return applyDraftTransition({
+        from: draft.state,
+        event,
+        actor,
+        // 'retry' is the one event the pure table cannot decide from state
+        // alone: §1.7 folds C-10's ceiling into it, and it REQUIRES the
+        // count. Omitting it reads as "unknown retries" and is refused, so
+        // this must be threaded through rather than defaulted.
+        ...(retriesUsed !== undefined ? { retriesUsed } : {}),
+      });
     } catch (err) {
       if (
         err instanceof IllegalDraftTransition ||
@@ -242,6 +284,181 @@ export function registerDraftRoutes(
     }
   };
 
+  /**
+   * The whole of "approve this draft," extracted so the single-draft route
+   * and the bulk handler run the SAME code. A bulk approve that took a
+   * shortcut past the gate, or stamped grace differently, would be a second
+   * approval path with second-class safety properties — exactly the sort of
+   * divergence that survives review because both halves look fine alone.
+   */
+  const approveOne = (
+    draft: Draft,
+    opts: { editedBody?: string; batchId?: Ulid } = {},
+  ): ApplyResult => {
+    // Legality BEFORE policy: a draft that was already sent is a 409
+    // whatever the kill switch says, because the request is incoherent
+    // rather than merely refused.
+    const to = decide(draft, 'approve');
+    if (to === null) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: 'illegal-transition',
+          from: draft.state,
+          requested: 'approve',
+        },
+      };
+    }
+
+    const parsedGuid = parseChatGuid(draft.chatGuid);
+    const gate = evaluateGate({
+      now: clock.now(),
+      settings: readGateSettings(store),
+      rule: draft.ruleId === null ? null : store.getRule(draft.ruleId),
+      schedule: null,
+      contact: store.getContactPolicy(parsedGuid.handle),
+      message: {
+        isGroup: parsedGuid.isGroup,
+        service: parsedGuid.service,
+        handle: parsedGuid.handle,
+        chatGuid: draft.chatGuid,
+      },
+      counters: {
+        contactAutoLastHour: 0,
+        globalAutoLastHour: 0,
+        consecutiveAutoInChat: 0,
+        circuitOpen: false,
+      },
+    });
+    if (!gate.allow) {
+      // F-34: audited, and the draft stays exactly where it was.
+      sink.append(
+        { type: 'gate.denied', draftId: draft.id, reason: gate.reason },
+        actor,
+      );
+      sink.broadcast({
+        event: 'gate.denied',
+        reason: gate.reason,
+        chatGuid: draft.chatGuid,
+        draftId: draft.id,
+      });
+      return {
+        ok: false,
+        status: 403,
+        body: { error: 'gate-denied', reason: gate.reason },
+      };
+    }
+
+    const at = clock.now();
+    const updated = store.applyDraftTransition({
+      id: draft.id,
+      from: draft.state,
+      to,
+      at,
+      sendNotBefore: addSeconds(at, undoGraceSeconds(store)),
+      ...(opts.editedBody !== undefined ? { body: opts.editedBody } : {}),
+    });
+    const approvalId = ulid();
+    store.insertApproval({
+      id: approvalId,
+      draftId: draft.id,
+      action: 'approve',
+      actor,
+      ...(opts.editedBody !== undefined ? { editedBody: opts.editedBody } : {}),
+      ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
+      at,
+    });
+    sink.append(
+      { type: 'draft.approved', draftId: draft.id, approvalId, actor },
+      actor,
+    );
+    sink.broadcast({
+      event: 'draft.approved',
+      draftId: draft.id,
+      actor,
+      ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
+    });
+    return { ok: true, draft: updated, approvalId };
+  };
+
+  /** Same extraction for recall; see approveOne. */
+  const recallOne = (draft: Draft, batchId?: Ulid): ApplyResult => {
+    const to = decide(draft, 'recall');
+    if (to === null) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: 'illegal-transition',
+          from: draft.state,
+          requested: 'recall',
+        },
+      };
+    }
+
+    // The window is a fact about time, not about state, so the table cannot
+    // express it: an approved draft whose sendNotBefore has passed is
+    // legally recallable right up until the tick that sends it, and
+    // pretending otherwise would be a lie the moment the scheduler wins the
+    // race. Refuse at the boundary instead. With send.undoGraceSeconds='0'
+    // (F-32) this refuses immediately, the honest reading of "no undo."
+    const at = clock.now();
+    if (
+      draft.sendNotBefore === undefined ||
+      draft.sendNotBefore === null ||
+      Date.parse(at) >= Date.parse(draft.sendNotBefore)
+    ) {
+      sink.append(
+        {
+          type: 'draft.illegal-transition',
+          draftId: draft.id,
+          from: draft.state,
+          event: 'recall',
+        },
+        actor,
+      );
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: 'grace-elapsed',
+          from: draft.state,
+          requested: 'recall',
+        },
+      };
+    }
+
+    const updated = store.applyDraftTransition({
+      id: draft.id,
+      from: draft.state,
+      to,
+      at,
+      // Clearing the stamp is what actually stops the next tick.
+      sendNotBefore: null,
+    });
+    const approvalId = ulid();
+    store.insertApproval({
+      id: approvalId,
+      draftId: draft.id,
+      action: 'recall',
+      actor,
+      ...(batchId !== undefined ? { batchId } : {}),
+      at,
+    });
+    sink.append(
+      { type: 'draft.recalled', draftId: draft.id, approvalId },
+      actor,
+    );
+    sink.broadcast({
+      event: 'draft.recalled',
+      draftId: draft.id,
+      actor,
+      ...(batchId !== undefined ? { batchId } : {}),
+    });
+    return { ok: true, draft: updated, approvalId };
+  };
+
   // ---- POST /v1/drafts/:id/approve -------------------------------------
   app.post<{ Params: { id: string } }>(
     '/v1/drafts/:id/approve',
@@ -256,83 +473,16 @@ export function registerDraftRoutes(
       const draft = store.getDraft(req.params.id);
       if (draft === null) return reply.code(404).send({ error: 'not-found' });
 
-      // Legality BEFORE policy: a draft that was already sent is a 409
-      // whatever the kill switch says, because the request is incoherent
-      // rather than merely refused.
-      const to = decide(draft, 'approve');
-      if (to === null) {
-        return reply.code(409).send({
-          error: 'illegal-transition',
-          from: draft.state,
-          requested: 'approve',
-        });
-      }
-
-      const parsedGuid = parseChatGuid(draft.chatGuid);
-      const gate = evaluateGate({
-        now: clock.now(),
-        settings: readGateSettings(store),
-        rule: draft.ruleId === null ? null : store.getRule(draft.ruleId),
-        schedule: null,
-        contact: store.getContactPolicy(parsedGuid.handle),
-        message: {
-          isGroup: parsedGuid.isGroup,
-          service: parsedGuid.service,
-          handle: parsedGuid.handle,
-          chatGuid: draft.chatGuid,
-        },
-        counters: {
-          contactAutoLastHour: 0,
-          globalAutoLastHour: 0,
-          consecutiveAutoInChat: 0,
-          circuitOpen: false,
-        },
-      });
-      if (!gate.allow) {
-        // F-34: audited, and the draft stays exactly where it was.
-        sink.append(
-          { type: 'gate.denied', draftId: draft.id, reason: gate.reason },
-          actor,
-        );
-        sink.broadcast({
-          event: 'gate.denied',
-          reason: gate.reason,
-          chatGuid: draft.chatGuid,
-          draftId: draft.id,
-        });
-        return reply
-          .code(403)
-          .send({ error: 'gate-denied', reason: gate.reason });
-      }
-
-      const at = clock.now();
-      const updated = store.applyDraftTransition({
-        id: draft.id,
-        from: draft.state,
-        to,
-        at,
-        sendNotBefore: addSeconds(at, undoGraceSeconds(store)),
-        ...(parsed.data.editedBody !== undefined
-          ? { body: parsed.data.editedBody }
-          : {}),
-      });
-      const approvalId = ulid();
-      store.insertApproval({
-        id: approvalId,
-        draftId: draft.id,
-        action: 'approve',
-        actor,
+      const result = approveOne(draft, {
         ...(parsed.data.editedBody !== undefined
           ? { editedBody: parsed.data.editedBody }
           : {}),
-        at,
       });
-      sink.append(
-        { type: 'draft.approved', draftId: draft.id, approvalId, actor },
-        actor,
-      );
-      sink.broadcast({ event: 'draft.approved', draftId: draft.id, actor });
-      return reply.send({ draft: updated, approvalId });
+      if (!result.ok) return reply.code(result.status).send(result.body);
+      return reply.send({
+        draft: result.draft,
+        approvalId: result.approvalId,
+      });
     },
   );
 
@@ -342,66 +492,150 @@ export function registerDraftRoutes(
     async (req, reply) => {
       const draft = store.getDraft(req.params.id);
       if (draft === null) return reply.code(404).send({ error: 'not-found' });
+      const result = recallOne(draft);
+      if (!result.ok) return reply.code(result.status).send(result.body);
+      return reply.send({
+        draft: result.draft,
+        approvalId: result.approvalId,
+      });
+    },
+  );
 
-      const to = decide(draft, 'recall');
+  // ---- POST /v1/drafts/bulk --------------------------------------------
+  /**
+   * Always 200. A bulk operation over N drafts is not one atomic act, it is
+   * N acts reported honestly: `applied` are the ones that moved, `refused`
+   * carry the reason each one didn't. Failing the whole request because one
+   * of fifty drafts was already sent would make the endpoint unusable
+   * exactly when a queue has drifted, which is when you most want it.
+   *
+   * The batchId is minted here and stamped on every Approval row, which is
+   * what makes GET /v1/batches/:id possible without a batches table.
+   */
+  app.post('/v1/drafts/bulk', async (req, reply) => {
+    const parsed = bulkBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-bulk',
+        detail: { issues: parsed.error.issues },
+      });
+    }
+    const { action, ids, filter } = parsed.data;
+
+    // Selection. An id list is taken verbatim (an unknown id is a refusal,
+    // not a silent omission — the caller named it and deserves an answer).
+    const targets: Array<{ id: string; draft: Draft | null }> = [];
+    if (ids !== undefined) {
+      for (const id of ids) targets.push({ id, draft: store.getDraft(id) });
+    } else {
+      const f = filter as NonNullable<typeof filter>;
+      // Bulk approve wants the pending queue; bulk recall wants what is
+      // sitting in its grace window. Selecting on the state each action can
+      // actually consume keeps `refused` meaningful instead of listing every
+      // unrelated draft in the store.
+      const state: DraftState = action === 'approve' ? 'pending' : 'approved';
+      const matched = store.listDrafts({
+        state,
+        ...(f.rule !== undefined ? { ruleId: f.rule } : {}),
+        ...(f.contact !== undefined ? { contact: f.contact } : {}),
+      });
+      for (const draft of matched) targets.push({ id: draft.id, draft });
+    }
+
+    const batchId = ulid();
+    const applied: string[] = [];
+    const refused: Array<{ id: string; error: string }> = [];
+    for (const target of targets) {
+      if (target.draft === null) {
+        refused.push({ id: target.id, error: 'not-found' });
+        continue;
+      }
+      const result =
+        action === 'approve'
+          ? approveOne(target.draft, { batchId })
+          : recallOne(target.draft, batchId);
+      if (result.ok) applied.push(target.id);
+      else refused.push({ id: target.id, error: String(result.body.error) });
+    }
+    return reply.send({
+      batchId,
+      matched: targets.length,
+      applied: applied.length,
+      appliedIds: applied,
+      refused,
+    });
+  });
+
+  // ---- GET /v1/batches/:id ---------------------------------------------
+  app.get<{ Params: { id: string } }>('/v1/batches/:id', async (req, reply) => {
+    // Derived by joining approvals(batch_id) -> drafts.state, so the report
+    // is always the drafts' CURRENT truth rather than a counter that has to
+    // be kept in sync with every later transition.
+    return reply.send({
+      batchId: req.params.id,
+      ...store.batchReport(req.params.id),
+    });
+  });
+
+  // ---- POST /v1/drafts/:id/retry ---------------------------------------
+  /**
+   * failed -> approved with a FRESH grace window. Fresh is the whole point:
+   * reusing the old sendNotBefore would hand back a window that is already
+   * in the past, so the retry would fire on the very next tick with no undo
+   * at all — the user asked to try again, not to send instantly.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/v1/drafts/:id/retry',
+    async (req, reply) => {
+      const draft = store.getDraft(req.params.id);
+      if (draft === null) return reply.code(404).send({ error: 'not-found' });
+
+      // C-10: refuse at the ceiling BEFORE the transition, so the user
+      // gets 'retry-limit' rather than the table's generic
+      // 'illegal-transition'. Both refuse the same act; only one of them
+      // tells an operator why. Moving the draft first would be worse
+      // still: it would show a retry that looked like it worked right up
+      // until the next tick failed it again.
+      const attempts = store.sendAttemptCount(draft.id);
+      if (attempts >= RETRY_CEILING) {
+        return reply.code(409).send({ error: 'retry-limit', attempts });
+      }
+
+      // One first try burns no retry, hence the -1 (floored at 0 for a
+      // draft that somehow reached 'failed' without a ledger row).
+      const to = decide(draft, 'retry', Math.max(0, attempts - 1));
       if (to === null) {
         return reply.code(409).send({
           error: 'illegal-transition',
           from: draft.state,
-          requested: 'recall',
+          requested: 'retry',
         });
       }
 
-      // The window is a fact about time, not about state, so the table
-      // cannot express it: an approved draft whose sendNotBefore has passed
-      // is legally recallable right up until the tick that sends it, and
-      // pretending otherwise would be a lie the moment the scheduler wins
-      // the race. Refuse at the boundary instead. With
-      // send.undoGraceSeconds='0' (F-32) this refuses immediately, which is
-      // the honest reading of "no undo window."
       const at = clock.now();
-      if (
-        draft.sendNotBefore === undefined ||
-        draft.sendNotBefore === null ||
-        Date.parse(at) >= Date.parse(draft.sendNotBefore)
-      ) {
-        sink.append(
-          {
-            type: 'draft.illegal-transition',
-            draftId: draft.id,
-            from: draft.state,
-            event: 'recall',
-          },
-          actor,
-        );
-        return reply.code(409).send({
-          error: 'grace-elapsed',
-          from: draft.state,
-          requested: 'recall',
-        });
-      }
-
       const updated = store.applyDraftTransition({
         id: draft.id,
         from: draft.state,
         to,
         at,
-        // Clearing the stamp is what actually stops the next tick.
-        sendNotBefore: null,
+        sendNotBefore: addSeconds(at, undoGraceSeconds(store)),
       });
       const approvalId = ulid();
       store.insertApproval({
         id: approvalId,
         draftId: draft.id,
-        action: 'recall',
+        // 'approve', not a new verb: the scheduler looks up the latest
+        // approve row to authorize the send (INV-2), and a retry that wrote
+        // some other action would leave the draft approved but unsendable.
+        action: 'approve',
         actor,
         at,
       });
       sink.append(
-        { type: 'draft.recalled', draftId: draft.id, approvalId },
+        { type: 'draft.approved', draftId: draft.id, approvalId, actor },
         actor,
       );
-      sink.broadcast({ event: 'draft.recalled', draftId: draft.id, actor });
+      sink.broadcast({ event: 'draft.approved', draftId: draft.id, actor });
       return reply.send({ draft: updated, approvalId });
     },
   );

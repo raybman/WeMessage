@@ -31,6 +31,16 @@ export interface LoopbackSendBackend extends SendBackend {
   calls(): SendInput[];
   /** After calling this, `send()` still accepts but stops writing rows. */
   sabotage(): void;
+  /**
+   * s4 Scenario 7: sabotage exactly ONE draft's send. Partial-failure is the
+   * whole point of a bulk batch — an all-or-nothing switch can only prove
+   * "everything failed", which is indistinguishable from "the batch aborted".
+   * Matching on the body keeps the fixture honest: the backend has no idea
+   * which draft it is serving, exactly like Messages.app.
+   */
+  sabotageBody(body: string): void;
+  /** Lift a per-body sabotage, so a retry can be made to succeed. */
+  unsabotageBody(body: string): void;
 }
 
 export function createLoopbackSendBackend(
@@ -39,12 +49,13 @@ export function createLoopbackSendBackend(
 ): LoopbackSendBackend {
   const seen: SendInput[] = [];
   let sabotaged = false;
+  const doomed = new Set<string>();
 
   return {
     isAvailable: () => Promise.resolve(true),
     send(input: SendInput): Promise<SendOutcome> {
       seen.push(input);
-      if (!sabotaged) {
+      if (!sabotaged && !doomed.has(input.body)) {
         fixture.appendOutbound({
           chatGuid: input.chatGuid,
           text: input.body,
@@ -57,6 +68,12 @@ export function createLoopbackSendBackend(
     calls: () => [...seen],
     sabotage: () => {
       sabotaged = true;
+    },
+    sabotageBody: (body: string) => {
+      doomed.add(body);
+    },
+    unsabotageBody: (body: string) => {
+      doomed.delete(body);
     },
   };
 }

@@ -47,6 +47,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'DELETE /v1/rules/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
+  'GET /v1/batches/:id',
   'GET /v1/doctor',
   'GET /v1/drafts',
   'GET /v1/drafts/:id',
@@ -58,6 +59,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/status',
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
+  'HEAD /v1/batches/:id',
   'HEAD /v1/doctor',
   'HEAD /v1/drafts',
   'HEAD /v1/drafts/:id',
@@ -74,6 +76,8 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/drafts/:id/approve',
   'POST /v1/drafts/:id/recall',
   'POST /v1/drafts/:id/reject',
+  'POST /v1/drafts/:id/retry',
+  'POST /v1/drafts/bulk',
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
   'POST /v1/send',
@@ -121,6 +125,9 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * lists in the same reviewed diff as the routes that emit it.)
  * (Deliberate update #9, s4 Scenario 6: the recall route adds
  * POST /v1/drafts/:id/recall and constructs 'draft.recalled'.)
+ * (Deliberate update #10, s4 Scenario 7: bulk/retry/batch-report routes.
+ * No new event literals — bulk reuses draft.approved/draft.recalled with a
+ * batchId, which is already in the GatewayEvent shape.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',

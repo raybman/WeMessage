@@ -331,6 +331,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       findDraftByIdempotencyKey: () => null,
       // s4 Scenario 5: the approval history read behind GET /v1/drafts/:id.
       listApprovals: () => [],
+      sendAttemptCount: () => 0,
       latestApproveApproval: () => null,
       listGraceElapsed: () => [],
       listExpiredPending: () => [],

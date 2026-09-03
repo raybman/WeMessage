@@ -25,6 +25,7 @@ import {
   readTokenFile,
   rotateTokenFile,
   DaemonAuthError,
+  DaemonConflictError,
   DaemonGateDeniedError,
   DaemonUnreachableError,
   type AuditRowPayload,
@@ -38,6 +39,11 @@ import {
   type RulePayload,
   type RuleTestResult,
   type RuleWriteResult,
+  type BatchReport,
+  type ContactMode,
+  type ContactPolicyPayload,
+  type DraftPayload,
+  type DraftState,
   type SendResult,
   type StatusPayload,
 } from '@wemessage/client';
@@ -49,6 +55,8 @@ const EXIT_USAGE = 2;
 const EXIT_UNREACHABLE = 3;
 const EXIT_AUTH = 4;
 const EXIT_GATE_DENIED = 5;
+/** `drafts approve --all --wait` poll interval (F-37). */
+const WAIT_POLL_MS = 100;
 
 function configDir(): string {
   return (
@@ -72,6 +80,19 @@ function fail(message: string, code: number): never {
 }
 
 function exitFor(error: unknown): never {
+  if (error instanceof DaemonConflictError) {
+    // Exit 1, the operation-failed code: an illegal transition is a real
+    // refusal, not a usage error. The message names the state it actually
+    // was, because "you cannot approve that" without saying why is the
+    // least useful thing a CLI can print.
+    const { error: kind, from, requested, attempts } = error.detail;
+    fail(
+      kind === 'retry-limit'
+        ? `retry limit reached after ${String(attempts ?? 0)} attempt(s)`
+        : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
+      EXIT_FAILED,
+    );
+  }
   if (error instanceof DaemonUnreachableError) {
     fail(error.message, EXIT_UNREACHABLE);
   }
@@ -865,6 +886,469 @@ program
           opts.json === true
             ? JSON.stringify(report)
             : renderDisconnect(report),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+// ---- s4 Scenario 11: drafts / contacts / kill / resume (§3.8) ----------
+
+/** Fixed-width monochrome table (C-8: no color anywhere in the CLI). */
+function renderDraftTable(drafts: DraftPayload[]): string {
+  if (drafts.length === 0) return '(no drafts)';
+  const rows = drafts.map((d) => [
+    d.id,
+    d.state,
+    d.chatGuid.split(';').at(-1) ?? d.chatGuid,
+    d.body.length > 40 ? `${d.body.slice(0, 39)}…` : d.body,
+  ]);
+  const head = ['ID', 'STATE', 'CHAT', 'BODY'];
+  const widths = head.map((h, i) =>
+    Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)),
+  );
+  const line = (cells: string[]): string =>
+    cells
+      .map((c, i) => c.padEnd(widths[i] ?? 0))
+      .join('  ')
+      .trimEnd();
+  return [line(head), ...rows.map(line)].join('\n');
+}
+
+function renderDraft(d: DraftPayload): string {
+  return [
+    `id:        ${d.id}`,
+    `state:     ${d.state}`,
+    `chat:      ${d.chatGuid}`,
+    `rule:      ${d.ruleId ?? '(none)'}`,
+    `adapter:   ${d.adapterId}`,
+    `body:      ${d.body}`,
+    ...(d.body !== d.originalBody ? [`original:  ${d.originalBody}`] : []),
+    ...(d.sendNotBefore !== undefined ? [`sends at:  ${d.sendNotBefore}`] : []),
+    `expires:   ${d.expiresAt}`,
+    ...(d.error !== undefined
+      ? [`error:     ${d.error.code}: ${d.error.message}`]
+      : []),
+  ].join('\n');
+}
+
+function renderBatchReport(report: BatchReport): string {
+  return [
+    `batch:     ${report.batchId}`,
+    `sent:      ${String(report.sent)}`,
+    `failed:    ${String(report.failed)}`,
+    `recalled:  ${String(report.recalled)}`,
+  ].join('\n');
+}
+
+function renderContacts(contacts: ContactPolicyPayload[]): string {
+  if (contacts.length === 0) return '(no contact policies)';
+  return contacts.map((c) => `${c.mode.padEnd(10)} ${c.handle}`).join('\n');
+}
+
+const drafts = program
+  .command('drafts')
+  .description('review, approve and recall drafts (§3.8)');
+
+drafts
+  .command('list')
+  .description('list drafts; the queue by default (§1.6)')
+  .option('--state <state>', 'filter by draft state, e.g. expired')
+  .option('--rule <id>', 'filter by rule id')
+  .option('--contact <handle>', 'filter by contact handle')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (opts: {
+      state?: string;
+      rule?: string;
+      contact?: string;
+      json?: boolean;
+      token?: string;
+    }) => {
+      try {
+        const items = await clientOrExit(opts.token).listDrafts({
+          ...(opts.state !== undefined
+            ? { state: opts.state as DraftState }
+            : {}),
+          ...(opts.rule !== undefined ? { ruleId: opts.rule } : {}),
+          ...(opts.contact !== undefined ? { contact: opts.contact } : {}),
+        });
+        console.log(
+          opts.json === true ? JSON.stringify(items) : renderDraftTable(items),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+drafts
+  .command('show <id>')
+  .description('show one draft with its approval history')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const detail = await clientOrExit(opts.token).getDraft(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(detail)
+          : `${renderDraft(detail.draft)}\napprovals: ${String(detail.approvals.length)}`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+drafts
+  .command('create')
+  .description('(dev) compose a draft by hand, bypassing the rule pipeline')
+  .requiredOption('--chat <guid>', 'chat guid, e.g. "iMessage;-;+15551234567"')
+  .requiredOption('--body <text>', 'draft body')
+  .option('--ttl <minutes>', 'draft TTL in minutes (default 240)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (opts: {
+      chat: string;
+      body: string;
+      ttl?: string;
+      json?: boolean;
+      token?: string;
+    }) => {
+      let ttlMinutes: number | undefined;
+      if (opts.ttl !== undefined) {
+        ttlMinutes = Number(opts.ttl);
+        if (!Number.isInteger(ttlMinutes) || ttlMinutes <= 0) {
+          fail(
+            '--ttl must be a positive integer number of minutes',
+            EXIT_USAGE,
+          );
+        }
+      }
+      try {
+        const draft = await clientOrExit(opts.token).createDraft({
+          chatGuid: opts.chat,
+          body: opts.body,
+          ...(ttlMinutes !== undefined ? { ttlMinutes } : {}),
+        });
+        console.log(
+          opts.json === true ? JSON.stringify(draft) : renderDraft(draft),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+drafts
+  .command('approve [id]')
+  .description('approve a draft, or --all to approve a whole selection')
+  .option('--edit <text>', 'replace the body before sending')
+  .option('--all', 'approve every pending draft in the selection')
+  .option('--rule <id>', 'with --all: limit to one rule')
+  .option('--contact <handle>', 'with --all: limit to one contact')
+  .option('--wait', 'with --all: poll until the batch settles, then report')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      id: string | undefined,
+      opts: {
+        edit?: string;
+        all?: boolean;
+        rule?: string;
+        contact?: string;
+        wait?: boolean;
+        json?: boolean;
+        token?: string;
+      },
+    ) => {
+      const bulk = opts.all === true;
+      // An id AND --all is ambiguous in a way that matters: one of the two
+      // interpretations sends messages the user did not name.
+      if (bulk === (id !== undefined)) {
+        fail('give exactly one of <id> or --all', EXIT_USAGE);
+      }
+      const client = clientOrExit(opts.token);
+      try {
+        if (!bulk) {
+          const result = await client.approveDraft(String(id), {
+            ...(opts.edit !== undefined ? { editedBody: opts.edit } : {}),
+          });
+          console.log(
+            opts.json === true
+              ? JSON.stringify(result)
+              : renderDraft(result.draft),
+          );
+          return;
+        }
+        const batch = await client.bulkDrafts('approve', {
+          filter: {
+            ...(opts.rule !== undefined ? { rule: opts.rule } : {}),
+            ...(opts.contact !== undefined ? { contact: opts.contact } : {}),
+            ...(opts.rule === undefined && opts.contact === undefined
+              ? { all: true as const }
+              : {}),
+          },
+        });
+        if (opts.wait !== true) {
+          // Undo grace makes a synchronous report impossible without holding
+          // the request open through the window (F-37), so the default is
+          // honest: here is the batch id, ask for the report when you want it.
+          console.log(
+            opts.json === true
+              ? JSON.stringify(batch)
+              : `batch:     ${batch.batchId}\napproved:  ${String(batch.applied)} of ${String(batch.matched)}${
+                  batch.refused.length > 0
+                    ? `\nrefused:   ${String(batch.refused.length)}`
+                    : ''
+                }`,
+          );
+          return;
+        }
+        let report = await client.batchReport(batch.batchId);
+        while (report.approved + report.sending > 0) {
+          await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+          report = await client.batchReport(batch.batchId);
+        }
+        console.log(
+          opts.json === true
+            ? JSON.stringify(report)
+            : renderBatchReport(report),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+drafts
+  .command('recall [id]')
+  .description('recall an approved draft during its undo window')
+  .option('--all', 'recall every approved draft in the selection')
+  .option('--rule <id>', 'with --all: limit to one rule')
+  .option('--contact <handle>', 'with --all: limit to one contact')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      id: string | undefined,
+      opts: {
+        all?: boolean;
+        rule?: string;
+        contact?: string;
+        json?: boolean;
+        token?: string;
+      },
+    ) => {
+      const bulk = opts.all === true;
+      if (bulk === (id !== undefined)) {
+        fail('give exactly one of <id> or --all', EXIT_USAGE);
+      }
+      try {
+        const client = clientOrExit(opts.token);
+        if (!bulk) {
+          const result = await client.recallDraft(String(id));
+          console.log(
+            opts.json === true
+              ? JSON.stringify(result)
+              : renderDraft(result.draft),
+          );
+          return;
+        }
+        const batch = await client.bulkDrafts('recall', {
+          filter: {
+            ...(opts.rule !== undefined ? { rule: opts.rule } : {}),
+            ...(opts.contact !== undefined ? { contact: opts.contact } : {}),
+            ...(opts.rule === undefined && opts.contact === undefined
+              ? { all: true as const }
+              : {}),
+          },
+        });
+        console.log(
+          opts.json === true
+            ? JSON.stringify(batch)
+            : `batch:     ${batch.batchId}\nrecalled:  ${String(batch.applied)} of ${String(batch.matched)}`,
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+drafts
+  .command('reject <id>')
+  .description('reject a pending draft')
+  .option('--reason <text>', 'why (recorded in the audit log)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      id: string,
+      opts: { reason?: string; json?: boolean; token?: string },
+    ) => {
+      try {
+        const result = await clientOrExit(opts.token).rejectDraft(id, {
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        });
+        console.log(
+          opts.json === true
+            ? JSON.stringify(result)
+            : renderDraft(result.draft),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+drafts
+  .command('retry <id>')
+  .description('retry a failed draft with a fresh undo window')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).retryDraft(id);
+      console.log(
+        opts.json === true ? JSON.stringify(result) : renderDraft(result.draft),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+drafts
+  .command('redraft <id>')
+  .description('compose a fresh draft from an expired or rejected one')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).redraftDraft(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : `from:      ${result.fromDraftId}\n${renderDraft(result.draft)}`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+const contacts = program
+  .command('contacts')
+  .description('contact policies: deny / draft-only / auto (§2.4.3)');
+
+contacts
+  .command('list')
+  .description('list every contact policy')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const items = await clientOrExit(opts.token).listContacts();
+      console.log(
+        opts.json === true ? JSON.stringify(items) : renderContacts(items),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+contacts
+  .command('set <handle> <mode>')
+  .description('set a contact policy: deny | draft-only | auto')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      handle: string,
+      mode: string,
+      opts: { json?: boolean; token?: string },
+    ) => {
+      if (!['deny', 'draft-only', 'auto'].includes(mode)) {
+        fail(
+          `mode must be deny, draft-only or auto (got "${mode}")`,
+          EXIT_USAGE,
+        );
+      }
+      try {
+        const contact = await clientOrExit(opts.token).setContactPolicy(
+          handle,
+          mode as ContactMode,
+        );
+        console.log(
+          opts.json === true
+            ? JSON.stringify(contact)
+            : `${contact.mode.padEnd(10)} ${contact.handle}`,
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+contacts
+  .command('rm <handle>')
+  .description('remove a contact policy, returning it to unknown')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (handle: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).deleteContactPolicy(handle);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : `removed ${result.deleted}`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+program
+  .command('kill')
+  .description('emergency stop: cancel in-grace drafts and refuse new sends')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).setKillSwitch(true);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : `kill switch: on\ncancelled:   ${String(result.cancelled.length)} draft(s)`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+program
+  .command('resume')
+  .description('lift the kill switch (does not revive what it stopped)')
+  .option('--circuit', 'also reset the circuit breaker')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (opts: { circuit?: boolean; json?: boolean; token?: string }) => {
+      if (opts.circuit === true) {
+        // An honest refusal beats a flag that silently does nothing: a user
+        // who thinks they reset the breaker would stop looking for the
+        // reason sends are still being refused.
+        fail(
+          '--circuit is not available yet: circuit breaker lands in S6',
+          EXIT_USAGE,
+        );
+      }
+      try {
+        const result = await clientOrExit(opts.token).setKillSwitch(false);
+        console.log(
+          opts.json === true ? JSON.stringify(result) : 'kill switch: off',
         );
       } catch (error) {
         exitFor(error);

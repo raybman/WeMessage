@@ -297,6 +297,134 @@ export interface DisconnectReportPayload {
   manualRevocation: readonly string[];
 }
 
+/**
+ * s4 DTOs (Scenario 11) — client-local, same "no @wemessage/core dep"
+ * convention as every DTO above.
+ */
+export type DraftState =
+  | 'pending'
+  | 'approved'
+  | 'sending'
+  | 'sent'
+  | 'rejected'
+  | 'expired'
+  | 'superseded'
+  | 'recalled'
+  | 'failed';
+
+export type ContactMode = 'deny' | 'draft-only' | 'auto';
+
+export interface DraftPayload {
+  id: string;
+  inboundGuid: string | null;
+  chatGuid: string;
+  ruleId: string | null;
+  adapterId: string;
+  idempotencyKey: string;
+  body: string;
+  originalBody: string;
+  state: DraftState;
+  stateChangedAt: string;
+  sendNotBefore?: string;
+  expiresAt: string;
+  createdAt: string;
+  error?: { code: string; message: string; at: string };
+}
+
+export interface DraftFilter {
+  state?: DraftState;
+  ruleId?: string;
+  contact?: string;
+  batchId?: string;
+}
+
+export interface DraftCreateInput {
+  chatGuid: string;
+  body: string;
+  ttlMinutes?: number;
+}
+
+export interface ApprovalPayload {
+  id: string;
+  draftId: string;
+  action: 'approve' | 'reject' | 'recall';
+  editedBody?: string;
+  batchId?: string;
+  at: string;
+}
+
+export interface DraftDetail {
+  draft: DraftPayload;
+  approvals: ApprovalPayload[];
+}
+
+export interface DraftActionResult {
+  draft: DraftPayload;
+  approvalId: string;
+}
+
+export interface RedraftResult {
+  fromDraftId: string;
+  draft: DraftPayload;
+}
+
+/** Exactly one of `ids` or `filter`, mirroring the route's own refusal. */
+export type BulkSelector =
+  | { ids: string[] }
+  | { filter: { all?: true; rule?: string; contact?: string } };
+
+export interface BulkResult {
+  batchId: string;
+  matched: number;
+  applied: number;
+  appliedIds: string[];
+  refused: Array<{ id: string; error: string }>;
+}
+
+export interface BatchReport {
+  batchId: string;
+  approved: number;
+  sending: number;
+  sent: number;
+  failed: number;
+  recalled: number;
+}
+
+export interface KillSwitchResult {
+  key: string;
+  on: boolean;
+  version: number;
+  cancelled: string[];
+}
+
+export interface ContactPolicyPayload {
+  handle: string;
+  displayName?: string;
+  mode: ContactMode;
+  updatedAt: string;
+}
+
+/**
+ * A 409 from the draft surface. The daemon uses 409 for exactly one class of
+ * thing — "the draft is not in a state where you may do that" — and the body
+ * carries which state it actually was. Collapsing that into a generic
+ * DaemonRequestError would leave a CLI unable to say anything more useful
+ * than "request failed", for the most common mistake a user can make.
+ */
+export class DaemonConflictError extends DaemonRequestError {
+  constructor(
+    readonly detail: {
+      error: string;
+      from?: DraftState;
+      requested?: string;
+      attempts?: number;
+    },
+  ) {
+    super(409, JSON.stringify(detail));
+    this.name = 'DaemonConflictError';
+  }
+}
+
 export interface WeMessageClient {
   health(): Promise<{ status: string }>;
   status(): Promise<StatusPayload>;
@@ -323,6 +451,35 @@ export interface WeMessageClient {
   send(input: SendInput): Promise<SendResult>;
   connect(): Promise<DoctorReportPayload>;
   disconnect(input?: DisconnectInput): Promise<DisconnectReportPayload>;
+
+  // s4-execution Scenario 11: the draft/contact/kill surface.
+  listDrafts(filter?: DraftFilter): Promise<DraftPayload[]>;
+  getDraft(id: string): Promise<DraftDetail>;
+  createDraft(input: DraftCreateInput): Promise<DraftPayload>;
+  approveDraft(
+    id: string,
+    opts?: { editedBody?: string },
+  ): Promise<DraftActionResult>;
+  rejectDraft(
+    id: string,
+    opts?: { reason?: string },
+  ): Promise<DraftActionResult>;
+  recallDraft(id: string): Promise<DraftActionResult>;
+  retryDraft(id: string): Promise<DraftActionResult>;
+  redraftDraft(id: string): Promise<RedraftResult>;
+  bulkDrafts(
+    action: 'approve' | 'recall',
+    selector: BulkSelector,
+  ): Promise<BulkResult>;
+  batchReport(batchId: string): Promise<BatchReport>;
+  setKillSwitch(on: boolean): Promise<KillSwitchResult>;
+  listContacts(): Promise<ContactPolicyPayload[]>;
+  setContactPolicy(
+    handle: string,
+    mode: ContactMode,
+    opts?: { displayName?: string },
+  ): Promise<ContactPolicyPayload>;
+  deleteContactPolicy(handle: string): Promise<{ deleted: string }>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -331,7 +488,7 @@ export function createClient(options: ClientOptions): WeMessageClient {
   // JSON body when one is given, and 204 (route 5 delete) resolving to
   // `undefined` rather than an empty-body JSON.parse crash.
   const request = async (
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
   ): Promise<unknown> => {
@@ -371,6 +528,22 @@ export function createClient(options: ClientOptions): WeMessageClient {
       }
       throw new DaemonAuthError(res.status);
     }
+    if (res.status === 409) {
+      // Preserve the shape rather than the string: {from, requested} is what
+      // lets a caller say "that draft was already sent" instead of "409".
+      const text = await res.text();
+      try {
+        const parsed = JSON.parse(text) as { error?: unknown };
+        if (typeof parsed?.error === 'string') {
+          throw new DaemonConflictError(
+            parsed as ConstructorParameters<typeof DaemonConflictError>[0],
+          );
+        }
+      } catch (err) {
+        if (err instanceof DaemonConflictError) throw err;
+      }
+      throw new DaemonRequestError(409, text);
+    }
     if (!res.ok) {
       throw new DaemonRequestError(res.status, await res.text());
     }
@@ -383,10 +556,16 @@ export function createClient(options: ClientOptions): WeMessageClient {
     request('POST', path, body);
   const patch = (path: string, body?: unknown): Promise<unknown> =>
     request('PATCH', path, body);
+  const put = (path: string, body?: unknown): Promise<unknown> =>
+    request('PUT', path, body);
   const del = (path: string): Promise<unknown> => request('DELETE', path);
 
   const rulePath = (id: string): string =>
     `/v1/rules/${encodeURIComponent(id)}`;
+  const draftPath = (id: string): string =>
+    `/v1/drafts/${encodeURIComponent(id)}`;
+  const contactPath = (handle: string): string =>
+    `/v1/contacts/${encodeURIComponent(handle)}`;
 
   return {
     health: () => get('/v1/health') as Promise<{ status: string }>,
@@ -434,6 +613,58 @@ export function createClient(options: ClientOptions): WeMessageClient {
       post('/v1/disconnect', {
         purge: input?.purge ?? false,
       }) as Promise<DisconnectReportPayload>,
+
+    listDrafts: async (filter) => {
+      const qs = new URLSearchParams();
+      if (filter?.state !== undefined) qs.set('state', filter.state);
+      if (filter?.ruleId !== undefined) qs.set('ruleId', filter.ruleId);
+      if (filter?.contact !== undefined) qs.set('contact', filter.contact);
+      if (filter?.batchId !== undefined) qs.set('batchId', filter.batchId);
+      const suffix = qs.toString();
+      const res = (await get(
+        `/v1/drafts${suffix.length > 0 ? `?${suffix}` : ''}`,
+      )) as { drafts: DraftPayload[] };
+      return res.drafts;
+    },
+    getDraft: (id) => get(draftPath(id)) as Promise<DraftDetail>,
+    createDraft: async (input) =>
+      ((await post('/v1/drafts', input)) as { draft: DraftPayload }).draft,
+    approveDraft: (id, opts) =>
+      post(`${draftPath(id)}/approve`, {
+        ...(opts?.editedBody !== undefined
+          ? { editedBody: opts.editedBody }
+          : {}),
+      }) as Promise<DraftActionResult>,
+    rejectDraft: (id, opts) =>
+      post(`${draftPath(id)}/reject`, {
+        ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
+      }) as Promise<DraftActionResult>,
+    recallDraft: (id) =>
+      post(`${draftPath(id)}/recall`) as Promise<DraftActionResult>,
+    retryDraft: (id) =>
+      post(`${draftPath(id)}/retry`) as Promise<DraftActionResult>,
+    redraftDraft: (id) =>
+      post(`${draftPath(id)}/redraft`) as Promise<RedraftResult>,
+    bulkDrafts: (action, selector) =>
+      post('/v1/drafts/bulk', { action, ...selector }) as Promise<BulkResult>,
+    batchReport: (batchId) =>
+      get(`/v1/batches/${encodeURIComponent(batchId)}`) as Promise<BatchReport>,
+    setKillSwitch: (on) =>
+      post('/v1/toggles/kill-switch', { on }) as Promise<KillSwitchResult>,
+    listContacts: async () =>
+      ((await get('/v1/contacts')) as { contacts: ContactPolicyPayload[] })
+        .contacts,
+    setContactPolicy: async (handle, mode, opts) =>
+      (
+        (await put(contactPath(handle), {
+          mode,
+          ...(opts?.displayName !== undefined
+            ? { displayName: opts.displayName }
+            : {}),
+        })) as { contact: ContactPolicyPayload }
+      ).contact,
+    deleteContactPolicy: (handle) =>
+      del(contactPath(handle)) as Promise<{ deleted: string }>,
 
     events(onEvent) {
       const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events`;

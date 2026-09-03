@@ -475,16 +475,32 @@ describe('arch invariants (dependency-cruiser)', () => {
         .sort();
     }
 
-    // (b) no production file computes a setTimeout horizon from
-    // expiresAt/sendNotBefore yet (heuristic: both strings present in the
-    // same file — reviewed by hand, not a precise dataflow check).
+    /**
+     * (b) no production file computes a setTimeout horizon from
+     * expiresAt/sendNotBefore. Still a heuristic, not a dataflow check.
+     *
+     * NARROWED in s4 Scenario 11. The check was "both strings appear anywhere
+     * in the same file", which cannot tell a scheduled horizon from a file
+     * that happens to do both unrelated things. packages/cli/src/bin.ts now
+     * prints `sendNotBefore` as a field label in `drafts show` and, 200 lines
+     * away, polls `batchReport` on a FIXED 100ms interval (F-37) — no deadline
+     * is derived from anything. Widening the guard's blind spot to keep that
+     * file quiet would have been the wrong repair; instead the guard now
+     * requires PROXIMITY, because deriving a horizon and passing it to
+     * setTimeout is by nature local: you compute the delta and schedule it in
+     * the same handful of lines. The (b) teeth probe below plants exactly that
+     * shape and still trips it.
+     */
+    const HORIZON_WINDOW_LINES = 5;
     function computedHorizonSetTimeoutOffenders(): string[] {
       return productionSrcFiles().filter((f) => {
-        const content = readFileSync(join(repoRoot, f), 'utf8');
-        return (
-          content.includes('setTimeout') &&
-          /(expiresAt|sendNotBefore)/.test(content)
-        );
+        const lines = readFileSync(join(repoRoot, f), 'utf8').split('\n');
+        return lines.some((line, i) => {
+          if (!line.includes('setTimeout')) return false;
+          const from = Math.max(0, i - HORIZON_WINDOW_LINES);
+          const window = lines.slice(from, i + HORIZON_WINDOW_LINES + 1);
+          return window.some((w) => /(expiresAt|sendNotBefore)/.test(w));
+        });
       });
     }
 

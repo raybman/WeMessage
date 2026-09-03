@@ -163,6 +163,9 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const server = await buildServer({
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink },
+    // s5 Scenario 4: the adapter registry rides along in the harness so the
+    // agent-era suites boot the same server the composed daemon does.
+    adapters: { store, clock: clockCtl.clock, sink },
   });
   servers.push(server);
   if (server.token === null) throw new Error('harness: no token');

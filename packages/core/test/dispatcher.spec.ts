@@ -162,6 +162,7 @@ function makeStore(cfg: {
     updateAdapter: () => undefined,
     deleteAdapter: () => false,
     setAdapterTokenHash: () => undefined,
+    rotateAdapterTokenHash: () => undefined,
     findAdapterByToken: () => null,
     setAdapterHealth: () => undefined,
     rawScanForToken: () => [],

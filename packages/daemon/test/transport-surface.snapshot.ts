@@ -53,8 +53,14 @@ export const ROUTE_TABLE: readonly string[] = [
   // #13 deliberate (s4 Scenario 10): §2.4.3 contact policies. DELETE
   // REMOVES the row rather than writing 'deny' — unknown and deny refuse
   // the same next message, but only one of them is a decision.
+  // #14 deliberate (s5 Scenario 4): the adapter registry. Six routes plus
+  // the two auto-HEAD twins of the GETs, 43 -> 51. The token a POST returns
+  // is shown once and is not readable from any of these routes afterwards.
+  'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
+  'GET /v1/adapters',
+  'GET /v1/adapters/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
   'GET /v1/batches/:id',
@@ -68,6 +74,8 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/rules/:id',
   'GET /v1/rules/:id/dry-run',
   'GET /v1/status',
+  'HEAD /v1/adapters',
+  'HEAD /v1/adapters/:id',
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
   'HEAD /v1/batches/:id',
@@ -81,7 +89,10 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/rules/:id',
   'HEAD /v1/rules/:id/dry-run',
   'HEAD /v1/status',
+  'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
+  'POST /v1/adapters',
+  'POST /v1/adapters/:id/token',
   'POST /v1/connect',
   'POST /v1/disconnect',
   'POST /v1/drafts',

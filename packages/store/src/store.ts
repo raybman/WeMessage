@@ -1097,6 +1097,24 @@ export class SqliteStore implements Store {
       .run(hash, JSON.stringify(config), id);
   }
 
+  rotateAdapterTokenHash(
+    id: string,
+    hash: string,
+    prevExpiresAt: IsoUtc,
+  ): void {
+    const row = this.db
+      .prepare('SELECT token_hash, config FROM adapters WHERE id = ?')
+      .get(id) as { token_hash: string | null; config: string } | undefined;
+    if (row === undefined) throw new Error(`unknown adapter: ${id}`);
+    this.setAdapterTokenHash(
+      id,
+      hash,
+      row.token_hash === null
+        ? null
+        : { hash: row.token_hash, expiresAt: prevExpiresAt },
+    );
+  }
+
   findAdapterByToken(token: string, now: IsoUtc): AdapterRecord | null {
     const rows = this.db
       .prepare(

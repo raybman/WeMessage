@@ -120,6 +120,18 @@ export type AuditEvent =
   // scheduler/gate revisions that produce them are built (Sc 4, 5, 6, 8, 9,
   // 10); the vocabulary itself ships now so the transition table (Scenario 2)
   // and its tests have somewhere to land every outcome.
+  // s5 Scenario 4: adapter registry lifecycle. Separate variants rather than
+  // one 'adapter.changed' with a verb field, matching the rule.* precedent:
+  // the audit reader greps for what happened, not for a payload discriminator.
+  | { type: 'adapter.created'; adapterId: string; kind: string }
+  | {
+      type: 'adapter.updated';
+      adapterId: string;
+      from: { enabled: boolean; displayName: string };
+      to: { enabled: boolean; displayName: string };
+    }
+  | { type: 'adapter.token-rotated'; adapterId: string }
+  | { type: 'adapter.deleted'; adapterId: string }
   | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)

@@ -278,6 +278,12 @@ export interface Store {
     prev: { hash: string; expiresAt: IsoUtc } | null,
   ): void;
   /**
+   * Rotation done inside the store, because the outgoing hash must move into
+   * the carry-over slot without ever being handed to a caller: the hash does
+   * not leave here, so neither does the decision about what was live.
+   */
+  rotateAdapterTokenHash(id: string, hash: string, prevExpiresAt: IsoUtc): void;
+  /**
    * Answers "whose token is this", including for a DISABLED adapter — the
    * transport refuses it, and it can only audit the refusal if it knows who.
    * A NULL hash matches nothing, ever (§2.6 fail-closed).

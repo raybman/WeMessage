@@ -355,6 +355,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       updateAdapter: () => undefined,
       deleteAdapter: () => false,
       setAdapterTokenHash: () => undefined,
+      rotateAdapterTokenHash: () => undefined,
       findAdapterByToken: () => null,
       setAdapterHealth: () => undefined,
       rawScanForToken: () => [],

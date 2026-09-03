@@ -16,6 +16,14 @@ import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
+import { registerAdapterRoutes } from './routes/adapters.js';
+
+/**
+ * The §2.6 local API port, used only to render the connect command an
+ * operator pastes. A server bound to an ephemeral port in tests renders this
+ * one, which is what an operator would actually type.
+ */
+const DEFAULT_ADAPTER_PORT = 47100;
 import { registerDraftRoutes } from './routes/drafts.js';
 import { registerToggleRoutes } from './routes/toggles.js';
 import { registerContactRoutes } from './routes/contacts.js';
@@ -81,6 +89,13 @@ export interface DaemonOptions {
    * them when the composed daemon passes several.
    */
   drafts?: { store: Store; clock: Clock; sink?: AuditSink };
+
+  /**
+   * s5-execution Scenario 4: the adapter registry surface. Separate opt-in
+   * from `drafts` because an operator can run the human compose surface with
+   * no agents registered at all, which is the S1-S4 product.
+   */
+  adapters?: { store: Store; clock: Clock; sink?: AuditSink; port?: number };
 }
 
 export interface DaemonServer {
@@ -173,7 +188,8 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   // One §1.8 chokepoint shared across rules/audit AND doctor/send when both
   // are provided (daemon.ts always provides both, with the same explicit
   // `sink` on each); either can also stand alone with its own sink in tests.
-  const sinkSource = opts.rules ?? opts.send ?? opts.connection ?? opts.drafts;
+  const sinkSource =
+    opts.rules ?? opts.send ?? opts.connection ?? opts.drafts ?? opts.adapters;
   const sink = sinkSource
     ? (sinkSource.sink ??
       createAuditSink({ store: sinkSource.store, clock: sinkSource.clock }))
@@ -244,6 +260,16 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,
+    });
+  }
+
+  if (opts.adapters && sink) {
+    // §1.6 adapter registry (s5 Scenario 4). Ratchet update #14.
+    registerAdapterRoutes(app, {
+      store: opts.adapters.store,
+      clock: opts.adapters.clock,
+      sink,
+      port: opts.adapters.port ?? DEFAULT_ADAPTER_PORT,
     });
   }
 

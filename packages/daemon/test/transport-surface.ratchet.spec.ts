@@ -124,6 +124,9 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
       // s4 Scenario 5: the drafts block must be passed here or the ratchet
       // silently under-covers the surface it exists to pin.
       drafts: { store, clock },
+      // s5 Scenario 4: same obligation as drafts — the adapter registry is
+      // real reachable surface, so the ratchet has to see it.
+      adapters: { store, clock },
       send: {
         store,
         reader: createUnusedChatDbReader(),

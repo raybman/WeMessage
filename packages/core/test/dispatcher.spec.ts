@@ -136,6 +136,8 @@ function makeStore(cfg: {
     },
     updateDraftBody: () => undefined,
     findDraftByIdempotencyKey: () => null,
+    // s4 Scenario 5: the approval history read behind GET /v1/drafts/:id.
+    listApprovals: () => [],
     latestApproveApproval: () => null,
     listGraceElapsed: () => [],
     listExpiredPending: () => [],

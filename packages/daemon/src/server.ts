@@ -16,6 +16,7 @@ import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
+import { registerDraftRoutes } from './routes/drafts.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import type { DoctorProbes } from './doctor.js';
@@ -70,6 +71,14 @@ export interface DaemonOptions {
     purge: () => void;
     rearmWatcher: () => Promise<void>;
   };
+
+  /**
+   * s4-execution Scenario 5: when provided, registers the §1.6 draft
+   * review surface (create/list/show/approve/reject). Optional on the same
+   * terms as `rules`/`send`/`connection`, and shares the ONE §1.8 sink with
+   * them when the composed daemon passes several.
+   */
+  drafts?: { store: Store; clock: Clock; sink?: AuditSink };
 }
 
 export interface DaemonServer {
@@ -162,7 +171,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   // One §1.8 chokepoint shared across rules/audit AND doctor/send when both
   // are provided (daemon.ts always provides both, with the same explicit
   // `sink` on each); either can also stand alone with its own sink in tests.
-  const sinkSource = opts.rules ?? opts.send ?? opts.connection;
+  const sinkSource = opts.rules ?? opts.send ?? opts.connection ?? opts.drafts;
   const sink = sinkSource
     ? (sinkSource.sink ??
       createAuditSink({ store: sinkSource.store, clock: sinkSource.clock }))
@@ -207,6 +216,15 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       clock: opts.send.clock,
       delay: opts.send.delay,
       doctorProbes: opts.send.doctorProbes,
+      sink,
+    });
+  }
+
+  if (opts.drafts && sink) {
+    // §1.6 routes: the draft queue humans actually review through.
+    registerDraftRoutes(app, {
+      store: opts.drafts.store,
+      clock: opts.drafts.clock,
       sink,
     });
   }

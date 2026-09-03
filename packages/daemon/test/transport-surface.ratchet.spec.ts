@@ -121,6 +121,9 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
     const server = await buildServer({
       configDir: dir,
       rules: { store, clock },
+      // s4 Scenario 5: the drafts block must be passed here or the ratchet
+      // silently under-covers the surface it exists to pin.
+      drafts: { store, clock },
       send: {
         store,
         reader: createUnusedChatDbReader(),
@@ -168,7 +171,14 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
     for (const file of productionSourceFiles()) {
       if (!file.includes(`${sep}daemon${sep}src${sep}`)) continue;
       const text = readFileSync(file, 'utf8');
-      for (const match of text.matchAll(/event: ['"]([a-z.]+)['"]/g)) {
+      // s4 Scenario 5: require a dotted, namespaced name. Every member of
+      // the GatewayEvent union is `noun.verb`, while an unrelated `event:`
+      // property can legitimately hold a bare word — the audit shape for
+      // `draft.illegal-transition` carries `event: 'approve'`. Matching bare
+      // words made this guard report audit fields as wire events.
+      for (const match of text.matchAll(
+        /event: ['"]([a-z]+(?:\.[a-z]+)+)['"]/g,
+      )) {
         found.add(match[1] as string);
       }
     }

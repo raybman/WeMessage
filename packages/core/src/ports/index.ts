@@ -196,6 +196,15 @@ export interface Store {
    * (INV-2: never synthesize an approval). Latest `action:'approve'` row for
    * the draft, or null.
    */
+  /**
+   * s4 Scenario 5 (deliberate §1.5 extension beyond Scenario 3's list): the
+   * full approval history for one draft, oldest first, for
+   * `GET /v1/drafts/:id`. Distinct from `latestApproveApproval`, which
+   * answers "what authorizes THIS send" — this answers "what happened to
+   * this draft," rejects and recalls included.
+   */
+  listApprovals(draftId: Ulid): Approval[];
+
   latestApproveApproval(draftId: Ulid): Approval | null;
   /**
    * Grace-elapsed sweep: state='approved' AND send_not_before IS NOT NULL

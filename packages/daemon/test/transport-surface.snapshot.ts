@@ -48,6 +48,8 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/audit',
   'GET /v1/audit/verify',
   'GET /v1/doctor',
+  'GET /v1/drafts',
+  'GET /v1/drafts/:id',
   'GET /v1/events',
   'GET /v1/health',
   'GET /v1/rules',
@@ -57,6 +59,8 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
   'HEAD /v1/doctor',
+  'HEAD /v1/drafts',
+  'HEAD /v1/drafts/:id',
   'HEAD /v1/events',
   'HEAD /v1/health',
   'HEAD /v1/rules',
@@ -66,6 +70,9 @@ export const ROUTE_TABLE: readonly string[] = [
   'PATCH /v1/rules/:id',
   'POST /v1/connect',
   'POST /v1/disconnect',
+  'POST /v1/drafts',
+  'POST /v1/drafts/:id/approve',
+  'POST /v1/drafts/:id/reject',
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
   'POST /v1/send',
@@ -87,6 +94,7 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'draft.approved',
   'draft.created',
   'draft.failed',
+  'draft.rejected',
   'draft.sent',
   'gate.denied',
   'gateway.disconnected',
@@ -106,12 +114,16 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * (Deliberate update #7, Scenario 9: connection.ts's disconnectDaemon
  * constructs 'gateway.disconnected' — already added to the allowed
  * vocabulary above.)
+ * (Deliberate update #8, s4 Scenario 5: routes/drafts.ts constructs
+ * 'draft.rejected' — the one new event literal of this slice, added to both
+ * lists in the same reviewed diff as the routes that emit it.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
   'draft.approved',
   'draft.created',
   'draft.failed',
+  'draft.rejected',
   'draft.sent',
   'gate.denied',
   'gateway.disconnected',

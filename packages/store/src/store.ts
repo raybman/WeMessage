@@ -323,6 +323,7 @@ export class SqliteStore implements Store {
   readonly #clearAdapterTokensStmt: Database.Statement;
   // --- S4 §1.5 (Scenario 3) ---
   readonly #findDraftByIdem: Database.Statement;
+  readonly #listApprovals: Database.Statement;
   readonly #latestApproveApproval: Database.Statement;
   readonly #listGraceElapsed: Database.Statement;
   readonly #listExpiredPending: Database.Statement;
@@ -538,6 +539,9 @@ export class SqliteStore implements Store {
     // --- S4 §1.5 body extensions (s4-execution Scenario 3) ---
     this.#findDraftByIdem = this.db.prepare(
       'SELECT * FROM drafts WHERE adapter_id = ? AND idempotency_key = ?',
+    );
+    this.#listApprovals = this.db.prepare(
+      'SELECT * FROM approvals WHERE draft_id = ? ORDER BY at ASC, id ASC',
     );
     this.#latestApproveApproval = this.db.prepare(
       'SELECT id, draft_id, action, actor, batch_id, edited_body, at ' +
@@ -1030,6 +1034,12 @@ export class SqliteStore implements Store {
     const row = this.#findDraftByIdem.get(adapterId, key) as
       DraftRow | undefined;
     return row ? draftFromRow(row) : null;
+  }
+
+  listApprovals(draftId: string): Approval[] {
+    return (this.#listApprovals.all(draftId) as ApprovalRow[]).map(
+      approvalFromRow,
+    );
   }
 
   latestApproveApproval(draftId: Ulid): Approval | null {

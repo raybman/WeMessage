@@ -44,6 +44,7 @@ import {
   type DoctorProbes,
   type RunningDaemon,
 } from '@wemessage/daemon';
+import { createUnusedSendBackend } from './helpers/loopback-backend.js';
 
 const clock: Clock = {
   now: () => new Date().toISOString(),
@@ -147,6 +148,8 @@ async function boot(opts?: {
     clock,
     watcher,
     doctorProbes: fullyConnectedProbes,
+    backend: createUnusedSendBackend(),
+    backendName: 'unused',
     ...(opts?.createAuditSink ? { createAuditSink: opts.createAuditSink } : {}),
   });
   cleanups.push(() => daemon.stop());

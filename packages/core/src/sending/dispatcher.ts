@@ -284,7 +284,8 @@ export async function dispatchApproved(
     if (!verified.verified) {
       return fail(store, clock, actor, draftId, {
         code: 'unverified',
-        message: 'send accepted but not verified in chat.db within budget',
+        message:
+          'send accepted but could not confirm in Messages history within 10s',
         at: clock.now(),
       });
     }

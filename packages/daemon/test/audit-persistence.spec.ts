@@ -22,6 +22,7 @@ import {
   type DoctorProbes,
   type RunningDaemon,
 } from '@wemessage/daemon';
+import { createUnusedSendBackend } from './helpers/loopback-backend.js';
 
 const clock: Clock = {
   now: () => new Date().toISOString(),
@@ -110,6 +111,8 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       clock,
       watcher: idleWatcher,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     cleanups.push(() => daemon.stop());
 
@@ -143,6 +146,8 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       clock,
       watcher: idleWatcher,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     cleanups.push(() => daemon.stop());
 
@@ -177,6 +182,8 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       clock,
       watcher,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
       createAuditSink: (deps) => {
         const real = createAuditSink(deps);
         return {
@@ -206,6 +213,8 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       clock,
       watcher: idleWatcher,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     cleanups.push(() => daemon.stop());
     const rows = trail(daemon).filter(

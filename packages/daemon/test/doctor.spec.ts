@@ -23,7 +23,7 @@
  * gate (b)) proves `GET /v1/status` and the WS greeting both reflect the
  * probe-driven state end to end.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,17 +34,24 @@ import {
 } from '@wemessage/core';
 import { createChatDb } from '@wemessage/fixtures';
 import { createClient } from '@wemessage/client';
+import { openStore, type SqliteStore } from '@wemessage/store';
 import type { GatewayEventPayload } from '@wemessage/protocol';
 import {
+  buildServer,
   evaluateDoctor,
   macOsMajorFromRelease,
   readConnectionState,
   runDoctor,
   startDaemon,
   type AuditSink,
+  type DaemonServer,
   type DoctorProbes,
   type DoctorSnapshot,
 } from '@wemessage/daemon';
+import {
+  createUnusedChatDbReader,
+  createUnusedSendBackend,
+} from './helpers/loopback-backend.js';
 
 // Verbatim copy pinned from doctor.ts's own module-private constants (its
 // header comment commits to keeping these in sync with this file).
@@ -408,6 +415,8 @@ describe('startDaemon integration: probe-driven state reaches GET /v1/status + t
       clock: fixedClock,
       watcher: idleWatcher,
       doctorProbes: deniedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     cleanups.push(() => daemon.stop());
     const token = daemon.server.token;
@@ -432,5 +441,130 @@ describe('startDaemon integration: probe-driven state reaches GET /v1/status + t
 
     const status = await client.status();
     expect(status.connectionState).toBe('read-only');
+  });
+});
+
+describe('GET /v1/doctor (s3-execution Scenario 8, §1.6 route): thin wrapper over runDoctor', () => {
+  const dirs: string[] = [];
+  const stores: SqliteStore[] = [];
+  const servers: DaemonServer[] = [];
+
+  afterEach(async () => {
+    for (const s of servers.splice(0)) await s.app.close();
+    for (const s of stores.splice(0)) s.close();
+    for (const d of dirs.splice(0)) {
+      chmodSync(d, 0o700); // undo any 0o500 fixture before recursive delete
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  async function boot(probes: DoctorProbes): Promise<{
+    server: DaemonServer;
+    store: SqliteStore;
+    headers: { authorization: string };
+  }> {
+    const dir = mkdtempSync(join(tmpdir(), 'wm-doctor-route-'));
+    dirs.push(dir);
+    const store = openStore({ dir, clock: fixedClock });
+    stores.push(store);
+    const server = await buildServer({
+      configDir: dir,
+      send: {
+        store,
+        reader: createUnusedChatDbReader(),
+        backend: createUnusedSendBackend(),
+        backendName: 'unused',
+        clock: fixedClock,
+        delay: () => Promise.resolve(),
+        doctorProbes: probes,
+      },
+    });
+    servers.push(server);
+    if (server.token === null) throw new Error('harness: no token');
+    return {
+      server,
+      store,
+      headers: { authorization: `Bearer ${server.token}` },
+    };
+  }
+
+  it('returns the DoctorReport shape and persists/audits/broadcasts the derived state (proven by one row)', async () => {
+    const { server, store, headers } = await boot({
+      osMajor: () => 15,
+      fda: async () => 'ok',
+      automation: async () => 'denied',
+      messagesRunning: async () => true,
+    });
+
+    const res = await server.app.inject({
+      method: 'GET',
+      url: '/v1/doctor',
+      headers,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      state: string;
+      checks: unknown[];
+      probedAt: string;
+    };
+    expect(body.state).toBe('read-only');
+    expect(Array.isArray(body.checks)).toBe(true);
+    expect(body.probedAt).toBe('2026-09-01T00:00:00.000Z');
+    // one row is enough to prove this route reuses the Scenario 7 engine
+    // (probe-derive-persist-audit-broadcast), not a bespoke reimplementation.
+    expect(store.getSetting(SETTING_CONNECTION_STATE)).toBe('read-only');
+  });
+
+  it('inherits the fail-closed auth posture: no bearer -> 401', async () => {
+    const { server } = await boot({
+      osMajor: () => 15,
+      fda: async () => 'ok',
+      automation: async () => 'ok',
+      messagesRunning: async () => true,
+    });
+
+    const res = await server.app.inject({ method: 'GET', url: '/v1/doctor' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('inherits the fail-closed auth posture: no obtainable token -> 503 (first-run self-heal fails on an unwritable configDir)', async () => {
+    // Store data lives in its own writable dir; configDir (token-only) is
+    // made unwritable so loadOrCreateToken's first-run self-heal fails —
+    // the same Part-A recipe as auth-failclosed.spec.ts.
+    const storeDir = mkdtempSync(join(tmpdir(), 'wm-doctor-route-store-'));
+    dirs.push(storeDir);
+    const configDir = mkdtempSync(join(tmpdir(), 'wm-doctor-route-cfg-'));
+    dirs.push(configDir);
+    const store = openStore({ dir: storeDir, clock: fixedClock });
+    stores.push(store);
+    chmodSync(configDir, 0o500); // unwritable: first-run token generation must fail
+    const server = await buildServer({
+      configDir,
+      send: {
+        store,
+        reader: createUnusedChatDbReader(),
+        backend: createUnusedSendBackend(),
+        backendName: 'unused',
+        clock: fixedClock,
+        delay: () => Promise.resolve(),
+        doctorProbes: {
+          osMajor: () => 15,
+          fda: async () => 'ok',
+          automation: async () => 'ok',
+          messagesRunning: async () => true,
+        },
+      },
+    });
+    servers.push(server);
+    expect(server.token).toBeNull();
+
+    const res = await server.app.inject({
+      method: 'GET',
+      url: '/v1/doctor',
+      headers: { authorization: 'Bearer whatever' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toEqual({ error: 'no-auth-token' });
   });
 });

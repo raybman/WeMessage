@@ -76,7 +76,23 @@ export interface StartDaemonOptions {
    * test) to pass an explicit fake; main.ts composes the real four.
    */
   doctorProbes: DoctorProbes;
+  /**
+   * s3-execution Scenario 8: the SendBackend `POST /v1/send` dispatches
+   * through. REQUIRED for the same reason doctorProbes is: no safe
+   * production default exists (a real backend shells out to the real
+   * AppleScript runner binary, exactly the class of risk test/arch.spec.ts's
+   * gate (a)/(b) forbid in a test), and main.ts always has a real one to
+   * pass anyway.
+   */
+  backend: SendBackend;
+  /** Named alongside backend (audit `send.attempted` rows record it). */
+  backendName: string;
+  /** Injected sleep for dispatchApproved's verify-poll; defaults to real setTimeout. */
+  delay?: (ms: number) => Promise<void>;
 }
+
+const realDelay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * S1's in-memory recovery trail -> the persisted §2.4.4 audit vocabulary
@@ -181,6 +197,13 @@ export async function startDaemon(
     sink.append(toRecoveryAuditEvent(entry), systemActor('recovery'));
   }
   bootLog.push('recovery');
+
+  // Long-lived reader for POST /v1/send (Scenario 8): distinct from
+  // recoveryReader above (opened, used, closed within phase 1). This one
+  // lives for the daemon's process lifetime, closed in stop() below.
+  const sendReader = createChatDbReader(options.chatDbPath, {
+    clock: options.clock,
+  });
 
   // ---- doctor: capability probes (Scenario 7, §2.2.3) ----
   // Runs after recovery, before the watcher/listen phases — connection
@@ -316,6 +339,17 @@ export async function startDaemon(
     configDir: options.configDir,
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
     rules: { store, clock: options.clock, sink },
+    // s3-execution Scenario 8: doctor/send routes, same shared sink.
+    send: {
+      store,
+      reader: sendReader,
+      backend: options.backend,
+      backendName: options.backendName,
+      clock: options.clock,
+      delay: options.delay ?? realDelay,
+      doctorProbes: options.doctorProbes,
+      sink,
+    },
     getStatus: () => ({
       // s3 Scenario 7: probe-derived, persisted state (was the in-memory
       // scanHealthy flag through S1/S2).
@@ -356,6 +390,7 @@ export async function startDaemon(
       trigger.stop();
       for (const socket of sockets) socket.close();
       await server.app.close();
+      sendReader.close();
       store.close();
     },
   };

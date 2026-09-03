@@ -11,7 +11,7 @@ import {
   createClockSkewWakeSignal,
   createNodeFsWatcher,
 } from '@wemessage/ingest';
-import type { ExecFn } from '@wemessage/sendkit';
+import { AppleScriptSendBackend, type ExecFn } from '@wemessage/sendkit';
 import { startDaemon } from './daemon.js';
 import { createRealDoctorProbes } from './doctor.js';
 
@@ -70,6 +70,12 @@ const daemon = await startDaemon({
     chatDbPath,
     exec: realExec,
   }),
+  // s3-execution Scenario 8: the only production SendBackend — the real
+  // AppleScript runner via the injected execFile primitive above (never a
+  // bespoke scripting-runner literal in this file; that stays confined to
+  // packages/sendkit/src per test/arch.spec.ts's gate (a)).
+  backend: new AppleScriptSendBackend({ exec: realExec }),
+  backendName: 'applescript',
   onError: (error) => {
     console.error('wemessage daemon: pipeline error (loop continues):', error);
   },

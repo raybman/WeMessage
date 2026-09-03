@@ -10,11 +10,14 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
-import type { Clock, Store } from '@wemessage/core';
+import type { ChatDbReader, Clock, SendBackend, Store } from '@wemessage/core';
 import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
+import { registerDoctorRoutes } from './routes/doctor.js';
+import { registerSendRoutes } from './routes/send.js';
+import type { DoctorProbes } from './doctor.js';
 
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
@@ -30,6 +33,23 @@ export interface DaemonOptions {
    * routes and the match pipeline (Scenario 9); omitted, one is created.
    */
   rules?: { store: Store; clock: Clock; sink?: AuditSink };
+  /**
+   * s3-execution Scenario 8: when provided, registers `GET /v1/doctor` and
+   * `POST /v1/send` (§1.6). Optional for the same reason `rules` is —
+   * earlier transport harnesses boot bare. Shares the ONE §1.8 sink with
+   * `rules` when the real daemon passes both (daemon.ts always does); a
+   * standalone test may pass `send` alone and get its own sink instead.
+   */
+  send?: {
+    store: Store;
+    reader: ChatDbReader;
+    backend: SendBackend;
+    backendName: string;
+    clock: Clock;
+    delay: (ms: number) => Promise<void>;
+    doctorProbes: DoctorProbes;
+    sink?: AuditSink;
+  };
 }
 
 export interface DaemonServer {
@@ -112,8 +132,13 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     );
   });
 
-  const sink = opts.rules
-    ? (opts.rules.sink ?? createAuditSink(opts.rules))
+  // One §1.8 chokepoint shared across rules/audit AND doctor/send when both
+  // are provided (daemon.ts always provides both, with the same explicit
+  // `sink` on each); either can also stand alone with its own sink in tests.
+  const sinkSource = opts.rules ?? opts.send;
+  const sink = sinkSource
+    ? (sinkSource.sink ??
+      createAuditSink({ store: sinkSource.store, clock: sinkSource.clock }))
     : undefined;
 
   app.get('/v1/events', { websocket: true }, (socket) => {
@@ -134,6 +159,28 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // §1.6 routes 8-9 (S2 Scenario 11): audit reads share the rules gate —
     // there is no standalone opt-in, audit only exists where rules do.
     registerAuditRoutes(app, { store: opts.rules.store });
+  }
+
+  if (opts.send && sink) {
+    // §1.6 route: GET /v1/doctor (s3-execution Scenario 8), reusing the
+    // Scenario 7 engine on-demand.
+    registerDoctorRoutes(app, {
+      probes: opts.send.doctorProbes,
+      store: opts.send.store,
+      sink,
+      clock: opts.send.clock,
+    });
+    // §1.6 route: POST /v1/send (s3-execution Scenario 8), the human-direct
+    // mint-then-dispatch path.
+    registerSendRoutes(app, {
+      store: opts.send.store,
+      reader: opts.send.reader,
+      backend: opts.send.backend,
+      backendName: opts.send.backendName,
+      clock: opts.send.clock,
+      delay: opts.send.delay,
+      sink,
+    });
   }
 
   return {

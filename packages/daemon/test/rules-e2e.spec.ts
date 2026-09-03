@@ -56,6 +56,7 @@ import type {
   RuleWriteResult,
 } from '@wemessage/client';
 import type { GatewayEventPayload } from '@wemessage/protocol';
+import { createUnusedSendBackend } from './helpers/loopback-backend.js';
 
 const CLI_BIN = fileURLToPath(
   new URL('../../cli/dist/bin.js', import.meta.url),
@@ -174,6 +175,8 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
       clock: clockCtl.clock,
       watcher: watcher1,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     daemons.push(daemon1);
     const token1 = daemon1.server.token;
@@ -386,6 +389,8 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
       clock: clockCtl.clock,
       watcher: watcher2,
       doctorProbes: fullyConnectedProbes,
+      backend: createUnusedSendBackend(),
+      backendName: 'unused',
     });
     daemons.push(daemon2);
     const token2 = daemon2.server.token;

@@ -58,11 +58,19 @@ export const ROUTE_TABLE: readonly string[] = [
 
 /**
  * WS `event` values the daemon is ALLOWED to emit (s2 §1.6 pins the post-S2
- * vocabulary; `rule.matched` joins when Scenario 9 wires emission). Emitted
+ * vocabulary; `rule.matched` joins when Scenario 9 wires emission).
+ * Deliberate update #6, s3-execution Scenario 8: `POST /v1/send` and
+ * `GET /v1/doctor` wire draft.created/approved/sent/failed and gate.denied
+ * onto the same WS broadcast channel (§1.6 route table rows 10-12). Emitted
  * literals must be a subset of this list and exactly equal EMITTED_WS_EVENTS.
  */
 export const WS_EVENT_VOCABULARY: readonly string[] = [
   'connection.state',
+  'draft.approved',
+  'draft.created',
+  'draft.failed',
+  'draft.sent',
+  'gate.denied',
   'message.edited',
   'message.received',
   'message.unsent',
@@ -74,9 +82,16 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * `event: '<value>'` literals under packages/daemon/src).
  * (Deliberate update #3: Scenario 9 wires the match pipeline, so the daemon
  * now constructs 'rule.matched' — already in the allowed vocabulary above.)
+ * (Deliberate update #6, Scenario 8: routes/send.ts constructs
+ * draft.created/draft.approved/draft.sent/draft.failed/gate.denied.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
+  'draft.approved',
+  'draft.created',
+  'draft.failed',
+  'draft.sent',
+  'gate.denied',
   'message.edited',
   'message.received',
   'message.unsent',
@@ -104,12 +119,22 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
  * SendBackend and ChatDbReader directly (calls backend.send and duplicates
  * sendkit's verify-poll in-process, per INV-1: core cannot import sendkit),
  * so it legitimately mentions both ports too.
+ *
+ * Deliberate update #4 of this array, s3-execution Scenario 8: §1.6 wires
+ * `POST /v1/send` and `GET /v1/doctor` into the daemon process. main.ts
+ * constructs the real SendBackend/ChatDbReader at boot, server.ts's
+ * DaemonOptions.send threads both ports through to registerSendRoutes, and
+ * routes/send.ts itself calls dispatchApproved with them — all three now
+ * legitimately mention the ports.
  */
 export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/core/src/drafts/recovery.ts',
   'packages/core/src/ports/index.ts',
   'packages/core/src/sending/dispatcher.ts',
   'packages/daemon/src/daemon.ts',
+  'packages/daemon/src/main.ts',
+  'packages/daemon/src/routes/send.ts',
+  'packages/daemon/src/server.ts',
   'packages/ingest/src/chatdb/index.ts',
   'packages/ingest/src/index.ts',
   'packages/ingest/src/scan/index.ts',

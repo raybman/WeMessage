@@ -39,6 +39,7 @@ import {
   type DoctorProbes,
   type RunningDaemon,
 } from '@wemessage/daemon';
+import { createUnusedSendBackend } from './helpers/loopback-backend.js';
 
 const CLI_BIN = fileURLToPath(
   new URL('../../cli/dist/bin.js', import.meta.url),
@@ -132,6 +133,8 @@ async function boot(): Promise<Ctx> {
     clock,
     watcher,
     doctorProbes: fullyConnectedProbes,
+    backend: createUnusedSendBackend(),
+    backendName: 'unused',
   });
   cleanups.push(() => daemon.stop());
 

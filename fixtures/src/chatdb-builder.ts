@@ -183,6 +183,21 @@ export interface ChatDbFixture {
   addAttachmentOnly(opts: AddMessageOptions & AttachmentOptions): MessageRef;
   addAttachment(messageRowid: number, opts?: AttachmentOptions): number;
   addSelfMessage(opts: Omit<AddMessageOptions, 'isFromMe'>): MessageRef;
+  /**
+   * s3-execution Scenario 8, Part 3 fixture extension: a test-only
+   * `SendBackend` (`LoopbackSendBackend`) only ever has a `chatGuid` string
+   * (mirrors the real `SendBackend.send({chatGuid, body})` shape) — never
+   * the integer chat ROWID `addSelfMessage`/`addMessage` require. This
+   * resolves `chatGuid` -> ROWID via `chat.guid` (throws if no such chat,
+   * a programmer error in test setup, never a runtime path) then delegates
+   * to `addSelfMessage`, landing an `is_from_me=1` row `findOutboundMessage`
+   * can discover — the read half of post-send verification (§2.2.2).
+   */
+  appendOutbound(opts: {
+    chatGuid: string;
+    text: string;
+    atIso: string;
+  }): MessageRef;
   addSmsMessage(opts: Omit<AddMessageOptions, 'service'>): MessageRef;
   /** T-9.3 crash-window seeding: N sequential messages, 1s apart. */
   addMessageBurst(
@@ -390,6 +405,20 @@ export function createChatDb(path: string): ChatDbFixture {
 
     addSelfMessage(opts) {
       return fixture.addMessage({ ...opts, isFromMe: true });
+    },
+
+    appendOutbound(opts) {
+      const chat = db
+        .prepare('SELECT ROWID as rowid FROM chat WHERE guid = ?')
+        .get(opts.chatGuid) as { rowid: number } | undefined;
+      if (chat === undefined) {
+        throw new Error(`appendOutbound: no chat with guid ${opts.chatGuid}`);
+      }
+      return fixture.addSelfMessage({
+        chatId: chat.rowid,
+        text: opts.text,
+        at: opts.atIso,
+      });
     },
 
     addSmsMessage(opts) {

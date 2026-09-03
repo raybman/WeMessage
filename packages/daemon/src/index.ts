@@ -9,6 +9,8 @@ export {
 } from './server.js';
 export { createAuditSink, type AuditSink } from './audit-sink.js';
 export { registerRuleRoutes, type RuleRouteDeps } from './routes/rules.js';
+export { registerDoctorRoutes, type DoctorRouteDeps } from './routes/doctor.js';
+export { registerSendRoutes, type SendRouteDeps } from './routes/send.js';
 export {
   generateToken,
   loadOrCreateToken,

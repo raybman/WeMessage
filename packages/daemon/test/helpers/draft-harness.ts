@@ -81,6 +81,8 @@ export interface Harness {
   store: SqliteStore;
   scheduler: Scheduler;
   backend: LoopbackSendBackend;
+  /** The one §1.8 sink the routes and scheduler share. */
+  sink: ReturnType<typeof createAuditSink>;
   clockCtl: ClockCtl;
   headers: { authorization: string };
 }
@@ -167,6 +169,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     store,
     scheduler,
     backend,
+    sink,
     clockCtl,
     headers: { authorization: `Bearer ${server.token}` },
   };

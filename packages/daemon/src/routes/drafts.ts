@@ -65,6 +65,17 @@ const DEFAULT_TTL_MINUTES = 240;
 const DEFAULT_UNDO_GRACE_SECONDS = 10;
 /** C-10 (§1.3.3): one first try plus two retries, then the draft is done. */
 const RETRY_CEILING = 3;
+/**
+ * The terminal, never-sent states a draft may be redrafted from. 'failed'
+ * is deliberately absent: that draft has a retry path with a ledger and a
+ * ceiling, and redrafting it would be a way to launder past C-10.
+ */
+const REDRAFTABLE: ReadonlySet<DraftState> = new Set<DraftState>([
+  'expired',
+  'rejected',
+  'recalled',
+  'superseded',
+]);
 
 const createBody = z.strictObject({
   chatGuid: z.string().min(1),
@@ -637,6 +648,73 @@ export function registerDraftRoutes(
       );
       sink.broadcast({ event: 'draft.approved', draftId: draft.id, actor });
       return reply.send({ draft: updated, approvalId });
+    },
+  );
+
+  // ---- POST /v1/drafts/:id/redraft -------------------------------------
+  /**
+   * F-40: a redraft is a NEW draft, never a resurrection. Fresh id, fresh
+   * idempotency key, fresh TTL, `state:'pending'`; the source is left
+   * exactly where it was, because "this expired and then someone tried
+   * again" is a different fact from "this eventually went out."
+   *
+   * It copies `originalBody`, not `body`: the point of redrafting an
+   * expired draft is to restore what was actually proposed, not to revive a
+   * half-finished human edit that was already left to lapse.
+   *
+   * The {fromDraftId, toDraftId} link lives in the audit row and this
+   * response. §2.3's drafts table has no parent column, and a derived
+   * idempotency key ('<old>#r1') would collide with the UNIQUE dedup
+   * semantics agents depend on in S5.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/v1/drafts/:id/redraft',
+    async (req, reply) => {
+      const source = store.getDraft(req.params.id);
+      if (source === null) return reply.code(404).send({ error: 'not-found' });
+
+      // Only a draft that is DONE and unsent may be redrafted. Redrafting a
+      // pending draft would silently double the queue for one inbound
+      // message; redrafting a sent one would invite saying it twice.
+      if (!REDRAFTABLE.has(source.state)) {
+        return reply.code(409).send({
+          error: 'illegal-redraft',
+          from: source.state,
+        });
+      }
+
+      const at = clock.now();
+      const draft: Draft = {
+        id: ulid(),
+        inboundGuid: source.inboundGuid,
+        chatGuid: source.chatGuid,
+        ruleId: source.ruleId,
+        adapterId: source.adapterId,
+        idempotencyKey: ulid(),
+        body: source.originalBody,
+        originalBody: source.originalBody,
+        state: 'pending',
+        stateChangedAt: at,
+        // Fresh TTL from now. Inheriting the source's long-dead deadline
+        // would create a draft that is born expired.
+        expiresAt: addSeconds(at, DEFAULT_TTL_MINUTES * 60),
+        createdAt: at,
+      };
+      store.insertDraft(draft);
+      sink.append({ type: 'draft.created', draftId: draft.id, draft }, actor);
+      sink.append(
+        {
+          type: 'draft.redrafted',
+          fromDraftId: source.id,
+          toDraftId: draft.id,
+        },
+        actor,
+      );
+      // F-39: no WS event for the redraft itself. Protocol has no such
+      // frame in S4, and a client that sees draft.created has everything it
+      // needs to render the new row.
+      sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+      return reply.send({ fromDraftId: source.id, draft });
     },
   );
 

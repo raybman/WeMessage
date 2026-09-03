@@ -75,6 +75,10 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/drafts',
   'POST /v1/drafts/:id/approve',
   'POST /v1/drafts/:id/recall',
+  // #11 deliberate (s4 Scenario 8): redraft an expired/rejected/recalled/
+  // superseded draft into a NEW pending one (F-40). 'failed' is excluded —
+  // it has the retry path, and redrafting it would launder past C-10.
+  'POST /v1/drafts/:id/redraft',
   'POST /v1/drafts/:id/reject',
   'POST /v1/drafts/:id/retry',
   'POST /v1/drafts/bulk',

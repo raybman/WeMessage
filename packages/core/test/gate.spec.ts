@@ -10,7 +10,7 @@
  * fake-port convention).
  */
 import { describe, expect, it } from 'vitest';
-import type { GateContext, Store } from '@wemessage/core';
+import type { ContactPolicy, GateContext, Store } from '@wemessage/core';
 import {
   evaluateGate,
   readGateSettings,
@@ -141,5 +141,268 @@ describe('readGateSettings (s3 Scenario 6)', () => {
     const settings = readGateSettings(store);
     expect(settings.killSwitch).toBe(false);
     expect(settings.allowSmsAuto).toBe(false);
+  });
+});
+
+/**
+ * s4-execution.md Part 2 Scenario 4 — gate v1. Adds the §2.4.3 contact
+ * ladder and the INV-5 group clamp on top of v0's three settings deny rules.
+ * Everything above stays exactly as v0 wrote it: these are additions, and
+ * the v0 blocks are the regression proof that nothing shrank.
+ *
+ * Teeth: skip the contact check when mode is 'deny' -> the deny row fails;
+ * drop the group clamp -> the INV-5 row fails.
+ */
+function v1Ctx(overrides: Partial<GateContext>): GateContext {
+  return { ...baseCtx({}), ...overrides };
+}
+
+const RULE = {
+  id: 'r1',
+  name: 'r1',
+  enabled: true,
+  matcher: { kind: 'keyword' as const, keywords: ['x'], mode: 'any' as const },
+  adapterId: 'echo',
+  respondMode: 'auto' as const,
+  scheduleId: null,
+  outsideWindow: 'queue' as const,
+  allowGroupDrafts: true,
+  matchAttachmentOnly: false,
+  draftTtlMinutes: 240,
+  priority: 100,
+  createdAt: NOW,
+  updatedAt: NOW,
+};
+
+function policy(mode: 'deny' | 'draft-only' | 'auto'): ContactPolicy {
+  return { handle: '+15551234567', mode, updatedAt: NOW };
+}
+
+describe('evaluateGate (s4 Scenario 4, gate v1)', () => {
+  describe('deny order: kill > disconnected > read-only > contact', () => {
+    it('kill-switch DOMINATES an otherwise fully-auto contact', () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: true,
+              globalMode: 'auto',
+              connectionState: 'fully-connected',
+              allowSmsAuto: true,
+            },
+            rule: RULE,
+            contact: policy('auto'),
+          }),
+        ),
+      ).toEqual({ allow: false, reason: 'kill-switch' });
+    });
+
+    it('disconnected outranks a denied contact', () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'disconnected',
+              allowSmsAuto: false,
+            },
+            rule: RULE,
+            contact: policy('deny'),
+          }),
+        ),
+      ).toEqual({ allow: false, reason: 'disconnected' });
+    });
+
+    it('read-only outranks a denied contact', () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'read-only',
+              allowSmsAuto: false,
+            },
+            rule: RULE,
+            contact: policy('deny'),
+          }),
+        ),
+      ).toEqual({ allow: false, reason: 'read-only' });
+    });
+  });
+
+  describe('contact ladder (rule-driven traffic only)', () => {
+    it('rule + UNKNOWN contact -> contact-denied (§1.3.5 deny-all default)', () => {
+      expect(evaluateGate(v1Ctx({ rule: RULE, contact: null }))).toEqual({
+        allow: false,
+        reason: 'contact-denied',
+      });
+    });
+
+    it("rule + mode 'deny' -> contact-denied", () => {
+      expect(
+        evaluateGate(v1Ctx({ rule: RULE, contact: policy('deny') })),
+      ).toEqual({ allow: false, reason: 'contact-denied' });
+    });
+
+    it("rule + 'draft-only' contact CLAMPS an auto global (most restrictive)", () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'fully-connected',
+              allowSmsAuto: false,
+            },
+            rule: RULE,
+            contact: policy('draft-only'),
+          }),
+        ),
+      ).toEqual({ allow: true, mode: 'draft-only' });
+    });
+
+    it("rule + 'auto' contact + auto global -> auto (both must agree)", () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'fully-connected',
+              allowSmsAuto: false,
+            },
+            rule: RULE,
+            contact: policy('auto'),
+          }),
+        ),
+      ).toEqual({ allow: true, mode: 'auto' });
+    });
+
+    it("rule + 'auto' contact + draft-only global -> draft-only (global clamps too)", () => {
+      expect(
+        evaluateGate(v1Ctx({ rule: RULE, contact: policy('auto') })),
+      ).toEqual({ allow: true, mode: 'draft-only' });
+    });
+  });
+
+  describe('human pin (F-20, v0 behavior preserved verbatim)', () => {
+    it('rule null + contact null -> ALLOW, not contact-denied', () => {
+      expect(evaluateGate(v1Ctx({ rule: null, contact: null }))).toEqual({
+        allow: true,
+        mode: 'draft-only',
+      });
+    });
+
+    it('a human at an auto global still gets auto with no contact policy at all', () => {
+      // The ladder is gated on rule !== null: a hand-written first message to
+      // a brand-new number must not be blocked by the deny-all default.
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'fully-connected',
+              allowSmsAuto: false,
+            },
+            rule: null,
+            contact: null,
+          }),
+        ),
+      ).toEqual({ allow: true, mode: 'auto' });
+    });
+
+    it('rule null IGNORES even an explicit deny policy (ladder not consulted)', () => {
+      expect(
+        evaluateGate(v1Ctx({ rule: null, contact: policy('deny') })),
+      ).toEqual({ allow: true, mode: 'draft-only' });
+    });
+  });
+
+  describe('group clamp (INV-5)', () => {
+    it('everything-auto in a GROUP still resolves to draft-only, never auto', () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            settings: {
+              killSwitch: false,
+              globalMode: 'auto',
+              connectionState: 'fully-connected',
+              allowSmsAuto: true,
+            },
+            rule: RULE,
+            contact: policy('auto'),
+            message: {
+              isGroup: true,
+              service: 'imessage',
+              handle: '',
+              chatGuid: 'iMessage;+;chat123456789',
+            },
+          }),
+        ),
+      ).toEqual({ allow: true, mode: 'draft-only' });
+    });
+
+    it('the clamp is a MODE clamp, not a deny: the group draft is still allowed', () => {
+      const decision = evaluateGate(
+        v1Ctx({
+          message: {
+            isGroup: true,
+            service: 'imessage',
+            handle: '',
+            chatGuid: 'iMessage;+;chat123456789',
+          },
+        }),
+      );
+      expect(decision.allow).toBe(true);
+    });
+
+    it('a group with a DENIED contact still denies (deny outranks the clamp)', () => {
+      expect(
+        evaluateGate(
+          v1Ctx({
+            rule: RULE,
+            contact: policy('deny'),
+            message: {
+              isGroup: true,
+              service: 'imessage',
+              handle: '',
+              chatGuid: 'iMessage;+;chat123456789',
+            },
+          }),
+        ),
+      ).toEqual({ allow: false, reason: 'contact-denied' });
+    });
+  });
+
+  it('schedules and counters remain UNCONSULTED (hostile values change nothing)', () => {
+    // S6/S7 own these fields. Planting values that would obviously deny if
+    // they were read pins that v1 still does not read them.
+    const hostile = v1Ctx({
+      settings: {
+        killSwitch: false,
+        globalMode: 'auto',
+        connectionState: 'fully-connected',
+        allowSmsAuto: false,
+      },
+      rule: RULE,
+      contact: policy('auto'),
+      schedule: {
+        id: 's1',
+        name: 'never',
+        timezone: 'America/Los_Angeles',
+        windows: [],
+        enabled: true,
+      },
+      counters: {
+        contactAutoLastHour: 9999,
+        globalAutoLastHour: 9999,
+        consecutiveAutoInChat: 9999,
+        circuitOpen: true,
+      },
+    });
+    expect(evaluateGate(hostile)).toEqual({ allow: true, mode: 'auto' });
   });
 });

@@ -492,11 +492,23 @@ describe('arch invariants (dependency-cruiser)', () => {
     // Actor union's own type declaration, which merely names the literal.
     const ACTOR_TYPE_DECL_FILE = 'packages/core/src/domain/types.ts';
 
+    /**
+     * NARROWED in s4 Scenario 4. The check was a bare substring match for
+     * `'auto-respond'`, which cannot tell MINTING the reason (constructing an
+     * auto actor — the thing S4 must not ship) from READING it (comparing
+     * against it in order to REFUSE an auto approval, which is the opposite
+     * of shipping autonomy, and is exactly what dispatchApproved now does).
+     * The guard's own name says "minted", so it now matches the minting
+     * syntax: `reason: 'auto-respond'` in an object literal. The (c) teeth
+     * probe below mints precisely that shape and still trips it.
+     */
     function autoRespondMintedOffenders(): string[] {
       return productionSrcFiles()
         .filter((f) => f !== ACTOR_TYPE_DECL_FILE)
         .filter((f) =>
-          readFileSync(join(repoRoot, f), 'utf8').includes("'auto-respond'"),
+          /reason:\s*'auto-respond'/.test(
+            readFileSync(join(repoRoot, f), 'utf8'),
+          ),
         );
     }
 

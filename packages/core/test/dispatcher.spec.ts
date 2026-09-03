@@ -74,6 +74,8 @@ function makeStore(cfg: {
   settings?: Record<string, string>;
   calls: string[];
   auditEvents: AuditEvent[];
+  /** s4 Scenario 4: the ledger attempt beginSendAttempt reports (retry threading). */
+  attempt?: number;
 }): Store {
   const settings = cfg.settings ?? {};
   return {
@@ -124,7 +126,7 @@ function makeStore(cfg: {
     },
     beginSendAttempt: (draftId) => {
       cfg.calls.push(`beginSendAttempt:${draftId}`);
-      return { attempt: 1 };
+      return { attempt: cfg.attempt ?? 1 };
     },
     // S4 Scenario 3 body extensions (§1.5). Unused by this suite; present so
     // the fake stays a real `Store` and the interface keeps its teeth.
@@ -408,7 +410,15 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     expect(emitted).toEqual([
       { type: 'gate.denied', draftId: 'D1', reason: 'kill-switch', at: NOW },
     ]);
-    expect(auditEvents.map((e) => e.type)).toEqual(['draft.failed']);
+    // ADJUSTED in s4 Scenario 4 (planned conflict #5): S3 asserted
+    // ['draft.failed'] alone. F-35 adds an explicit `gate.denied` audit row
+    // to every denial so the reason survives in the log, not just in the
+    // DraftError message. The draft.failed row and its ordering are
+    // unchanged; this is strictly an addition.
+    expect(auditEvents.map((e) => e.type)).toEqual([
+      'draft.failed',
+      'gate.denied',
+    ]);
   });
 
   it('two concurrent dispatchApproved calls on different drafts never interleave their send-critical-sections', async () => {
@@ -670,5 +680,322 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
       'send.attempted',
       'draft.failed',
     ]);
+  });
+});
+
+/**
+ * s4-execution.md Part 2 Scenario 4 — dispatcher revisions.
+ *
+ * Teeth: move the re-gate back outside the mutex -> the
+ * flip-between-two-queued-dispatches row fails; drop the group clamp in
+ * gate v1 -> the INV-5 auto-on-a-group row fails.
+ */
+const AUTO_ACTOR = { kind: 'system' as const, reason: 'auto-respond' as const };
+const GROUP_GUID = 'iMessage;+;chat123456789';
+
+function baseDeps(over: Partial<DispatchApprovedDeps>): DispatchApprovedDeps {
+  const { clock, delay } = makeVirtualClock();
+  return {
+    reader: makeReader({ resolveChatResult: null, calls: [] }),
+    backend: makeBackend({ result: { accepted: true }, calls: [] }),
+    clock,
+    delay,
+    backendName: 'applescript',
+    emit: () => undefined,
+    ...over,
+  } as DispatchApprovedDeps;
+}
+
+describe('dispatchApproved (s4 Scenario 4 revisions)', () => {
+  it('the re-gate settings read happens AFTER mutex acquisition', async () => {
+    // Two dispatches queue behind the send mutex; the kill switch flips
+    // between them. With a PRE-mutex gate read, the second dispatch reads
+    // settings at call time (before the flip) and sends anyway. Only a gate
+    // read taken after acquiring the mutex can see the flip.
+    const settings: Record<string, string> = { ...ALLOW_SETTINGS };
+    const mk = (
+      id: string,
+      backendCalls: string[],
+      auditEvents: AuditEvent[],
+      delayMs?: number,
+    ): DispatchApprovedDeps => {
+      const draft = makeDraft({ id });
+      const approval = makeApproval({ id: `A-${id}`, draftId: id });
+      const { clock, delay } = makeVirtualClock();
+      return {
+        store: makeStore({
+          draft,
+          approval,
+          settings,
+          calls: [],
+          auditEvents,
+        }),
+        reader: makeReader({
+          resolveChatResult: {
+            chatGuid: draft.chatGuid,
+            service: 'imessage',
+            isGroup: false,
+          },
+          calls: [],
+          findOutboundQueue: [{ guid: `guid-${id}` }],
+        }),
+        backend: makeBackend({
+          result: { accepted: true },
+          calls: backendCalls,
+          ...(delayMs !== undefined ? { delayMs } : {}),
+        }),
+        clock,
+        delay,
+        backendName: 'applescript',
+        emit: () => undefined,
+      };
+    };
+
+    const firstBackend: string[] = [];
+    const secondBackend: string[] = [];
+    const secondAudit: AuditEvent[] = [];
+    const first = dispatchApproved(
+      mk('D1', firstBackend, [], 20),
+      'D1',
+      'A-D1',
+    );
+    // Let D1 actually acquire the mutex and pass its own gate (the mutex body
+    // starts in a microtask, so without this the flip would deny D1 too and
+    // the test would prove nothing).
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    // D2 is CALLED before the flip. Its synchronous prefix runs immediately,
+    // so a pre-mutex gate read would happen here, on pre-flip settings, and
+    // D2 would send. Only a post-mutex read sees what happens next.
+    const second = dispatchApproved(
+      mk('D2', secondBackend, secondAudit),
+      'D2',
+      'A-D2',
+    );
+    settings['send.killSwitch'] = '1';
+
+    expect(await first).toEqual({
+      outcome: 'sent',
+      sentMessageGuid: 'guid-D1',
+    });
+    expect(firstBackend).toHaveLength(1);
+
+    const secondResult = await second;
+    expect(secondResult).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({
+        code: 'gate-denied',
+        message: 'gate denied: kill-switch',
+      }),
+    });
+    expect(secondBackend).toEqual([]);
+    expect(secondAudit.map((e) => e.type)).toEqual([
+      'draft.failed',
+      'gate.denied',
+    ]);
+  });
+
+  it('a mismatched approval throws AND audits exactly one gate.denied:unapproved', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const backendCalls: string[] = [];
+    const readerCalls: string[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1' }),
+        // Approval points at a DIFFERENT draft: forged authorization.
+        approval: makeApproval({ id: 'A1', draftId: 'D-other' }),
+        settings: ALLOW_SETTINGS,
+        calls,
+        auditEvents,
+      }),
+      reader: makeReader({ resolveChatResult: null, calls: readerCalls }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+    });
+
+    await expect(dispatchApproved(deps, 'D1', 'A1')).rejects.toThrow(
+      /does not authorize/,
+    );
+    expect(auditEvents).toEqual([
+      { type: 'gate.denied', draftId: 'D1', reason: 'unapproved' },
+    ]);
+    // Nothing downstream of validation ran.
+    expect(readerCalls).toEqual([]);
+    expect(backendCalls).toEqual([]);
+    expect(calls.filter((c) => c.startsWith('beginSendAttempt'))).toEqual([]);
+  });
+
+  it('an AGENT-actor approval takes the same throw+audit path (agents may draft, never approve)', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const backendCalls: string[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1' }),
+        approval: makeApproval({
+          id: 'A1',
+          draftId: 'D1',
+          actor: { kind: 'agent', adapterId: 'echo' },
+        }),
+        settings: ALLOW_SETTINGS,
+        calls,
+        auditEvents,
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+    });
+
+    await expect(dispatchApproved(deps, 'D1', 'A1')).rejects.toThrow(
+      /agent actor/,
+    );
+    expect(auditEvents).toEqual([
+      { type: 'gate.denied', draftId: 'D1', reason: 'unapproved' },
+    ]);
+    expect(backendCalls).toEqual([]);
+    expect(calls.filter((c) => c.startsWith('beginSendAttempt'))).toEqual([]);
+  });
+
+  it('INV-5: a system-auto approval on a GROUP -> failed, gate.denied:group-auto-forbidden', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const backendCalls: string[] = [];
+    const emitted: DispatchGateDenied[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1', chatGuid: GROUP_GUID }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
+        // Global auto: the ONLY thing standing between this and a send is
+        // the group clamp.
+        settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        calls,
+        auditEvents,
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+      emit: (e) => emitted.push(e),
+    });
+
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({
+        code: 'gate-denied',
+        message: 'gate denied: group-auto-forbidden',
+      }),
+    });
+    expect(auditEvents).toEqual([
+      { type: 'draft.failed', draftId: 'D1', error: expect.anything() },
+      { type: 'gate.denied', draftId: 'D1', reason: 'group-auto-forbidden' },
+    ]);
+    expect(emitted.map((e) => e.reason)).toEqual(['group-auto-forbidden']);
+    expect(backendCalls).toEqual([]);
+  });
+
+  it('F-36: a HUMAN approval on a group still gets the S3 group-send-disabled error, unchanged', async () => {
+    // Pinned side by side with the row above: same group guid, same auto
+    // global, different actor, materially different outcome.
+    const backendCalls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1', chatGuid: GROUP_GUID }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1' }),
+        settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        calls: [],
+        auditEvents,
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+    });
+
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({ code: 'group-send-disabled' }),
+    });
+    expect(auditEvents.map((e) => e.type)).toEqual(['draft.failed']);
+    expect(backendCalls).toEqual([]);
+  });
+
+  it('a system-auto approval on a 1:1 chat at global auto DOES send (the clamp is group-only)', async () => {
+    const draft = makeDraft({ id: 'D1' });
+    const backendCalls: string[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft,
+        approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
+        settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        calls: [],
+        auditEvents: [],
+      }),
+      reader: makeReader({
+        resolveChatResult: {
+          chatGuid: draft.chatGuid,
+          service: 'imessage',
+          isGroup: false,
+        },
+        calls: [],
+        findOutboundQueue: [{ guid: 'guid-1' }],
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+    });
+
+    expect(await dispatchApproved(deps, 'D1', 'A1')).toEqual({
+      outcome: 'sent',
+      sentMessageGuid: 'guid-1',
+    });
+    expect(backendCalls).toHaveLength(1);
+  });
+
+  it('a system-auto approval at DRAFT-ONLY global is refused even 1:1', async () => {
+    // An auto approval is only honored if the gate also resolved to auto.
+    const backendCalls: string[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1' }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
+        settings: ALLOW_SETTINGS,
+        calls: [],
+        auditEvents: [],
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
+    });
+
+    expect(await dispatchApproved(deps, 'D1', 'A1')).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({ code: 'gate-denied' }),
+    });
+    expect(backendCalls).toEqual([]);
+  });
+
+  it('threads the ledger attempt into the send.attempted audit payload', async () => {
+    const draft = makeDraft({ id: 'D1' });
+    const auditEvents: AuditEvent[] = [];
+    const deps = baseDeps({
+      store: makeStore({
+        draft,
+        approval: makeApproval({ id: 'A1', draftId: 'D1' }),
+        settings: ALLOW_SETTINGS,
+        calls: [],
+        auditEvents,
+        // A re-approved draft on its second try (C-10).
+        attempt: 2,
+      }),
+      reader: makeReader({
+        resolveChatResult: {
+          chatGuid: draft.chatGuid,
+          service: 'imessage',
+          isGroup: false,
+        },
+        calls: [],
+        findOutboundQueue: [{ guid: 'guid-1' }],
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: [] }),
+    });
+
+    await dispatchApproved(deps, 'D1', 'A1');
+    expect(auditEvents).toContainEqual({
+      type: 'send.attempted',
+      draftId: 'D1',
+      attempt: 2,
+      backend: 'applescript',
+    });
   });
 });

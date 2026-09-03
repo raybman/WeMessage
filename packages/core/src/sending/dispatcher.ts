@@ -4,14 +4,26 @@
  * matching Approval) becomes code here — see the three named-teeth proofs
  * in dispatcher.spec.ts.
  *
- * Call order (Fable design consult, coordinator-confirmed): approval-validate
- * -> gate (the ONE re-gate call, evaluated at send moment, not draft/approval
- * moment) -> resolve conversation -> [mutex] beginSendAttempt -> backend.send
- * -> verify-poll -> mark sent/failed. Gate and resolveChat run OUTSIDE the
- * mutex (cheap, read-only, §2.4.1 numbered ordering: approval(1) ->
- * gate(2) -> mutex(3) -> ledger(4) -> backend(5)); everything from
- * beginSendAttempt onward is serialized process-wide ("one physical
- * Messages.app, one send at a time").
+ * Call order, REVISED in s4-execution Scenario 4: approval-validate ->
+ * [mutex] gate -> auto-approval check -> group short-circuit -> resolve
+ * conversation -> beginSendAttempt -> backend.send -> verify-poll -> mark
+ * sent/failed.
+ *
+ * S3 evaluated the gate OUTSIDE the mutex on the theory that it was a cheap
+ * read-only call. That was a TOCTOU hole: two dispatches queued behind the
+ * mutex both read the settings before either acquired it, so a kill-switch
+ * flip landing between them was invisible to the second one and it sent
+ * anyway. The whole point of a re-gate is that it reads state as late as
+ * possible, so the settings read now happens strictly AFTER mutex
+ * acquisition. resolveChat and the group short-circuit moved in with it
+ * because they must stay ordered behind the gate. Approval validation stays
+ * outside: it reads only the draft and approval rows the caller named, and a
+ * caller-error throw should not queue behind a live send.
+ *
+ * §2.4.1 numbered ordering is therefore now: approval(1) -> mutex(2) ->
+ * gate(3) -> ledger(4) -> backend(5). dispatcher.spec.ts pins the move with
+ * a flip-between-two-queued-dispatches test that is impossible to pass with
+ * a pre-mutex gate read.
  */
 import type { AuditEvent } from '../audit/events.js';
 import type {
@@ -177,9 +189,24 @@ export async function dispatchApproved(
 ): Promise<DispatchOutcome> {
   const { store, reader, backend, clock, delay, backendName, emit } = deps;
 
+  // F-35: every INV-2 validation failure now leaves an audit row before it
+  // throws. S3 threw silently, which meant the one event an operator most
+  // wants to see after a suspicious dispatch attempt ("something tried to
+  // send an unapproved draft") left no trace. The actor on the row is the
+  // system, not the (possibly absent, possibly forged) approval's actor.
+  const unapproved = (message: string): Error => {
+    appendAudit(
+      store,
+      clock,
+      { kind: 'system', reason: 'rule-engine' },
+      { type: 'gate.denied', draftId, reason: 'unapproved' },
+    );
+    return new Error(message);
+  };
+
   const draft = store.getDraft(draftId);
   if (draft === null || draft.state !== 'approved') {
-    throw new Error(
+    throw unapproved(
       `dispatchApproved: draft ${draftId} is not in state 'approved'`,
     );
   }
@@ -189,72 +216,96 @@ export async function dispatchApproved(
     approval.draftId !== draftId ||
     approval.action !== 'approve'
   ) {
-    throw new Error(
+    throw unapproved(
       `dispatchApproved: approval ${approvalId} does not authorize draft ${draftId}`,
     );
   }
+  // An agent may DRAFT, never approve (§1.7's actor constraint, same rule
+  // the pure transition table enforces on the approve edge). An agent-actor
+  // approval row is a forged authorization, so it takes the same path.
+  if (approval.actor.kind === 'agent') {
+    throw unapproved(
+      `dispatchApproved: approval ${approvalId} was made by an agent actor, which may not approve`,
+    );
+  }
   const actor = approval.actor;
+  /** §1.7: the system 'auto-respond' actor is the only auto-approval there is. */
+  const isAutoApproval =
+    actor.kind === 'system' && actor.reason === 'auto-respond';
 
   const parsed = parseChatGuid(draft.chatGuid);
-  const gate = evaluateGate({
-    now: clock.now(),
-    settings: readGateSettings(store),
-    rule: null,
-    schedule: null,
-    contact: null,
-    message: {
-      isGroup: parsed.isGroup,
-      service: parsed.service,
-      handle: parsed.handle,
-      chatGuid: draft.chatGuid,
-    },
-    counters: {
-      contactAutoLastHour: 0,
-      globalAutoLastHour: 0,
-      consecutiveAutoInChat: 0,
-      circuitOpen: false,
-    },
-  });
-  if (!gate.allow) {
-    const error: DraftError = {
-      code: 'gate-denied',
-      message: `gate denied: ${gate.reason}`,
-      at: clock.now(),
-    };
-    const outcome = fail(store, clock, actor, draftId, error);
-    emit({
-      type: 'gate.denied',
-      draftId,
-      reason: gate.reason,
-      at: clock.now(),
-    });
-    return outcome;
-  }
-
-  if (parsed.isGroup) {
-    return fail(store, clock, actor, draftId, {
-      code: 'group-send-disabled',
-      message: 'group sends are not supported (S3)',
-      at: clock.now(),
-    });
-  }
-  const resolved = await reader.resolveChat(parsed.handle);
-  if (resolved === null) {
-    return fail(store, clock, actor, draftId, {
-      code: 'no-conversation',
-      message: `no existing conversation for handle ${parsed.handle}`,
-      at: clock.now(),
-    });
-  }
-  if (resolved.isGroup) {
-    return fail(store, clock, actor, draftId, {
-      code: 'group-send-disabled',
-      message: 'group sends are not supported (S3)',
-      at: clock.now(),
-    });
-  }
 
   return withSendMutex(async () => {
+    // THE re-gate, read after mutex acquisition (see the header note).
+    const gate = evaluateGate({
+      now: clock.now(),
+      settings: readGateSettings(store),
+      rule: null,
+      schedule: null,
+      contact: null,
+      message: {
+        isGroup: parsed.isGroup,
+        service: parsed.service,
+        handle: parsed.handle,
+        chatGuid: draft.chatGuid,
+      },
+      counters: {
+        contactAutoLastHour: 0,
+        globalAutoLastHour: 0,
+        consecutiveAutoInChat: 0,
+        circuitOpen: false,
+      },
+    });
+    const gateDeny = (reason: GateDenyReason): DispatchOutcome => {
+      const error: DraftError = {
+        code: 'gate-denied',
+        message: `gate denied: ${reason}`,
+        at: clock.now(),
+      };
+      const outcome = fail(store, clock, actor, draftId, error);
+      appendAudit(store, clock, actor, {
+        type: 'gate.denied',
+        draftId,
+        reason,
+      });
+      emit({ type: 'gate.denied', draftId, reason, at: clock.now() });
+      return outcome;
+    };
+    if (!gate.allow) {
+      return gateDeny(gate.reason);
+    }
+    // An auto-approval is only honored if the gate ALSO resolved to auto.
+    // The commonest way it does not is INV-5's group clamp, which is exactly
+    // the 'group-auto-forbidden' reason. A HUMAN approval on a group falls
+    // through to the S3 'group-send-disabled' path below, unchanged (F-36:
+    // both rows are pinned side by side in dispatcher.spec.ts).
+    if (isAutoApproval && gate.mode !== 'auto') {
+      return gateDeny(parsed.isGroup ? 'group-auto-forbidden' : 'unapproved');
+    }
+
+    if (parsed.isGroup) {
+      return fail(store, clock, actor, draftId, {
+        code: 'group-send-disabled',
+        message: 'group sends are not supported (S3)',
+        at: clock.now(),
+      });
+    }
+    const resolved = await reader.resolveChat(parsed.handle);
+    if (resolved === null) {
+      return fail(store, clock, actor, draftId, {
+        code: 'no-conversation',
+        message: `no existing conversation for handle ${parsed.handle}`,
+        at: clock.now(),
+      });
+    }
+    if (resolved.isGroup) {
+      return fail(store, clock, actor, draftId, {
+        code: 'group-send-disabled',
+        message: 'group sends are not supported (S3)',
+        at: clock.now(),
+      });
+    }
+
     const attempt = store.beginSendAttempt(draftId, backendName, clock.now());
     appendAudit(store, clock, actor, {
       type: 'send.attempted',

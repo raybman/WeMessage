@@ -11,7 +11,11 @@
  * serialize as the strings '1'/'0' (§2.3 `settings` is a flat key/value
  * TEXT table; there is no boolean column type to lean on).
  */
-import type { GateContext, GateDecision } from '../domain/types.js';
+import type {
+  GateContext,
+  GateDecision,
+  RespondMode,
+} from '../domain/types.js';
 import type { Store } from '../ports/index.js';
 
 export const SETTING_KILL_SWITCH = 'send.killSwitch';
@@ -44,6 +48,20 @@ export const SETTING_AUTO_LAUNCH_MESSAGES = 'send.autoLaunchMessages';
  * flat settings-table convention above.
  */
 export const SETTING_USER_DISCONNECTED = 'connection.userDisconnected';
+
+/**
+ * s4-execution Scenario 4: seconds between an approval and the actual send —
+ * the undo window a human can recall inside (§1.3.3). Read by the draft
+ * approve route (Scenario 5) and the grace scheduler (Scenario 6); NOT read
+ * by `evaluateGate` (grace is not a deny rule, it is a delay).
+ */
+export const SETTING_UNDO_GRACE_SECONDS = 'send.undoGraceSeconds';
+/**
+ * s4-execution Scenario 4: whether a failed iMessage send may be retried
+ * over SMS. Minted here so Scenario 8's SMS-retry field has a settings key
+ * to read; like the grace key it is not a gate deny rule.
+ */
+export const SETTING_RETRY_AS_SMS = 'send.retryAsSms';
 
 function parseBool(raw: string | null, fallback: boolean): boolean {
   if (raw === '1') return true;
@@ -78,13 +96,38 @@ export function readGateSettings(
   };
 }
 
+/** Most-restrictive-wins: 'draft-only' beats 'auto' whenever the two disagree. */
+function narrower(a: RespondMode, b: RespondMode): RespondMode {
+  return a === 'draft-only' || b === 'draft-only' ? 'draft-only' : 'auto';
+}
+
 /**
- * v0: three deny rules in priority order (kill-switch first — an operator
- * emergency stop outranks connection state), else allow at `globalMode`.
- * Everything else in `GateContext` (rule/schedule/contact/counters/message)
- * is plumbed through for later slices but not consulted yet — v0 allows a
- * human actor with an unknown (null) contact, unlike the eventual §1.3.5
- * deny-all-unknown-contacts default.
+ * Gate v1 (s4-execution Scenario 4, §2.4.1). Deny rules in strict priority
+ * order, then a most-restrictive-wins mode resolution:
+ *
+ *   1. kill-switch   — an operator emergency stop outranks everything.
+ *   2. disconnected  — no live Messages connection at all.
+ *   3. read-only     — connected, but sending is not possible.
+ *   4. contact       — §2.4.3's ladder, consulted ONLY for rule-driven
+ *      traffic (`ctx.rule !== null`). An unknown contact (null) and an
+ *      explicit 'deny' both deny with 'contact-denied': §1.3.5's deny-all
+ *      default is what "unknown" means.
+ *
+ * The **human pin** (F-20, preserved verbatim from v0): when `ctx.rule` is
+ * null the traffic is a human acting deliberately through the API/CLI/GUI,
+ * not a rule firing at a stranger. A null contact must NOT deny there, or
+ * every hand-written first message to a new number would be blocked. The
+ * contact ladder is therefore gated on `rule !== null`, and the S3 F-20 test
+ * keeps passing untouched.
+ *
+ * The **group clamp** (INV-5) is applied last and unconditionally: a group
+ * chat can never resolve to 'auto', whatever the global mode or contact
+ * policy says. This is a clamp on the ALLOWED MODE, not a deny — a group
+ * draft is still perfectly legal, it just always needs a human.
+ *
+ * Schedules, counters and the circuit breaker remain plumbed-but-unread
+ * (S6/S7 own them). Hostile values in those fields must not change any
+ * decision here; gate.spec.ts pins that.
  */
 export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.killSwitch) {
@@ -96,5 +139,16 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.connectionState === 'read-only') {
     return { allow: false, reason: 'read-only' };
   }
-  return { allow: true, mode: ctx.settings.globalMode };
+
+  let mode: RespondMode = ctx.settings.globalMode;
+  if (ctx.rule !== null) {
+    if (ctx.contact === null || ctx.contact.mode === 'deny') {
+      return { allow: false, reason: 'contact-denied' };
+    }
+    mode = narrower(mode, ctx.contact.mode);
+  }
+  if (ctx.message.isGroup) {
+    mode = 'draft-only';
+  }
+  return { allow: true, mode };
 }

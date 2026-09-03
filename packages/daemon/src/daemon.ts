@@ -41,6 +41,7 @@ import {
   createScanLoop,
   createWatchTrigger,
   type IngestChatDbReader,
+  type ScanLoopOptions,
   type WakeSignal,
 } from '@wemessage/ingest';
 import type { GatewayEventPayload } from '@wemessage/protocol';
@@ -94,6 +95,17 @@ export interface StartDaemonOptions {
   backendName: string;
   /** Injected sleep for dispatchApproved's verify-poll; defaults to real setTimeout. */
   delay?: (ms: number) => Promise<void>;
+  /**
+   * s3-execution Scenario 11 test seam: overrides the scan loop's reader
+   * factory so a test can start a scan burst healthy and later switch it to
+   * throw EPERM mid-run (§2.2.3 row 1, "FDA revoked mid-run"). Mirrors the
+   * existing `openReader` seam `createScanLoop` already exposes to
+   * ingest-level tests (cursor-scan.spec.ts, mutation-scan.spec.ts) — this
+   * just threads it one level up so a real `startDaemon()` can be driven the
+   * same way. Unset in production: `createScanLoop` falls back to the real
+   * `createChatDbReader`.
+   */
+  scanOpenReader?: ScanLoopOptions['openReader'];
 }
 
 const realDelay = (ms: number): Promise<void> =>
@@ -342,6 +354,7 @@ export async function startDaemon(
     chatDbPath: options.chatDbPath,
     store,
     clock: options.clock,
+    ...(options.scanOpenReader ? { openReader: options.scanOpenReader } : {}),
     onMessage: deliver,
     onMutation: deliver,
     onDecodeFailed: (signal) => {
@@ -368,12 +381,20 @@ export async function startDaemon(
       // error still propagates to onError afterward; the loop keeps going.
       const code = (err as NodeJS.ErrnoException | undefined)?.code;
       if (code === 'EPERM' || code === 'EACCES') {
-        await runDoctor({
+        const report = await runDoctor({
           probes: options.doctorProbes,
           store,
           sink,
           clock: options.clock,
         });
+        // s3-execution Scenario 11 (§2.2.3 row 1): a scan-time EPERM that
+        // resolves to a state the daemon can't usefully tail from must stop
+        // the watcher — otherwise every subsequent fs event re-tries the
+        // same doomed scan burst forever. 'read-only' keeps tailing (the
+        // failure was e.g. automation/messages, not chat.db access).
+        if (report.state === 'disconnected' || report.state === 'unsupported') {
+          stopWatcher();
+        }
       }
       throw err;
     }

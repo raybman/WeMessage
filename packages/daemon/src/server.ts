@@ -206,6 +206,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       backendName: opts.send.backendName,
       clock: opts.send.clock,
       delay: opts.send.delay,
+      doctorProbes: opts.send.doctorProbes,
       sink,
     });
   }

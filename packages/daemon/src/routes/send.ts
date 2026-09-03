@@ -40,6 +40,19 @@ import {
   type Store,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
+import { runDoctor, type DoctorProbes } from '../doctor.js';
+
+/**
+ * s3-execution Scenario 11 (§2.2.3 row 2, "send capability lost mid-run"):
+ * two consecutive `messages-not-running` failures re-probe immediately
+ * rather than waiting for the next GET /v1/doctor / POST /v1/connect — one
+ * failure alone is too noisy a signal (Messages can take a moment to relaunch
+ * under autoLaunch); two in a row without an intervening success means the
+ * capability is actually gone. Any `sent` outcome resets the counter
+ * unconditionally; any OTHER failure code leaves it unchanged (only this one
+ * code means "the thing doctor actually checks" went away).
+ */
+const NOT_RUNNING_REPROBE_THRESHOLD = 2;
 
 export interface SendRouteDeps {
   store: Store;
@@ -49,6 +62,8 @@ export interface SendRouteDeps {
   clock: Clock;
   /** Injected sleep, threaded straight through to dispatchApproved's verify-poll. */
   delay: (ms: number) => Promise<void>;
+  /** s3-execution Scenario 11: re-probe trigger for the row-2 counter above. */
+  doctorProbes: DoctorProbes;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
 }
 
@@ -64,7 +79,19 @@ export function registerSendRoutes(
   app: FastifyInstance,
   deps: SendRouteDeps,
 ): void {
-  const { store, reader, backend, backendName, clock, delay, sink } = deps;
+  const {
+    store,
+    reader,
+    backend,
+    backendName,
+    clock,
+    delay,
+    doctorProbes,
+    sink,
+  } = deps;
+  // s3-execution Scenario 11 row 2: in-process counter, reset on any `sent`
+  // outcome or any failure code other than `messages-not-running`.
+  let consecutiveNotRunning = 0;
 
   app.post('/v1/send', async (req, reply) => {
     const parsed = sendBody.safeParse(req.body);
@@ -142,6 +169,7 @@ export function registerSendRoutes(
     );
 
     if (outcome.outcome === 'sent') {
+      consecutiveNotRunning = 0;
       sink.broadcast({
         event: 'draft.sent',
         draftId: draft.id,
@@ -173,6 +201,16 @@ export function registerSendRoutes(
       return reply
         .code(403)
         .send({ error: 'gate-denied', reason: denial.reason });
+    }
+
+    if (outcome.error.code === 'messages-not-running') {
+      consecutiveNotRunning += 1;
+      if (consecutiveNotRunning >= NOT_RUNNING_REPROBE_THRESHOLD) {
+        consecutiveNotRunning = 0;
+        await runDoctor({ probes: doctorProbes, store, sink, clock });
+      }
+    } else {
+      consecutiveNotRunning = 0;
     }
 
     sink.broadcast({

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/draft.delta.json",
+  "title": "draft.delta frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correlation", "seq", "textDelta"],
+  "properties": {
+    "correlation": {
+      "type": "object"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "textDelta": {
+      "type": "string"
+    }
+  }
+}

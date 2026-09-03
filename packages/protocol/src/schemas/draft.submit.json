@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/draft.submit.json",
+  "title": "draft.submit frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correlation", "idempotencyKey"],
+  "properties": {
+    "correlation": {
+      "type": "object"
+    },
+    "idempotencyKey": {
+      "type": "string"
+    },
+    "body": {
+      "type": "string"
+    },
+    "declined": {
+      "type": "boolean"
+    },
+    "confidence": {
+      "type": "number"
+    }
+  }
+}

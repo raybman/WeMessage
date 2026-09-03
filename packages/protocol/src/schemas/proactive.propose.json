@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/proactive.propose.json",
+  "title": "proactive.propose frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["idempotencyKey", "target", "body", "reason"],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string"
+    },
+    "target": {
+      "type": "object"
+    },
+    "body": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

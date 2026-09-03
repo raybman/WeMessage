@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/draft.feedback.json",
+  "title": "draft.feedback frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correlation", "kind", "actor"],
+  "properties": {
+    "correlation": {
+      "type": "object"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "finalBody": {
+      "type": "string"
+    },
+    "error": {
+      "type": "object"
+    }
+  }
+}

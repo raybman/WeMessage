@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/draft.request.json",
+  "title": "draft.request frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["correlation", "message", "context", "rule", "constraints"],
+  "properties": {
+    "correlation": {
+      "type": "object"
+    },
+    "message": {
+      "type": "object"
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "rule": {
+      "type": "object"
+    },
+    "constraints": {
+      "type": "object"
+    }
+  }
+}

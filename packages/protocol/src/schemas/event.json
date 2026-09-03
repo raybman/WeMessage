@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/event.json",
+  "title": "event frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event"],
+  "properties": {
+    "event": {
+      "type": "string"
+    },
+    "message": {
+      "type": "object"
+    },
+    "guid": {
+      "type": "string"
+    },
+    "newText": {},
+    "ruleId": {
+      "type": "string"
+    },
+    "adapterId": {
+      "type": "string"
+    },
+    "draft": {
+      "type": "object"
+    },
+    "draftId": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "object"
+    },
+    "batchId": {
+      "type": "string"
+    },
+    "sentMessageGuid": {
+      "type": "string"
+    },
+    "error": {
+      "type": "object"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "chatGuid": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    },
+    "value": {},
+    "status": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string"
+    }
+  }
+}

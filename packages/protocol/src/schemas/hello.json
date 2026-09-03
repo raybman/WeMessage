@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/hello.json",
+  "title": "hello frame payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["adapterId", "token", "wire"],
+  "properties": {
+    "adapterId": {
+      "type": "string"
+    },
+    "token": {
+      "type": "string"
+    },
+    "wire": {
+      "type": "integer",
+      "const": 1
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

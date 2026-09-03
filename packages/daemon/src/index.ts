@@ -12,13 +12,28 @@ export { registerRuleRoutes, type RuleRouteDeps } from './routes/rules.js';
 export { registerDoctorRoutes, type DoctorRouteDeps } from './routes/doctor.js';
 export { registerSendRoutes, type SendRouteDeps } from './routes/send.js';
 export {
+  registerConnectionRoutes,
+  type ConnectionRouteDeps,
+} from './routes/connection.js';
+export {
   generateToken,
   loadOrCreateToken,
   readToken,
+  rotateToken,
   tokenEquals,
   TOKEN_FILENAME,
   TOKEN_PREFIX,
 } from './auth.js';
+export {
+  disconnectDaemon,
+  connectDaemon,
+  MANUAL_REVOCATION,
+  type ConnectDeps,
+  type DisconnectDeps,
+  type DisconnectReport,
+  type DisconnectStep,
+  type DisconnectStepId,
+} from './connection.js';
 export { sanitizeInbound, stripControlChars } from './sanitize.js';
 export {
   startDaemon,
@@ -32,6 +47,8 @@ export {
   readConnectionState,
   runDoctor,
   createRealDoctorProbes,
+  AUTOMATION_DENIED,
+  FDA_EPERM,
   type DoctorCheck,
   type DoctorProbes,
   type DoctorReport,

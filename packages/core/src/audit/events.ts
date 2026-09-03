@@ -95,6 +95,19 @@ export type AuditEvent =
       type: 'connection.state-changed';
       from: ConnectionState | null;
       to: ConnectionState;
+    }
+  // s3-execution Scenario 9 (Fable design consult): the disconnect
+  // orchestration's own summary row, distinct from the WS wire event of the
+  // same name (`GatewayEventPayload`'s `gateway.disconnected` — a courtesy
+  // broadcast, not the persisted record). `connection.state-changed` (above)
+  // already covers the fully-connected/read-only -> disconnected transition
+  // itself; this row is the "what else happened" ledger entry: how many
+  // adapter tokens were revoked and whether the operator also asked to purge.
+  | {
+      type: 'gateway.disconnected';
+      reason: 'user-disconnect';
+      revokedAdapterTokens: number;
+      purge: boolean;
     };
 
 export type AuditEventType = AuditEvent['type'];

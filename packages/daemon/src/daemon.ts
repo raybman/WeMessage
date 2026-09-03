@@ -10,8 +10,10 @@
  *
  * F-1: foreground process, no launchd packaging in S1.
  */
+import { rmSync } from 'node:fs';
 import type {
   AuditEvent,
+  ChatDbReader,
   Clock,
   CursorHealReason,
   DraftError,
@@ -27,6 +29,7 @@ import {
   evaluateRules,
   runStartupRecovery,
   systemActor,
+  SETTING_USER_DISCONNECTED,
   type StartupRecoveryResult,
 } from '@wemessage/core';
 import {
@@ -37,6 +40,7 @@ import {
   createChatDbReader,
   createScanLoop,
   createWatchTrigger,
+  type IngestChatDbReader,
   type WakeSignal,
 } from '@wemessage/ingest';
 import type { GatewayEventPayload } from '@wemessage/protocol';
@@ -45,6 +49,7 @@ import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
+import { rotateToken as rotateTokenOnDisk } from './auth.js';
 
 export interface StartDaemonOptions {
   /** Config dir: token file + our SQLite store live here (§2.6, §2.3). */
@@ -146,6 +151,50 @@ const mustNotCallSendBackend: SendBackend = {
   },
 };
 
+/**
+ * s3-execution Scenario 9: `routes/send.ts` holds a single `reader:
+ * ChatDbReader` reference captured once at `buildServer()` time, but
+ * `disconnectDaemon`/`connectDaemon` need to close and reopen the
+ * long-lived chat.db handle mid-lifecycle. This wrapper gives the route a
+ * STABLE `ChatDbReader`-shaped object that delegates to a swappable
+ * `current` underneath; invoking it while closed throws loudly (mirrors
+ * `createUnusedChatDbReader`'s throw-not-misbehave convention) rather than
+ * silently returning stale/empty data — in practice unreachable in
+ * production since the gate denies sends while disconnected, but a real
+ * invariant violation should never fail silently.
+ */
+function createReaderHandle(factory: () => IngestChatDbReader): {
+  reader: ChatDbReader;
+  close(): void;
+  reopen(): void;
+} {
+  let current: IngestChatDbReader | null = factory();
+  const live = (): IngestChatDbReader => {
+    if (current === null) {
+      throw new Error(
+        'chat.db reader used while disconnected (invariant violated: the gate must deny sends before this is ever reached)',
+      );
+    }
+    return current;
+  };
+  return {
+    reader: {
+      readSince: (lastRowid) => live().readSince(lastRowid),
+      readMutatedSince: (sinceNs) => live().readMutatedSince(sinceNs),
+      resolveChat: (handle) => live().resolveChat(handle),
+      findOutboundMessage: (q) => live().findOutboundMessage(q),
+    },
+    close: () => {
+      current?.close();
+      current = null;
+    },
+    reopen: () => {
+      if (current !== null) return; // already open — idempotent
+      current = factory();
+    },
+  };
+}
+
 /** Domain Message -> §3.4 wire event, sanitized at the boundary (§2.4.5). */
 export function toGatewayEvent(message: Message): GatewayEventPayload {
   if (message.kind === 'edit') {
@@ -200,22 +249,35 @@ export async function startDaemon(
 
   // Long-lived reader for POST /v1/send (Scenario 8): distinct from
   // recoveryReader above (opened, used, closed within phase 1). This one
-  // lives for the daemon's process lifetime, closed in stop() below.
-  const sendReader = createChatDbReader(options.chatDbPath, {
-    clock: options.clock,
-  });
+  // lives for the daemon's process lifetime (closed in stop() below), but
+  // Scenario 9's disconnect/connect can also close/reopen it mid-lifecycle
+  // via the handle wrapper — routes/send.ts keeps the stable `.reader`.
+  const sendReaderHandle = createReaderHandle(() =>
+    createChatDbReader(options.chatDbPath, { clock: options.clock }),
+  );
+
+  // s3-execution Scenario 9: a prior run's user-initiated disconnect must
+  // survive a restart (RED row 2). Recorded decision: still open the
+  // sendReaderHandle above even when latched (harmless — the gate denies
+  // sends before it's ever touched) to keep this boot path minimal; only
+  // the doctor probe and the watcher/scan below are skipped.
+  const userDisconnected = store.getSetting(SETTING_USER_DISCONNECTED) === '1';
 
   // ---- doctor: capability probes (Scenario 7, §2.2.3) ----
   // Runs after recovery, before the watcher/listen phases — connection
   // state must be known before anything downstream (gate, status route)
   // consults it. Does not add its own bootLog entry (S1's three-phase
-  // bootLog is pinned by audit-persistence.spec.ts).
-  await runDoctor({
-    probes: options.doctorProbes,
-    store,
-    sink,
-    clock: options.clock,
-  });
+  // bootLog is pinned by audit-persistence.spec.ts). Skipped when a human
+  // disconnected before this restart: an unconditional probe here would
+  // silently reconnect them the moment the daemon comes back up.
+  if (!userDisconnected) {
+    await runDoctor({
+      probes: options.doctorProbes,
+      store,
+      sink,
+      clock: options.clock,
+    });
+  }
 
   // ---- phase 2: watch trigger + scan loop (Scenarios 8/10) ----
   // sockets tracked here only for the greeting frame + stop(); event fan-out
@@ -324,9 +386,36 @@ export async function startDaemon(
     ...(options.wake ? { wake: options.wake } : {}),
     ...(options.onError ? { onError: options.onError } : {}),
   });
-  trigger.start();
-  // catch-up scan: rows written while the daemon was down (§1.3.8 restart)
-  await scan();
+
+  // s3-execution Scenario 9: `watcherArmed` tracks whether the tail
+  // pipeline is currently live, independent of `createWatchTrigger`'s own
+  // start()/stop() idempotency (confirmed directly: safe to call
+  // repeatedly) — this guard exists so `connectDaemon`'s idempotent
+  // second call doesn't re-run an unnecessary catch-up scan, and so a
+  // latched boot can leave the trigger un-started at all.
+  let watcherArmed = !userDisconnected;
+  const stopWatcher = (): void => {
+    if (!watcherArmed) return;
+    trigger.stop();
+    sendReaderHandle.close();
+    watcherArmed = false;
+  };
+  const rearmWatcher = async (): Promise<void> => {
+    if (watcherArmed) return;
+    sendReaderHandle.reopen();
+    trigger.start();
+    await scan();
+    watcherArmed = true;
+  };
+  const closeEventClients = (): void => {
+    for (const socket of sockets) socket.close();
+  };
+
+  if (!userDisconnected) {
+    trigger.start();
+    // catch-up scan: rows written while the daemon was down (§1.3.8 restart)
+    await scan();
+  }
   bootLog.push('watcher');
 
   // ---- phase 3: HTTP/WS listen ----
@@ -342,13 +431,28 @@ export async function startDaemon(
     // s3-execution Scenario 8: doctor/send routes, same shared sink.
     send: {
       store,
-      reader: sendReader,
+      reader: sendReaderHandle.reader,
       backend: options.backend,
       backendName: options.backendName,
       clock: options.clock,
       delay: options.delay ?? realDelay,
       doctorProbes: options.doctorProbes,
       sink,
+    },
+    // s3-execution Scenario 9: connect/disconnect routes, same shared sink.
+    connection: {
+      store,
+      clock: options.clock,
+      sink,
+      probes: options.doctorProbes,
+      stopWatcher,
+      closeEventClients,
+      rotateToken: () => rotateTokenOnDisk(options.configDir),
+      purge: () => {
+        store.close();
+        rmSync(options.configDir, { recursive: true, force: true });
+      },
+      rearmWatcher,
     },
     getStatus: () => ({
       // s3 Scenario 7: probe-derived, persisted state (was the in-memory
@@ -390,7 +494,10 @@ export async function startDaemon(
       trigger.stop();
       for (const socket of sockets) socket.close();
       await server.app.close();
-      sendReader.close();
+      // Idempotent: a prior `purge:true` disconnect may have already closed
+      // both (better-sqlite3's close() tolerates a double call, confirmed
+      // directly; the reader handle's close() no-ops when already closed).
+      sendReaderHandle.close();
       store.close();
     },
   };

@@ -50,6 +50,33 @@ export function loadOrCreateToken(configDir: string): string | null {
   }
 }
 
+/**
+ * s3-execution Scenario 9: the daemon's OWN internal rotation, used inside
+ * `disconnectDaemon` (connection.ts). Distinct from `@wemessage/client`'s
+ * `rotateTokenFile` (a pre-existing, filesystem-direct CLI-side helper for
+ * `wemessage auth rotate` — the daemon cannot depend on `@wemessage/client`,
+ * wrong dependency direction) and from `loadOrCreateToken` (which returns an
+ * EXISTING token unchanged when one is present — no good for forced
+ * rotation). Always generates a fresh token, mirroring
+ * `loadOrCreateToken`'s write discipline (0600, chmod-after-write since the
+ * mode option is umask-filtered). Returns null on write failure — fail
+ * closed, never throw (§2.4.2 posture: a write failure here still leaves
+ * the OLD token file in place, so callers must treat null as "rotation did
+ * not happen," not "the old token is now invalid").
+ */
+export function rotateToken(configDir: string): string | null {
+  const path = join(configDir, TOKEN_FILENAME);
+  try {
+    mkdirSync(configDir, { recursive: true });
+    const token = generateToken();
+    writeFileSync(path, `${token}\n`, { mode: 0o600 });
+    chmodSync(path, 0o600);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
 /** Constant-time comparison (hash both sides to equal length first). */
 export function tokenEquals(expected: string, presented: string): boolean {
   const a = createHash('sha256').update(expected).digest();

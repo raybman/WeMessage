@@ -17,6 +17,7 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerSendRoutes } from './routes/send.js';
+import { registerConnectionRoutes } from './routes/connection.js';
 import type { DoctorProbes } from './doctor.js';
 
 export interface DaemonOptions {
@@ -49,6 +50,25 @@ export interface DaemonOptions {
     delay: (ms: number) => Promise<void>;
     doctorProbes: DoctorProbes;
     sink?: AuditSink;
+  };
+  /**
+   * s3-execution Scenario 9: when provided, registers `POST /v1/disconnect`
+   * and `POST /v1/connect` (§1.6). Shares the ONE §1.8 sink with `rules`/
+   * `send` when the real daemon passes all three (daemon.ts always does).
+   * `purge()` is wrapped below so the module-local `purged` latch flips to
+   * true BEFORE the real purge runs — fail-closed even if the delete itself
+   * throws partway through.
+   */
+  connection?: {
+    store: Store;
+    clock: Clock;
+    sink?: AuditSink;
+    probes: DoctorProbes;
+    stopWatcher: () => void;
+    closeEventClients: () => void;
+    rotateToken: () => string | null;
+    purge: () => void;
+    rearmWatcher: () => Promise<void>;
   };
 }
 
@@ -85,10 +105,17 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   await app.register(websocket);
   const counters = { handlerCalls: 0 };
 
+  // s3-execution Scenario 9: once a `purge:true` disconnect runs, this
+  // process must never serve authenticated again, even if the config-dir
+  // delete itself throws partway (the connection.purge wrapper below flips
+  // this BEFORE calling the real purge). Checked ahead of the token file so
+  // a purge can't be undone by another process re-creating the file.
+  let purged = false;
+
   // §2.6: the token file is the live source of truth (rotation = rewrite);
   // fall back to the boot token only if the file disappears mid-flight.
   const currentToken = (): string | null =>
-    readToken(opts.configDir) ?? bootToken;
+    purged ? null : (readToken(opts.configDir) ?? bootToken);
 
   app.addHook('onRequest', async (req, reply) => {
     const token = currentToken();
@@ -135,7 +162,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   // One §1.8 chokepoint shared across rules/audit AND doctor/send when both
   // are provided (daemon.ts always provides both, with the same explicit
   // `sink` on each); either can also stand alone with its own sink in tests.
-  const sinkSource = opts.rules ?? opts.send;
+  const sinkSource = opts.rules ?? opts.send ?? opts.connection;
   const sink = sinkSource
     ? (sinkSource.sink ??
       createAuditSink({ store: sinkSource.store, clock: sinkSource.clock }))
@@ -180,6 +207,32 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       clock: opts.send.clock,
       delay: opts.send.delay,
       sink,
+    });
+  }
+
+  if (opts.connection && sink) {
+    const connection = opts.connection;
+    // Fail-closed even if the delete throws partway: flip the latch first.
+    const purge = (): void => {
+      purged = true;
+      connection.purge();
+    };
+    registerConnectionRoutes(app, {
+      disconnect: {
+        store: connection.store,
+        sink,
+        stopWatcher: connection.stopWatcher,
+        closeEventClients: connection.closeEventClients,
+        rotateToken: connection.rotateToken,
+        purge,
+      },
+      connect: {
+        store: connection.store,
+        sink,
+        clock: connection.clock,
+        probes: connection.probes,
+        rearmWatcher: connection.rearmWatcher,
+      },
     });
   }
 

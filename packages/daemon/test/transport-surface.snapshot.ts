@@ -31,12 +31,23 @@
  * Scenario 10: GET /v1/rules/:id/dry-run + auto-HEAD twin — §1.6 route
  * table row 7, read-only replay over the mirrored inbound window.
  * Deliberate update #5, Scenario 11: GET /v1/audit + GET /v1/audit/verify
- * + auto-HEAD twins — §1.6 route table rows 8-9, read-only audit reads.)
+ * + auto-HEAD twins — §1.6 route table rows 8-9, read-only audit reads.
+ * Deliberate update #7, s3-execution Scenario 9: the ratchet's own
+ * route-table sub-test wired only `rules` into `buildServer` since S2
+ * Scenario 7 and was never widened when Scenario 8 landed `send`, so
+ * `GET /v1/doctor` and `POST /v1/send` were real reachable surface but
+ * never actually pinned here (gap noted + closed 2026-09-02, same commit
+ * as `connection` wiring). Now wiring `rules`+`send`+`connection` together
+ * (matching daemon.ts's real composition) adds all four: GET /v1/doctor +
+ * auto-HEAD twin, POST /v1/send, POST /v1/connect, POST /v1/disconnect —
+ * the latter two get no HEAD twin, POST routes never do (see POST /v1/rules
+ * and POST /v1/rules/:id/test above, same precedent).
  */
 export const ROUTE_TABLE: readonly string[] = [
   'DELETE /v1/rules/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
+  'GET /v1/doctor',
   'GET /v1/events',
   'GET /v1/health',
   'GET /v1/rules',
@@ -45,6 +56,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/status',
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
+  'HEAD /v1/doctor',
   'HEAD /v1/events',
   'HEAD /v1/health',
   'HEAD /v1/rules',
@@ -52,8 +64,11 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/rules/:id/dry-run',
   'HEAD /v1/status',
   'PATCH /v1/rules/:id',
+  'POST /v1/connect',
+  'POST /v1/disconnect',
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
+  'POST /v1/send',
 ];
 
 /**
@@ -63,6 +78,9 @@ export const ROUTE_TABLE: readonly string[] = [
  * `GET /v1/doctor` wire draft.created/approved/sent/failed and gate.denied
  * onto the same WS broadcast channel (§1.6 route table rows 10-12). Emitted
  * literals must be a subset of this list and exactly equal EMITTED_WS_EVENTS.
+ * Deliberate update #7, s3-execution Scenario 9: `POST /v1/disconnect`
+ * broadcasts `gateway.disconnected` (§1.3.7 step 3) after the
+ * `connection.state` twin, once WS clients have seen the state flip.
  */
 export const WS_EVENT_VOCABULARY: readonly string[] = [
   'connection.state',
@@ -71,6 +89,7 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'draft.failed',
   'draft.sent',
   'gate.denied',
+  'gateway.disconnected',
   'message.edited',
   'message.received',
   'message.unsent',
@@ -84,6 +103,9 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * now constructs 'rule.matched' — already in the allowed vocabulary above.)
  * (Deliberate update #6, Scenario 8: routes/send.ts constructs
  * draft.created/draft.approved/draft.sent/draft.failed/gate.denied.)
+ * (Deliberate update #7, Scenario 9: connection.ts's disconnectDaemon
+ * constructs 'gateway.disconnected' — already added to the allowed
+ * vocabulary above.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
@@ -92,6 +114,7 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   'draft.failed',
   'draft.sent',
   'gate.denied',
+  'gateway.disconnected',
   'message.edited',
   'message.received',
   'message.unsent',

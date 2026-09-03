@@ -32,6 +32,18 @@ export const SETTING_ALLOW_SMS_AUTO = 'send.allowSmsAuto';
  * warn (gateway will auto-launch on next send) or a fail (read-only).
  */
 export const SETTING_AUTO_LAUNCH_MESSAGES = 'send.autoLaunchMessages';
+/**
+ * s3-execution Scenario 9 (Fable design consult): a user-initiated
+ * disconnect latch, distinct from `SETTING_CONNECTION_STATE`. Not consumed
+ * by `evaluateGate`/`readGateSettings` (the gate already denies on
+ * `connectionState === 'disconnected'`, which the disconnect flow also
+ * writes) — this key exists solely so `startDaemon`'s boot sequence can
+ * tell "the daemon has never probed" apart from "a human asked to stop,
+ * and an unconditional boot-time `runDoctor()` must not silently
+ * reconnect them across a restart." Booleans serialize as '1'/'0' per the
+ * flat settings-table convention above.
+ */
+export const SETTING_USER_DISCONNECTED = 'connection.userDisconnected';
 
 function parseBool(raw: string | null, fallback: boolean): boolean {
   if (raw === '1') return true;

@@ -24,13 +24,43 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, type SqliteStore } from '@wemessage/store';
-import { buildServer, type DaemonServer } from '@wemessage/daemon';
+import {
+  buildServer,
+  type DaemonServer,
+  type DoctorProbes,
+} from '@wemessage/daemon';
+import {
+  createUnusedChatDbReader,
+  createUnusedSendBackend,
+} from './helpers/loopback-backend.js';
 import {
   EMITTED_WS_EVENTS,
   PORT_IMPORTER_ALLOWLIST,
   ROUTE_TABLE,
   WS_EVENT_VOCABULARY,
 } from './transport-surface.snapshot.js';
+
+/**
+ * Never touched: this test only asserts `server.routes` (route
+ * registration), it never calls GET /v1/doctor, POST /v1/send,
+ * POST /v1/connect, or POST /v1/disconnect. Real probes would still be
+ * "safe" here, but a loud fake keeps that guarantee honest if the ratchet
+ * ever grows a request-level assertion by accident.
+ */
+const unusedProbes: DoctorProbes = {
+  osMajor: () => {
+    throw new Error('DoctorProbes must not be called: route-table test only');
+  },
+  fda: () => {
+    throw new Error('DoctorProbes must not be called: route-table test only');
+  },
+  automation: () => {
+    throw new Error('DoctorProbes must not be called: route-table test only');
+  },
+  messagesRunning: () => {
+    throw new Error('DoctorProbes must not be called: route-table test only');
+  },
+};
 
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -73,8 +103,14 @@ function productionSourceFiles(): string[] {
 
 describe('transport-surface ratchet (INV-3, F-17)', () => {
   it('live fastify route table equals the snapshot exactly', async () => {
-    // Full production surface: the composed daemon passes `rules`, so the
-    // ratchet must too (a bare buildServer would only see the S1 routes).
+    // Full production surface: the composed daemon (daemon.ts) always passes
+    // `rules` + `send` + `connection` together, so the ratchet must wire all
+    // three too — a bare `rules`-only buildServer would only ever see the S1
+    // + S2 routes, silently missing S3 Scenario 8's doctor/send routes and
+    // Scenario 9's connect/disconnect routes forever (gap noted 2026-09-02:
+    // this sub-test previously wired `rules` alone since S2 Scenario 7 and
+    // was never widened when Scenario 8 landed, so /v1/doctor and /v1/send
+    // were never actually pinned here despite being real reachable surface).
     const dir = tempDir();
     const clock = {
       now: () => new Date(0).toISOString(),
@@ -85,6 +121,43 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
     const server = await buildServer({
       configDir: dir,
       rules: { store, clock },
+      send: {
+        store,
+        reader: createUnusedChatDbReader(),
+        backend: createUnusedSendBackend(),
+        backendName: 'unused',
+        clock,
+        delay: () => Promise.resolve(),
+        doctorProbes: unusedProbes,
+      },
+      connection: {
+        store,
+        clock,
+        probes: unusedProbes,
+        stopWatcher: () => {
+          throw new Error(
+            'stopWatcher must not be called: route-table test only',
+          );
+        },
+        closeEventClients: () => {
+          throw new Error(
+            'closeEventClients must not be called: route-table test only',
+          );
+        },
+        rotateToken: () => {
+          throw new Error(
+            'rotateToken must not be called: route-table test only',
+          );
+        },
+        purge: () => {
+          throw new Error('purge must not be called: route-table test only');
+        },
+        rearmWatcher: () => {
+          throw new Error(
+            'rearmWatcher must not be called: route-table test only',
+          );
+        },
+      },
     });
     servers.push(server);
     expect([...server.routes].sort()).toEqual([...ROUTE_TABLE]);

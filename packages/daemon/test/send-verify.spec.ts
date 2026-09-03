@@ -270,7 +270,7 @@ describe('POST /v1/send — row 3: new recipient, no existing conversation', () 
     // deliberately no addHandle/addChat for this handle at all
 
     const res = await send(h, {
-      chatGuid: 'iMessage;-;+19998887777',
+      chatGuid: 'iMessage;-;+15559998888',
       body: 'first contact',
     });
 

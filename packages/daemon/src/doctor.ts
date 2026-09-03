@@ -72,9 +72,14 @@ const MESSAGES_WARN_3A =
   'Messages is not running; the gateway will launch it automatically on the next send.';
 const MESSAGES_FAIL_3B =
   'Messages must be running to send; open Messages, or enable send.autoLaunchMessages to let the gateway launch it.';
-const AUTOMATION_DENIED =
+// Exported (s3-execution Scenario 9): `connection.ts`'s manual-revocation
+// remainder reuses these two verbatim — the disconnect response tells the
+// operator what a `POST /v1/disconnect` cannot do for them (revoke OS-level
+// grants), and that copy must never drift from what GET /v1/doctor already
+// tells them for the same failure.
+export const AUTOMATION_DENIED =
   'Automation permission denied; run tccutil reset AppleEvents sh.wemessage.gateway and approve the prompt on the next send. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
-const FDA_EPERM =
+export const FDA_EPERM =
   'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to wemessaged in System Settings > Privacy & Security, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 const FDA_ENOENT =
   'No Messages history found at the chat.db path; this is not a permission failure. Sign in to Messages and send or receive a message to create it.';

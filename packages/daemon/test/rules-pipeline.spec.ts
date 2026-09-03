@@ -41,12 +41,22 @@ import {
   createAuditSink,
   startDaemon,
   type AuditSink,
+  type DoctorProbes,
   type RunningDaemon,
 } from '@wemessage/daemon';
 
 const clock: Clock = {
   now: () => new Date().toISOString(),
   nowMs: () => Date.now(),
+};
+
+// s3 Scenario 7: startDaemon requires explicit doctorProbes; never a real
+// osascript call in a test (test/arch.spec.ts gate (b)).
+const fullyConnectedProbes: DoctorProbes = {
+  osMajor: () => 15,
+  fda: async () => 'ok',
+  automation: async () => 'ok',
+  messagesRunning: async () => true,
 };
 
 interface FakeWatcher extends FsWatcher {
@@ -136,6 +146,7 @@ async function boot(opts?: {
     chatDbPath,
     clock,
     watcher,
+    doctorProbes: fullyConnectedProbes,
     ...(opts?.createAuditSink ? { createAuditSink: opts.createAuditSink } : {}),
   });
   cleanups.push(() => daemon.stop());

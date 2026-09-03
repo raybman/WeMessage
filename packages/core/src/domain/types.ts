@@ -99,7 +99,11 @@ export type Actor =
             // extension for the persisted audit log's system actors
             // (recovery/ingest/rule-engine events, §2.4.4). No pre-existing
             // variant touched.
-            | 'recovery' | 'ingest' | 'rule-engine' };
+            | 'recovery' | 'ingest' | 'rule-engine'
+            // F-28 (s3-execution Scenario 7, coordinator-confirmed): additive
+            // extension, same precedent as F-16. Probe-driven connection-state
+            // flips (§2.2.3) need an actor; nothing pre-existing touched.
+            | 'capability-probe' };
 
 export interface Approval {
   id: Ulid; draftId: Ulid;
@@ -129,6 +133,14 @@ export type ContactMode = 'deny' | 'draft-only' | 'auto';
 export interface ContactPolicy {
   handle: Handle; displayName?: string; mode: ContactMode; updatedAt: IsoUtc;
 }
+
+// s3-execution Scenario 7, §2.2.3: the doctor engine's derived connection
+// state. 'unsupported' (macOS <13) is additive vs. GateContext.settings'
+// existing inline 3-value literal below, which Scenario 6 already shipped
+// and pins on its own (read-write fail-closed default is 'disconnected';
+// 'unsupported' fails closed there too, no gate change needed).
+export type ConnectionState =
+  | 'fully-connected' | 'read-only' | 'disconnected' | 'unsupported';
 
 export type GateDenyReason =
   | 'kill-switch' | 'disconnected' | 'read-only' | 'contact-denied'

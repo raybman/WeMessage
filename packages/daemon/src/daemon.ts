@@ -44,6 +44,7 @@ import { SqliteStore } from '@wemessage/store';
 import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
+import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
 
 export interface StartDaemonOptions {
   /** Config dir: token file + our SQLite store live here (§2.6, §2.3). */
@@ -64,6 +65,17 @@ export interface StartDaemonOptions {
    * broadcast via an injected recording sink). Production omits it.
    */
   createAuditSink?: (deps: { store: Store; clock: Clock }) => AuditSink;
+  /**
+   * Doctor's capability-probe seam (s3-execution Scenario 7). REQUIRED, not
+   * optional-with-a-production-default: unlike createAuditSink's default
+   * (SQLite only), a "default" DoctorProbes would need to invoke sendkit's
+   * real probeAutomation/isMessagesRunning, which shell out to the real
+   * AppleScript runner binary — never allowed in a test (test/arch.spec.ts
+   * gate (a)/(b)).
+   * Requiring this field forces every call site (including every existing
+   * test) to pass an explicit fake; main.ts composes the real four.
+   */
+  doctorProbes: DoctorProbes;
 }
 
 /**
@@ -170,6 +182,18 @@ export async function startDaemon(
   }
   bootLog.push('recovery');
 
+  // ---- doctor: capability probes (Scenario 7, §2.2.3) ----
+  // Runs after recovery, before the watcher/listen phases — connection
+  // state must be known before anything downstream (gate, status route)
+  // consults it. Does not add its own bootLog entry (S1's three-phase
+  // bootLog is pinned by audit-persistence.spec.ts).
+  await runDoctor({
+    probes: options.doctorProbes,
+    store,
+    sink,
+    clock: options.clock,
+  });
+
   // ---- phase 2: watch trigger + scan loop (Scenarios 8/10) ----
   // sockets tracked here only for the greeting frame + stop(); event fan-out
   // goes through the sink (whose client set the server populates).
@@ -248,11 +272,26 @@ export async function startDaemon(
       );
     },
   });
-  let scanHealthy = false;
   const scan = async (): Promise<void> => {
     burstRules = store.listRules();
-    await scanLoop.scanOnce();
-    scanHealthy = true;
+    try {
+      await scanLoop.scanOnce();
+    } catch (err) {
+      // §2.2.3: a scan hitting EPERM/EACCES means FDA was revoked mid-run
+      // (or never propagated, macOS 26) — re-probe immediately rather than
+      // waiting for the next GET /v1/doctor / POST /v1/connect. The scan
+      // error still propagates to onError afterward; the loop keeps going.
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'EPERM' || code === 'EACCES') {
+        await runDoctor({
+          probes: options.doctorProbes,
+          store,
+          sink,
+          clock: options.clock,
+        });
+      }
+      throw err;
+    }
   };
   const trigger = createWatchTrigger({
     chatDbPath: options.chatDbPath,
@@ -278,8 +317,9 @@ export async function startDaemon(
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
     rules: { store, clock: options.clock, sink },
     getStatus: () => ({
-      // S1 can read but not send: read-only once a scan has succeeded (§3.4).
-      connectionState: scanHealthy ? 'read-only' : 'disconnected',
+      // s3 Scenario 7: probe-derived, persisted state (was the in-memory
+      // scanHealthy flag through S1/S2).
+      connectionState: readConnectionState(store),
       cursor: store.getCursor(),
       counts: {
         messagesToday: store.countInboundMessagesSince(utcMidnight()),
@@ -295,7 +335,7 @@ export async function startDaemon(
       socket.send(
         JSON.stringify({
           event: 'connection.state',
-          state: scanHealthy ? 'read-only' : 'disconnected',
+          state: readConnectionState(store),
         } satisfies GatewayEventPayload),
       );
     },

@@ -19,12 +19,22 @@ import { SqliteStore } from '@wemessage/store';
 import {
   createAuditSink,
   startDaemon,
+  type DoctorProbes,
   type RunningDaemon,
 } from '@wemessage/daemon';
 
 const clock: Clock = {
   now: () => new Date().toISOString(),
   nowMs: () => Date.now(),
+};
+
+// s3 Scenario 7: startDaemon requires explicit doctorProbes; never a real
+// osascript call in a test (test/arch.spec.ts gate (b)).
+const fullyConnectedProbes: DoctorProbes = {
+  osMajor: () => 15,
+  fda: async () => 'ok',
+  automation: async () => 'ok',
+  messagesRunning: async () => true,
 };
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -99,6 +109,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       ...seeded,
       clock,
       watcher: idleWatcher,
+      doctorProbes: fullyConnectedProbes,
     });
     cleanups.push(() => daemon.stop());
 
@@ -131,6 +142,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       ...seeded,
       clock,
       watcher: idleWatcher,
+      doctorProbes: fullyConnectedProbes,
     });
     cleanups.push(() => daemon.stop());
 
@@ -164,6 +176,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       ...seeded,
       clock,
       watcher,
+      doctorProbes: fullyConnectedProbes,
       createAuditSink: (deps) => {
         const real = createAuditSink(deps);
         return {
@@ -192,6 +205,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       ...seeded,
       clock,
       watcher: idleWatcher,
+      doctorProbes: fullyConnectedProbes,
     });
     cleanups.push(() => daemon.stop());
     const rows = trail(daemon).filter(

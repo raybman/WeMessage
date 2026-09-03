@@ -24,6 +24,14 @@ export const SETTING_GLOBAL_MODE = 'send.globalMode';
 export const SETTING_CONNECTION_STATE = 'connection.state';
 /** S6 feature; carried-but-unused in S3 (F-20 — read but never yet set true by any S3 code path). */
 export const SETTING_ALLOW_SMS_AUTO = 'send.allowSmsAuto';
+/**
+ * s3-execution Scenario 7 (Fable design consult): not a probe, a settings
+ * key. Default true when unset (matches the pre-existing design-note comment
+ * in packages/sendkit/src/applescript.ts referencing this exact key).
+ * Governs whether the doctor engine treats "Messages not running" as a
+ * warn (gateway will auto-launch on next send) or a fail (read-only).
+ */
+export const SETTING_AUTO_LAUNCH_MESSAGES = 'send.autoLaunchMessages';
 
 function parseBool(raw: string | null, fallback: boolean): boolean {
   if (raw === '1') return true;

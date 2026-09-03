@@ -1,15 +1,39 @@
 // Foreground dev entrypoint (F-1: no launchd packaging in S1). Boot order
 // recovery -> watcher -> listen per §2.5; live FSEvents + clock-skew wake
 // (F-9). The demo script (spec 4.2) runs this via WEMESSAGE_DIR/PORT.
-import { homedir } from 'node:os';
+import { homedir, release as osRelease } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { Clock } from '@wemessage/core';
 import {
   createClockSkewWakeSignal,
   createNodeFsWatcher,
 } from '@wemessage/ingest';
+import type { ExecFn } from '@wemessage/sendkit';
 import { startDaemon } from './daemon.js';
+import { createRealDoctorProbes } from './doctor.js';
+
+// Real execFile-backed ExecFn (s3-execution Scenario 7): deliberately
+// generic (cmd/args are caller-supplied) so this file names no specific
+// AppleScript-runner binary — that literal stays confined to
+// packages/sendkit/src per test/arch.spec.ts's S3 production-source gate.
+// This is just the shell-out primitive sendkit's probes are injected with.
+const execFileAsync = promisify(execFile);
+const realExec: ExecFn = async (cmd, args) => {
+  try {
+    const { stdout, stderr } = await execFileAsync(cmd, args);
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    const e = err as { code?: number; stdout?: string; stderr?: string };
+    return {
+      code: e.code ?? 1,
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? '',
+    };
+  }
+};
 
 const Env = z.object({
   // R7 rename map: WEMESSAGE_DIR overrides the config dir (tests/dev).
@@ -41,6 +65,11 @@ const daemon = await startDaemon({
   watcher: createNodeFsWatcher(),
   wake,
   port: env.WEMESSAGE_PORT,
+  doctorProbes: createRealDoctorProbes({
+    osRelease,
+    chatDbPath,
+    exec: realExec,
+  }),
   onError: (error) => {
     console.error('wemessage daemon: pipeline error (loop continues):', error);
   },

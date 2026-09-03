@@ -30,6 +30,7 @@
  */
 import type {
   Actor,
+  ConnectionState,
   Draft,
   DraftError,
   MessageGuid,
@@ -85,7 +86,16 @@ export type AuditEvent =
     }
   | { type: 'send.attempted'; draftId: Ulid; attempt: number; backend: string }
   | { type: 'draft.sent'; draftId: Ulid; sentMessageGuid: MessageGuid }
-  | { type: 'draft.failed'; draftId: Ulid; error: DraftError };
+  | { type: 'draft.failed'; draftId: Ulid; error: DraftError }
+  // s3-execution Scenario 7, §2.2.3 (Fable design consult): the doctor
+  // engine's only-on-change connection-state flip. Just {from,to} — the
+  // full checks/remediation breakdown lives in the DoctorReport returned to
+  // the caller, not the persisted audit log.
+  | {
+      type: 'connection.state-changed';
+      from: ConnectionState | null;
+      to: ConnectionState;
+    };
 
 export type AuditEventType = AuditEvent['type'];
 

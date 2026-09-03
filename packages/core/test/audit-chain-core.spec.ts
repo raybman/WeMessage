@@ -304,4 +304,24 @@ describe('AuditEvent union (S2 vocabulary, §2.4.4 subset) + F-16 Actor extensio
     const bogus: Actor = { kind: 'system', reason: 'gremlins' };
     void bogus;
   });
+
+  it('F-28: the Actor system-reason union gained capability-probe additively (s3 Scenario 7)', () => {
+    const extended: Actor[] = [{ kind: 'system', reason: 'capability-probe' }];
+    // Pre-existing §3.2 + F-16 variants still type-check untouched:
+    const existing: Actor[] = [
+      { kind: 'human', via: 'api' },
+      { kind: 'agent', adapterId: 'echo' },
+      { kind: 'system', reason: 'expiry' },
+      { kind: 'system', reason: 'kill-switch' },
+      { kind: 'system', reason: 'disconnect' },
+      { kind: 'system', reason: 'recovery' },
+      { kind: 'system', reason: 'ingest' },
+      { kind: 'system', reason: 'rule-engine' },
+    ];
+    expect([...extended, ...existing]).toHaveLength(9);
+
+    // @ts-expect-error — arbitrary reasons still rejected
+    const bogus: Actor = { kind: 'system', reason: 'reboot-detected' };
+    void bogus;
+  });
 });

@@ -38,3 +38,5 @@ export {
   type WatchTrigger,
   type WatchTriggerOptions,
 } from './watch/index.js';
+// s3-execution Scenario 7: FDA probe for the doctor engine.
+export { probeChatDbReadable, type FdaProbeResult } from './probe.js';

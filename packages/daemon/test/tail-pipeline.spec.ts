@@ -34,7 +34,11 @@ import {
   DaemonUnreachableError,
 } from '@wemessage/client';
 import type { GatewayEventPayload } from '@wemessage/protocol';
-import { startDaemon, type RunningDaemon } from '@wemessage/daemon';
+import {
+  startDaemon,
+  type DoctorProbes,
+  type RunningDaemon,
+} from '@wemessage/daemon';
 
 const CLI_BIN = fileURLToPath(
   new URL('../../cli/dist/bin.js', import.meta.url),
@@ -43,6 +47,17 @@ const CLI_BIN = fileURLToPath(
 const clock: Clock = {
   now: () => new Date().toISOString(),
   nowMs: () => Date.now(),
+};
+
+// s3 Scenario 7: startDaemon requires explicit doctorProbes (no production
+// default — see doctor.ts's header comment on why). Fixed 'fully-connected'
+// fake for this file's fixture-driven boot; never calls real osascript
+// (test/arch.spec.ts gate (b)).
+const fullyConnectedProbes: DoctorProbes = {
+  osMajor: () => 15,
+  fda: async () => 'ok',
+  automation: async () => 'ok',
+  messagesRunning: async () => true,
 };
 
 interface FakeWatcher extends FsWatcher {
@@ -111,7 +126,13 @@ async function boot(): Promise<Ctx> {
   const chatId = fixture.addChat('iMessage;-;+15550001111', handleId);
 
   const watcher = fakeWatcher();
-  const daemon = await startDaemon({ configDir, chatDbPath, clock, watcher });
+  const daemon = await startDaemon({
+    configDir,
+    chatDbPath,
+    clock,
+    watcher,
+    doctorProbes: fullyConnectedProbes,
+  });
   cleanups.push(() => daemon.stop());
 
   const token = daemon.server.token;
@@ -150,7 +171,7 @@ describe('WS tail (§3.4, §2.4.5)', () => {
     await waitFor(() => events.length >= 1, 'connection.state greeting');
     expect(events[0]).toEqual({
       event: 'connection.state',
-      state: 'read-only',
+      state: 'fully-connected',
     });
 
     const a = ctx.fixture.addMessage({
@@ -263,7 +284,7 @@ describe('/v1/status (F-5)', () => {
       await new Promise((r) => setTimeout(r, 20));
       status = await client.status();
     }
-    expect(status.connectionState).toBe('read-only');
+    expect(status.connectionState).toBe('fully-connected');
     expect(status.cursor?.lastRowid).toBe(3);
     expect(status.counts.messagesToday).toBe(3);
     expect(status.adapters).toEqual([]);
@@ -301,11 +322,11 @@ describe('CLI (§3.8, §2.6)', () => {
     const json = await runCli(['status', '--json'], env);
     expect(json.code).toBe(0);
     const payload = JSON.parse(json.stdout) as { connectionState: string };
-    expect(payload.connectionState).toBe('read-only');
+    expect(payload.connectionState).toBe('fully-connected');
 
     const human = await runCli(['status'], env);
     expect(human.code).toBe(0);
-    expect(human.stdout).toContain('read-only');
+    expect(human.stdout).toContain('fully-connected');
   });
 
   it('wemessage watch --json emits one NDJSON object per event', async () => {
@@ -370,7 +391,7 @@ describe('CLI (§3.8, §2.6)', () => {
     await expect(oldClient.status()).rejects.toBeInstanceOf(DaemonAuthError);
     const newClient = createClient({ baseUrl: ctx.baseUrl, token: rotated });
     const status = await newClient.status();
-    expect(status.connectionState).toBe('read-only');
+    expect(status.connectionState).toBe('fully-connected');
   });
 
   it('exits 3 when the daemon is unreachable, 4 on auth failure (§3.8)', async () => {

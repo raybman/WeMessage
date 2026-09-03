@@ -24,3 +24,15 @@ export {
   type RunningDaemon,
   type StartDaemonOptions,
 } from './daemon.js';
+export {
+  evaluateDoctor,
+  macOsMajorFromRelease,
+  readConnectionState,
+  runDoctor,
+  createRealDoctorProbes,
+  type DoctorCheck,
+  type DoctorProbes,
+  type DoctorReport,
+  type DoctorSnapshot,
+  type RunDoctorDeps,
+} from './doctor.js';

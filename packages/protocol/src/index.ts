@@ -8,6 +8,7 @@ import type {
   Actor,
   AttachmentRef,
   ChatGuid,
+  ConnectionState,
   DraftError,
   DraftState,
   GateDenyReason,
@@ -43,7 +44,10 @@ export type GatewayEventPayload =
   | { event: 'toggle.changed';   key: string; value: unknown; actor: Actor }
   | { event: 'adapter.health';   adapterId: string;
       status: 'connected' | 'disconnected' | 'unhealthy' }
-  | { event: 'connection.state'; state: 'fully-connected'|'read-only'|'disconnected' }
+  // s3-execution Scenario 7: additively widened to include 'unsupported'
+  // (macOS <13, doctor engine §2.2.3) — the two pre-existing values are
+  // untouched.
+  | { event: 'connection.state'; state: ConnectionState }
   | { event: 'gateway.disconnected'; reason: 'user-disconnect' };
 
 export interface DraftSummary {

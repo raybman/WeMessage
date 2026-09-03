@@ -43,7 +43,11 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Clock, FsWatcher } from '@wemessage/core';
 import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
-import { startDaemon, type RunningDaemon } from '@wemessage/daemon';
+import {
+  startDaemon,
+  type DoctorProbes,
+  type RunningDaemon,
+} from '@wemessage/daemon';
 import type {
   AuditRowPayload,
   AuditVerifyResult,
@@ -56,6 +60,15 @@ import type { GatewayEventPayload } from '@wemessage/protocol';
 const CLI_BIN = fileURLToPath(
   new URL('../../cli/dist/bin.js', import.meta.url),
 );
+
+// s3 Scenario 7: startDaemon requires explicit doctorProbes; never a real
+// osascript call in a test (test/arch.spec.ts gate (b)).
+const fullyConnectedProbes: DoctorProbes = {
+  osMajor: () => 15,
+  fda: async () => 'ok',
+  automation: async () => 'ok',
+  messagesRunning: async () => true,
+};
 
 interface ClockCtl {
   clock: Clock;
@@ -160,6 +173,7 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
       chatDbPath,
       clock: clockCtl.clock,
       watcher: watcher1,
+      doctorProbes: fullyConnectedProbes,
     });
     daemons.push(daemon1);
     const token1 = daemon1.server.token;
@@ -371,6 +385,7 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
       chatDbPath,
       clock: clockCtl.clock,
       watcher: watcher2,
+      doctorProbes: fullyConnectedProbes,
     });
     daemons.push(daemon2);
     const token2 = daemon2.server.token;

@@ -384,6 +384,192 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
   });
 
+  /**
+   * S4 Scenario 1 — arch guards for the approval era (s4-execution Part 2
+   * Scenario 1). Ratchet snapshot: asserts the current baseline holds, no
+   * growth yet. Structural-only: no production code lands this scenario.
+   *
+   * (a) `SendBackend`/`ChatDbReader` are mentioned in production src by
+   *     exactly the 13 S3 files today — the send/scheduler surface must stay
+   *     funneled through `dispatchApproved`; a new caller (e.g. a scheduler
+   *     reaching around it straight to `SendBackend`) grows this list and
+   *     must be reviewed here, not discovered later.
+   * (b) grep gate: no production file computes a `setTimeout` horizon from
+   *     `expiresAt`/`sendNotBefore` (the constraint-4 tripwire — S4's grace
+   *     scheduler is not built yet; when it is, this test is the reviewer).
+   * (c) grep gate: the literal `'auto-respond'` never appears as a minted
+   *     actor reason in production src — S4 ships no autonomy. The one
+   *     legitimate home for the string is the `Actor` union's own type
+   *     declaration (`domain/types.ts`), which is exempted: declaring the
+   *     type is not minting a value.
+   * (d) public-repo + no-green sweeps: no new tests here, they already exist
+   *     ((d) above, and the CLI specs' ANSI-absence checks) — re-pinned by
+   *     the full gate run this scenario's commit requires.
+   */
+  describe('S4 extensions (s4-execution Scenario 1: approval-era guards)', () => {
+    const skipDirs = new Set([
+      'node_modules',
+      'dist',
+      '.git',
+      'coverage',
+      '.turbo',
+    ]);
+    const codeIsh = /\.(ts|tsx|js|mjs|cjs)$/;
+
+    function listFiles(root: string): string[] {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (skipDirs.has(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else out.push(full);
+        }
+      };
+      walk(root);
+      return out;
+    }
+
+    const relOf = (abs: string): string =>
+      abs.slice(repoRoot.length + 1).replace(/\\/g, '/');
+
+    function productionSrcFiles(): string[] {
+      const roots = ['packages', 'apps'].map((p) => join(repoRoot, p));
+      return roots
+        .flatMap((r) => listFiles(r))
+        .map(relOf)
+        .filter((f) => /^(packages|apps)\/[^/]+\/src\//.test(f))
+        .filter((f) => codeIsh.test(f));
+    }
+
+    // (a) importer allowlist: exactly these 13 files mention SendBackend or
+    // ChatDbReader in production source, as of S3's close (841cd27).
+    const SEND_BACKEND_CHAT_DB_READER_BASELINE = [
+      'packages/core/src/drafts/recovery.ts',
+      'packages/core/src/ports/index.ts',
+      'packages/core/src/sending/dispatcher.ts',
+      'packages/daemon/src/daemon.ts',
+      'packages/daemon/src/main.ts',
+      'packages/daemon/src/routes/send.ts',
+      'packages/daemon/src/server.ts',
+      'packages/ingest/src/chatdb/index.ts',
+      'packages/ingest/src/index.ts',
+      'packages/ingest/src/scan/index.ts',
+      'packages/sendkit/src/applescript.ts',
+      'packages/sendkit/src/index.ts',
+      'packages/sendkit/src/verify.ts',
+    ].sort();
+
+    function sendBackendChatDbReaderImporters(): string[] {
+      // Substring, not word-boundary: derived types/values like
+      // `ChatDbReaderOptions` and `createChatDbReader` count as "mentions"
+      // of the surface too (that is how the 13-file S3 baseline was
+      // computed) — narrowing to the bare identifiers undercounts it.
+      return productionSrcFiles()
+        .filter((f) => {
+          const content = readFileSync(join(repoRoot, f), 'utf8');
+          return (
+            content.includes('SendBackend') || content.includes('ChatDbReader')
+          );
+        })
+        .sort();
+    }
+
+    // (b) no production file computes a setTimeout horizon from
+    // expiresAt/sendNotBefore yet (heuristic: both strings present in the
+    // same file — reviewed by hand, not a precise dataflow check).
+    function computedHorizonSetTimeoutOffenders(): string[] {
+      return productionSrcFiles().filter((f) => {
+        const content = readFileSync(join(repoRoot, f), 'utf8');
+        return (
+          content.includes('setTimeout') &&
+          /(expiresAt|sendNotBefore)/.test(content)
+        );
+      });
+    }
+
+    // (c) 'auto-respond' as a minted actor reason: everywhere except the
+    // Actor union's own type declaration, which merely names the literal.
+    const ACTOR_TYPE_DECL_FILE = 'packages/core/src/domain/types.ts';
+
+    function autoRespondMintedOffenders(): string[] {
+      return productionSrcFiles()
+        .filter((f) => f !== ACTOR_TYPE_DECL_FILE)
+        .filter((f) =>
+          readFileSync(join(repoRoot, f), 'utf8').includes("'auto-respond'"),
+        );
+    }
+
+    it('(a) SendBackend/ChatDbReader importers match the 13-file S3 baseline exactly', () => {
+      expect(sendBackendChatDbReaderImporters()).toEqual(
+        SEND_BACKEND_CHAT_DB_READER_BASELINE,
+      );
+    });
+
+    it('(b) no production file derives a setTimeout horizon from expiresAt/sendNotBefore', () => {
+      expect(computedHorizonSetTimeoutOffenders()).toEqual([]);
+    });
+
+    it("(c) 'auto-respond' is not minted as an actor reason outside its type declaration", () => {
+      expect(autoRespondMintedOffenders()).toEqual([]);
+    });
+
+    describe('proven teeth', () => {
+      const schedulerProbe = join(
+        repoRoot,
+        'packages/daemon/src/__arch_s4_scheduler_probe__.ts',
+      );
+      const horizonProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s4_horizon_probe__.ts',
+      );
+      const autoRespondProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s4_auto_respond_probe__.ts',
+      );
+
+      afterEach(() => {
+        rmSync(schedulerProbe, { force: true });
+        rmSync(horizonProbe, { force: true });
+        rmSync(autoRespondProbe, { force: true });
+      });
+
+      it('planting a SendBackend import in a scratch scheduler.ts grows the allowlist (a)', () => {
+        writeFileSync(
+          schedulerProbe,
+          "import type { SendBackend } from '@wemessage/core';\nexport type Probe = SendBackend;\n",
+        );
+        const found = sendBackendChatDbReaderImporters();
+        expect(found).toContain(
+          'packages/daemon/src/__arch_s4_scheduler_probe__.ts',
+        );
+        expect(found).not.toEqual(SEND_BACKEND_CHAT_DB_READER_BASELINE);
+      });
+
+      it('planting a setTimeout keyed off expiresAt fails the horizon gate (b)', () => {
+        writeFileSync(
+          horizonProbe,
+          'export function arm(expiresAt: number): void {\n' +
+            '  setTimeout(() => {}, expiresAt - Date.now());\n' +
+            '}\n',
+        );
+        expect(computedHorizonSetTimeoutOffenders()).toContain(
+          'packages/core/src/__arch_s4_horizon_probe__.ts',
+        );
+      });
+
+      it("planting a minted 'auto-respond' actor reason fails the autonomy gate (c)", () => {
+        writeFileSync(
+          autoRespondProbe,
+          "export const actor = { kind: 'system', reason: 'auto-respond' } as const;\n",
+        );
+        expect(autoRespondMintedOffenders()).toContain(
+          'packages/core/src/__arch_s4_auto_respond_probe__.ts',
+        );
+      });
+    });
+  });
+
   it('does not flag violations planted outside the cruised tree (sandbox sanity)', () => {
     // Sanity check that the teeth tests above are attributable to the probe
     // file, not ambient noise: an identical import in a temp dir outside the

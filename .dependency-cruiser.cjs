@@ -62,12 +62,17 @@ module.exports = {
       to: { path: '^packages/(?!core/|$1/)' },
     },
 
-    // §3.1: cli and apps/desktop import client+protocol only
+    // §3.1: cli and apps/desktop import client+protocol only. Self-imports
+    // within packages/cli/src (e.g. bin.ts -> ./probe.js, ./purge.js — S3
+    // Scenario 10) are not a cross-package dependency and must stay legal;
+    // the `cli/` exclusion mirrors ingest-sendkit-store-core-only's `$1/`
+    // self-exclusion above. apps/desktop needs no equivalent clause: its own
+    // files never match `^packages/`, so this rule never fires on them.
     {
       severity: 'error',
       name: 'cli-desktop-thin-clients',
       from: { path: '^(packages/cli|apps/desktop)/src' },
-      to: { path: '^packages/(?!client|protocol)' },
+      to: { path: '^packages/(?!client|protocol|cli)' },
     },
 
     // §3.1: nobody imports daemon

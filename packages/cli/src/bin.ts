@@ -18,28 +18,37 @@
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError } from 'commander';
 import {
   createClient,
   readTokenFile,
   rotateTokenFile,
   DaemonAuthError,
+  DaemonGateDeniedError,
   DaemonUnreachableError,
   type AuditRowPayload,
   type AuditVerifyResult,
+  type DisconnectReportPayload,
+  type DoctorCheckPayload,
+  type DoctorReportPayload,
   type DryRunResult,
   type RuleInput,
   type RuleMatcher,
   type RulePayload,
   type RuleTestResult,
   type RuleWriteResult,
+  type SendResult,
   type StatusPayload,
 } from '@wemessage/client';
+import { probeChatDbReadable } from './probe.js';
+import { confirmPurge } from './purge.js';
 
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
 const EXIT_UNREACHABLE = 3;
 const EXIT_AUTH = 4;
+const EXIT_GATE_DENIED = 5;
 
 function configDir(): string {
   return (
@@ -69,6 +78,9 @@ function exitFor(error: unknown): never {
   if (error instanceof DaemonAuthError) {
     fail(error.message, EXIT_AUTH);
   }
+  if (error instanceof DaemonGateDeniedError) {
+    fail(`gate denied: ${error.reason}`, EXIT_GATE_DENIED);
+  }
   fail(error instanceof Error ? error.message : String(error), EXIT_FAILED);
 }
 
@@ -93,6 +105,86 @@ function renderStatus(status: StatusPayload): string {
     `today:      ${String(status.counts.messagesToday)} message(s)`,
     `adapters:   ${String(status.adapters.length)}`,
   ].join('\n');
+}
+
+function checkGlyph(status: DoctorCheckPayload['status']): string {
+  return status === 'ok' ? '✓' : status === 'warn' ? '!' : '✗';
+}
+
+/**
+ * Plaintext checks table (C-8: zero ANSI anywhere, glyphs only). Remediation
+ * is printed verbatim from the daemon's own string, never reworded — the
+ * daemon owns that copy (doctor.ts), the CLI is just a thin renderer.
+ */
+function renderDoctor(report: DoctorReportPayload): string {
+  const idWidth = Math.max(...report.checks.map((c) => c.id.length));
+  const lines = [`state: ${report.state}`, `probed: ${report.probedAt}`, ''];
+  for (const check of report.checks) {
+    const detail = check.detail !== undefined ? ` ${check.detail}` : '';
+    lines.push(
+      `${checkGlyph(check.status)} ${check.id.padEnd(idWidth)}${detail}`,
+    );
+    if (check.remediation !== undefined) {
+      lines.push(`  remediation: ${check.remediation}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * §1.3.1 GUI-vs-daemon divergence, CLI edition: on macOS 26, FDA does not
+ * propagate to background items, so an operator's own shell can read
+ * chat.db while wemessaged still cannot. Printed only when that exact
+ * mismatch is observed (local probe 'ok' + daemon fda check 'fail') — never
+ * when the local probe fails too (then it's just "no FDA anywhere", the
+ * daemon's own remediation line already says everything needed).
+ */
+async function renderDivergence(
+  report: DoctorReportPayload,
+): Promise<string | null> {
+  const fdaCheck = report.checks.find((c) => c.id === 'fda');
+  if (fdaCheck?.status !== 'fail') return null;
+  const local = await probeChatDbReadable();
+  if (local !== 'ok') return null;
+  return [
+    '',
+    'divergence: this shell can read chat.db but the daemon cannot',
+    'This is the macOS 26 FDA propagation landmine: Full Disk Access',
+    'granted to your terminal/shell does not propagate to the background',
+    'wemessaged process. Grant Full Disk Access to wemessaged itself.',
+  ].join('\n');
+}
+
+function renderSend(result: SendResult): string {
+  const lines = [`draft: ${result.draftId}`];
+  lines.push(
+    result.outcome === 'sent'
+      ? `sent: ${result.sentMessageGuid}`
+      : `failed: ${result.error.code} (${result.error.message})`,
+  );
+  return lines.join('\n');
+}
+
+function disconnectStepGlyph(status: 'done' | 'skipped' | 'failed'): string {
+  return status === 'done' ? '✓' : status === 'skipped' ? '-' : '✗';
+}
+
+function renderDisconnect(report: DisconnectReportPayload): string {
+  const lines = [`state: ${report.state}`, ''];
+  for (const step of report.steps) {
+    const detail = step.detail !== undefined ? ` ${step.detail}` : '';
+    lines.push(`${disconnectStepGlyph(step.status)} ${step.id}${detail}`);
+  }
+  if (report.manualRevocation.length > 0) {
+    lines.push(
+      '',
+      'manual revocation required (OS-level, cannot be automated):',
+    );
+    for (const line of report.manualRevocation) {
+      lines.push(`  ${line}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 const program = new Command();
@@ -651,6 +743,134 @@ audit
       exitFor(error);
     }
   });
+
+// ---------------------------------------------------------------------------
+// doctor / send / connect / disconnect (S3 Scenario 10, §1.3.7/§3.8, F-29)
+// ---------------------------------------------------------------------------
+
+program
+  .command('doctor')
+  .description('connection health checks; exit 1 unless fully-connected (F-29)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const report = await clientOrExit(opts.token).doctor();
+      if (opts.json === true) {
+        console.log(JSON.stringify(report));
+      } else {
+        const divergence = await renderDivergence(report);
+        console.log(renderDoctor(report) + (divergence ?? ''));
+      }
+      if (report.state !== 'fully-connected') {
+        process.exit(EXIT_FAILED);
+      }
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+program
+  .command('send')
+  .description('send a message through the sending pipeline (§3.8)')
+  .requiredOption('--to <handle>', 'destination handle')
+  .requiredOption('--body <text>', 'message body')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (opts: {
+      to: string;
+      body: string;
+      json?: boolean;
+      token?: string;
+    }) => {
+      try {
+        const result = await clientOrExit(opts.token).send({
+          to: opts.to,
+          body: opts.body,
+        });
+        console.log(
+          opts.json === true ? JSON.stringify(result) : renderSend(result),
+        );
+        if (result.outcome === 'failed') {
+          process.exit(EXIT_FAILED);
+        }
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+program
+  .command('connect')
+  .description('re-arm the daemon after a prior disconnect (§1.3.7)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const report = await clientOrExit(opts.token).connect();
+      console.log(
+        opts.json === true ? JSON.stringify(report) : renderDoctor(report),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+program
+  .command('disconnect')
+  .description('disarm the daemon; optionally purge stored data (§1.3.7)')
+  .option('--purge', 'also delete the daemon config dir and all stored data')
+  .option(
+    '--yes-really-purge',
+    'skip the interactive confirmation for --purge (scripts/CI)',
+  )
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (opts: {
+      purge?: boolean;
+      yesReallyPurge?: boolean;
+      json?: boolean;
+      token?: string;
+    }) => {
+      const purge = opts.purge === true;
+      if (purge && opts.yesReallyPurge !== true) {
+        const confirmed = await confirmPurge({
+          isTTY: process.stdin.isTTY === true,
+          ask: async () => {
+            const rl = createInterface({
+              input: process.stdin,
+              output: process.stderr,
+            });
+            try {
+              return await rl.question(
+                'Type "delete my data" to confirm --purge: ',
+              );
+            } finally {
+              rl.close();
+            }
+          },
+        });
+        if (!confirmed) {
+          fail(
+            '--purge requires confirmation (refused or non-interactive)',
+            EXIT_USAGE,
+          );
+        }
+      }
+      try {
+        const report = await clientOrExit(opts.token).disconnect({ purge });
+        console.log(
+          opts.json === true
+            ? JSON.stringify(report)
+            : renderDisconnect(report),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
 
 try {
   await program.parseAsync(process.argv);

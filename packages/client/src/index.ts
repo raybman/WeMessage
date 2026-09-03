@@ -49,6 +49,39 @@ export class DaemonRequestError extends Error {
   }
 }
 
+/**
+ * §1.6 `GateDenyReason` (client-local redeclaration, same pattern as every
+ * other S2/S3 DTO here — @wemessage/client has no @wemessage/core dep).
+ */
+export type GateDenyReason =
+  | 'kill-switch'
+  | 'disconnected'
+  | 'read-only'
+  | 'contact-denied'
+  | 'group-auto-forbidden'
+  | 'outside-window'
+  | 'rate-limited'
+  | 'circuit-open'
+  | 'loop-detected'
+  | 'unapproved'
+  | 'adapter-disabled'
+  | 'sms-auto-forbidden';
+
+/**
+ * `POST /v1/send`'s ONE HTTP-level refusal (s3-execution Scenario 10). The
+ * daemon uses 403 EXCLUSIVELY for gate denial (grep of packages/daemon/src
+ * confirms no other 403 producer exists) — this used to fall into
+ * `DaemonAuthError` and lose `reason` entirely; extends `DaemonRequestError`
+ * (not `DaemonAuthError`) so `.statusCode` survives without implying an
+ * auth failure (CLI exit 5, EXIT_GATE_DENIED — 0-4 untouched).
+ */
+export class DaemonGateDeniedError extends DaemonRequestError {
+  constructor(readonly reason: GateDenyReason) {
+    super(403, JSON.stringify({ error: 'gate-denied', reason }));
+    this.name = 'DaemonGateDeniedError';
+  }
+}
+
 /** Read the daemon token from the config dir; null when absent (§2.6). */
 export function readTokenFile(configDir: string): string | null {
   try {
@@ -205,6 +238,65 @@ export type AuditVerifyResult =
       actualHash?: string;
     };
 
+/**
+ * s3-execution Scenario 10 DTOs — client-local, mirroring
+ * packages/daemon/src/doctor.ts + routes/send.ts + connection.ts verbatim
+ * (same "no @wemessage/core dep" convention as every DTO above).
+ */
+export type ConnectionState =
+  'fully-connected' | 'read-only' | 'disconnected' | 'unsupported';
+
+export interface DoctorCheckPayload {
+  id: 'os' | 'fda' | 'automation' | 'messages';
+  status: 'ok' | 'warn' | 'fail';
+  detail?: string;
+  remediation?: string;
+}
+
+export interface DoctorReportPayload {
+  state: ConnectionState;
+  checks: DoctorCheckPayload[];
+  probedAt: string;
+}
+
+export interface SendInput {
+  /** Bare handle, e.g. "+15551234567" — the client builds the chatGuid. */
+  to: string;
+  body: string;
+}
+
+export type SendResult =
+  | { draftId: string; outcome: 'sent'; sentMessageGuid: string }
+  | {
+      draftId: string;
+      outcome: 'failed';
+      error: { code: string; message: string };
+    };
+
+export interface DisconnectInput {
+  purge?: boolean;
+}
+
+export type DisconnectStepId =
+  | 'watcher-stop'
+  | 'state'
+  | 'adapter-tokens'
+  | 'token-rotation'
+  | 'launchd'
+  | 'purge';
+
+export interface DisconnectStepPayload {
+  id: DisconnectStepId;
+  status: 'done' | 'skipped' | 'failed';
+  detail?: string;
+}
+
+export interface DisconnectReportPayload {
+  state: 'disconnected';
+  steps: DisconnectStepPayload[];
+  manualRevocation: readonly string[];
+}
+
 export interface WeMessageClient {
   health(): Promise<{ status: string }>;
   status(): Promise<StatusPayload>;
@@ -225,6 +317,12 @@ export interface WeMessageClient {
   // §1.6 routes 8-9 (S2 Scenario 11)
   listAudit(params?: AuditListParams): Promise<AuditRowPayload[]>;
   verifyAudit(): Promise<AuditVerifyResult>;
+
+  // s3-execution Scenario 10
+  doctor(): Promise<DoctorReportPayload>;
+  send(input: SendInput): Promise<SendResult>;
+  connect(): Promise<DoctorReportPayload>;
+  disconnect(input?: DisconnectInput): Promise<DisconnectReportPayload>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -250,7 +348,27 @@ export function createClient(options: ClientOptions): WeMessageClient {
     } catch (cause) {
       throw new DaemonUnreachableError(options.baseUrl, cause);
     }
-    if (res.status === 401 || res.status === 403 || res.status === 503) {
+    if (res.status === 401 || res.status === 503) {
+      throw new DaemonAuthError(res.status);
+    }
+    if (res.status === 403) {
+      // Every 403 the daemon produces today is gate-denial (POST /v1/send's
+      // ONE HTTP-level refusal) — but fall back to the pre-existing
+      // DaemonAuthError mapping defensively if the body doesn't match that
+      // exact shape, rather than assuming.
+      const text = await res.text();
+      let parsed: { error?: unknown; reason?: unknown } | null = null;
+      try {
+        parsed = JSON.parse(text) as { error?: unknown; reason?: unknown };
+      } catch {
+        parsed = null;
+      }
+      if (
+        parsed?.error === 'gate-denied' &&
+        typeof parsed.reason === 'string'
+      ) {
+        throw new DaemonGateDeniedError(parsed.reason as GateDenyReason);
+      }
       throw new DaemonAuthError(res.status);
     }
     if (!res.ok) {
@@ -304,6 +422,18 @@ export function createClient(options: ClientOptions): WeMessageClient {
       ) as Promise<AuditRowPayload[]>;
     },
     verifyAudit: () => get('/v1/audit/verify') as Promise<AuditVerifyResult>,
+
+    doctor: () => get('/v1/doctor') as Promise<DoctorReportPayload>,
+    send: (input) =>
+      post('/v1/send', {
+        chatGuid: `iMessage;-;${input.to}`,
+        body: input.body,
+      }) as Promise<SendResult>,
+    connect: () => post('/v1/connect') as Promise<DoctorReportPayload>,
+    disconnect: (input) =>
+      post('/v1/disconnect', {
+        purge: input?.purge ?? false,
+      }) as Promise<DisconnectReportPayload>,
 
     events(onEvent) {
       const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events`;

@@ -62,7 +62,11 @@ importers:
 
   packages/adapters/openclaw: {}
 
-  packages/adapters/sol: {}
+  packages/adapters/sol:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
 
   packages/cli:
     dependencies:

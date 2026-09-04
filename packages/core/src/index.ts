@@ -5,4 +5,5 @@ export * from './audit/index.js';
 export * from './drafts/index.js';
 export * from './rules/index.js';
 export * from './gate/index.js';
+export * from './schedule/index.js';
 export * from './sending/index.js';

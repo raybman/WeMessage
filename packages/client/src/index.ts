@@ -42,7 +42,14 @@ export class DaemonAuthError extends Error {
 export class DaemonRequestError extends Error {
   constructor(
     readonly statusCode: number,
-    body: string,
+    /**
+     * s6 Sc12: the raw body, KEPT rather than only interpolated into the
+     * message. Several of the daemon's 400s are typed and actionable —
+     * `{error:'invalid-timezone'}` is the one that drove this — and a CLI
+     * that has to regex its own error string to say "that zone does not
+     * exist" is one refactor away from saying nothing useful at all.
+     */
+    readonly body: string,
   ) {
     super(`daemon request failed (HTTP ${statusCode}): ${body}`);
     this.name = 'DaemonRequestError';
@@ -125,19 +132,93 @@ export interface StatusPayload {
    * work; carrying it honestly is this slice's.
    */
   killSwitch: boolean | null;
-  armed: {
-    armed: boolean;
-    until: string | null;
-    reason:
-      | 'disconnected'
-      | 'read-only'
-      | 'unsupported'
-      | 'kill-switch'
-      | 'paused'
-      | 'outside-window'
-      | 'circuit-open'
-      | 'armed';
-  } | null;
+  armed: ArmingStatePayload | null;
+}
+
+/**
+ * §1.3.6 `ArmingReason` — the five holds, plus the two connection states
+ * that are holds by another name, plus `armed` itself. Exactly one wins;
+ * the precedence order lives in the daemon (arming.ts) and is not
+ * reconstructed here.
+ */
+export type ArmingReason =
+  | 'disconnected'
+  | 'read-only'
+  | 'unsupported'
+  | 'kill-switch'
+  | 'paused'
+  | 'outside-window'
+  | 'circuit-open'
+  | 'armed';
+
+/**
+ * §1.3.6 `ArmingState`. `until` is the earliest REAL horizon among the pause
+ * deadline, the window close and the breaker expiry — it is not the winning
+ * reason's own clock, so a renderer must not describe it as one.
+ */
+export interface ArmingStatePayload {
+  armed: boolean;
+  until: string | null;
+  reason: ArmingReason;
+}
+
+/**
+ * s6 Sc12 schedule DTOs — client-local, same "no @wemessage/core dep"
+ * convention as every DTO in this file; mirrors `Schedule` /
+ * `ScheduleWindow` in packages/core/src/domain/types.ts.
+ *
+ * `end < start` is a MIDNIGHT-WRAPPING window, not an error: it is one
+ * window that crosses a day boundary, and the daemon stores it exactly as
+ * given. Anything that renders it as two is inventing a boundary.
+ */
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface ScheduleWindowPayload {
+  days: Weekday[];
+  /** `HH:MM`, 24-hour, in the schedule's own zone. */
+  start: string;
+  end: string;
+}
+
+export interface SchedulePayload {
+  id: string;
+  name: string;
+  /** IANA zone name; the daemon is the only thing that can validate it. */
+  timezone: string;
+  windows: ScheduleWindowPayload[];
+  enabled: boolean;
+}
+
+export interface ScheduleInput {
+  name: string;
+  timezone: string;
+  windows: ScheduleWindowPayload[];
+  /** Omitted means the route's own §2.3 DDL default (enabled). */
+  enabled?: boolean;
+}
+
+export type SchedulePatch = Partial<ScheduleInput>;
+
+/** §2.4.3's top scope: what the daemon MAY say, not whether it may speak. */
+export type RespondMode = 'draft-only' | 'auto';
+
+/**
+ * `POST /v1/toggles/pause`. `until: null` on the way in is RESUME and on the
+ * way out is "there is no deadline any more" — the daemon spells clearing a
+ * hold as a value rather than a second route (toggles.ts), and this shape
+ * keeps that honest rather than hiding it behind two result types.
+ */
+export interface PauseResult {
+  key: string;
+  until: string | null;
+  armed: ArmingStatePayload;
+}
+
+/** `POST /v1/toggles/global-mode` (F-77). */
+export interface GlobalModeResult {
+  key: string;
+  mode: RespondMode;
+  armed: ArmingStatePayload;
 }
 
 export interface ClientOptions {
@@ -569,6 +650,34 @@ export interface WeMessageClient {
     on: boolean,
     opts?: { circuit?: boolean },
   ): Promise<KillSwitchResult>;
+
+  /**
+   * s6 Sc12 — the S6 operator surface (§1.6 ratchets #19 and #20).
+   *
+   * Every one of these is EXACTLY ONE HTTP call. That is not an accident of
+   * implementation, it is the contract: the CLI and the GUI are thin clients
+   * (§2.5) and reach the daemon only through this file, so a composite
+   * method here would hand them a verb the HTTP surface does not have and
+   * cannot audit. The one composition S6 allows (`wemessage resume`, which
+   * clears whichever holds are set) is built in the CLI out of these calls,
+   * where its cost is visible.
+   */
+  listSchedules(): Promise<SchedulePayload[]>;
+  getSchedule(id: string): Promise<SchedulePayload>;
+  createSchedule(input: ScheduleInput): Promise<SchedulePayload>;
+  updateSchedule(id: string, patch: SchedulePatch): Promise<SchedulePayload>;
+  deleteSchedule(id: string): Promise<{ deleted: string }>;
+
+  /**
+   * The shorthand (`1h`, `until-tomorrow`, `rest-of-window`) travels
+   * VERBATIM. Resolving it here would mean guessing at the daemon host's
+   * clock and reading its schedule from the wrong side of the wire; the
+   * route owns both (toggles.ts `resolveDeadline`).
+   */
+  pause(until: string): Promise<PauseResult>;
+  /** The same route with a null deadline, and a word a human would use. */
+  resume(): Promise<PauseResult>;
+  setGlobalMode(mode: RespondMode): Promise<GlobalModeResult>;
   listContacts(): Promise<ContactPolicyPayload[]>;
   setContactPolicy(
     handle: string,
@@ -672,6 +781,11 @@ export function createClient(options: ClientOptions): WeMessageClient {
     `/v1/contacts/${encodeURIComponent(handle)}`;
   const adapterPath = (id: string): string =>
     `/v1/adapters/${encodeURIComponent(id)}`;
+  // F-76: the CLI noun is `windows`, the resource is `/v1/schedules`. The
+  // client speaks the resource, never the noun — the rename lives in exactly
+  // one place (the CLI's command name) rather than in two.
+  const schedulePath = (id: string): string =>
+    `/v1/schedules/${encodeURIComponent(id)}`;
 
   return {
     health: () => get('/v1/health') as Promise<{ status: string }>,
@@ -755,6 +869,38 @@ export function createClient(options: ClientOptions): WeMessageClient {
       post('/v1/drafts/bulk', { action, ...selector }) as Promise<BulkResult>,
     batchReport: (batchId) =>
       get(`/v1/batches/${encodeURIComponent(batchId)}`) as Promise<BatchReport>,
+    listSchedules: () => get('/v1/schedules') as Promise<SchedulePayload[]>,
+    getSchedule: (id) => get(schedulePath(id)) as Promise<SchedulePayload>,
+    createSchedule: async (input) =>
+      (
+        (await post('/v1/schedules', {
+          name: input.name,
+          timezone: input.timezone,
+          windows: input.windows,
+          // Omitted rather than sent as `undefined`: the route body is a zod
+          // strictObject with its own default, and an explicit `undefined`
+          // is a different request from an absent key.
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        })) as { schedule: SchedulePayload }
+      ).schedule,
+    updateSchedule: async (id, patchBody) =>
+      (
+        (await patch(schedulePath(id), patchBody)) as {
+          schedule: SchedulePayload;
+        }
+      ).schedule,
+    deleteSchedule: async (id) => {
+      await del(schedulePath(id));
+      return { deleted: id };
+    },
+
+    pause: (until) =>
+      post('/v1/toggles/pause', { until }) as Promise<PauseResult>,
+    resume: () =>
+      post('/v1/toggles/pause', { until: null }) as Promise<PauseResult>,
+    setGlobalMode: (mode) =>
+      post('/v1/toggles/global-mode', { mode }) as Promise<GlobalModeResult>,
+
     setKillSwitch: (on, opts) =>
       post('/v1/toggles/kill-switch', {
         on,

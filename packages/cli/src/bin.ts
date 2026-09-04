@@ -27,6 +27,7 @@ import {
   DaemonAuthError,
   DaemonConflictError,
   DaemonGateDeniedError,
+  DaemonRequestError,
   DaemonUnreachableError,
   type AuditRowPayload,
   type AuditVerifyResult,
@@ -45,15 +46,34 @@ import {
   type DraftPayload,
   type DraftState,
   type SendResult,
-  type StatusPayload,
   type AdapterKind,
   type AdapterPatch,
+  type RespondMode,
+  type SchedulePatch,
+  type ScheduleWindowPayload,
 } from '@wemessage/client';
 import {
   renderAdapter,
   renderAdapterTable,
   renderMintedCredential,
 } from './adapters.js';
+import {
+  confirmTyped,
+  contactAutoPhrase,
+  contactAutoPrompt,
+  isRespondMode,
+  parseWindowSpec,
+  renderMode,
+  renderPause,
+  renderResume,
+  renderSchedule,
+  renderScheduleTable,
+  renderStatus,
+  resolveGlobalMode,
+  resumeHolds,
+  GLOBAL_AUTO_PHRASE,
+  GLOBAL_AUTO_PROMPT,
+} from './arming.js';
 import { probeChatDbReadable } from './probe.js';
 import { confirmPurge } from './purge.js';
 import { createWatchRenderer } from './watch.js';
@@ -106,11 +126,19 @@ function exitFor(error: unknown): never {
         ? `retry limit reached after ${String(attempts ?? 0)} attempt(s)`
         : // s5 Sc11: the adapter registry's two 409s. Naming the rules that
           // block a delete is the entire actionable content of that refusal.
-          kind === 'adapter-referenced'
-          ? `adapter-referenced: still used by rule(s) ${(ruleIds ?? []).join(', ')} — delete or repoint them first`
-          : kind === 'adapter-exists'
-            ? `adapter-exists: an adapter with id "${String(id)}" already exists`
-            : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
+          // s6 Sc12. `not-armed` is not a draft transition and must not be
+          // rendered as one: `rest-of-window` asked for a horizon this
+          // daemon's schedule does not have, so the message points at the
+          // schedule rather than at the word the operator typed.
+          kind === 'not-armed'
+          ? 'not-armed: nothing to rest out — no enabled rule has a window open right now (see `wemessage windows list`)'
+          : kind === 'schedule-in-use'
+            ? 'schedule-in-use: a rule still points at this window — repoint or delete the rule first (see `wemessage rules list`)'
+            : kind === 'adapter-referenced'
+              ? `adapter-referenced: still used by rule(s) ${(ruleIds ?? []).join(', ')} — delete or repoint them first`
+              : kind === 'adapter-exists'
+                ? `adapter-exists: an adapter with id "${String(id)}" already exists`
+                : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
       EXIT_FAILED,
     );
   }
@@ -126,6 +154,19 @@ function exitFor(error: unknown): never {
   fail(error instanceof Error ? error.message : String(error), EXIT_FAILED);
 }
 
+/**
+ * Read one line from the operator, prompting on STDERR so that a `--json`
+ * pipeline never sees the prompt text mixed into its payload.
+ */
+async function askLine(prompt: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
+}
+
 function clientOrExit(tokenFlag?: string): ReturnType<typeof createClient> {
   const token = resolveToken(tokenFlag);
   if (token === null) {
@@ -135,18 +176,6 @@ function clientOrExit(tokenFlag?: string): ReturnType<typeof createClient> {
     );
   }
   return createClient({ baseUrl: baseUrl(), token });
-}
-
-function renderStatus(status: StatusPayload): string {
-  const cursor = status.cursor
-    ? `rowid ${String(status.cursor.lastRowid)} @ ${status.cursor.lastScanAt}`
-    : 'none';
-  return [
-    `connection: ${status.connectionState}`,
-    `cursor:     ${cursor}`,
-    `today:      ${String(status.counts.messagesToday)} message(s)`,
-    `adapters:   ${String(status.adapters.length)}`,
-  ].join('\n');
 }
 
 function checkGlyph(status: DoctorCheckPayload['status']): string {
@@ -244,7 +273,11 @@ program
     try {
       const status = await clientOrExit(opts.token).status();
       console.log(
-        opts.json === true ? JSON.stringify(status) : renderStatus(status),
+        opts.json === true
+          ? JSON.stringify(status)
+          : // s6 Sc12 row 5: the armed line needs a `now` to count down to,
+            // and the CLI is the only party that knows the operator's.
+            renderStatus(status, Date.now()),
       );
     } catch (error) {
       exitFor(error);
@@ -1301,19 +1334,42 @@ contacts
 contacts
   .command('set <handle> <mode>')
   .description('set a contact policy: deny | draft-only | auto')
+  .option('--yes', 'skip the typed confirmation on `auto` (scripts, CI)')
   .option('--json', 'stable machine-readable output')
   .option('-T, --token <token>', 'bearer token override')
   .action(
     async (
       handle: string,
       mode: string,
-      opts: { json?: boolean; token?: string },
+      opts: { yes?: boolean; json?: boolean; token?: string },
     ) => {
       if (!['deny', 'draft-only', 'auto'].includes(mode)) {
         fail(
           `mode must be deny, draft-only or auto (got "${mode}")`,
           EXIT_USAGE,
         );
+      }
+      // s6 Sc12 row 6. `auto` is the only one of the three that GRANTS
+      // autonomy (§2.4.3), so it is the only one that costs a ceremony, and
+      // the phrase is the handle itself: typing "yes" proves a keypress,
+      // typing the handle proves the operator read which conversation they
+      // were about to hand over. `deny` and `draft-only` withdraw autonomy
+      // and prompt for nothing — a rule that made safety expensive would be
+      // a rule people route around.
+      if (mode === 'auto' && opts.yes !== true) {
+        const confirmed = await confirmTyped(
+          {
+            isTTY: process.stdin.isTTY === true,
+            ask: () => askLine(contactAutoPrompt(handle)),
+          },
+          contactAutoPhrase(handle),
+        );
+        if (!confirmed) {
+          fail(
+            `contacts set ${handle} auto requires confirmation (refused or non-interactive); pass --yes to script it`,
+            EXIT_USAGE,
+          );
+        }
       }
       try {
         const contact = await clientOrExit(opts.token).setContactPolicy(
@@ -1536,6 +1592,367 @@ adapters
     );
   });
 
+// ---- s6 Scenario 12: windows / pause / mode (§3.8, F-76, F-77) --------
+
+/** `--window` is repeatable: one flag per window, in the order given. */
+function collectWindow(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+/**
+ * Every `--window` spec, or exit 2 naming the first bad one.
+ *
+ * Refused HERE, ahead of the wire, for the reason §2.5 gives for every other
+ * client-side check in this file: the daemon's `invalid-window` 400 answers a
+ * different question (is this a legal window?) and cannot see the string the
+ * operator actually typed.
+ */
+function parseWindows(specs: readonly string[]): ScheduleWindowPayload[] {
+  if (specs.length === 0) {
+    fail(
+      'at least one --window is required, e.g. --window "mon,tue 09:00-17:00"',
+      EXIT_USAGE,
+    );
+  }
+  return specs.map((spec) => {
+    const parsed = parseWindowSpec(spec);
+    if (!parsed.ok) fail(parsed.message, EXIT_USAGE);
+    return parsed.window;
+  });
+}
+
+interface ScheduleErrorBody {
+  error?: unknown;
+  detail?: { index?: unknown; field?: unknown };
+}
+
+/**
+ * The two typed 400s from `/v1/schedules`, rendered with the input that
+ * caused them. Both bodies name the FAULT and not the VALUE — the route sees
+ * `{error:'invalid-timezone'}` and an index, never `--tz Mars/Olympus_Mons` —
+ * so the CLI, which still has the argv, is the only layer that can put the
+ * operator's own string back into the sentence.
+ */
+function scheduleExit(
+  error: unknown,
+  ctx: { timezone?: string; specs?: readonly string[] },
+): never {
+  if (
+    error instanceof DaemonRequestError &&
+    !(error instanceof DaemonConflictError) &&
+    error.statusCode === 400
+  ) {
+    let body: ScheduleErrorBody = {};
+    try {
+      body = JSON.parse(error.body) as ScheduleErrorBody;
+    } catch {
+      body = {};
+    }
+    if (body.error === 'invalid-timezone') {
+      fail(
+        `invalid-timezone: this machine cannot project into "${ctx.timezone ?? '(unset)'}" — --tz takes an IANA name, e.g. America/Los_Angeles`,
+        EXIT_FAILED,
+      );
+    }
+    if (body.error === 'invalid-window') {
+      const index =
+        typeof body.detail?.index === 'number' ? body.detail.index : -1;
+      const field =
+        typeof body.detail?.field === 'string' ? body.detail.field : 'field';
+      const spec = ctx.specs?.[index];
+      fail(
+        `invalid-window: the daemon refused ${
+          spec === undefined ? `window ${String(index)}` : `--window "${spec}"`
+        } (bad ${field})`,
+        EXIT_FAILED,
+      );
+    }
+  }
+  exitFor(error);
+}
+
+interface AddWindowOpts {
+  name: string;
+  tz: string;
+  window: string[];
+  disabled?: boolean;
+  json?: boolean;
+  token?: string;
+}
+
+interface EditWindowOpts {
+  name?: string;
+  tz?: string;
+  window: string[];
+  enable?: boolean;
+  disable?: boolean;
+  json?: boolean;
+  token?: string;
+}
+
+/**
+ * F-76's deliberate asymmetry, stated in the one place an operator will look
+ * for it. The CLI noun is `windows` because that is the word §1.4.1 and the
+ * wireframe use for the thing ("respond between these hours"); the HTTP
+ * resource stayed `/v1/schedules` because that is the table name in §2.3 and
+ * renaming a shipped route to match a CLI noun is a migration, not a fix. An
+ * asymmetry nobody documents is a bug report waiting to be filed, so the
+ * group description names both spellings.
+ */
+const windows = program
+  .command('windows')
+  .description(
+    'respond windows: when a rule may fire (F-76 — the CLI noun is `windows`, the HTTP resource is /v1/schedules)',
+  );
+
+windows
+  .command('list')
+  .description('list every window (GET /v1/schedules)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const items = await clientOrExit(opts.token).listSchedules();
+      console.log(
+        opts.json === true ? JSON.stringify(items) : renderScheduleTable(items),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+windows
+  .command('show <id>')
+  .description('fetch one window by id (GET /v1/schedules/:id)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const schedule = await clientOrExit(opts.token).getSchedule(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(schedule)
+          : renderSchedule(schedule),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+windows
+  .command('add')
+  .description('create a window (POST /v1/schedules)')
+  .requiredOption('--name <name>', 'what this window is for')
+  // Required, and required LOUDLY: a window with no zone is not a window, it
+  // is a guess about which 09:00 the operator meant, and §1.4.1 makes the
+  // zone the thing the whole comparison hangs on.
+  .requiredOption('--tz <zone>', 'IANA timezone the hours are expressed in')
+  .option(
+    '--window <spec>',
+    'repeatable: "<days> HH:MM-HH:MM", e.g. "mon,tue 09:00-17:00"',
+    collectWindow,
+    [] as string[],
+  )
+  .option('--disabled', 'create it switched off')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: AddWindowOpts) => {
+    const parsed = parseWindows(opts.window);
+    try {
+      const schedule = await clientOrExit(opts.token).createSchedule({
+        name: opts.name,
+        timezone: opts.tz,
+        windows: parsed,
+        ...(opts.disabled === true ? { enabled: false } : {}),
+      });
+      console.log(
+        opts.json === true
+          ? JSON.stringify(schedule)
+          : renderSchedule(schedule),
+      );
+    } catch (error) {
+      scheduleExit(error, { timezone: opts.tz, specs: opts.window });
+    }
+  });
+
+windows
+  .command('edit <id>')
+  .description("patch a window (PATCH /v1/schedules/:id); mirrors add's flags")
+  .option('--name <name>', 'what this window is for')
+  .option('--tz <zone>', 'IANA timezone the hours are expressed in')
+  .option(
+    '--window <spec>',
+    'repeatable; REPLACES the whole window list',
+    collectWindow,
+    [] as string[],
+  )
+  .option('--enable', 'switch this window on')
+  .option('--disable', 'switch this window off')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: EditWindowOpts) => {
+    if (opts.enable === true && opts.disable === true) {
+      fail('--enable and --disable are mutually exclusive', EXIT_USAGE);
+    }
+    // exactOptionalPropertyTypes discipline, same as the rules patch above:
+    // absent keys are ABSENT, never present-and-undefined, so a PATCH cannot
+    // accidentally spell "leave this alone" as "set this to nothing".
+    const patch: SchedulePatch = {
+      ...(opts.name !== undefined ? { name: opts.name } : {}),
+      ...(opts.tz !== undefined ? { timezone: opts.tz } : {}),
+      ...(opts.window.length > 0 ? { windows: parseWindows(opts.window) } : {}),
+      ...(opts.enable === true ? { enabled: true } : {}),
+      ...(opts.disable === true ? { enabled: false } : {}),
+    };
+    try {
+      const schedule = await clientOrExit(opts.token).updateSchedule(id, patch);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(schedule)
+          : renderSchedule(schedule),
+      );
+    } catch (error) {
+      scheduleExit(error, {
+        ...(opts.tz !== undefined ? { timezone: opts.tz } : {}),
+        specs: opts.window,
+      });
+    }
+  });
+
+windows
+  .command('rm <id>')
+  .description('delete a window; refused while a rule still points at it')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).deleteSchedule(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : `removed ${result.deleted}`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+/**
+ * `pause` is TOP-LEVEL, beside `kill` and `resume`, and there is no `toggles`
+ * noun anywhere in this CLI.
+ *
+ * The daemon groups these three under `/v1/toggles/*` because they are one
+ * family of settings writes. An operator reaching for the pause verb is not
+ * thinking about a settings namespace; they are thinking "stop, for a bit",
+ * which is the same shelf `kill` and `resume` live on. Route shape is the
+ * daemon's business (§2.5), and mirroring it into the verb list would make
+ * the operator learn it.
+ *
+ * None of the four deadline forms is parsed here. `until-tomorrow` is the
+ * next 08:00 in the DAEMON HOST's zone and `rest-of-window` reads the
+ * schedule dimension: both are answers only the daemon has, and a CLI that
+ * computed its own would drift the moment the two clocks disagreed (F-68).
+ */
+program
+  .command('pause <until>')
+  .description(
+    'hold autonomous sends until a deadline: 1h | until-tomorrow | rest-of-window | <iso>',
+  )
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (until: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).pause(until);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : renderPause(result, Date.now()),
+      );
+    } catch (error) {
+      if (
+        error instanceof DaemonRequestError &&
+        !(error instanceof DaemonConflictError) &&
+        error.statusCode === 400 &&
+        error.body.includes('invalid-until')
+      ) {
+        fail(
+          `invalid-until: could not read "${until}" as a deadline — use 1h, until-tomorrow, rest-of-window, or an ISO-8601 instant in the future`,
+          EXIT_FAILED,
+        );
+      }
+      exitFor(error);
+    }
+  });
+
+/**
+ * `mode` reads by DERIVING and writes by POSTing (F-77).
+ *
+ * F-77 ratified exactly one route for `send.globalMode` — the POST — and
+ * deferred a general settings API to S7, so there is no GET to call and this
+ * scenario must not mint one (the transport-surface ratchet does not move for
+ * a client scenario). The read comes from the audit log instead, which is not
+ * a workaround but the complete record: the setting has exactly one writer,
+ * that writer appends `arming.mode-changed` before it answers, and no row at
+ * all means the shipped default. One call either way.
+ */
+program
+  .command('mode [value]')
+  .description('read or set the global respond mode: draft-only | auto (F-77)')
+  .option('--yes', 'skip the typed confirmation on `auto` (scripts, CI)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      value: string | undefined,
+      opts: { yes?: boolean; json?: boolean; token?: string },
+    ) => {
+      if (value === undefined) {
+        try {
+          const rows = await clientOrExit(opts.token).listAudit({
+            event: 'arming.mode-changed',
+            limit: 1,
+          });
+          const mode = resolveGlobalMode(rows);
+          console.log(
+            opts.json === true ? JSON.stringify({ mode }) : renderMode(mode),
+          );
+        } catch (error) {
+          exitFor(error);
+        }
+        return;
+      }
+      if (!isRespondMode(value)) {
+        fail(`mode must be draft-only or auto (got "${value}")`, EXIT_USAGE);
+      }
+      const mode: RespondMode = value;
+      // Granting autonomy costs a typed phrase; withdrawing it costs nothing.
+      // §2.4.3's ladder only ever gets climbed on purpose.
+      if (mode === 'auto' && opts.yes !== true) {
+        const confirmed = await confirmTyped(
+          {
+            isTTY: process.stdin.isTTY === true,
+            ask: () => askLine(GLOBAL_AUTO_PROMPT),
+          },
+          GLOBAL_AUTO_PHRASE,
+        );
+        if (!confirmed) {
+          fail(
+            'mode auto requires confirmation (refused or non-interactive); pass --yes to script it',
+            EXIT_USAGE,
+          );
+        }
+      }
+      try {
+        const result = await clientOrExit(opts.token).setGlobalMode(mode);
+        console.log(
+          opts.json === true ? JSON.stringify(result) : renderMode(result.mode),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
 program
   .command('kill')
   .description('emergency stop: cancel in-grace drafts and refuse new sends')
@@ -1556,33 +1973,26 @@ program
 
 program
   .command('resume')
-  .description('lift the kill switch (does not revive what it stopped)')
+  .description('lift the holds you are holding: the kill switch and a pause')
   .option('--circuit', 'also reset the circuit breaker')
   .option('--json', 'stable machine-readable output')
   .option('-T, --token <token>', 'bearer token override')
   .action(
     async (opts: { circuit?: boolean; json?: boolean; token?: string }) => {
-      // s6 Scenario 7. The flag is OPT-IN both here and on the wire: the two
-      // holds are independent, so a plain `resume` must leave an open breaker
-      // open. Lifting a switch a human threw says nothing about a decision
-      // the machine made about a broken send path.
+      // s6 Scenario 7, widened by Scenario 12 to cover the pause deadline
+      // F-68 added. `--circuit` stays OPT-IN both here and on the wire: the
+      // breaker is a decision the MACHINE made about a broken send path, and
+      // lifting a switch a human threw says nothing about it.
+      //
+      // This is the one composed verb in the CLI (§2.5 row 8). The
+      // composition lives in `resumeHolds`, in the open, with its cost
+      // asserted at both ends: one read plus at most two writes, and with
+      // nothing held one read and no writes at all.
       const circuit = opts.circuit === true;
       try {
-        const result = await clientOrExit(opts.token).setKillSwitch(
-          false,
-          circuit ? { circuit: true } : {},
-        );
-        // Reported, not assumed: `circuitCleared` is false when the breaker
-        // was not tripped, and an operator who resets a hold that was never
-        // held should be told that rather than left believing they fixed
-        // whatever they were actually looking at.
-        const circuitLine = circuit
-          ? `\ncircuit:     ${result.circuitCleared ? 'reset' : 'was not open'}`
-          : '';
+        const report = await resumeHolds(clientOrExit(opts.token), { circuit });
         console.log(
-          opts.json === true
-            ? JSON.stringify(result)
-            : `kill switch: off${circuitLine}`,
+          opts.json === true ? JSON.stringify(report) : renderResume(report),
         );
       } catch (error) {
         exitFor(error);

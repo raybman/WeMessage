@@ -11,6 +11,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
@@ -21,9 +22,33 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PORT_IMPORTER_ALLOWLIST } from '../packages/daemon/test/transport-surface.snapshot.js';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
+
+/**
+ * Production files permitted to MINT `reason: 'auto-respond'` — the actor a
+ * machine wears when it approves a draft on the operator's behalf.
+ *
+ * Seeded by s4-execution Scenario 1 guard (c) at ONE path: the `Actor`
+ * union's own declaration, because naming a literal in a type is not
+ * minting a value.
+ *
+ * GROWN TO TWO by s6-execution Scenario 1 (C-11, F-74). S6 is the slice
+ * that mints it, and the natural move — deleting the guard — would be the
+ * wrong one: the guard's value was never that the literal appears nowhere,
+ * it is that the literal appears in exactly ONE place, so "where can this
+ * system decide to speak on my behalf" has a single-file answer forever.
+ * `sending/auto-approve.ts` is that place, and it stays that place.
+ *
+ * Read by TWO rows, deliberately: S4 (c) ("nothing outside this list mints")
+ * and S6 (a) ("this list is exactly these two files, and both exist").
+ */
+const AUTO_RESPOND_MINT_ALLOWLIST: readonly string[] = [
+  'packages/core/src/domain/types.ts',
+  'packages/core/src/sending/auto-approve.ts',
+];
 
 interface CruiseSummary {
   modules: Array<{ source: string }>;
@@ -519,8 +544,11 @@ describe('arch invariants (dependency-cruiser)', () => {
     }
 
     // (c) 'auto-respond' as a minted actor reason: everywhere except the
-    // Actor union's own type declaration, which merely names the literal.
-    const ACTOR_TYPE_DECL_FILE = 'packages/core/src/domain/types.ts';
+    // files on AUTO_RESPOND_MINT_ALLOWLIST (module scope). That list was the
+    // single Actor-union declaration through S5 and grew to two in
+    // s6-execution Scenario 1, when `sending/auto-approve.ts` became the one
+    // legitimate mint site (C-11, F-74). This row's meaning is unchanged:
+    // nothing OUTSIDE the list mints the reason.
 
     /**
      * NARROWED in s4 Scenario 4. The check was a bare substring match for
@@ -534,7 +562,7 @@ describe('arch invariants (dependency-cruiser)', () => {
      */
     function autoRespondMintedOffenders(): string[] {
       return productionSrcFiles()
-        .filter((f) => f !== ACTOR_TYPE_DECL_FILE)
+        .filter((f) => !AUTO_RESPOND_MINT_ALLOWLIST.includes(f))
         .filter((f) =>
           /reason:\s*'auto-respond'/.test(
             readFileSync(join(repoRoot, f), 'utf8'),
@@ -747,6 +775,410 @@ describe('arch invariants (dependency-cruiser)', () => {
           `${pkg}/vitest.config.ts`,
         ).toContain('name:');
       }
+    });
+  });
+
+  /**
+   * s6-execution Scenario 1 — arch guards for the autonomy era.
+   *
+   * S6 turns on exactly one new capability: a system actor may approve a
+   * draft. These guards exist so that capability cannot spread. No
+   * production logic lands this scenario; the only non-test file it creates
+   * is `packages/core/src/sending/auto-approve.ts` as an `export {}` stub,
+   * so row (a)'s allowlist is anchored to a real path (the S5 precedent:
+   * adapter vitest configs landed before their bodies).
+   *
+   * (a) the auto-approve mint site is exactly one file — the deliberate
+   *     narrowing of S4 guard (c) (C-11, F-74). The guard is NOT deleted:
+   *     its allowlist grows from one path to exactly two and it still trips
+   *     on a third. Its value was never "the literal appears nowhere", it is
+   *     "the literal appears in ONE place", so that "where can this system
+   *     decide to speak on my behalf" has a single-file answer forever.
+   * (b) system approvals have exactly one writer: `insertApproval` never
+   *     appears within 5 lines of a `kind: 'system'` actor outside
+   *     `core/src/sending/auto-approve.ts` (the minter) and
+   *     `store/src/store.ts` (the implementation). Proximity, not bare
+   *     co-occurrence — the same narrowing S4 (b) already makes, for the
+   *     same reason: a file may legitimately mention both, far apart.
+   * (c) the port importer allowlist is unchanged at 15 files. S6 declares in
+   *     advance that it will not grow: arming decides WHEN a system actor
+   *     may approve, never how to reach `SendBackend` without a stored,
+   *     validated `Approval`. This row failing at any point in the slice is
+   *     a design error, not a ratchet update. It is pinned against the
+   *     daemon ratchet's own `PORT_IMPORTER_ALLOWLIST` so the two copies of
+   *     that list cannot drift; S4 (a) pins the same live scan against its
+   *     own baseline, which makes byte-identity transitive.
+   * (d) no horizon is derived from any S6 deadline. S4 guard (b)'s field
+   *     list widens from (expiresAt|sendNotBefore) to also cover the four
+   *     deadlines this slice introduces — `pauseUntil`, `circuitOpenedAt`,
+   *     `armedUntil`, `windowClose` — inside the same 5-line proximity
+   *     window. S4 (b) is left exactly as it is: this row is a superset that
+   *     becomes the binding one, not an edit to a shipped guard.
+   * (e) timezone math is `Intl`-only (F-57). No core file imports a date or
+   *     timezone library and core still declares zero dependencies. Belt and
+   *     braces over `core-no-unresolvable-imports`, which would catch a
+   *     package import but not a vendored copy — testing the whole import
+   *     SPECIFIER catches `./vendor/tzdata.js` too.
+   * (f) public-repo sweep extended. The S3 (d) brand/phone sweep re-runs
+   *     above, in this same file; this row adds the timezone pin — no file
+   *     under packages/apps/fixtures/test names an IANA zone outside
+   *     {UTC, America/Los_Angeles, Australia/Lord_Howe, Pacific/Chatham,
+   *     Asia/Kolkata}. Those five are chosen for DST and half-hour-offset
+   *     SHAPE, and pinning the set stops a future fixture from encoding
+   *     where somebody lives. Scanned from the filesystem rather than
+   *     `git ls-files` so an untracked probe is visible to the teeth.
+   * (g) the five dormant deny literals are still dormant. `outside-window`,
+   *     `rate-limited`, `circuit-open`, `loop-detected` and
+   *     `sms-auto-forbidden` have been in the §3.2 union since S1 and have
+   *     never been emitted. The expected sets below are explicit, and each
+   *     owning scenario edits its own row in its own commit, so no literal
+   *     can start being emitted silently. `audit/events.ts` appears in three
+   *     of them because of the C-6 taxonomy pin in its header, which maps
+   *     the wireframe's reason names onto exactly these values.
+   */
+  describe('S6 extensions (s6-execution Scenario 1: autonomy-era guards)', () => {
+    // Local file-walk helpers, per the S5 block's precedent: duplicating six
+    // lines beats hoisting shared mutable state across five slices of guards.
+    const S6_SKIP = new Set([
+      'node_modules',
+      'dist',
+      '.git',
+      'coverage',
+      '.turbo',
+    ]);
+    const codeIsh = /\.(ts|tsx|js|mjs|cjs)$/;
+    function listFiles(root: string): string[] {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (S6_SKIP.has(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else out.push(full);
+        }
+      };
+      walk(root);
+      return out;
+    }
+    const relOf = (abs: string): string =>
+      abs.slice(repoRoot.length + 1).replace(/\\/g, '/');
+    const readOf = (rel: string): string =>
+      readFileSync(join(repoRoot, rel), 'utf8');
+
+    function productionSrcFiles(): string[] {
+      const roots = ['packages', 'apps'].map((p) => join(repoRoot, p));
+      return roots
+        .flatMap((r) => listFiles(r))
+        .map(relOf)
+        .filter((f) => /^(packages|apps)\/[^/]+\/src\//.test(f))
+        .filter((f) => codeIsh.test(f));
+    }
+
+    // (a) the mint site. AUTO_RESPOND_MINT_ALLOWLIST is declared at module
+    // scope because the S4 (c) guard reads the same list — one list, one
+    // edit, and the growth from one path to two shows up in a single hunk.
+    function autoRespondMintOffenders(): string[] {
+      return productionSrcFiles()
+        .filter((f) => !AUTO_RESPOND_MINT_ALLOWLIST.includes(f))
+        .filter((f) => /reason:\s*'auto-respond'/.test(readOf(f)))
+        .sort();
+    }
+
+    // (b) system-approval writers. `store.ts` is the Store implementation
+    // and is exempt as such; every other file that both writes an approval
+    // and names a system actor within five lines is minting autonomy.
+    const SYSTEM_APPROVAL_WRITERS: readonly string[] = [
+      'packages/core/src/sending/auto-approve.ts',
+      'packages/store/src/store.ts',
+    ];
+    const SYSTEM_ACTOR_WINDOW_LINES = 5;
+    function systemApprovalWriterOffenders(): string[] {
+      return productionSrcFiles()
+        .filter((f) => !SYSTEM_APPROVAL_WRITERS.includes(f))
+        .filter((f) => {
+          const lines = readOf(f).split('\n');
+          return lines.some((line, i) => {
+            if (!line.includes('insertApproval')) return false;
+            const from = Math.max(0, i - SYSTEM_ACTOR_WINDOW_LINES);
+            const window = lines.slice(from, i + SYSTEM_ACTOR_WINDOW_LINES + 1);
+            return window.some((w) => /kind:\s*'system'/.test(w));
+          });
+        })
+        .sort();
+    }
+
+    // (c) same substring scan the S4 (a) baseline uses, re-run here against
+    // the daemon ratchet's copy of the list.
+    function sendBackendChatDbReaderImporters(): string[] {
+      return productionSrcFiles()
+        .filter((f) => {
+          const content = readOf(f);
+          return (
+            content.includes('SendBackend') || content.includes('ChatDbReader')
+          );
+        })
+        .sort();
+    }
+
+    // (d) S4 (b)'s shape, widened to every deadline S6 persists. All four
+    // new names are horizons the slice stores in the DB precisely so that
+    // no `setTimeout` ever holds one: a restart must not resurrect a stale
+    // pause, circuit or window.
+    const S6_HORIZON_FIELDS =
+      /(expiresAt|sendNotBefore|pauseUntil|circuitOpenedAt|armedUntil|windowClose)/;
+    const S6_HORIZON_WINDOW_LINES = 5;
+    function s6ComputedHorizonOffenders(): string[] {
+      return productionSrcFiles()
+        .filter((f) => {
+          const lines = readOf(f).split('\n');
+          return lines.some((line, i) => {
+            if (!line.includes('setTimeout') && !line.includes('setInterval')) {
+              return false;
+            }
+            const from = Math.max(0, i - S6_HORIZON_WINDOW_LINES);
+            const window = lines.slice(from, i + S6_HORIZON_WINDOW_LINES + 1);
+            return window.some((w) => S6_HORIZON_FIELDS.test(w));
+          });
+        })
+        .sort();
+    }
+
+    // (e) every import specifier, whatever the form: `from 'x'`, bare
+    // `import 'x'`, dynamic `import('x')`, `require('x')`. Matching the
+    // specifier (not the bare package name) is what makes a vendored copy
+    // visible: `./vendor/tzdata.js` names tzdata in the specifier itself.
+    const TZ_LIB_RE = /temporal|tzdata|luxon|date-fns|moment|dayjs/i;
+    function importSpecifiers(content: string): string[] {
+      const re =
+        /\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(?\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g;
+      return [...content.matchAll(re)].map((m) => m[1] ?? m[2] ?? m[3] ?? '');
+    }
+    function coreTimezoneLibImporters(): string[] {
+      return productionSrcFiles()
+        .filter((f) => f.startsWith('packages/core/src/'))
+        .filter((f) =>
+          importSpecifiers(readOf(f)).some((s) => TZ_LIB_RE.test(s)),
+        )
+        .sort();
+    }
+
+    // (f) IANA zone strings. Only a quoted string whose first segment is a
+    // real zone region counts, so repo paths and URL fragments cannot false
+    // positive. This spec file is exempt: it is the denylist source and has
+    // to spell the pinned set (and a probe zone) out to check for them.
+    const PINNED_TIMEZONES = new Set([
+      'UTC',
+      'America/Los_Angeles',
+      'Australia/Lord_Howe',
+      'Pacific/Chatham',
+      'Asia/Kolkata',
+    ]);
+    const IANA_ZONE_RE =
+      /['"`]((?:Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|Pacific|Etc)\/[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)?)['"`]/g;
+    function unpinnedTimezoneOffenders(): string[] {
+      const roots = ['packages', 'apps', 'fixtures', 'test'].map((p) =>
+        join(repoRoot, p),
+      );
+      return roots
+        .flatMap((r) => listFiles(r))
+        .map(relOf)
+        .filter((f) => codeIsh.test(f) || f.endsWith('.json'))
+        .filter((f) => f !== 'test/arch.spec.ts')
+        .flatMap((f) =>
+          [...readOf(f).matchAll(IANA_ZONE_RE)]
+            .map((m) => m[1] ?? '')
+            .filter((zone) => !PINNED_TIMEZONES.has(zone))
+            .map((zone) => `${f}: ${zone}`),
+        )
+        .sort();
+    }
+
+    // (g) the dormant five, each with the explicit set of production files
+    // allowed to name it TODAY. Sc 4/6/7/8/9 each edit their own row here,
+    // in their own commit, as the literal starts being emitted.
+    const DORMANT_DENY_LITERALS: ReadonlyArray<
+      readonly [string, readonly string[]]
+    > = [
+      [
+        'outside-window',
+        [
+          'packages/client/src/index.ts',
+          'packages/core/src/audit/events.ts',
+          'packages/core/src/domain/types.ts',
+        ],
+      ],
+      [
+        'rate-limited',
+        [
+          'packages/client/src/index.ts',
+          'packages/core/src/audit/events.ts',
+          'packages/core/src/domain/types.ts',
+        ],
+      ],
+      [
+        'circuit-open',
+        ['packages/client/src/index.ts', 'packages/core/src/domain/types.ts'],
+      ],
+      [
+        'loop-detected',
+        [
+          'packages/client/src/index.ts',
+          'packages/core/src/audit/events.ts',
+          'packages/core/src/domain/types.ts',
+        ],
+      ],
+      [
+        'sms-auto-forbidden',
+        ['packages/client/src/index.ts', 'packages/core/src/domain/types.ts'],
+      ],
+    ];
+    function filesNamingLiteral(literal: string): string[] {
+      const re = new RegExp(`(['"\`])${literal}\\1`);
+      return productionSrcFiles()
+        .filter((f) => re.test(readOf(f)))
+        .sort();
+    }
+
+    it('(a) the auto-approve mint site is exactly one file', () => {
+      // Anchored by path: an allowlist entry that does not exist is an
+      // allowlist entry nobody can review.
+      expect(
+        AUTO_RESPOND_MINT_ALLOWLIST.filter(
+          (f) => !existsSync(join(repoRoot, f)),
+        ),
+      ).toEqual([]);
+      expect(AUTO_RESPOND_MINT_ALLOWLIST).toHaveLength(2);
+      expect(autoRespondMintOffenders()).toEqual([]);
+    });
+
+    it('(b) system approvals have exactly one writer', () => {
+      expect(systemApprovalWriterOffenders()).toEqual([]);
+    });
+
+    it('(c) the port importer allowlist is unchanged at 15 files (INV-2)', () => {
+      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+      expect(sendBackendChatDbReaderImporters()).toEqual([
+        ...PORT_IMPORTER_ALLOWLIST,
+      ]);
+    });
+
+    it('(d) no production file derives a horizon from an S6 deadline', () => {
+      expect(s6ComputedHorizonOffenders()).toEqual([]);
+    });
+
+    it('(e) core does timezone math with Intl and nothing else', () => {
+      expect(coreTimezoneLibImporters()).toEqual([]);
+      const pkg = JSON.parse(readOf('packages/core/package.json')) as {
+        dependencies?: Record<string, string>;
+      };
+      expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+    });
+
+    it('(f) no file names an IANA timezone outside the pinned five', () => {
+      expect(unpinnedTimezoneOffenders()).toEqual([]);
+    });
+
+    it('(g) the five dormant gate deny literals are still dormant', () => {
+      for (const [literal, homes] of DORMANT_DENY_LITERALS) {
+        expect(filesNamingLiteral(literal), literal).toEqual([...homes]);
+      }
+    });
+
+    describe('proven teeth', () => {
+      const mintProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s6_mint_probe__.ts',
+      );
+      const writerProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s6_writer_probe__.ts',
+      );
+      const horizonProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s6_horizon_probe__.ts',
+      );
+      const tzLibProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s6_tzlib_probe__.ts',
+      );
+      const zoneProbeDir = join(repoRoot, 'fixtures/test/__s6_teeth__');
+      const zoneProbe = join(zoneProbeDir, 'probe.spec.ts');
+      const denyProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s6_deny_probe__.ts',
+      );
+
+      afterEach(() => {
+        rmSync(mintProbe, { force: true });
+        rmSync(writerProbe, { force: true });
+        rmSync(horizonProbe, { force: true });
+        rmSync(tzLibProbe, { force: true });
+        rmSync(zoneProbeDir, { recursive: true, force: true });
+        rmSync(denyProbe, { force: true });
+      });
+
+      it('planting a third mint site trips the allowlist (a)', () => {
+        writeFileSync(
+          mintProbe,
+          "export const actor = { kind: 'system', reason: 'auto-respond' } as const;\n",
+        );
+        expect(autoRespondMintOffenders()).toContain(
+          'packages/core/src/__arch_s6_mint_probe__.ts',
+        );
+      });
+
+      it('planting a system-actor insertApproval call trips the writer gate (b)', () => {
+        writeFileSync(
+          writerProbe,
+          'export function mint(store: { insertApproval: (a: unknown) => void }): void {\n' +
+            '  store.insertApproval({\n' +
+            "    actor: { kind: 'system', reason: 'auto-respond' },\n" +
+            '  });\n' +
+            '}\n',
+        );
+        expect(systemApprovalWriterOffenders()).toContain(
+          'packages/core/src/__arch_s6_writer_probe__.ts',
+        );
+      });
+
+      it('planting a setTimeout keyed off pauseUntil trips the horizon gate (d)', () => {
+        writeFileSync(
+          horizonProbe,
+          'export function arm(pauseUntil: number): void {\n' +
+            '  setTimeout(() => {}, pauseUntil - Date.now());\n' +
+            '}\n',
+        );
+        expect(s6ComputedHorizonOffenders()).toContain(
+          'packages/core/src/__arch_s6_horizon_probe__.ts',
+        );
+      });
+
+      it('planting a vendored tz-data import in core trips the Intl gate (e)', () => {
+        writeFileSync(tzLibProbe, "import './vendor/tzdata.js';\nexport {};\n");
+        expect(coreTimezoneLibImporters()).toContain(
+          'packages/core/src/__arch_s6_tzlib_probe__.ts',
+        );
+      });
+
+      it('planting an unpinned timezone in a fixture trips the public-repo sweep (f)', () => {
+        mkdirSync(zoneProbeDir, { recursive: true });
+        // A zone nobody lives in: the probe must prove the sweep bites
+        // without itself naming a place a person could be.
+        writeFileSync(zoneProbe, "export const tz = 'Antarctica/Troll';\n");
+        expect(unpinnedTimezoneOffenders()).toContain(
+          'fixtures/test/__s6_teeth__/probe.spec.ts: Antarctica/Troll',
+        );
+      });
+
+      it('emitting a dormant deny literal from a new file trips the taxonomy pin (g)', () => {
+        writeFileSync(
+          denyProbe,
+          "export const denial = { allow: false, reason: 'rate-limited' };\n",
+        );
+        expect(filesNamingLiteral('rate-limited')).toContain(
+          'packages/core/src/__arch_s6_deny_probe__.ts',
+        );
+      });
     });
   });
 

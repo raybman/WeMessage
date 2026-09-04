@@ -19,7 +19,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import type { Clock, FsWatcher } from '@wemessage/core';
-import { SETTING_UNDO_GRACE_SECONDS } from '@wemessage/core';
+import {
+  SETTING_CIRCUIT_OPENED_AT,
+  SETTING_UNDO_GRACE_SECONDS,
+} from '@wemessage/core';
 import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import {
   startDaemon,
@@ -315,11 +318,61 @@ describe('wemessage kill / resume', () => {
     ).toBe('rejected');
   });
 
-  it('resume --circuit refuses honestly (exit 2): the breaker lands in S6', async () => {
+  // s6 Scenario 7 row 7. This row used to assert the honest refusal
+  // (`--circuit is not available yet`); the breaker has landed, so it now
+  // asserts the verb it was holding the place for.
+  it('resume --circuit resets an open breaker, and says so when there was none', async () => {
     const ctx = await boot();
-    const res = await runCli(['resume', '--circuit'], envFor(ctx));
-    expect(res.code).toBe(2);
-    expect(res.stderr).toContain('circuit breaker lands in S6');
+    // The breaker's entire state is one settings row holding one instant
+    // (F-61), so an open breaker is exactly this and a test does not need to
+    // manufacture five real send failures to have one.
+    ctx.daemon.store.setSetting(
+      SETTING_CIRCUIT_OPENED_AT,
+      new Date().toISOString(),
+    );
+
+    const reset = await runCli(['resume', '--circuit'], envFor(ctx));
+    expect(reset.code).toBe(0);
+    expect(reset.stdout).toContain('kill switch: off');
+    expect(reset.stdout).toContain('circuit:     reset');
+    expect(ctx.daemon.store.getSetting(SETTING_CIRCUIT_OPENED_AT)).toBeNull();
+    // And it is on the record, not just gone from `settings`: a hold being
+    // released is a posture change, whoever released it.
+    expect(
+      ctx.daemon.store
+        .readAuditRows(0, 2000)
+        .map((row) => JSON.parse(row.eventJson) as { type: string }),
+    ).toContainEqual({
+      type: 'toggle.changed',
+      key: 'send.circuitOpen',
+      on: false,
+    });
+
+    // Idempotent, and honest about it: resetting a hold that is not held is a
+    // silent no-op on the server and a different word here, so an operator
+    // never reads "reset" as evidence the breaker had tripped.
+    const again = await runCli(['resume', '--circuit', '--json'], envFor(ctx));
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.stdout)).toMatchObject({
+      on: false,
+      circuitCleared: false,
+    });
+  });
+
+  it('plain resume lifts the switch and leaves an open breaker open', async () => {
+    const ctx = await boot();
+    const openedAt = new Date().toISOString();
+    ctx.daemon.store.setSetting(SETTING_CIRCUIT_OPENED_AT, openedAt);
+
+    const res = await runCli(['resume'], envFor(ctx));
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('kill switch: off');
+    // Two independent holds: the operator asked about one of them, so the
+    // other is neither touched nor mentioned.
+    expect(res.stdout).not.toContain('circuit');
+    expect(ctx.daemon.store.getSetting(SETTING_CIRCUIT_OPENED_AT)).toBe(
+      openedAt,
+    );
   });
 });
 

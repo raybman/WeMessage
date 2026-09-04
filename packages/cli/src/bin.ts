@@ -1562,19 +1562,27 @@ program
   .option('-T, --token <token>', 'bearer token override')
   .action(
     async (opts: { circuit?: boolean; json?: boolean; token?: string }) => {
-      if (opts.circuit === true) {
-        // An honest refusal beats a flag that silently does nothing: a user
-        // who thinks they reset the breaker would stop looking for the
-        // reason sends are still being refused.
-        fail(
-          '--circuit is not available yet: circuit breaker lands in S6',
-          EXIT_USAGE,
-        );
-      }
+      // s6 Scenario 7. The flag is OPT-IN both here and on the wire: the two
+      // holds are independent, so a plain `resume` must leave an open breaker
+      // open. Lifting a switch a human threw says nothing about a decision
+      // the machine made about a broken send path.
+      const circuit = opts.circuit === true;
       try {
-        const result = await clientOrExit(opts.token).setKillSwitch(false);
+        const result = await clientOrExit(opts.token).setKillSwitch(
+          false,
+          circuit ? { circuit: true } : {},
+        );
+        // Reported, not assumed: `circuitCleared` is false when the breaker
+        // was not tripped, and an operator who resets a hold that was never
+        // held should be told that rather than left believing they fixed
+        // whatever they were actually looking at.
+        const circuitLine = circuit
+          ? `\ncircuit:     ${result.circuitCleared ? 'reset' : 'was not open'}`
+          : '';
         console.log(
-          opts.json === true ? JSON.stringify(result) : 'kill switch: off',
+          opts.json === true
+            ? JSON.stringify(result)
+            : `kill switch: off${circuitLine}`,
         );
       } catch (error) {
         exitFor(error);

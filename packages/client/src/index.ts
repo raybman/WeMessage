@@ -395,6 +395,13 @@ export interface KillSwitchResult {
   on: boolean;
   version: number;
   cancelled: string[];
+  /**
+   * s6 Scenario 7: whether this request actually cleared an OPEN circuit
+   * breaker. False when `circuit` was not asked for and false when it was
+   * asked for but nothing was tripped, so `resume --circuit` can tell "I
+   * released a hold" from "there was no hold" without a second round trip.
+   */
+  circuitCleared: boolean;
 }
 
 export interface ContactPolicyPayload {
@@ -529,7 +536,15 @@ export interface WeMessageClient {
     selector: BulkSelector,
   ): Promise<BulkResult>;
   batchReport(batchId: string): Promise<BatchReport>;
-  setKillSwitch(on: boolean): Promise<KillSwitchResult>;
+  /**
+   * The kill switch, and optionally the circuit breaker with it. The two are
+   * independent holds on the same endpoint: omitting `circuit` leaves the
+   * breaker exactly as it was, in both directions.
+   */
+  setKillSwitch(
+    on: boolean,
+    opts?: { circuit?: boolean },
+  ): Promise<KillSwitchResult>;
   listContacts(): Promise<ContactPolicyPayload[]>;
   setContactPolicy(
     handle: string,
@@ -716,8 +731,14 @@ export function createClient(options: ClientOptions): WeMessageClient {
       post('/v1/drafts/bulk', { action, ...selector }) as Promise<BulkResult>,
     batchReport: (batchId) =>
       get(`/v1/batches/${encodeURIComponent(batchId)}`) as Promise<BatchReport>,
-    setKillSwitch: (on) =>
-      post('/v1/toggles/kill-switch', { on }) as Promise<KillSwitchResult>,
+    setKillSwitch: (on, opts) =>
+      post('/v1/toggles/kill-switch', {
+        on,
+        // Omitted rather than sent as `undefined`: the body is a
+        // `strictObject` on the far side and an absent key is the only way to
+        // say "do not touch the breaker".
+        ...(opts?.circuit !== undefined ? { circuit: opts.circuit } : {}),
+      }) as Promise<KillSwitchResult>,
     listContacts: async () =>
       ((await get('/v1/contacts')) as { contacts: ContactPolicyPayload[] })
         .contacts,

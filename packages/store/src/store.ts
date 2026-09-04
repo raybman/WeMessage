@@ -367,6 +367,9 @@ export class SqliteStore implements Store {
   // --- s6 §1.5 (Scenario 6): rate counters, body-only over the 0001 table ---
   readonly #bumpRateCounter: Database.Statement;
   readonly #sumRateCounter: Database.Statement;
+  // --- s6 §1.5 (Scenario 7): circuit breaker, derived + settings-only ---
+  readonly #countSendFailuresSince: Database.Statement;
+  readonly #deleteSetting: Database.Statement;
   readonly #listRecentInbound: Database.Statement;
   readonly #getInbound: Database.Statement;
   readonly #updateInbound: Database.Statement;
@@ -533,6 +536,18 @@ export class SqliteStore implements Store {
       'SELECT COALESCE(SUM(count), 0) AS n FROM rate_counters ' +
         'WHERE scope = ? AND bucket_start >= ?',
     );
+    // s6 Scenario 7 (F-62 derived / F-65 exclusion). `error` is the JSON blob
+    // `markDraftFailed` wrote, so the cause is read back out of it with
+    // json_extract rather than out of a column nobody added. COALESCE, not a
+    // bare `!=`: `json_extract` over a NULL/unparseable `error` is NULL, and
+    // `NULL != 'gate-denied'` is NULL, which SQLite treats as false — the
+    // direction that silently stops counting real failures.
+    this.#countSendFailuresSince = this.db.prepare(
+      "SELECT COUNT(*) AS n FROM drafts WHERE state = 'failed' " +
+        'AND state_changed_at >= ? ' +
+        "AND COALESCE(json_extract(error, '$.code'), '') != 'gate-denied'",
+    );
+    this.#deleteSetting = this.db.prepare('DELETE FROM settings WHERE key = ?');
     this.#listRecentInbound = this.db.prepare(
       'SELECT * FROM inbound_messages ORDER BY received_at DESC LIMIT ?',
     );
@@ -813,6 +828,17 @@ export class SqliteStore implements Store {
     this.#setSetting.run(key, value, this.#clock.now());
   }
 
+  /**
+   * Removes the row entirely, so `getSetting` goes back to `null` and
+   * `getSettingVersion` back to -1. That is deliberate: the version counter is
+   * a per-key WRITE count (C-7), and a key that no longer exists has no writes
+   * to report. Callers that need "this was cleared" as a fact write an audit
+   * row for it, which is where that fact belongs.
+   */
+  deleteSetting(key: string): void {
+    this.#deleteSetting.run(key);
+  }
+
   countInboundMessagesSince(since: IsoUtc): number {
     const row = this.#countInboundSince.get(since) as { n: number };
     return row.n;
@@ -999,6 +1025,21 @@ export class SqliteStore implements Store {
    */
   sumRateCounter(scope: string, sinceInclusive: IsoUtc): number {
     return (this.#sumRateCounter.get(scope, sinceInclusive) as { n: number }).n;
+  }
+
+  /**
+   * Inclusive on `sinceInclusive` for the same reason `sumRateCounter` is: the
+   * window is `now - 10min` and the failure sitting exactly on that instant is
+   * the oldest one still inside it. Fixed-width ISO strings compare
+   * lexicographically in instant order, so no date parsing happens in SQL.
+   *
+   * Only 'failed' counts. A draft the breaker itself rejected is 'rejected',
+   * which is what stops an open circuit from feeding itself, and an expired
+   * or recalled draft was never attempted at all.
+   */
+  countSendFailuresSince(sinceInclusive: IsoUtc): number {
+    return (this.#countSendFailuresSince.get(sinceInclusive) as { n: number })
+      .n;
   }
 
   listRecentInboundMessages(limit: number): Message[] {

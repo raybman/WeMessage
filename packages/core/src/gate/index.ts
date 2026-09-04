@@ -200,6 +200,108 @@ function windowStart(now: IsoUtc, ms: number): IsoUtc {
   return new Date(Date.parse(now) - ms).toISOString();
 }
 
+/* ------------------------------------------------------------------ *
+ * Circuit breaker (s6 Scenario 7, §1.7 "Circuit breaker"; F-65)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The breaker's entire state: the ISO instant it tripped, or no row at all.
+ *
+ * Not a boolean, and deliberately not a timer (F-65). "Open" is the
+ * arithmetic `now < openedAt + openMinutes`, recomputed at every evaluation,
+ * which is what makes it survive a restart without resurrecting a stale
+ * horizon: a daemon that was asleep for an hour reopens to a breaker that has
+ * long since closed, and one restarted two minutes in reopens to thirteen
+ * minutes left rather than a fresh fifteen.
+ */
+export const SETTING_CIRCUIT_OPENED_AT = 'send.circuitOpenedAt';
+/** Rolling window the failure count is measured over (default 10, floor 1). */
+export const SETTING_CIRCUIT_FAILURE_WINDOW_MIN =
+  'send.circuitFailureWindowMin';
+/** Failures in that window that trip it (default 5, floor 1). */
+export const SETTING_CIRCUIT_FAILURE_THRESHOLD = 'send.circuitFailureThreshold';
+/** How long it stays open once tripped (default 15, floor 1). */
+export const SETTING_CIRCUIT_OPEN_MINUTES = 'send.circuitOpenMinutes';
+
+/**
+ * The `toggle.changed` key the breaker's flips are audited and broadcast
+ * under. NOT a settings key — the settings key is the instant above, and this
+ * is the operator-facing NAME of the posture it implies. The kill switch gets
+ * to use one string for both because its stored value IS its posture; the
+ * breaker's is derived, so the two names are different on purpose.
+ */
+export const CIRCUIT_TOGGLE_KEY = 'send.circuitOpen';
+
+export interface CircuitConfig {
+  failureWindowMin: number;
+  failureThreshold: number;
+  openMinutes: number;
+}
+
+/** §1.3.6's shipped shape: five failures in ten minutes opens for fifteen. */
+export const DEFAULT_CIRCUIT_CONFIG: CircuitConfig = {
+  failureWindowMin: 10,
+  failureThreshold: 5,
+  openMinutes: 15,
+};
+
+/**
+ * Read through the same strict-integer-or-default parser the caps use, floors
+ * included: a threshold of 0 would mean "open, always", and a window or an
+ * open duration of 0 would mean "never open" — both are ways to disable the
+ * breaker by typing a number, and F-66's reasoning applies here unchanged.
+ */
+export function readCircuitConfig(
+  store: Pick<Store, 'getSetting'>,
+): CircuitConfig {
+  return {
+    failureWindowMin: readCap(
+      store,
+      SETTING_CIRCUIT_FAILURE_WINDOW_MIN,
+      DEFAULT_CIRCUIT_CONFIG.failureWindowMin,
+    ),
+    failureThreshold: readCap(
+      store,
+      SETTING_CIRCUIT_FAILURE_THRESHOLD,
+      DEFAULT_CIRCUIT_CONFIG.failureThreshold,
+    ),
+    openMinutes: readCap(
+      store,
+      SETTING_CIRCUIT_OPEN_MINUTES,
+      DEFAULT_CIRCUIT_CONFIG.openMinutes,
+    ),
+  };
+}
+
+/** The inclusive lower edge of the window failures are counted over. */
+export function circuitFailureWindowStart(
+  store: Pick<Store, 'getSetting'>,
+  now: IsoUtc,
+): IsoUtc {
+  return windowStart(now, readCircuitConfig(store).failureWindowMin * 60_000);
+}
+
+/**
+ * The instant an open breaker closes at, or `null` when it is not open.
+ *
+ * Fail-OPEN on an unparseable instant, which is the unusual direction and is
+ * deliberate: a `send.circuitOpenedAt` nobody can read is a row this product
+ * did not write, and treating it as "closed" is the reading that lets a
+ * corrupted value silently restore autonomy. Treating it as closed is also
+ * self-correcting — the next threshold crossing overwrites it.
+ */
+export function circuitOpenUntil(
+  store: Pick<Store, 'getSetting'>,
+  now: IsoUtc,
+): IsoUtc | null {
+  const openedAt = store.getSetting(SETTING_CIRCUIT_OPENED_AT);
+  if (openedAt === null) return null;
+  const openedMs = Date.parse(openedAt);
+  if (!Number.isFinite(openedMs)) return null;
+  const until = openedMs + readCircuitConfig(store).openMinutes * 60_000;
+  return Date.parse(now) < until ? new Date(until).toISOString() : null;
+}
+
 /**
  * Read the autonomy history a gate decision is measured against (§1.7).
  *
@@ -213,7 +315,7 @@ function windowStart(now: IsoUtc, ms: number): IsoUtc {
  * store handle.
  */
 export function readGateCounters(
-  store: Pick<Store, 'sumRateCounter'>,
+  store: Pick<Store, 'sumRateCounter' | 'getSetting'>,
   input: { now: IsoUtc; handle: Handle },
 ): GateContext['counters'] {
   const scope = contactRateScope(input.handle);
@@ -231,7 +333,11 @@ export function readGateCounters(
       windowStart(input.now, RATE_WINDOW_HOUR_MS),
     ),
     consecutiveAutoInChat: 0,
-    circuitOpen: false,
+    // s6 Scenario 7: derived, never stored as a boolean. `circuitOpenUntil`
+    // compares the persisted instant against `now`, so a context built from a
+    // clock that has moved past the horizon sees a closed breaker even if
+    // nothing has swept yet — the gate cannot be stale.
+    circuitOpen: circuitOpenUntil(store, input.now) !== null,
   };
 }
 
@@ -390,9 +496,19 @@ function narrower(a: RespondMode, b: RespondMode): RespondMode {
  * reason, and an operator asked to fix "rate-limited" when the real cause was
  * a shut window has been sent to the wrong knob.
  *
- * The circuit breaker, the loop breaker and the SMS clamp are the remaining
- * conditions in this step and land in their own scenarios (S6 Sc 7/8/9);
- * until then `readGateCounters` reports them as inert.
+ * **F-65 (s6 Scenario 7), the third clamp.** `counters.circuitOpen` stops
+ * being inert. It is derived, not stored: `circuitOpenUntil` compares the
+ * persisted `send.circuitOpenedAt` instant against `now` at every read, which
+ * is why the breaker needs no timer and cannot survive its own horizon across
+ * a restart. Like the other two it clamps and never denies at this layer, and
+ * it sits AFTER rate in the chain because §1.7 orders them that way: an
+ * operator whose window is shut and whose breaker is open should be told
+ * about the window, which is the condition that will still be true after the
+ * breaker closes itself.
+ *
+ * The loop breaker and the SMS clamp are the remaining conditions in this
+ * step and land in their own scenarios (S6 Sc 8/9); until then
+ * `readGateCounters` reports `consecutiveAutoInChat` as inert.
  */
 export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.killSwitch) {
@@ -437,6 +553,9 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   } else if (overRateCap(ctx)) {
     mode = 'draft-only';
     clampedBy = 'rate-limited';
+  } else if (ctx.counters.circuitOpen) {
+    mode = 'draft-only';
+    clampedBy = 'circuit-open';
   }
 
   return {

@@ -1,10 +1,19 @@
 /**
  * The grace scheduler (s4-execution Scenario 6, §1.3.3 + §1.7).
  *
- * One `tick(now)` does exactly two things, in this order:
- *   1. TTL sweep — every 'pending' draft past `expiresAt` becomes 'expired'.
- *   2. Grace sweep — every 'approved' draft whose persisted `sendNotBefore`
+ * One `tick(now)` does exactly three things, in this order:
+ *   1. Circuit sweep (s6 Sc 7) — the breaker is closed if its horizon has
+ *      passed and opened if the failure threshold has been crossed.
+ *   2. TTL sweep — every 'pending' draft past `expiresAt` becomes 'expired'.
+ *   3. Grace sweep — every 'approved' draft whose persisted `sendNotBefore`
  *      has arrived is dispatched, SEQUENTIALLY, oldest first.
+ *
+ * The circuit sweep goes FIRST so that the failures it counts are the ones
+ * that had already happened when it decided, and so that an opening breaker
+ * takes down the in-grace drafts before anything else in the tick looks at
+ * them. It is here rather than in the gate because a flip has to be audited
+ * and broadcast, and core is not allowed to hold a sink (INV-1); the gate
+ * still derives the posture itself, so the two can never disagree.
  *
  * Three properties this file exists to guarantee:
  *
@@ -39,14 +48,18 @@ import {
   type Ulid,
 } from '@wemessage/core';
 import type { AuditSink } from './audit-sink.js';
+import { sweepCircuit } from './circuit.js';
 
 export interface SchedulerDeps {
   store: Store;
   clock: Clock;
-  /** Append only: neither sweep has a wire event. `draft.expired` is
-   * deliberately audit-only (§1.8), and the dispatch path owns its own
-   * broadcasts. */
-  sink: Pick<AuditSink, 'append'>;
+  /**
+   * `draft.expired` is deliberately audit-only (§1.8) and the dispatch path
+   * owns its own broadcasts, so the TTL and grace sweeps never reach for
+   * `broadcast`. The circuit sweep does: a breaker flipping is a posture
+   * change an operator's UI has to see, exactly as a kill-switch flip is.
+   */
+  sink: Pick<AuditSink, 'append' | 'broadcast'>;
   /**
    * Injected rather than constructed here so the scheduler never needs the
    * backend, reader or delay: it decides WHEN, `dispatchApproved` decides
@@ -113,6 +126,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (running) return;
       running = true;
       try {
+        sweepCircuit({ store, clock, sink });
         const now = clock.now();
         sweepExpired(now);
         await sweepGrace(now);

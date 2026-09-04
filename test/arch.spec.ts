@@ -995,7 +995,10 @@ describe('arch invariants (dependency-cruiser)', () => {
 
     // (g) the dormant five, each with the explicit set of production files
     // allowed to name it TODAY. Sc 4/6/7/8/9 each edit their own row here,
-    // in their own commit, as the literal starts being emitted.
+    // in their own commit, as the literal starts being emitted. Claimed so
+    // far: 'outside-window' (Sc 4/5), 'rate-limited' (Sc 6), 'circuit-open'
+    // (Sc 7). 'loop-detected' and 'sms-auto-forbidden' are still at their S1
+    // shape.
     const DORMANT_DENY_LITERALS: ReadonlyArray<
       readonly [string, readonly string[]]
     > = [
@@ -1047,7 +1050,23 @@ describe('arch invariants (dependency-cruiser)', () => {
       ],
       [
         'circuit-open',
-        ['packages/client/src/index.ts', 'packages/core/src/domain/types.ts'],
+        [
+          'packages/client/src/index.ts',
+          'packages/core/src/domain/types.ts',
+          // s6 Scenario 7, the FOURTH deliberate edit to this guard and the
+          // third dormant literal to be claimed: `evaluateGate` clamps to
+          // 'draft-only' with `clampedBy: 'circuit-open'` when the breaker is
+          // open (F-65). A clamp, not a denial — the send-moment refusal is
+          // Sc 10's job (F-59).
+          'packages/core/src/gate/index.ts',
+          // Same scenario, and the one place the breaker actually STOPS
+          // something today: an opening breaker cancels the drafts still
+          // inside their undo grace, writing a genuine per-draft
+          // `gate.denied` row and a `{code:'circuit-open'}` draft error. Both
+          // spell the literal, which is why the file has to be named here
+          // rather than reading it out of `clampedBy`.
+          'packages/daemon/src/circuit.ts',
+        ],
       ],
       [
         'loop-detected',

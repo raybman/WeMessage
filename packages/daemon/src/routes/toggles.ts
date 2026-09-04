@@ -19,6 +19,22 @@
  * send mutex (§1.3.5, Scenario 4), not here — two mechanisms for two
  * different moments, and the seam between them is why Scenario 9 asserts a
  * disjunction rather than a single outcome for a draft racing the flip.
+ *
+ * **s6 Scenario 7, the resume path.** The circuit breaker is the second hold
+ * an operator can be sitting under, and `wemessage resume --circuit` clears
+ * it through an OPTIONAL `circuit` field on this same body rather than a new
+ * route. Two reasons, and the second is the real one:
+ *
+ *  - §1.6 lists no route for this scenario, and the transport-surface ratchet
+ *    pins S6's growth numerically to Scenarios 3 and 11. A route here would
+ *    be a silent third increment.
+ *  - The two holds are INDEPENDENT and one request should be able to say so.
+ *    `{on: false}` lifts the switch and leaves an open breaker open, because
+ *    they were tripped by different things and one operator action should not
+ *    quietly undo a decision the machine made about a broken send path.
+ *    `{on: true, circuit: true}` is equally legal and equally meaningful:
+ *    "keep everything held, but stop counting the breaker against me."
+ *    Neither field implies the other, in either direction.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -30,6 +46,7 @@ import {
   type Store,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
+import { closeCircuit } from '../circuit.js';
 
 export interface ToggleRouteDeps {
   store: Store;
@@ -37,7 +54,15 @@ export interface ToggleRouteDeps {
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
 }
 
-const toggleBody = z.strictObject({ on: z.boolean() });
+/**
+ * `circuit` is optional and absent means "leave it alone", NOT false: a
+ * client that has never heard of the breaker must not silently clear it, and
+ * `{on: false}` from an old CLI has to keep meaning exactly what it meant.
+ */
+const toggleBody = z.strictObject({
+  on: z.boolean(),
+  circuit: z.boolean().optional(),
+});
 
 export function registerToggleRoutes(
   app: FastifyInstance,
@@ -54,7 +79,7 @@ export function registerToggleRoutes(
         detail: { issues: parsed.error.issues },
       });
     }
-    const { on } = parsed.data;
+    const { on, circuit } = parsed.data;
     store.setSetting(SETTING_KILL_SWITCH, on ? '1' : '0');
     sink.append(
       { type: 'toggle.changed', key: SETTING_KILL_SWITCH, on },
@@ -89,11 +114,20 @@ export function registerToggleRoutes(
       });
     }
 
+    // Independent of the switch, and after it: an operator clearing both in
+    // one request gets the switch flip audited first, which is the order they
+    // typed it in. Reported rather than assumed, because "there was nothing
+    // to clear" and "I cleared it" are different answers to `resume
+    // --circuit` and only one of them means the breaker had tripped.
+    const circuitCleared =
+      circuit === true ? closeCircuit({ store, clock, sink }, actor) : false;
+
     return reply.send({
       key: SETTING_KILL_SWITCH,
       on,
       version: store.getSettingVersion(SETTING_KILL_SWITCH),
       cancelled: cancelled.map((d) => d.id),
+      circuitCleared,
     });
   });
 }

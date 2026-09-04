@@ -603,11 +603,12 @@ describe('a deny is never expressed as a clamp (s6 Scenario 4 row 8)', () => {
  * That shrinking is the point of keeping the row at all. A "we do not read
  * this" pin that is not narrowed the moment a field is claimed becomes a
  * green test asserting a lie, and the next scenario reads the lie as
- * permission. The circuit and the streak are the two fields left; Sc 7 and
- * Sc 8 take one each, and this row should be empty when they are done.
+ * permission. s6 Sc 7 has now claimed `circuitOpen`, so the row is down to
+ * `consecutiveAutoInChat` alone; Sc 8 takes it, and this row should be empty
+ * when it does.
  */
 describe('what this scenario deliberately still does NOT read', () => {
-  it('an open circuit and a runaway auto streak change no decision', () => {
+  it('a runaway auto streak changes no decision', () => {
     const base = ctx({
       globalMode: 'auto',
       contact: policy('auto'),
@@ -616,11 +617,7 @@ describe('what this scenario deliberately still does NOT read', () => {
     expect(
       evaluateGate({
         ...base,
-        counters: {
-          ...base.counters,
-          consecutiveAutoInChat: 9999,
-          circuitOpen: true,
-        },
+        counters: { ...base.counters, consecutiveAutoInChat: 9999 },
       }),
     ).toEqual({ allow: true, mode: 'auto' });
   });
@@ -642,6 +639,21 @@ describe('what this scenario deliberately still does NOT read', () => {
         counters: { ...base.counters, contactAutoLast2Min: 9999 },
       }),
     ).toEqual({ allow: true, mode: 'draft-only', clampedBy: 'rate-limited' });
+  });
+
+  /** And the same for the field s6 Sc 7 just claimed (F-65). */
+  it('a hostile CIRCUIT now clamps, which is what "claimed" means', () => {
+    const base = ctx({
+      globalMode: 'auto',
+      contact: policy('auto'),
+      rule: makeRule(),
+    });
+    expect(
+      evaluateGate({
+        ...base,
+        counters: { ...base.counters, circuitOpen: true },
+      }),
+    ).toEqual({ allow: true, mode: 'draft-only', clampedBy: 'circuit-open' });
   });
 
   it('a never-armed schedule changes nothing when the rule points at no schedule', () => {

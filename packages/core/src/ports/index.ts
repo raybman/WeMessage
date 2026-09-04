@@ -46,6 +46,14 @@ export interface Store {
   setCursor(next: CursorState): void;
   getSetting(key: string): string | null;
   setSetting(key: string, value: string): void;
+  /**
+   * s6 Scenario 7. Back to "never set", not to a sentinel value: the circuit
+   * breaker's state IS the presence of `send.circuitOpenedAt`, so resuming it
+   * has to remove the row rather than write something that means "not open".
+   * A sentinel would be a second reading of the same key that every future
+   * consumer has to remember. Idempotent — deleting an absent key is a no-op.
+   */
+  deleteSetting(key: string): void;
   /** §2.3 `inbound_messages` mirror (minimal; chat.db stays canonical). */
   hasInboundMessage(guid: string): boolean;
   /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
@@ -124,6 +132,26 @@ export interface Store {
   bumpRateCounter(scope: string, bucketStart: IsoUtc): void;
   /** Sum of every bucket at or after `sinceInclusive`; 0 when there are none. */
   sumRateCounter(scope: string, sinceInclusive: IsoUtc): number;
+
+  // --- circuit breaker history (s6 §1.5, Scenario 7; F-62 derived) ---
+  /**
+   * Sent-attempt failures in a window, EXCLUDING gate denials (F-65).
+   *
+   * Derived from `drafts` rather than stored: a draft parked 'failed' already
+   * records both the instant and the cause, so a second ledger would be a
+   * second source of truth for a fact we have (F-62 — no new table, column or
+   * index; C-8 keeps the repo index-free and a recent-window scan on a
+   * single-operator daemon is small).
+   *
+   * The exclusion is the whole point. A gate denial at the send moment parks a
+   * draft 'failed' with `{code:'gate-denied'}` and is indistinguishable in the
+   * ledger from a backend that stopped working. Counting it would mean an
+   * operator flipping the kill switch trips the breaker, cascading one
+   * deliberate action into a fifteen-minute outage — safety turning on more
+   * safety. The breaker exists for a BROKEN SEND PATH, and a switch working
+   * correctly is not one.
+   */
+  countSendFailuresSince(sinceInclusive: IsoUtc): number;
 
   // --- inbound mirror (dry-run replay + mutation visibility; s2 §1.5) ---
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */

@@ -112,6 +112,8 @@ function makeStore(cfg: {
     countRulesUsingSchedule: () => 0,
     bumpRateCounter: () => undefined,
     sumRateCounter: () => 0,
+    deleteSetting: () => undefined,
+    countSendFailuresSince: () => 0,
     listRecentInboundMessages: () => [],
     getInboundMessage: () => null,
     updateInboundMessage: () => undefined,

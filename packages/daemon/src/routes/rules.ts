@@ -12,9 +12,17 @@
  *  - F-14: ANY non-empty adapterId is accepted; create/patch responses carry
  *    the advisory `adapterKnown: false` (adapters land S5; registration-time
  *    reconciliation is S5's job).
- *  - Non-null scheduleId → 400 {code:'schedule-not-found'}: schedules have
- *    no S2 route surface and rules.schedule_id is a FOREIGN KEY (§2.3), so
- *    accepting one would surface as an opaque 500.
+ *  - scheduleId naming no schedule → 400 {code:'schedule-not-found'}.
+ *    C-7 (retired in s6 Scenario 3): this guard used to refuse EVERY non-null
+ *    scheduleId, because schedules had no route surface and rules.schedule_id
+ *    is a FOREIGN KEY (§2.3) that would have surfaced as an opaque 500. Now
+ *    that `/v1/schedules` exists the guard narrows to ids that name nothing —
+ *    still a 400 with the same code, still ahead of the FK, but a real
+ *    schedule is now attachable.
+ *  - outsideWindow:'queue' → 400 {error:'unsupported-outside-window',
+ *    detail:{mode:'queue'}} (F-69). The z.enum keeps all three literals so
+ *    §3.2 and the client mirror do not narrow: the running system declines
+ *    the mode, the type stays honest about the design.
  *
  * Defaults for omitted create fields are the §2.3 rules-DDL defaults —
  * cited, not invented (enabled 1, respond_mode 'draft-only',
@@ -155,22 +163,59 @@ const ruleFields = {
   enabled: z.boolean(),
 };
 
-// §2.3 DDL defaults (cited in the header)
-const createBody = z.strictObject({
-  name: ruleFields.name,
-  matcher: ruleFields.matcher,
-  adapterId: ruleFields.adapterId,
-  respondMode: ruleFields.respondMode.default('draft-only'),
-  scheduleId: ruleFields.scheduleId.default(null),
-  outsideWindow: ruleFields.outsideWindow.default('draft-only'),
-  allowGroupDrafts: ruleFields.allowGroupDrafts.default(false),
-  matchAttachmentOnly: ruleFields.matchAttachmentOnly.default(false),
-  draftTtlMinutes: ruleFields.draftTtlMinutes.default(240),
-  priority: ruleFields.priority.default(100),
-  enabled: ruleFields.enabled.default(true),
-});
+/**
+ * F-69: `queue` is defined in §1.4.1 #7 and unsupported in v1. Narrowing the
+ * z.enum would be a breaking change to a published type for a feature that is
+ * coming, so the refusal lives here instead. The marker rides in `params` so
+ * the route can answer with the typed 400 rather than the generic shape
+ * error — the issue list is not a contract, this key is.
+ */
+const UNSUPPORTED_OUTSIDE_WINDOW = 'unsupported-outside-window';
 
-const patchBody = z.strictObject(ruleFields).partial();
+function refuseQueue(
+  // `| undefined` explicitly: exactOptionalPropertyTypes makes an optional
+  // key and a present-but-undefined key different types, and `.partial()`
+  // produces the latter.
+  value: { outsideWindow?: Rule['outsideWindow'] | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.outsideWindow !== 'queue') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['outsideWindow'],
+    message: "outsideWindow 'queue' is not supported in v1",
+    params: { [UNSUPPORTED_OUTSIDE_WINDOW]: value.outsideWindow },
+  });
+}
+
+/** The rejected mode when refuseQueue fired, else null. */
+function unsupportedMode(error: z.ZodError): string | null {
+  for (const issue of error.issues) {
+    const params = (issue as { params?: Record<string, unknown> }).params;
+    const mode = params?.[UNSUPPORTED_OUTSIDE_WINDOW];
+    if (typeof mode === 'string') return mode;
+  }
+  return null;
+}
+
+// §2.3 DDL defaults (cited in the header)
+const createBody = z
+  .strictObject({
+    name: ruleFields.name,
+    matcher: ruleFields.matcher,
+    adapterId: ruleFields.adapterId,
+    respondMode: ruleFields.respondMode.default('draft-only'),
+    scheduleId: ruleFields.scheduleId.default(null),
+    outsideWindow: ruleFields.outsideWindow.default('draft-only'),
+    allowGroupDrafts: ruleFields.allowGroupDrafts.default(false),
+    matchAttachmentOnly: ruleFields.matchAttachmentOnly.default(false),
+    draftTtlMinutes: ruleFields.draftTtlMinutes.default(240),
+    priority: ruleFields.priority.default(100),
+    enabled: ruleFields.enabled.default(true),
+  })
+  .superRefine(refuseQueue);
+
+const patchBody = z.strictObject(ruleFields).partial().superRefine(refuseQueue);
 
 const testBody = z.strictObject({
   text: z.union([z.string(), z.null()]),
@@ -221,6 +266,12 @@ export function registerRuleRoutes(
   app.post('/v1/rules', (req, reply) => {
     const parsed = createBody.safeParse(req.body);
     if (!parsed.success) {
+      const mode = unsupportedMode(parsed.error);
+      if (mode !== null) {
+        return reply
+          .code(400)
+          .send({ error: 'unsupported-outside-window', detail: { mode } });
+      }
       return reply.code(400).send({
         error: 'invalid-rule',
         detail: { code: 'invalid-shape', issues: parsed.error.issues },
@@ -228,7 +279,12 @@ export function registerRuleRoutes(
     }
     const rejection = validateMatcherTree(parsed.data.matcher);
     if (rejection !== null) return sendMatcherRejection(reply, rejection);
-    if (parsed.data.scheduleId !== null) {
+    // C-7 retired (s6 Scenario 3): a real schedule is attachable now; only
+    // an id that names nothing is refused, still ahead of the FK.
+    if (
+      parsed.data.scheduleId !== null &&
+      store.getSchedule(parsed.data.scheduleId) === null
+    ) {
       return reply.code(400).send({
         error: 'invalid-rule',
         detail: { code: 'schedule-not-found' },
@@ -238,7 +294,6 @@ export function registerRuleRoutes(
     const rule: Rule = {
       ...parsed.data,
       matcher: parsed.data.matcher as RuleMatcher,
-      scheduleId: null,
       id: ulid(),
       createdAt: now,
       updatedAt: now,
@@ -262,6 +317,12 @@ export function registerRuleRoutes(
     if (existing === null) return reply.code(404).send({ error: 'not-found' });
     const parsed = patchBody.safeParse(req.body ?? {});
     if (!parsed.success) {
+      const mode = unsupportedMode(parsed.error);
+      if (mode !== null) {
+        return reply
+          .code(400)
+          .send({ error: 'unsupported-outside-window', detail: { mode } });
+      }
       return reply.code(400).send({
         error: 'invalid-rule',
         detail: { code: 'invalid-shape', issues: parsed.error.issues },
@@ -276,7 +337,13 @@ export function registerRuleRoutes(
       const rejection = validateMatcherTree(patch.matcher);
       if (rejection !== null) return sendMatcherRejection(reply, rejection);
     }
-    if (patch.scheduleId !== undefined && patch.scheduleId !== null) {
+    // C-7 retired: attach and detach both work; an id naming no schedule
+    // does not (same code, narrower guard).
+    if (
+      patch.scheduleId !== undefined &&
+      patch.scheduleId !== null &&
+      store.getSchedule(patch.scheduleId) === null
+    ) {
       return reply.code(400).send({
         error: 'invalid-rule',
         detail: { code: 'schedule-not-found' },

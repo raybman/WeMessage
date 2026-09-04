@@ -19,9 +19,16 @@
  * Defaults for omitted create-body fields are the §2.3 rules-DDL defaults
  * (enabled 1, respond_mode 'draft-only', outside_window 'draft-only',
  * allow_group_drafts 0, draft_ttl_minutes 240, priority 100) — cited, not
- * invented. Non-null scheduleId is rejected in S2: schedules have no route
- * surface yet and rules.schedule_id carries a FOREIGN KEY, so accepting one
- * would surface as a 500 instead of a typed 400.
+ * invented. A scheduleId that names no schedule is rejected with a typed 400
+ * rather than being let through to the rules.schedule_id FOREIGN KEY, which
+ * would surface as an opaque 500.
+ *
+ * REVISED in s6 Scenario 3 (C-7 retired): this file used to say EVERY
+ * non-null scheduleId was rejected, because schedules had no route surface.
+ * They do now (`/v1/schedules`), so the guard narrowed to unknown ids and
+ * the row below asserts exactly that narrower claim. The assertion itself is
+ * unchanged — the ULID it sends still names nothing — only the reasoning
+ * moved. Attaching a REAL schedule is covered in schedules-routes.spec.ts.
  */
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -482,7 +489,8 @@ describe('create/update validation 400s (§1.6, §1.4.1 #6, F-11)', () => {
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: string }).error).toBe('invalid-rule');
     }
-    // non-null scheduleId: schedules have no S2 surface; FK would 500
+    // a scheduleId naming no schedule (C-7 narrowed, s6 Scenario 3): the
+    // route checks the store first, so the FK never gets to 500
     const sched = await h.server.app.inject({
       method: 'POST',
       url: '/v1/rules',

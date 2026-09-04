@@ -39,6 +39,7 @@ import type {
   Handle,
   MessageGuid,
   Rule,
+  Schedule,
   Ulid,
 } from '../domain/types.js';
 import type { CursorHealReason } from '../drafts/recovery.js';
@@ -57,6 +58,15 @@ export type AuditEvent =
   | { type: 'rule.deleted'; ruleId: Ulid }
   | { type: 'rule.enabled'; ruleId: Ulid }
   | { type: 'rule.disabled'; ruleId: Ulid }
+  // s6 Scenario 3: schedule CRUD. Three separate variants rather than one
+  // row with a verb field — the `rule.*`/`adapter.*` precedent — and the
+  // create/update rows carry the FULL post-image, exactly as `rule.created`
+  // does, because §1.7's audit obligation is that an autonomous send be
+  // reconstructible from the chain ALONE: "which window armed this" has to
+  // be answerable after the schedule has since been edited or deleted.
+  | { type: 'schedule.created'; scheduleId: Ulid; schedule: Schedule }
+  | { type: 'schedule.updated'; scheduleId: Ulid; schedule: Schedule }
+  | { type: 'schedule.deleted'; scheduleId: Ulid }
   | {
       type: 'ingest.decode-failed'; // S1 deviation #1 (persisted by Scenario 9)
       guid: MessageGuid;

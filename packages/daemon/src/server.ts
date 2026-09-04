@@ -21,6 +21,7 @@ import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
+import { registerScheduleRoutes } from './routes/schedules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerAdapterRoutes } from './routes/adapters.js';
 import {
@@ -294,6 +295,10 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // §1.6 routes 8-9 (S2 Scenario 11): audit reads share the rules gate —
     // there is no standalone opt-in, audit only exists where rules do.
     registerAuditRoutes(app, { store: opts.rules.store });
+    // §1.6 `/v1/schedules` (s6 Scenario 3). Same gate as rules and audit:
+    // a schedule only means anything as a rule's arming window, so there is
+    // no world where schedules are wanted and rules are not. Ratchet #19.
+    registerScheduleRoutes(app, { store: opts.rules.store, sink });
   }
 
   if (opts.send && sink) {

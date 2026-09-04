@@ -21,6 +21,7 @@ import type {
   Message,
   MessageGuid,
   Rule,
+  Schedule,
   Service,
   Ulid,
 } from '../domain/types.js';
@@ -76,6 +77,37 @@ export interface Store {
   updateRule(rule: Rule): void;
   /** False when absent. */
   deleteRule(id: Ulid): boolean;
+
+  // --- schedules (§2.3 `schedules`; s6-execution §1.5 body extensions,
+  // Scenario 3). The table has existed UNUSED since migration 0001, so this
+  // is a body extension and not a migration (F-61: no ALTER TABLE, ever).
+  // `rules.schedule_id` is a real FOREIGN KEY onto it, which is what makes
+  // the delete path a route-level 409 rather than a caught SQL error. ---
+  /** All schedules, id ASC (the `listRules` F-12 deterministic-order rule). */
+  listSchedules(): Schedule[];
+  /**
+   * Null when absent — including for a DANGLING `rules.schedule_id`, which a
+   * hand-edited or partially restored database can produce. `null` is the
+   * store's honest answer and it means NEVER ARMED at the gate (§2.4.2
+   * fail-closed), never "unconstrained".
+   */
+  getSchedule(id: Ulid): Schedule | null;
+  insertSchedule(schedule: Schedule): void;
+  /** Full-row update keyed on id; throws if absent (the `updateRule` rule). */
+  updateSchedule(schedule: Schedule): void;
+  /**
+   * Idempotent: deleting an absent id is a no-op, not an error. Deliberately
+   * UNGUARDED against referencing rules — callers 409 first (F-75), because
+   * the route is the only layer that can say how many rules are in the way.
+   * The FK stays underneath as the backstop it is.
+   */
+  deleteSchedule(id: Ulid): void;
+  /**
+   * The 409 predicate (F-75). Counts DISABLED referencing rules too: a
+   * disabled rule still holds the foreign key, so a count that skipped it
+   * would promise a delete SQLite then refuses.
+   */
+  countRulesUsingSchedule(id: Ulid): number;
 
   // --- inbound mirror (dry-run replay + mutation visibility; s2 §1.5) ---
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */

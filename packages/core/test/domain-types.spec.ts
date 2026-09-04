@@ -308,6 +308,14 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       insertRule: () => undefined,
       updateRule: () => undefined,
       deleteRule: () => false,
+      // s6 Scenario 3 grew the port by six schedule methods; this row exists
+      // to prove Store stays implementable by hand, so it grows with it.
+      listSchedules: () => [],
+      getSchedule: () => null,
+      insertSchedule: () => undefined,
+      updateSchedule: () => undefined,
+      deleteSchedule: () => undefined,
+      countRulesUsingSchedule: () => 0,
       listRecentInboundMessages: () => [],
       getInboundMessage: () => null,
       updateInboundMessage: () => undefined,

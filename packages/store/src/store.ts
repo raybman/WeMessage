@@ -21,6 +21,8 @@ import type {
   MessageGuid,
   Rule,
   RuleMatcher,
+  Schedule,
+  ScheduleWindow,
   SendingDraft,
   Store,
   Ulid,
@@ -98,6 +100,31 @@ interface RuleRow {
   priority: number;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * §2.3 `schedules`: a table that has been in migration 0001 since S1 and
+ * unused until s6 Scenario 3. `windows` is JSON `ScheduleWindow[]` and
+ * `enabled` is an INTEGER; `timezone` is an IANA string stored VERBATIM,
+ * because it is a key into a tz database and any normalisation here would be
+ * a silent behaviour change at the gate.
+ */
+interface ScheduleRow {
+  id: string;
+  name: string;
+  timezone: string;
+  windows: string;
+  enabled: number;
+}
+
+function scheduleFromRow(row: ScheduleRow): Schedule {
+  return {
+    id: row.id,
+    name: row.name,
+    timezone: row.timezone,
+    windows: JSON.parse(row.windows) as ScheduleWindow[],
+    enabled: row.enabled === 1,
+  };
 }
 
 interface InboundRow {
@@ -330,6 +357,13 @@ export class SqliteStore implements Store {
   readonly #insertRule: Database.Statement;
   readonly #updateRule: Database.Statement;
   readonly #deleteRule: Database.Statement;
+  // --- s6 §1.5 (Scenario 3): schedules, body-only over the 0001 table ---
+  readonly #listSchedules: Database.Statement;
+  readonly #getSchedule: Database.Statement;
+  readonly #insertSchedule: Database.Statement;
+  readonly #updateSchedule: Database.Statement;
+  readonly #deleteSchedule: Database.Statement;
+  readonly #countRulesUsingSchedule: Database.Statement;
   readonly #listRecentInbound: Database.Statement;
   readonly #getInbound: Database.Statement;
   readonly #updateInbound: Database.Statement;
@@ -456,6 +490,28 @@ export class SqliteStore implements Store {
         'created_at = ?, updated_at = ? WHERE id = ?',
     );
     this.#deleteRule = this.db.prepare('DELETE FROM rules WHERE id = ?');
+    // Deterministic order, same reason listRules has one (F-12): a list an
+    // operator reads twice must not reorder itself.
+    this.#listSchedules = this.db.prepare(
+      'SELECT * FROM schedules ORDER BY id ASC',
+    );
+    this.#getSchedule = this.db.prepare('SELECT * FROM schedules WHERE id = ?');
+    this.#insertSchedule = this.db.prepare(
+      'INSERT INTO schedules (id, name, timezone, windows, enabled) ' +
+        'VALUES (?, ?, ?, ?, ?)',
+    );
+    this.#updateSchedule = this.db.prepare(
+      'UPDATE schedules SET name = ?, timezone = ?, windows = ?, ' +
+        'enabled = ? WHERE id = ?',
+    );
+    this.#deleteSchedule = this.db.prepare(
+      'DELETE FROM schedules WHERE id = ?',
+    );
+    // The F-75 409 predicate. No `AND enabled = 1`: a disabled rule still
+    // holds the foreign key, so it still blocks the delete.
+    this.#countRulesUsingSchedule = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM rules WHERE schedule_id = ?',
+    );
     this.#listRecentInbound = this.db.prepare(
       'SELECT * FROM inbound_messages ORDER BY received_at DESC LIMIT ?',
     );
@@ -861,6 +917,52 @@ export class SqliteStore implements Store {
 
   deleteRule(id: Ulid): boolean {
     return this.#deleteRule.run(id).changes > 0;
+  }
+
+  // --- schedules (s6 Scenario 3; §2.3 table, no migration — F-61) ---
+
+  listSchedules(): Schedule[] {
+    return (this.#listSchedules.all() as ScheduleRow[]).map(scheduleFromRow);
+  }
+
+  getSchedule(id: Ulid): Schedule | null {
+    const row = this.#getSchedule.get(id) as ScheduleRow | undefined;
+    return row ? scheduleFromRow(row) : null;
+  }
+
+  insertSchedule(schedule: Schedule): void {
+    this.#insertSchedule.run(
+      schedule.id,
+      schedule.name,
+      schedule.timezone,
+      JSON.stringify(schedule.windows),
+      schedule.enabled ? 1 : 0,
+    );
+  }
+
+  updateSchedule(schedule: Schedule): void {
+    const info = this.#updateSchedule.run(
+      schedule.name,
+      schedule.timezone,
+      JSON.stringify(schedule.windows),
+      schedule.enabled ? 1 : 0,
+      schedule.id,
+    );
+    // Same posture as updateRule: a full-row update that silently wrote
+    // nothing is a lost edit, and the caller has already told the operator
+    // it succeeded by the time anyone notices.
+    if (info.changes === 0) {
+      throw new Error(`updateSchedule: no such schedule: ${schedule.id}`);
+    }
+  }
+
+  /** Idempotent; callers 409 on referencing rules FIRST (F-75). */
+  deleteSchedule(id: Ulid): void {
+    this.#deleteSchedule.run(id);
+  }
+
+  countRulesUsingSchedule(id: Ulid): number {
+    return (this.#countRulesUsingSchedule.get(id) as { n: number }).n;
   }
 
   listRecentInboundMessages(limit: number): Message[] {

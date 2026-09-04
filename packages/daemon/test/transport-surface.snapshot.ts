@@ -69,9 +69,20 @@ export const ROUTE_TABLE: readonly string[] = [
   // registry being wired at all; an un-helloed socket may do nothing but
   // send `hello`, and only until `helloDeadlineMs`. See server.ts's
   // AGENT_PATH comment and adapters/transport.ts.
+  //
+  // #19 deliberate (s6 Scenario 3): `/v1/schedules` CRUD, 53 -> 60. FIVE
+  // routes — GET /v1/schedules, POST /v1/schedules, GET /v1/schedules/:id,
+  // PATCH /v1/schedules/:id, DELETE /v1/schedules/:id — plus the TWO
+  // auto-HEAD twins fastify's exposeHeadRoutes mints for the two GETs.
+  // POST, PATCH and DELETE never get one (the POST /v1/rules precedent).
+  //   5 routes + 2 HEAD twins = +7; 53 + 7 = 60.
+  // No WS event and no port importer moves with them: schedule writes are
+  // audited, not broadcast, and the routes reach the store through the same
+  // `Store` port the rules routes already import.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
+  'DELETE /v1/schedules/:id',
   'GET /v1/adapters',
   'GET /v1/adapters/:id',
   'GET /v1/agent',
@@ -87,6 +98,8 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/rules',
   'GET /v1/rules/:id',
   'GET /v1/rules/:id/dry-run',
+  'GET /v1/schedules',
+  'GET /v1/schedules/:id',
   'GET /v1/status',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
@@ -103,9 +116,12 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/rules',
   'HEAD /v1/rules/:id',
   'HEAD /v1/rules/:id/dry-run',
+  'HEAD /v1/schedules',
+  'HEAD /v1/schedules/:id',
   'HEAD /v1/status',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
+  'PATCH /v1/schedules/:id',
   'POST /v1/adapters',
   'POST /v1/adapters/:id/token',
   'POST /v1/connect',
@@ -119,6 +135,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/drafts/bulk',
   'POST /v1/rules',
   'POST /v1/rules/:id/test',
+  'POST /v1/schedules',
   'POST /v1/send',
   'POST /v1/toggles/kill-switch',
   'PUT /v1/contacts/:handle',

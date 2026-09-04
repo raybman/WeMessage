@@ -101,6 +101,15 @@ function makeStore(cfg: {
     insertRule: () => undefined,
     updateRule: () => undefined,
     deleteRule: () => false,
+    // s6 Scenario 3: the schedules half of the port. The dispatcher never
+    // reads them (arming is the gate's job, §2.4.2), so the fake answers
+    // "no schedules" — which is also the fail-closed answer.
+    listSchedules: () => [],
+    getSchedule: () => null,
+    insertSchedule: () => undefined,
+    updateSchedule: () => undefined,
+    deleteSchedule: () => undefined,
+    countRulesUsingSchedule: () => 0,
     listRecentInboundMessages: () => [],
     getInboundMessage: () => null,
     updateInboundMessage: () => undefined,

@@ -291,8 +291,16 @@ describe('/v1/status (F-5)', () => {
     expect(status.cursor?.lastRowid).toBe(3);
     expect(status.counts.messagesToday).toBe(3);
     expect(status.adapters).toEqual([]);
-    expect(status.killSwitch).toBeNull();
-    expect(status.armed).toBeNull();
+    // s6 Scenario 11: the last two F-5 placeholders. This daemon is fully
+    // connected, has no kill switch set, no pause, no rules and no breaker,
+    // so it is armed with nothing bounding it — and the point of the row is
+    // that the payload now says so instead of `null`.
+    expect(status.killSwitch).toBe(false);
+    expect(status.armed).toEqual({
+      armed: true,
+      until: null,
+      reason: 'armed',
+    });
   });
 });
 

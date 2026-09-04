@@ -79,6 +79,33 @@ export const ROUTE_TABLE: readonly string[] = [
   // No WS event and no port importer moves with them: schedule writes are
   // audited, not broadcast, and the routes reach the store through the same
   // `Store` port the rules routes already import.
+  //
+  // #20 deliberate (s6 Scenario 11): the two arming controls, 60 -> 62.
+  //   POST /v1/toggles/pause        — the polite hold (F-68)
+  //   POST /v1/toggles/global-mode  — F-77, the setting with no writer
+  // BOTH are POSTs, and fastify's exposeHeadRoutes mints an auto-HEAD twin
+  // for GET routes only (the POST /v1/rules precedent, and #19's own note
+  // three lines up). So this is +2 entries for +2 routes, not the +4 a pair
+  // of GETs would have cost.
+  //   2 routes + 0 HEAD twins = +2; 60 + 2 = 62.
+  // §1.6's own arithmetic for S6 as a whole confirms the total: 7 routes + 2
+  // auto-HEAD twins = +9 across the slice, 53 -> 62, split #19 (+7) and this
+  // one (+2).
+  //
+  // F-77 is the reason `global-mode` is a route at all. `send.globalMode`
+  // has been READ by `readGateSettings` since S1 and written by nothing —
+  // no route, no client method, no CLI verb — so §2.4.3's three-scope
+  // ladder has never had a reachable `auto` at its top rung. One route, one
+  // setting, one audit row; no schema, no column, no migration (F-61).
+  //
+  // ONE WS event moves with them: `arming.changed` joins BOTH lists below
+  // in this same diff (16 -> 17 each), because the variant is new AND the
+  // daemon constructs it immediately (arming.ts's `sweepArming`), so there
+  // is no window in which the vocabulary is wider than what we emit.
+  //
+  // No port importer moves: arming reaches the store through the same
+  // `Store` port everything else does, and nothing here touches a
+  // SendBackend or a ChatDbReader.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -137,7 +164,9 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/rules/:id/test',
   'POST /v1/schedules',
   'POST /v1/send',
+  'POST /v1/toggles/global-mode',
   'POST /v1/toggles/kill-switch',
+  'POST /v1/toggles/pause',
   'PUT /v1/contacts/:handle',
 ];
 
@@ -158,6 +187,13 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   // has been in `GatewayEventPayload` since S1; this slice is the first time
   // the daemon actually constructs it, so it joins BOTH lists in one diff.
   'adapter.health',
+  // #20 deliberate (s6 Scenario 11, F-67): `arming.changed` is the ONE
+  // protocol addition of S6, and the `connection.state` twin one line down —
+  // same shape of fact (a posture somebody's screen is showing), same
+  // on-change-only discipline, so a subscriber renders an arming badge
+  // without polling `/v1/status`. It joins BOTH lists in this one diff:
+  // `arming.ts`'s `sweepArming` constructs it the moment the variant exists.
+  'arming.changed',
   'connection.state',
   'draft.approved',
   'draft.created',
@@ -209,6 +245,10 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
 export const EMITTED_WS_EVENTS: readonly string[] = [
   // #15 deliberate (s5 Scenario 5): constructed in adapters/transport.ts.
   'adapter.health',
+  // #20 deliberate (s6 Scenario 11, F-67): constructed in arming.ts's
+  // `sweepArming`, on change only — the scheduler calls it every tick and a
+  // window that stays open all afternoon produces exactly one frame.
+  'arming.changed',
   'connection.state',
   'draft.approved',
   'draft.created',

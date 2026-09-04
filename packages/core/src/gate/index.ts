@@ -81,8 +81,15 @@ function parseBool(raw: string | null, fallback: boolean): boolean {
  *  - killSwitch unset -> false (a fresh install can send).
  *  - globalMode unset/unrecognized -> 'draft-only' (fail toward human review).
  *  - connectionState unset/unrecognized -> 'disconnected' (a daemon that has
- *    never probed connectivity must not send — fail-closed).
+ *    never probed connectivity must not send — fail-closed). s6 Scenario 11
+ *    (F-73) adds 'unsupported' to the values that are CARRIED rather than
+ *    flattened; a stored value outside the enum still lands on 'disconnected',
+ *    which is the same fail-closed direction it has always had.
  *  - allowSmsAuto unset -> false.
+ *  - pauseUntil unset -> the key is OMITTED, not `undefined` (F-68 and
+ *    `exactOptionalPropertyTypes`), so `'pausedUntil' in settings` is a
+ *    truthful test and a context built before Scenario 11 is byte-for-byte
+ *    the context it was.
  */
 export function readGateSettings(
   store: Pick<Store, 'getSetting'>,
@@ -92,14 +99,17 @@ export function readGateSettings(
   const connectionStateRaw = store.getSetting(SETTING_CONNECTION_STATE);
   const connectionState =
     connectionStateRaw === 'fully-connected' ||
-    connectionStateRaw === 'read-only'
+    connectionStateRaw === 'read-only' ||
+    connectionStateRaw === 'unsupported'
       ? connectionStateRaw
       : 'disconnected';
+  const pausedUntil = store.getSetting(SETTING_PAUSE_UNTIL);
   return {
     killSwitch: parseBool(store.getSetting(SETTING_KILL_SWITCH), false),
     globalMode,
     connectionState,
     allowSmsAuto: parseBool(store.getSetting(SETTING_ALLOW_SMS_AUTO), false),
+    ...(pausedUntil === null ? {} : { pausedUntil }),
     // s6 Scenario 6: the caps are settings, so they are read where the other
     // settings are read. Every production gate call site goes through this
     // function, which is what makes an operator's raise take effect
@@ -110,6 +120,48 @@ export function readGateSettings(
     // read and a raise takes effect at every call site at once.
     loop: readLoopLimits(store),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Pause (s6 Scenario 11, §1.5 / §1.7 "Arming"; F-68)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The instant autonomy comes back, or no row at all.
+ *
+ * The breaker's shape (`send.circuitOpenedAt`) applied to the operator's own
+ * hand: a DEADLINE rather than a flag, so "am I paused" is arithmetic against
+ * an injected clock and not a boolean somebody has to remember to clear. A
+ * daemon that was asleep through its whole pause wakes up armed; one
+ * restarted a minute in resumes with the rest of the pause intact; and there
+ * is no timer anywhere in the mechanism to lose on a crash. Arch guard (d)
+ * enforces that last negative by grepping for the two scheduling primitives
+ * near any horizon field, which is also why this sentence declines to name
+ * them: the guard is a text scan, and a comment about not doing a thing
+ * looks exactly like doing it.
+ *
+ * Absent means not paused. Deleting the row is therefore the whole of
+ * "resume", which is why the route takes `{until: null}` rather than a
+ * separate verb.
+ */
+export const SETTING_PAUSE_UNTIL = 'arming.pauseUntil';
+
+/**
+ * Is a pause in force at `now`?
+ *
+ * An UNPARSEABLE deadline counts as paused with no known end — the opposite
+ * direction from `circuitOpenUntil`, which returns `null` on the same input.
+ * The breaker can afford to fail open because five more failures will simply
+ * reopen it; a pause cannot, because the thing on the other side of a wrong
+ * guess here is an operator who asked for silence and got speech. It is
+ * always clearable by resuming.
+ */
+function pausedAt(settings: GateContext['settings'], now: IsoUtc): boolean {
+  const raw = settings.pausedUntil;
+  if (raw === undefined) return false;
+  const untilMs = Date.parse(raw);
+  if (!Number.isFinite(untilMs)) return true;
+  return Date.parse(now) < untilMs;
 }
 
 /* ------------------------------------------------------------------ *
@@ -661,6 +713,17 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.connectionState === 'read-only') {
     return { allow: false, reason: 'read-only' };
   }
+  /**
+   * s6 Scenario 11 (F-73). A host that cannot run the automation at all is
+   * refused under the literal that already means "this daemon cannot send",
+   * because `GateDenyReason` gains nothing in this slice and a taxonomy that
+   * grows a word per host condition stops being a taxonomy. The distinction
+   * an operator needs survives in `ArmingReason`, which has 'unsupported' as
+   * its own value and is the only thing anybody reads.
+   */
+  if (ctx.settings.connectionState === 'unsupported') {
+    return { allow: false, reason: 'disconnected' };
+  }
 
   let mode: RespondMode = ctx.settings.globalMode;
   const agentOrigin = ctx.agentOrigin === true;
@@ -688,7 +751,20 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   // `outsideWindow: 'ignore'` drops the message entirely, whatever narrowed
   // the mode first).
   let clampedBy: GateDenyReason | undefined;
-  if (scheduleClosed(ctx)) {
+  /**
+   * s6 Scenario 11 (F-68). Pause is FIRST in the chain because it is the
+   * only one of the six an operator asked for by hand a moment ago: told
+   * about a pause and a shut window at once, they want to hear the one they
+   * caused. It reuses the 'outside-window' literal rather than minting
+   * 'paused' into the deny taxonomy, which is what makes `dispatchApproved`
+   * requeue a paused auto-approval instead of failing it — the same
+   * treatment a window that shuts mid-grace gets, and the right one, because
+   * neither is the draft's fault and a human can still send it.
+   */
+  if (pausedAt(ctx.settings, ctx.now)) {
+    mode = 'draft-only';
+    clampedBy = 'outside-window';
+  } else if (scheduleClosed(ctx)) {
     mode = 'draft-only';
     clampedBy = 'outside-window';
   } else if (overRateCap(ctx)) {

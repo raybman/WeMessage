@@ -6,6 +6,7 @@
  */
 import type {
   Actor,
+  ArmingReason,
   AttachmentRef,
   ChatGuid,
   ConnectionState,
@@ -54,6 +55,19 @@ export type GatewayEventPayload =
   // (macOS <13, doctor engine §2.2.3) — the two pre-existing values are
   // untouched.
   | { event: 'connection.state'; state: ConnectionState }
+  // s6 Scenario 11 (F-67): THE one protocol addition of this slice, and the
+  // `connection.state` twin one line up — same shape of fact (a posture an
+  // operator's screen is showing), same on-change-only discipline, so a
+  // subscriber can render an arming badge without polling `/v1/status`.
+  //
+  // The reason is the `ArmingReason` TYPE rather than the literals spelled
+  // out. Two of that union's words are also gate deny literals that
+  // `test/arch.spec.ts` (g) tracks by file, and a vocabulary copy here would
+  // put them in a third home for no gain — this file included, which is why
+  // even this comment declines to name them. The union is defined once in
+  // core and this is the same set by construction.
+  | { event: 'arming.changed'; armed: boolean; until: IsoUtc | null;
+      reason: ArmingReason }
   | { event: 'gateway.disconnected'; reason: 'user-disconnect' };
 
 export interface DraftSummary {
@@ -258,6 +272,12 @@ export const FRAME_SPECS = {
       'correlation',
       'seq',
       'textDelta',
+      // s6 Scenario 11 (F-67): the `arming.changed` variant's own two keys.
+      // Its `reason` is the pre-existing entry four lines up — the same word
+      // the `gate.denied` and `gateway.disconnected` variants already use,
+      // which is what keeps this a closed set rather than a growing one.
+      'armed',
+      'until',
     ],
     direction: 'gateway->agent',
   },

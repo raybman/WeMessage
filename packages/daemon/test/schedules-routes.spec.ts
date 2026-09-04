@@ -630,9 +630,17 @@ describe('ratchet #19: the schedules surface is +7 entries (53 -> 60)', () => {
       'POST /v1/schedules',
     ]);
     // Five routes; only the two GETs get a HEAD twin (POST/PATCH/DELETE
-    // never do) => +7. The pinned table moves 53 -> 60 in the same commit.
+    // never do) => +7. The pinned table moved 53 -> 60 in the same commit.
+    //
+    // s6 Scenario 11's ratchet #20 then took it to 62 with two POSTs of its
+    // own, so the whole-table length is no longer asserted here. That number
+    // is a fact about every slice at once — owned by
+    // transport-surface.ratchet.spec.ts, which derives it from the live app,
+    // and re-pinned by each scenario that moves it — and keeping a copy in a
+    // Scenario 3 file only meant this row failed for reasons that had
+    // nothing to do with schedules. What this row owns is the +7, and both
+    // halves of it are still asserted exactly.
     expect(live).toHaveLength(7);
-    expect(ROUTE_TABLE).toHaveLength(60);
     expect(ROUTE_TABLE.filter((r) => r.includes('/v1/schedules'))).toHaveLength(
       7,
     );

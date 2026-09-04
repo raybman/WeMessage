@@ -10,6 +10,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
+import { SETTING_KILL_SWITCH } from '@wemessage/core';
 import type {
   ChatDbReader,
   Clock,
@@ -50,7 +51,8 @@ import { registerToggleRoutes } from './routes/toggles.js';
 import { registerContactRoutes } from './routes/contacts.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
-import type { DoctorProbes } from './doctor.js';
+import { readConnectionState, type DoctorProbes } from './doctor.js';
+import { resolveArming } from './arming.js';
 
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
@@ -248,25 +250,6 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     return { status: 'ok' }; // liveness only, no state payload (F-4)
   });
 
-  app.get('/v1/status', () => {
-    counters.handlerCalls += 1;
-    // F-5 proposed S1 payload: nulls for S4/S6 concepts, never fake values.
-    // s5 Sc14: `adapters` is the one F-5 field this slice can finally fill —
-    // adapter health lands here, so the registry IS the answer. It stays an
-    // empty list on a server booted without adapters, which is the honest
-    // reading of "there are none", not a placeholder.
-    return (
-      opts.getStatus?.() ?? {
-        connectionState: 'disconnected',
-        cursor: null,
-        counts: { messagesToday: 0 },
-        adapters: opts.adapters?.store.listAdapters() ?? [],
-        killSwitch: null,
-        armed: null,
-      }
-    );
-  });
-
   // One §1.8 chokepoint shared across rules/audit AND doctor/send when both
   // are provided (daemon.ts always provides both, with the same explicit
   // `sink` on each); either can also stand alone with its own sink in tests.
@@ -276,6 +259,46 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     ? (sinkSource.sink ??
       createAuditSink({ store: sinkSource.store, clock: sinkSource.clock }))
     : undefined;
+
+  app.get('/v1/status', () => {
+    counters.handlerCalls += 1;
+    // F-5 proposed S1 payload: nulls for S4/S6 concepts, never fake values.
+    // s5 Sc14: `adapters` is the one F-5 field this slice can finally fill —
+    // adapter health lands here, so the registry IS the answer. It stays an
+    // empty list on a server booted without adapters, which is the honest
+    // reading of "there are none", not a placeholder.
+    //
+    // s6 Scenario 11: `killSwitch` and `armed` are the next two to stop being
+    // placeholders, and they stop wherever a store is actually wired. A
+    // server with no store at all keeps reporting `null` for both — that is
+    // still the honest answer there, because there is nothing to derive them
+    // from, and inventing `armed: false` would report a hold that does not
+    // exist. Derived on every request, never cached (§1.7).
+    return (
+      opts.getStatus?.() ??
+      (sinkSource
+        ? {
+            connectionState: readConnectionState(sinkSource.store),
+            cursor: null,
+            counts: { messagesToday: 0 },
+            adapters: opts.adapters?.store.listAdapters() ?? [],
+            killSwitch:
+              sinkSource.store.getSetting(SETTING_KILL_SWITCH) === '1',
+            armed: resolveArming({
+              store: sinkSource.store,
+              clock: sinkSource.clock,
+            }),
+          }
+        : {
+            connectionState: 'disconnected',
+            cursor: null,
+            counts: { messagesToday: 0 },
+            adapters: opts.adapters?.store.listAdapters() ?? [],
+            killSwitch: null,
+            armed: null,
+          })
+    );
+  });
 
   app.get('/v1/events', { websocket: true }, (socket) => {
     counters.handlerCalls += 1;

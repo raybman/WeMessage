@@ -144,12 +144,53 @@ export interface ContactPolicy {
 }
 
 // s3-execution Scenario 7, §2.2.3: the doctor engine's derived connection
-// state. 'unsupported' (macOS <13) is additive vs. GateContext.settings'
-// existing inline 3-value literal below, which Scenario 6 already shipped
-// and pins on its own (read-write fail-closed default is 'disconnected';
-// 'unsupported' fails closed there too, no gate change needed).
+// state. s6 Scenario 11 (F-73) makes GateContext.settings share this exact
+// type instead of the narrower inline literal it used to carry, so a Mac on
+// macOS <13 is now CARRIED into the gate rather than flattened to
+// 'disconnected' on the way in. It is still refused there — 'unsupported' is
+// not a GateDenyReason and this slice mints nothing into that taxonomy — but
+// the distinction survives as far as the operator-facing ArmingReason below,
+// which is the only place a person ever reads it.
 export type ConnectionState =
   | 'fully-connected' | 'read-only' | 'disconnected' | 'unsupported';
+
+/**
+ * s6 Scenario 11 (§1.7 "Arming"): WHY this daemon may or may not speak on
+ * its own right now, in the operator's vocabulary.
+ *
+ * Deliberately not `GateDenyReason`. The two overlap on four words and
+ * diverge on the two that matter: 'armed' is not a denial of anything, and
+ * 'unsupported' is a fact about the host rather than a policy the gate can
+ * enforce. Everything a person is shown lives here; everything the gate
+ * enforces lives there; the mapping between them is written down once, in
+ * `resolveArming`, instead of being re-derived by every reader.
+ *
+ * The order below is the precedence order (§1.3.6): a host that cannot send
+ * at all outranks a switch, which outranks a pause, which outranks a
+ * schedule, which outranks a breaker.
+ */
+export type ArmingReason =
+  | 'disconnected' | 'read-only' | 'unsupported'
+  | 'kill-switch' | 'paused' | 'outside-window' | 'circuit-open'
+  | 'armed';
+
+/**
+ * The whole posture in three fields, DERIVED on every read and stored
+ * nowhere (§1.7). No table has a column called `armed`, which is precisely
+ * why a restart cannot resurrect a stale "yes" and no timer can drift out of
+ * agreement with it.
+ *
+ * `until` is the earliest REAL horizon among the pause deadline, the current
+ * window's close and the breaker's expiry — independent of which reason won.
+ * An operator watching a countdown wants to know when something will next
+ * change, not which of several holds happens to own the clock. `null` means
+ * nothing bounds the posture: not "unknown", and never a sentinel date.
+ */
+export interface ArmingState {
+  armed: boolean;
+  until: IsoUtc | null;
+  reason: ArmingReason;
+}
 
 export type GateDenyReason =
   | 'kill-switch' | 'disconnected' | 'read-only' | 'contact-denied'
@@ -244,8 +285,28 @@ export interface LoopLimits {
 export interface GateContext {
   now: IsoUtc;                             // injected Clock (never Date.now in core)
   settings: { killSwitch: boolean; globalMode: RespondMode;
-              connectionState: 'fully-connected'|'read-only'|'disconnected';
+              /**
+               * s6 Scenario 11 (F-73): widened from the inline 3-value
+               * literal Scenario 6 shipped to the full `ConnectionState`, so
+               * an 'unsupported' host reaches the gate as itself. The gate
+               * denies it under the 'disconnected' literal (a daemon that
+               * cannot send is a daemon that cannot send), but flattening it
+               * at the READER meant no caller downstream could ever tell an
+               * unplugged Mac from an unsupported one.
+               */
+              connectionState: ConnectionState;
               allowSmsAuto: boolean;
+              /**
+               * s6 Scenario 11 (F-68): the RAW pause deadline, exactly as it
+               * sits in `settings`, or the key omitted when there is no
+               * pause. Raw rather than a pre-computed boolean because
+               * `readGateSettings` has no clock — the comparison against
+               * `now` belongs in `evaluateGate`, where `now` already is —
+               * and because a deadline the gate can read is a deadline a
+               * crash cannot lose. An unparseable value is treated as a live
+               * pause: fail-closed, and always clearable by resuming.
+               */
+              pausedUntil?: IsoUtc;
               /**
                * s6 Scenario 8 (F-62), additive and optional on the same
                * precedent as `caps` directly below: `readGateSettings`

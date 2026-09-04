@@ -228,7 +228,12 @@ describe('undo grace + scheduler (s4 Scenario 6)', () => {
     await h.scheduler.tick();
     expect(h.backend.callCount()).toBe(1);
     expect(h.store.getDraft(draft.id)!.state).toBe('sent');
-    expect(auditTypes(h.store)).toEqual([
+    // s6 Sc 11: the scheduler's first tick also announces the posture this
+    // daemon booted into (`arming.changed`, on-change only — the ticks after
+    // it add nothing). It is a fact about the daemon, not about this draft,
+    // so it is filtered out rather than folded into a list whose whole point
+    // is one draft's life in order.
+    expect(auditTypes(h.store).filter((t) => t !== 'arming.changed')).toEqual([
       'draft.created',
       'draft.approved',
       'send.attempted',
@@ -259,7 +264,8 @@ describe('undo grace + scheduler (s4 Scenario 6)', () => {
     await h.scheduler.tick();
     expect(h.backend.callCount()).toBe(0);
     expect(h.store.getDraft(draft.id)!.state).toBe('recalled');
-    expect(auditTypes(h.store)).toEqual([
+    // Same filter, same reason as the row above.
+    expect(auditTypes(h.store).filter((t) => t !== 'arming.changed')).toEqual([
       'draft.created',
       'draft.approved',
       'draft.recalled',

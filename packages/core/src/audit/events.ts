@@ -30,6 +30,7 @@
  */
 import type {
   Actor,
+  ArmingState,
   ConnectionState,
   ContactMode,
   Draft,
@@ -253,6 +254,25 @@ export type AuditEvent =
       adapterId?: string;
     }
   | { type: 'toggle.changed'; key: string; on: boolean } // kill-switch flips
+  /* --- s6 Scenario 11 (§1.6): arming ------------------------------------
+   *
+   * Three of these four are OPERATOR ACTIONS and carry the human API actor:
+   * somebody asked for silence, asked for it back, or moved the global scope.
+   * The fourth is DERIVED and carries a system actor — it is the
+   * `connection.state-changed` twin, written only when the posture actually
+   * changes (F-67), so a daemon ticking every few seconds inside one window
+   * writes exactly one row and not one per tick.
+   *
+   * The pair matters. `arming.paused` says what a person did; `arming.changed`
+   * says what became of the daemon as a result, which is not the same fact —
+   * pausing an already-disconnected daemon is a real operator action that
+   * changes no posture at all, and only one of these two rows should exist
+   * afterwards.
+   */
+  | { type: 'arming.paused'; until: IsoUtc }
+  | { type: 'arming.resumed' }
+  | { type: 'arming.mode-changed'; mode: RespondMode }
+  | { type: 'arming.changed'; from: ArmingState | null; to: ArmingState }
   | {
       type: 'contact.policy-changed';
       handle: Handle;

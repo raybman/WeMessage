@@ -112,8 +112,32 @@ export interface StatusPayload {
   cursor: { lastRowid: number; lastScanAt: string } | null;
   counts: { messagesToday: number };
   adapters: unknown[];
-  killSwitch: null;
-  armed: null;
+  /**
+   * s6 Scenario 11: both were F-5 placeholders that only ever carried `null`,
+   * and both now carry the truth wherever the daemon has a store to derive it
+   * from. `| null` stays because a server built without one still has nothing
+   * to report, and reporting `armed: false` there would name a hold that does
+   * not exist.
+   *
+   * The reason union is spelled out rather than imported: @wemessage/client
+   * has no @wemessage/core dependency, so every §3.2 shape in this file is a
+   * redeclaration (the `RulePayload` precedent below). Rendering it is Sc 12's
+   * work; carrying it honestly is this slice's.
+   */
+  killSwitch: boolean | null;
+  armed: {
+    armed: boolean;
+    until: string | null;
+    reason:
+      | 'disconnected'
+      | 'read-only'
+      | 'unsupported'
+      | 'kill-switch'
+      | 'paused'
+      | 'outside-window'
+      | 'circuit-open'
+      | 'armed';
+  } | null;
 }
 
 export interface ClientOptions {

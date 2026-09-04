@@ -35,18 +35,40 @@
  *    `{on: true, circuit: true}` is equally legal and equally meaningful:
  *    "keep everything held, but stop counting the breaker against me."
  *    Neither field implies the other, in either direction.
+ *
+ * **s6 Scenario 11 adds the other two controls an operator has**, and they
+ * are the only two routes this slice mints (§1.6, ratchet update #20):
+ *
+ *  - `POST /v1/toggles/pause` — the polite hold. It withdraws AUTONOMY and
+ *    nothing else: drafts keep being made, they keep collecting, and a human
+ *    can still approve and send one. That is the entire reason it exists as
+ *    a separate mechanism from the kill switch above, which slams the whole
+ *    outbound path shut.
+ *  - `POST /v1/toggles/global-mode` — F-77. `send.globalMode` has been READ
+ *    by the gate since S1 and written by nobody, so the top rung of §2.4.3's
+ *    three-scope ladder has never had a reachable `auto`: an operator could
+ *    configure per-rule and per-contact autonomy and still find the daemon
+ *    drafting, with no surface to say why. One route, one setting.
+ *
+ * Both audit the operator's action under the human API actor and then let
+ * `sweepArming` say what became of the daemon, which is a different fact:
+ * pausing an already-disconnected daemon is a real action that changes no
+ * posture at all.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   humanApiActor,
+  SETTING_GLOBAL_MODE,
   SETTING_KILL_SWITCH,
   systemActor,
   type Clock,
+  type IsoUtc,
   type Store,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
 import { closeCircuit } from '../circuit.js';
+import { armedWindowClose, setPause, sweepArming } from '../arming.js';
 
 export interface ToggleRouteDeps {
   store: Store;
@@ -63,6 +85,67 @@ const toggleBody = z.strictObject({
   on: z.boolean(),
   circuit: z.boolean().optional(),
 });
+
+/**
+ * `null` is RESUME, and it is a value rather than a second route because
+ * "how long" is the only variable an operator has: `{until: null}` and
+ * `{until: '1h'}` are the same decision at two settings. A `DELETE` twin
+ * would also have cost the ratchet an extra entry for no new capability.
+ */
+const pauseBody = z.strictObject({
+  until: z.union([z.string(), z.null()]),
+});
+
+/**
+ * The enum is the §3.2 `RespondMode` union, spelled here because zod needs
+ * runtime values. Anything else is refused rather than coerced: a typo'd mode
+ * that silently became 'draft-only' would look like the route worked.
+ */
+const globalModeBody = z.strictObject({
+  mode: z.enum(['draft-only', 'auto']),
+});
+
+/**
+ * The three shorthand deadlines plus a literal instant (F-68).
+ *
+ * `until-tomorrow` is the next 08:00 in the DAEMON HOST's zone, computed with
+ * the platform's own local-time arithmetic and naming no IANA string — the
+ * operator's morning is whatever their Mac says it is, and `test/arch.spec.ts`
+ * (f) pins the five zone literals any file may name for exactly the reason
+ * that a sixth would be a lie about somebody's clock.
+ *
+ * `rest-of-window` reads the schedule dimension and refuses when there is no
+ * window to rest out. Everything else must parse as an instant and must be in
+ * the FUTURE: a pause that has already expired is not a pause, and accepting
+ * one would leave an operator looking at a daemon they believe is silent.
+ */
+function resolveDeadline(
+  raw: string,
+  deps: { store: Store; clock: Clock },
+): { ok: true; until: IsoUtc } | { ok: false; code: 'not-armed' | 'invalid' } {
+  const now = deps.clock.now();
+  const nowMs = Date.parse(now);
+  if (raw === '1h') {
+    return { ok: true, until: new Date(nowMs + 3_600_000).toISOString() };
+  }
+  if (raw === 'until-tomorrow') {
+    const at = new Date(nowMs);
+    at.setHours(8, 0, 0, 0);
+    if (at.getTime() <= nowMs) at.setDate(at.getDate() + 1);
+    return { ok: true, until: at.toISOString() };
+  }
+  if (raw === 'rest-of-window') {
+    const close = armedWindowClose(deps);
+    return close === null
+      ? { ok: false, code: 'not-armed' }
+      : { ok: true, until: close };
+  }
+  const atMs = Date.parse(raw);
+  if (!Number.isFinite(atMs) || atMs <= nowMs) {
+    return { ok: false, code: 'invalid' };
+  }
+  return { ok: true, until: new Date(atMs).toISOString() };
+}
 
 export function registerToggleRoutes(
   app: FastifyInstance,
@@ -128,6 +211,70 @@ export function registerToggleRoutes(
       version: store.getSettingVersion(SETTING_KILL_SWITCH),
       cancelled: cancelled.map((d) => d.id),
       circuitCleared,
+    });
+  });
+
+  app.post('/v1/toggles/pause', async (req, reply) => {
+    const parsed = pauseBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-pause',
+        detail: { issues: parsed.error.issues },
+      });
+    }
+    const raw = parsed.data.until;
+
+    // Resume first, and unconditionally: an operator clearing a hold should
+    // never be told their input was malformed.
+    if (raw === null) {
+      return reply.send({
+        key: 'pause',
+        until: null,
+        armed: setPause({ store, clock, sink }, null),
+      });
+    }
+
+    const resolved = resolveDeadline(raw, { store, clock });
+    if (!resolved.ok) {
+      // 409, not 400: `rest-of-window` is a perfectly well-formed request
+      // that this daemon's current state cannot satisfy, and telling an
+      // operator their word was invalid would send them looking for a typo
+      // instead of at their schedule.
+      return resolved.code === 'not-armed'
+        ? reply.code(409).send({ error: 'not-armed' })
+        : reply
+            .code(400)
+            .send({ error: 'invalid-until', detail: { until: raw } });
+    }
+
+    return reply.send({
+      key: 'pause',
+      until: resolved.until,
+      armed: setPause({ store, clock, sink }, resolved.until),
+    });
+  });
+
+  app.post('/v1/toggles/global-mode', async (req, reply) => {
+    const parsed = globalModeBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-mode',
+        detail: { issues: parsed.error.issues },
+      });
+    }
+    const { mode } = parsed.data;
+    store.setSetting(SETTING_GLOBAL_MODE, mode);
+    sink.append({ type: 'arming.mode-changed', mode }, actor);
+
+    // The mode is deliberately NOT a dimension of `ArmingState`: 'auto' and
+    // 'draft-only' are what the daemon may say, not whether it may speak, and
+    // the five §1.3.6 dimensions are all holds. It still announces, because
+    // an operator who has just handed the machine autonomy is owed the same
+    // acknowledgement as one who has just taken it away.
+    return reply.send({
+      key: SETTING_GLOBAL_MODE,
+      mode,
+      armed: sweepArming({ store, clock, sink }, { alwaysBroadcast: true }),
     });
   });
 }

@@ -31,6 +31,7 @@ import {
   type DispatchGateDenied,
   runStartupRecovery,
   systemActor,
+  SETTING_KILL_SWITCH,
   SETTING_USER_DISCONNECTED,
   type StartupRecoveryResult,
 } from '@wemessage/core';
@@ -54,6 +55,7 @@ import { createInboundDispatch } from './adapters/dispatch.js';
 import type { AdapterTransportHandle } from './adapters/transport.js';
 import type { AgentRequests } from './adapters/submit.js';
 import { createScheduler } from './scheduler.js';
+import { resolveArming } from './arming.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
 import { rotateToken as rotateTokenOnDisk } from './auth.js';
@@ -524,8 +526,13 @@ export async function startDaemon(
       // and no hash of any kind (F-43), so the status payload cannot leak
       // credential material by construction.
       adapters: store.listAdapters(),
-      killSwitch: null, // S4
-      armed: null, // S6
+      // s6 Scenario 11: the last two F-5 placeholders. Both are DERIVED at
+      // request time from the same rows the gate reads — the switch is one
+      // settings row, the posture is a function of five of them — so a status
+      // payload can never disagree with the decision the daemon would make a
+      // millisecond later. Neither is cached and neither is a column.
+      killSwitch: store.getSetting(SETTING_KILL_SWITCH) === '1',
+      armed: resolveArming({ store, clock: options.clock }),
     }),
     onEventsClient: (socket) => {
       sockets.add(socket);

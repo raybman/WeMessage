@@ -92,3 +92,17 @@ export {
   type AdapterTransportDeps,
   type AdapterTransportHandle,
 } from './adapters/transport.js';
+// s6 Scenario 11: the arming derivation. Exported because three surfaces
+// outside this file need the same answer — `/v1/status`, the toggle routes,
+// and (Sc 12) the CLI that renders it — and a second implementation of a
+// precedence order is a second precedence order.
+export {
+  armedWindowClose,
+  resolveArming,
+  setPause,
+  sweepArming,
+  SETTING_ARMING_LAST_BROADCAST,
+  type ArmingDeps,
+  type ArmingSweepDeps,
+  type SweepArmingOptions,
+} from './arming.js';

@@ -465,8 +465,13 @@ describe('s6 Sc10 row 2: a window closing during the grace requeues (F-72)', () 
     // scanning for what happened to a draft should find it before the
     // explanation.
     // `adapter.created` is the harness registering the adapter through its
-    // own route; everything after it is this draft's whole life.
-    expect(auditTypes(h.store).filter((t) => t !== 'adapter.created')).toEqual([
+    // own route, and `arming.changed` (s6 Sc 11) is the scheduler's first
+    // tick noticing what posture this daemon booted into — neither belongs
+    // to this draft, and everything left is its whole life.
+    const NOT_THIS_DRAFT = ['adapter.created', 'arming.changed'];
+    expect(
+      auditTypes(h.store).filter((t) => !NOT_THIS_DRAFT.includes(t)),
+    ).toEqual([
       'auto.approved',
       'draft.approved',
       'draft.requeued',

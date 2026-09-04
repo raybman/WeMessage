@@ -1039,6 +1039,22 @@ describe('arch invariants (dependency-cruiser)', () => {
           // narrowed mode. No new deny literal is minted; 'outside-window'
           // simply gains a second, deliberate home.
           'packages/daemon/src/adapters/dispatch.ts',
+          // s6 Scenario 11, the FOURTH deliberate edit to this row: the
+          // arming derivation names 'outside-window' as an `ArmingReason`,
+          // which is a DIFFERENT union that happens to share four of its
+          // words with this one. That overlap is the point — an operator
+          // reading "outside-window" on their badge and "outside-window" in
+          // an audit row is reading about the same shut window — and it is
+          // also exactly the kind of coincidence this guard exists to keep
+          // visible, because the day the two vocabularies diverge, one of
+          // these two files will be wrong and nothing else would notice.
+          //
+          // Note what does NOT appear: `packages/protocol/src/index.ts`
+          // carries the `arming.changed` frame and its reason field, and
+          // references the `ArmingReason` TYPE rather than spelling the
+          // literals, precisely so the vocabulary has two homes and not
+          // three.
+          'packages/daemon/src/arming.ts',
         ],
       ],
       [
@@ -1080,6 +1096,15 @@ describe('arch invariants (dependency-cruiser)', () => {
           // `gate.denied` row and a `{code:'circuit-open'}` draft error. Both
           // spell the literal, which is why the file has to be named here
           // rather than reading it out of `clampedBy`.
+          //
+          // s6 Scenario 11, the FIFTH deliberate edit to this row, and the
+          // sort order puts it above `circuit.ts` rather than after it: the
+          // arming derivation reports 'circuit-open' as an `ArmingReason`
+          // when the breaker is the topmost hold. Same overlap, same
+          // reasoning, as the 'outside-window' row above — the badge and the
+          // audit log say the same word about the same breaker, and this
+          // guard is what makes the day they stop agreeing a reviewed diff.
+          'packages/daemon/src/arming.ts',
           'packages/daemon/src/circuit.ts',
         ],
       ],

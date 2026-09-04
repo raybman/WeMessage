@@ -49,6 +49,7 @@ import {
 } from '@wemessage/core';
 import type { AuditSink } from './audit-sink.js';
 import { sweepCircuit } from './circuit.js';
+import { sweepArming } from './arming.js';
 
 export interface SchedulerDeps {
   store: Store;
@@ -127,6 +128,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       running = true;
       try {
         sweepCircuit({ store, clock, sink });
+        // s6 Scenario 11 (F-67). AFTER the breaker sweep, because the breaker
+        // is one of the five dimensions the posture is derived from and a
+        // sweep that ran first would announce a state that was already stale
+        // by the end of the same tick. On-change only: twenty ticks inside
+        // one window write one audit row, not twenty.
+        sweepArming({ store, clock, sink });
         const now = clock.now();
         sweepExpired(now);
         await sweepGrace(now);

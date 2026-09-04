@@ -64,6 +64,10 @@
     },
     "textDelta": {
       "type": "string"
-    }
+    },
+    "armed": {
+      "type": "boolean"
+    },
+    "until": {}
   }
 }

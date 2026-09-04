@@ -288,7 +288,9 @@ function isConnectionState(value: string | null): value is ConnectionState {
  * directly, fail-closed to 'disconnected' on unset/unrecognized (same
  * default as readGateSettings) rather than re-deriving anything.
  */
-export function readConnectionState(store: Store): ConnectionState {
+export function readConnectionState(
+  store: Pick<Store, 'getSetting'>,
+): ConnectionState {
   const raw = store.getSetting(SETTING_CONNECTION_STATE);
   return isConnectionState(raw) ? raw : 'disconnected';
 }

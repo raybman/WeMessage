@@ -166,8 +166,30 @@ export interface AdapterRecord {
   config: Record<string, unknown>;
 }
 
+/**
+ * F-64 (s6 Scenario 4), additive under the F-16/F-28/F-30/F-43 precedent.
+ *
+ * `clampedBy` is how the allow-variant says "allowed, but not autonomously,
+ * and here is why". It exists because the gate is ONE pure function called
+ * at two moments (§2.4.1), and the two moments disagree only about what a
+ * withheld autonomy MEANS: at the draft moment the caller still creates the
+ * draft, at the send moment `dispatchApproved` turns the same clamp on an
+ * auto approval into a denial. A `moment: 'draft' | 'send'` parameter would
+ * let the two drift apart silently; a clamp channel cannot, because both
+ * moments read the identical decision.
+ *
+ * The literal is REUSED from the deny taxonomy rather than given its own
+ * union, so a clamp and a deny for the same cause are the same word in two
+ * places — which is what makes the audit trail readable. A clamp is never
+ * audited as `gate.denied`: nothing was denied and a draft was still
+ * produced, and conflating the two would poison the deny counts an operator
+ * reads to understand their own system.
+ *
+ * Omitted, never `undefined`-valued (`exactOptionalPropertyTypes`): callers
+ * spread it conditionally, and `'clampedBy' in decision` is a truthful test.
+ */
 export type GateDecision =
-  | { allow: true; mode: RespondMode }
+  | { allow: true; mode: RespondMode; clampedBy?: GateDenyReason }
   | { allow: false; reason: GateDenyReason };
 
 export interface GateContext {

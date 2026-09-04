@@ -377,32 +377,28 @@ describe('evaluateGate (s4 Scenario 4, gate v1)', () => {
     });
   });
 
-  it('schedules and counters remain UNCONSULTED (hostile values change nothing)', () => {
-    // S6/S7 own these fields. Planting values that would obviously deny if
-    // they were read pins that v1 still does not read them.
-    const hostile = v1Ctx({
-      settings: {
-        killSwitch: false,
-        globalMode: 'auto',
-        connectionState: 'fully-connected',
-        allowSmsAuto: false,
-      },
-      rule: RULE,
-      contact: policy('auto'),
-      schedule: {
-        id: 's1',
-        name: 'never',
-        timezone: 'America/Los_Angeles',
-        windows: [],
-        enabled: true,
-      },
-      counters: {
-        contactAutoLastHour: 9999,
-        globalAutoLastHour: 9999,
-        consecutiveAutoInChat: 9999,
-        circuitOpen: true,
-      },
-    });
-    expect(evaluateGate(hostile)).toEqual({ allow: true, mode: 'auto' });
-  });
+  /*
+   * RETIRED — s6-execution Scenario 4, row 7 (named revision).
+   *
+   * This block used to hold `schedules and counters remain UNCONSULTED
+   * (hostile values change nothing)`. Half of its claim became false in
+   * Scenario 4: `evaluateGate` now reads the schedule of a rule that names
+   * one and clamps autonomy when that window is shut (F-63/F-64), so a row
+   * asserting that schedules are never consulted is asserting the absence of
+   * a feature this slice exists to add. It passed on the day it was deleted
+   * only because its fixture rule carries `scheduleId: null` — i.e. for a
+   * reason unrelated to what it claimed — which is precisely the kind of
+   * false comfort a retired test should not keep providing.
+   *
+   * The surviving half of the claim is not lost. `counters` and the circuit
+   * ARE still unread, and `scope-resolution.spec.ts ›
+   * what this scenario deliberately still does NOT read` now pins that with
+   * the same hostile values, alongside the positive rows for the schedule
+   * behaviour that replaced it. Sc 6/7/8 retire those lines one at a time as
+   * each field is claimed.
+   *
+   * Recorded here rather than deleted silently: retiring a passing test is
+   * the kind of thing that gets done quietly, and the spec named it in
+   * advance so that it could not be.
+   */
 });

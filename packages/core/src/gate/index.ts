@@ -14,9 +14,11 @@
 import type {
   GateContext,
   GateDecision,
+  GateDenyReason,
   RespondMode,
 } from '../domain/types.js';
 import type { Store } from '../ports/index.js';
+import { isArmed } from '../schedule/index.js';
 
 export const SETTING_KILL_SWITCH = 'send.killSwitch';
 export const SETTING_GLOBAL_MODE = 'send.globalMode';
@@ -134,14 +136,43 @@ function narrower(a: RespondMode, b: RespondMode): RespondMode {
  * every S4 gate row passes unmodified. Teeth T9-proactive-unpoliced is the
  * check that the F-50 half is load-bearing.
  *
- * The **group clamp** (INV-5) is applied last and unconditionally: a group
- * chat can never resolve to 'auto', whatever the global mode or contact
- * policy says. This is a clamp on the ALLOWED MODE, not a deny — a group
- * draft is still perfectly legal, it just always needs a human.
+ * The **group clamp** (INV-5): a group chat can never resolve to 'auto',
+ * whatever the global mode or contact policy says. This is a clamp on the
+ * ALLOWED MODE, not a deny — a group draft is still perfectly legal, it
+ * just always needs a human.
  *
- * Schedules, counters and the circuit breaker remain plumbed-but-unread
- * (S6/S7 own them). Hostile values in those fields must not change any
- * decision here; gate.spec.ts pins that.
+ * **F-63 (s6 Scenario 4), the third scope.** `rules.respond_mode` has been
+ * written by the rules route since S2 and read by nothing, so §2.4.3's "all
+ * three scopes must say auto" was two scopes as built (C-4). Step 4 below
+ * narrows the resolved mode by `rule.respondMode` through the same
+ * `narrower()` the other two scopes already use, which is what makes
+ * most-restrictive-wins a property of one function rather than a convention
+ * three call sites have to keep. There is no scope that widens: the ladder
+ * has no escape hatch, and the UI's "per-contact AUTO scoped to specific
+ * rules" is exactly this composition rather than a new field.
+ *
+ * **F-64, the clamp channel.** Autonomy can be withheld for reasons that are
+ * not denials — the message still deserves a draft a human can look at.
+ * Those conditions clamp `mode` to 'draft-only' and record `clampedBy`,
+ * reusing the deny taxonomy's own literal so the same cause is the same word
+ * whether it clamped or denied. Steps 1–2 deny at both gate moments; the
+ * clamps are what the two moments read differently (§2.4.1). A clamp NEVER
+ * upgrades a deny, which is why every clamp is evaluated after every deny.
+ *
+ * The clamp this scenario owns is the schedule: a rule pointing at a
+ * schedule that is not armed right now cannot act autonomously. Fail-closed
+ * per §2.4.2 — a dangling `scheduleId` whose row was deleted (`schedule`
+ * arrives null), a disabled schedule and a schedule with no windows are all
+ * NOT armed, never "unconstrained, therefore always". A rule with
+ * `scheduleId: null` is genuinely always armed and is the only always-on
+ * reading in the function.
+ *
+ * Rate caps, the circuit breaker, the loop breaker and the SMS clamp are the
+ * remaining conditions in this step and land in their own scenarios (S6
+ * Sc 6/7/8/9). Until then `ctx.counters` stays unread, and
+ * scope-resolution.spec.ts pins that hostile values there change nothing —
+ * the honest successor to the "plumbed-but-unread" row this scenario retires
+ * from gate.spec.ts, now that schedules are read.
  */
 export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.killSwitch) {
@@ -162,11 +193,47 @@ export function evaluateGate(ctx: GateContext): GateDecision {
     }
     mode = narrower(mode, ctx.contact.mode);
   }
+  // Step 4 (F-63): the third scope. Only a rule carries one, so the human
+  // path (`rule === null`) is untouched and the F-20 pin above still holds.
+  if (ctx.rule !== null) {
+    mode = narrower(mode, ctx.rule.respondMode);
+  }
   if (agentOrigin) {
     mode = 'draft-only';
   }
   if (ctx.message.isGroup) {
     mode = 'draft-only';
   }
-  return { allow: true, mode };
+
+  // Step 7: the autonomy clamps. Recorded even when `mode` is already
+  // 'draft-only' — a clamp is a fact about the world, not a transition in
+  // `mode`, and the draft-moment callers branch on the fact (a rule with
+  // `outsideWindow: 'ignore'` drops the message entirely, whatever narrowed
+  // the mode first).
+  let clampedBy: GateDenyReason | undefined;
+  if (scheduleClosed(ctx)) {
+    mode = 'draft-only';
+    clampedBy = 'outside-window';
+  }
+
+  return {
+    allow: true,
+    mode,
+    ...(clampedBy !== undefined ? { clampedBy } : {}),
+  };
+}
+
+/**
+ * Is this decision's rule pointing at a schedule that is shut right now?
+ *
+ * `false` for a rule with no schedule (always armed, §3.2) and for the human
+ * path, which has no rule to carry a `scheduleId`. Everything else is
+ * fail-closed: a missing schedule row is NOT armed, which is what makes a
+ * deleted schedule withdraw autonomy instead of granting it.
+ */
+function scheduleClosed(ctx: GateContext): boolean {
+  const rule = ctx.rule;
+  if (rule === null || rule.scheduleId === null) return false;
+  if (ctx.schedule === null) return true;
+  return !isArmed(ctx.schedule, ctx.now);
 }

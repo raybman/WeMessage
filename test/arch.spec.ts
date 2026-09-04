@@ -1005,6 +1005,15 @@ describe('arch invariants (dependency-cruiser)', () => {
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
+          // s6 Scenario 4, the FIRST deliberate edit to this row and the
+          // first time any of the dormant five is emitted: `evaluateGate`
+          // clamps a rule whose schedule is shut to 'draft-only' and records
+          // the reason in `GateDecision.clampedBy` (F-64). A clamp is not a
+          // denial — no `gate.denied` row is written for it — but the
+          // LITERAL is now minted in production, which is exactly what this
+          // guard exists to make visible. Rows for the other four stay at
+          // their S1 shape until Sc 6/7/8/9 claim them one at a time.
+          'packages/core/src/gate/index.ts',
         ],
       ],
       [

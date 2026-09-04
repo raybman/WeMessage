@@ -43,22 +43,28 @@
 import { ulid } from 'ulid';
 import type {
   Actor,
+  ChatDbReader,
   ChatGuid,
   Clock,
   Draft,
+  Handle,
   MessageGuid,
   Store,
   Ulid,
 } from '@wemessage/core';
 import {
   applyDraftTransition,
+  evaluateGate,
   IllegalDraftActor,
   IllegalDraftTransition,
+  normalizeHandle,
   parseChatGuid,
+  readGateSettings,
   systemActor,
 } from '@wemessage/core';
 import type { DraftSummary } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
+import type { DraftRefusalTap } from './feedback.js';
 import { DRAFT_REQUEST_CONSTRAINTS } from './dispatch.js';
 
 /** §2.3 rules-DDL default, used only when the rule row has vanished. */
@@ -131,6 +137,13 @@ interface SubmitPayload {
   declined?: unknown;
 }
 
+interface ProactivePayload {
+  idempotencyKey?: unknown;
+  target?: unknown;
+  body?: unknown;
+  reason?: unknown;
+}
+
 interface DeltaPayload {
   correlation?: WireCorrelation;
   seq?: unknown;
@@ -142,11 +155,23 @@ export interface AgentSubmitDeps {
   clock: Clock;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   requests: AgentRequests;
+  /**
+   * s5 Sc 9: resolves a `{handle}` target to an EXISTING conversation
+   * (availability-only — it never mints a chat). Optional because a server
+   * booted without a chat.db reader still serves every other adapter frame;
+   * without it a handle target simply cannot be resolved and is refused,
+   * which is the fail-closed direction.
+   */
+  reader?: Pick<ChatDbReader, 'resolveChat'>;
+  /** s5 Sc 9: tell an adapter its proposal was refused before it existed. */
+  refuse?: DraftRefusalTap;
 }
 
 export interface AgentSubmitHandler {
   onSubmit(adapterId: string, payload: unknown): void;
   onDelta(adapterId: string, payload: unknown): void;
+  /** s5 Sc 9. Async only because resolving a handle is a chat.db read. */
+  onProactive(adapterId: string, payload: unknown): Promise<void>;
 }
 
 function agentActor(adapterId: string): Actor {
@@ -175,7 +200,10 @@ function addMinutes(iso: string, minutes: number): string {
 export function createAgentSubmitHandler(
   deps: AgentSubmitDeps,
 ): AgentSubmitHandler {
-  const { store, clock, sink, requests } = deps;
+  const { store, clock, sink, requests, reader } = deps;
+  // A server with no feedback wiring still refuses correctly; it just cannot
+  // say so out loud. Never a reason to skip the refusal itself.
+  const refuse: DraftRefusalTap = deps.refuse ?? ((): void => {});
 
   const violate = (adapterId: string, reason: string): void => {
     sink.append(
@@ -295,6 +323,159 @@ export function createAgentSubmitHandler(
     sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
   };
 
+  /**
+   * `{chatGuid}` is taken as addressed (the same handle-style address
+   * `POST /v1/send` accepts); `{handle}` must resolve to a conversation that
+   * ALREADY EXISTS. An adapter does not get to open a first contact with a
+   * stranger, and with no reader wired there is no way to know one exists —
+   * both refuse. Returns null having audited the refusal.
+   */
+  const resolveTarget = async (
+    adapterId: string,
+    target: unknown,
+  ): Promise<ChatGuid | null> => {
+    const t = (target ?? {}) as { chatGuid?: unknown; handle?: unknown };
+    if (typeof t.chatGuid === 'string' && t.chatGuid.length > 0) {
+      return t.chatGuid;
+    }
+    if (typeof t.handle !== 'string' || t.handle.length === 0) {
+      violate(adapterId, 'target');
+      return null;
+    }
+    if (reader === undefined) {
+      violate(adapterId, 'target');
+      return null;
+    }
+    const handle: Handle = normalizeHandle(t.handle);
+    const resolved = await reader.resolveChat(handle);
+    if (resolved === null) {
+      violate(adapterId, 'target');
+      return null;
+    }
+    return resolved.chatGuid;
+  };
+
+  /**
+   * s5 Scenario 9 — `proactive.propose`. The one frame where an adapter
+   * chooses the AUDIENCE rather than answering a question we asked, which is
+   * why it is the one frame that consults the gate before minting anything.
+   *
+   * Order is deliberate and fail-closed: shape (a body nobody can read and a
+   * reason nobody stated are refusals, not drafts) -> target resolution ->
+   * dedup -> gate. The gate runs last because it is the only check that
+   * needs a resolved conversation, and a refusal that named the wrong
+   * conversation would be worse evidence than none.
+   *
+   * `agentOrigin: true` (F-50) is what makes §2.4.3's ladder bind here at
+   * all: a proposal has `rule: null`, and without the discriminator the gate
+   * would apply the HUMAN pin to an agent. It also clamps the decision to
+   * 'draft-only', so a proposal can never be auto-sent — but nothing here
+   * reads that mode, because a proposal is only ever minted `pending`. The
+   * clamp is what S6 will inherit when auto-send exists.
+   */
+  const onProactive = async (
+    adapterId: string,
+    raw: unknown,
+  ): Promise<void> => {
+    const payload = (raw ?? {}) as ProactivePayload;
+
+    const idempotencyKey = payload.idempotencyKey;
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) {
+      violate(adapterId, 'idempotency-key');
+      return;
+    }
+    const body = payload.body;
+    if (typeof body !== 'string' || body.length === 0) {
+      violate(adapterId, 'body');
+      return;
+    }
+    if (body.length > DRAFT_REQUEST_CONSTRAINTS.maxChars) {
+      violate(adapterId, 'max-chars');
+      return;
+    }
+    // A proposal with no stated reason is unreviewable: the human is being
+    // asked to write to somebody who did not write first, and "why" is the
+    // entire content of that decision.
+    const reason = payload.reason;
+    if (typeof reason !== 'string' || reason.trim().length === 0) {
+      violate(adapterId, 'reason-required');
+      return;
+    }
+
+    const chatGuid = await resolveTarget(adapterId, payload.target);
+    if (chatGuid === null) return;
+
+    // F-15, the same closure `draft.submit` gets and for the same reason:
+    // read from the STORE, so a retry across a restart still dedups.
+    if (store.findDraftByIdempotencyKey(adapterId, idempotencyKey) !== null) {
+      return;
+    }
+
+    const parsed = parseChatGuid(chatGuid);
+    const decision = evaluateGate({
+      now: clock.now(),
+      settings: readGateSettings(store),
+      rule: null,
+      agentOrigin: true,
+      schedule: null,
+      contact: store.getContactPolicy(parsed.handle),
+      message: {
+        isGroup: parsed.isGroup,
+        service: parsed.service,
+        handle: parsed.handle,
+        chatGuid,
+      },
+      counters: {
+        contactAutoLastHour: 0,
+        globalAutoLastHour: 0,
+        consecutiveAutoInChat: 0,
+        circuitOpen: false,
+      },
+    });
+    if (!decision.allow) {
+      // §1.8: the log is the record, the agent's copy is the courtesy.
+      sink.append(
+        { type: 'gate.denied', reason: decision.reason, adapterId },
+        agentActor(adapterId),
+      );
+      refuse({
+        adapterId,
+        chatGuid,
+        kind: 'draft_rejected',
+        actor: agentActor(adapterId),
+        reason: decision.reason,
+      });
+      return;
+    }
+
+    const at = clock.now();
+    const draft: Draft = {
+      id: ulid(),
+      // Both null by §3.2: a proposal answers no message and serves no rule,
+      // and saying so honestly is what lets the queue show it as what it is.
+      inboundGuid: null,
+      chatGuid,
+      ruleId: null,
+      adapterId,
+      idempotencyKey,
+      body,
+      originalBody: body,
+      proactiveReason: reason,
+      state: 'pending',
+      stateChangedAt: at,
+      // No rule means no rule TTL (F-48 has nothing to read here), so the
+      // §2.3 DDL default is the honest answer rather than a borrowed one.
+      expiresAt: addMinutes(at, FALLBACK_TTL_MINUTES),
+      createdAt: at,
+    };
+    store.insertDraft(draft);
+    sink.append(
+      { type: 'draft.created', draftId: draft.id, draft },
+      agentActor(adapterId),
+    );
+    sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+  };
+
   return {
     onSubmit(adapterId, raw) {
       const payload = (raw ?? {}) as SubmitPayload;
@@ -330,6 +511,8 @@ export function createAgentSubmitHandler(
       }
       mint(adapterId, issued, idempotencyKey, body);
     },
+
+    onProactive,
 
     onDelta(adapterId, raw) {
       const payload = (raw ?? {}) as DeltaPayload;

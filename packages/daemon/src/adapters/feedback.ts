@@ -41,7 +41,14 @@
  * already takes as an injected dependency.
  */
 import { ulid } from 'ulid';
-import type { Actor, Clock, DraftError, Store, Ulid } from '@wemessage/core';
+import type {
+  Actor,
+  ChatGuid,
+  Clock,
+  DraftError,
+  Store,
+  Ulid,
+} from '@wemessage/core';
 import {
   WIRE_VERSION,
   type DraftFeedbackFrame,
@@ -83,9 +90,32 @@ export interface AgentFeedbackDeps {
   transport: FeedbackTransport;
 }
 
+/**
+ * s5 Sc 9: a proposal the gate refused BEFORE any draft existed. There is no
+ * `draftId` to look up and none to hand back, so this takes the addressee and
+ * the conversation directly; everything else (best-effort, addressed to the
+ * originator, dropped-never-queued) is the same posture as {@link emit}.
+ */
+export interface RefusalInput {
+  adapterId: string;
+  chatGuid: ChatGuid;
+  kind: FeedbackKind;
+  actor: Actor;
+  reason: string;
+}
+
+/** The narrow seam the proactive handler is given (Sc 9). */
+export type DraftRefusalTap = (input: RefusalInput) => void;
+
 export interface AgentFeedback {
   /** Tell the originating adapter what became of its draft. Never throws. */
   emit: DraftFeedbackTap;
+  /**
+   * Tell an adapter its proposal was refused before it became anything.
+   * Silence here would leave an agent to conclude the gateway simply lost
+   * the frame, and propose again on the next tick, forever.
+   */
+  refuse: DraftRefusalTap;
   /**
    * Wrap the `dispatchApproved` closure so a send outcome becomes feedback.
    * The wrapper lives HERE rather than in core because core has never heard
@@ -131,6 +161,17 @@ export function createAgentFeedback(deps: AgentFeedbackDeps): AgentFeedback {
       },
     };
 
+    deliver(adapterId, frame, draft.id, input.kind, input.actor);
+  };
+
+  /** The one write to a socket in this file, and the one drop row. */
+  function deliver(
+    adapterId: string,
+    frame: DraftFeedbackFrame,
+    draftId: Ulid | null,
+    kind: FeedbackKind,
+    actor: Actor,
+  ): void {
     let delivered = false;
     try {
       delivered = transport.sendTo(adapterId, frame);
@@ -139,21 +180,39 @@ export function createAgentFeedback(deps: AgentFeedbackDeps): AgentFeedback {
       // there, as far as this frame is concerned. Same row, same posture.
       delivered = false;
     }
-    if (!delivered) {
+    if (!delivered && draftId !== null) {
       sink.append(
-        {
-          type: 'adapter.feedback-dropped',
-          adapterId,
-          draftId: draft.id,
-          kind: input.kind,
-        },
-        input.actor,
+        { type: 'adapter.feedback-dropped', adapterId, draftId, kind },
+        actor,
       );
     }
+    // A REFUSED proposal (draftId === null) that could not be delivered
+    // writes no drop row: `adapter.feedback-dropped` is keyed on a draft, and
+    // the `gate.denied` row the caller already appended is the record that
+    // the refusal happened. Inventing a null-draft variant of that row would
+    // widen the audit vocabulary to say something it already says.
+  }
+
+  const refuse: DraftRefusalTap = (input) => {
+    if (input.adapterId === HUMAN_ADAPTER_ID) return;
+    const frame: DraftFeedbackFrame = {
+      v: WIRE_VERSION,
+      id: ulid(),
+      type: 'draft.feedback',
+      ts: clock.now(),
+      payload: {
+        correlation: { requestId: ulid(), chatGuid: input.chatGuid },
+        kind: input.kind,
+        actor: input.actor,
+        reason: input.reason,
+      },
+    };
+    deliver(input.adapterId, frame, null, input.kind, input.actor);
   };
 
   return {
     emit,
+    refuse,
     observeDispatch(dispatch) {
       return async (draftId, approvalId) => {
         // An INV-2 validation throw propagates untouched: nothing was

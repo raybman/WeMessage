@@ -443,9 +443,10 @@ describe('arch invariants (dependency-cruiser)', () => {
         .filter((f) => codeIsh.test(f));
     }
 
-    // (a) importer allowlist: exactly these 14 files mention SendBackend or
+    // (a) importer allowlist: exactly these 15 files mention SendBackend or
     // ChatDbReader in production source — the 13-file S3 baseline (841cd27)
-    // plus the one deliberate s5 Scenario 6 addition (F-46) below.
+    // plus the two deliberate s5 additions (Scenario 6's F-46 and Scenario
+    // 9's F-50) below.
     const SEND_BACKEND_CHAT_DB_READER_BASELINE = [
       'packages/core/src/drafts/recovery.ts',
       'packages/core/src/ports/index.ts',
@@ -455,6 +456,12 @@ describe('arch invariants (dependency-cruiser)', () => {
       // `ChatDbReader.readChatTurns`. Reviewed here, in the same commit as
       // the file that joins it, exactly as this guard intends.
       'packages/daemon/src/adapters/dispatch.ts',
+      // s5 Scenario 9 (F-50), the second deliberate growth of this list in
+      // S5: `adapters/submit.ts` turns a proactive `{handle}` target into a
+      // conversation through `ChatDbReader.resolveChat`, availability-only.
+      // It holds `Pick<ChatDbReader, 'resolveChat'>` and no SendBackend:
+      // nothing in that file can put a message on the wire.
+      'packages/daemon/src/adapters/submit.ts',
       'packages/daemon/src/daemon.ts',
       'packages/daemon/src/main.ts',
       'packages/daemon/src/routes/send.ts',
@@ -535,7 +542,7 @@ describe('arch invariants (dependency-cruiser)', () => {
         );
     }
 
-    it('(a) SendBackend/ChatDbReader importers match the 14-file S3+S5 baseline exactly', () => {
+    it('(a) SendBackend/ChatDbReader importers match the 15-file S3+S5 baseline exactly', () => {
       expect(sendBackendChatDbReaderImporters()).toEqual(
         SEND_BACKEND_CHAT_DB_READER_BASELINE,
       );

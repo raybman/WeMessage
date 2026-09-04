@@ -250,6 +250,12 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   // dispatcher holds a ChatDbReader for `readChatTurns` — an agent that
   // cannot see our prior replies re-answers the same question forever.
   'packages/daemon/src/adapters/dispatch.ts',
+  // s5 Scenario 9 (F-50), deliberate ratchet update #18: `proactive.propose`
+  // may name a `{handle}`, and turning that into a conversation is a
+  // `resolveChat` — availability-only, never a mint. The submit handler holds
+  // the narrowest possible slice of the port (`Pick<ChatDbReader,
+  // 'resolveChat'>`) and nothing in this file can send.
+  'packages/daemon/src/adapters/submit.ts',
   'packages/daemon/src/daemon.ts',
   'packages/daemon/src/main.ts',
   'packages/daemon/src/routes/send.ts',

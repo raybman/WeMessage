@@ -176,6 +176,19 @@ export interface GateContext {
               connectionState: 'fully-connected'|'read-only'|'disconnected';
               allowSmsAuto: boolean };
   rule: Rule | null; schedule: Schedule | null;
+  /**
+   * F-50 (s5 Scenario 9): this decision is being made ON BEHALF OF AN AGENT
+   * rather than a human at the keyboard. Additive and optional, under the
+   * F-30 precedent: every pre-existing caller omits it and gets the v1
+   * decision byte for byte.
+   *
+   * It exists because §2.4.3's ladder hangs off `rule !== null`, and a
+   * proactive proposal has `ruleId: null` — so without a second way to say
+   * "an agent chose this audience" the deny-all default would not bind the
+   * one path where an adapter picks who gets written to. It is an ORIGIN
+   * FLAG, not an adapter: core still has never heard of one (INV-1).
+   */
+  agentOrigin?: boolean;
   contact: ContactPolicy | null;           // null => unknown => deny (deny-all default, §1.3.5/§2.4.3)
   message: Pick<Message, 'isGroup' | 'service' | 'handle' | 'chatGuid'>;
   counters: { contactAutoLastHour: number; globalAutoLastHour: number;

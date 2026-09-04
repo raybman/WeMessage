@@ -386,6 +386,12 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
         clock: adapterOpts.clock,
         sink,
         requests: agentRequests,
+        // s5 Scenario 9: a `{handle}` target resolves against the same
+        // chat.db the redraft re-ask reads. Omitted, never undefined.
+        ...(adapterOpts.reader !== undefined
+          ? { reader: adapterOpts.reader }
+          : {}),
+        refuse: (input) => agentFeedback?.refuse(input),
       }),
       ...(adapterOpts.helloDeadlineMs !== undefined
         ? { helloDeadlineMs: adapterOpts.helloDeadlineMs }

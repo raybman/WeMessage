@@ -120,6 +120,20 @@ function narrower(a: RespondMode, b: RespondMode): RespondMode {
  * contact ladder is therefore gated on `rule !== null`, and the S3 F-20 test
  * keeps passing untouched.
  *
+ * **F-50 (s5 Scenario 9), additive.** `ctx.agentOrigin === true` is the
+ * second way traffic can be non-human: an agent's PROACTIVE proposal, which
+ * has no rule to hang the ladder off (`ruleId: null` by §3.2) and yet is the
+ * one path where an adapter chooses the audience. The ladder is therefore
+ * consulted when `rule !== null || agentOrigin === true`, and agent-origin
+ * decisions are additionally clamped to 'draft-only' — a message nobody
+ * asked for is never sent without a human, whatever the global mode and the
+ * contact policy say (INV-5's sibling; S6 inherits it).
+ *
+ * Both halves are ADDITIVE: a context that omits `agentOrigin` takes exactly
+ * the v1 branch it always did, so the human pin above survives verbatim and
+ * every S4 gate row passes unmodified. Teeth T9-proactive-unpoliced is the
+ * check that the F-50 half is load-bearing.
+ *
  * The **group clamp** (INV-5) is applied last and unconditionally: a group
  * chat can never resolve to 'auto', whatever the global mode or contact
  * policy says. This is a clamp on the ALLOWED MODE, not a deny — a group
@@ -141,11 +155,15 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   }
 
   let mode: RespondMode = ctx.settings.globalMode;
-  if (ctx.rule !== null) {
+  const agentOrigin = ctx.agentOrigin === true;
+  if (ctx.rule !== null || agentOrigin) {
     if (ctx.contact === null || ctx.contact.mode === 'deny') {
       return { allow: false, reason: 'contact-denied' };
     }
     mode = narrower(mode, ctx.contact.mode);
+  }
+  if (agentOrigin) {
+    mode = 'draft-only';
   }
   if (ctx.message.isGroup) {
     mode = 'draft-only';

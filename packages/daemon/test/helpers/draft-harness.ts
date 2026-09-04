@@ -115,6 +115,14 @@ export interface BootOptions {
   startIso?: string;
   /** s5 Sc5: the adapter transport's hello deadline, injected for tests. */
   helloDeadlineMs?: number;
+  /**
+   * s5 Sc9: also register `POST /v1/send` against this harness's own reader,
+   * loopback backend and fake clock. Opt-in and off by default so no suite
+   * that did not ask for it gains a route: the one caller is `proactive.spec`,
+   * which has to re-run S4 Sc 10 row 4 (the human pin) against the SAME deny
+   * row that refuses an agent's proposal, in the same process.
+   */
+  send?: boolean;
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -175,6 +183,25 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const server = await buildServer({
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink },
+    ...(opts.send === true
+      ? {
+          send: {
+            store,
+            reader,
+            backend,
+            backendName: 'loopback',
+            clock: clockCtl.clock,
+            delay,
+            doctorProbes: {
+              osMajor: () => 15,
+              fda: async () => 'ok' as const,
+              automation: async () => 'ok' as const,
+              messagesRunning: async () => true,
+            },
+            sink,
+          },
+        }
+      : {}),
     // s5 Scenario 4: the adapter registry rides along in the harness so the
     // agent-era suites boot the same server the composed daemon does.
     adapters: {

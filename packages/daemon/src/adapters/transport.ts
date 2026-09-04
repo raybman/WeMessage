@@ -289,11 +289,21 @@ export function createAdapterTransport(
         }
         submit.onDelta(s.adapterId, parsed.frame.payload);
         return;
+      case 'proactive.propose':
+        // s5 Scenario 9. Fire-and-forget: resolving a `{handle}` target is a
+        // chat.db read, and a socket callback must not wait on the disk. Every
+        // refusal inside the handler audits itself, and none closes the
+        // socket — same posture as `draft.submit`.
+        if (submit === undefined) {
+          violate(s, `unhandled:${parsed.frame.type}`, false);
+          return;
+        }
+        void submit.onProactive(s.adapterId, parsed.frame.payload);
+        return;
       default:
-        // proactive.propose lands in Sc 9. Until then it is a well-formed
-        // frame with no handler, which is a protocol violation of OUR making,
-        // not the adapter's; recorded so the gap is visible rather than
-        // silent.
+        // A well-formed frame with no handler is a protocol violation of OUR
+        // making, not the adapter's; recorded so the gap is visible rather
+        // than silent.
         violate(s, `unhandled:${parsed.frame.type}`, false);
         return;
     }

@@ -46,9 +46,17 @@ import {
   type DraftState,
   type SendResult,
   type StatusPayload,
+  type AdapterKind,
+  type AdapterPatch,
 } from '@wemessage/client';
+import {
+  renderAdapter,
+  renderAdapterTable,
+  renderMintedCredential,
+} from './adapters.js';
 import { probeChatDbReadable } from './probe.js';
 import { confirmPurge } from './purge.js';
+import { createWatchRenderer } from './watch.js';
 
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
@@ -85,11 +93,24 @@ function exitFor(error: unknown): never {
     // refusal, not a usage error. The message names the state it actually
     // was, because "you cannot approve that" without saying why is the
     // least useful thing a CLI can print.
-    const { error: kind, from, requested, attempts } = error.detail;
+    const {
+      error: kind,
+      from,
+      requested,
+      attempts,
+      ruleIds,
+      id,
+    } = error.detail;
     fail(
       kind === 'retry-limit'
         ? `retry limit reached after ${String(attempts ?? 0)} attempt(s)`
-        : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
+        : // s5 Sc11: the adapter registry's two 409s. Naming the rules that
+          // block a delete is the entire actionable content of that refusal.
+          kind === 'adapter-referenced'
+          ? `adapter-referenced: still used by rule(s) ${(ruleIds ?? []).join(', ')} — delete or repoint them first`
+          : kind === 'adapter-exists'
+            ? `adapter-exists: an adapter with id "${String(id)}" already exists`
+            : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
       EXIT_FAILED,
     );
   }
@@ -236,11 +257,29 @@ program
   .option('--json', 'NDJSON: one JSON object per event')
   .option('-T, --token <token>', 'bearer token override')
   .action(async (opts: { json?: boolean; token?: string }) => {
+    // s5 Sc11: `--json` is still NDJSON, every event, unchanged (§3.8
+    // "--json … NDJSON for streams"). Human mode renders the two S5 events
+    // that are unreadable as raw JSON at a terminal — a streaming preview
+    // and an adapter's health — and leaves every other event as NDJSON,
+    // which is what it has always been.
+    const render = createWatchRenderer();
     try {
       await clientOrExit(opts.token).events((event) => {
-        // S1 emits NDJSON in both modes; --json is the stable contract
-        // (§3.8 "--json … NDJSON for streams"). Pretty rendering is S3+.
-        console.log(JSON.stringify(event));
+        const line = opts.json === true ? null : render(event);
+        if (line === null) {
+          console.log(JSON.stringify(event));
+          return;
+        }
+        if (line.inPlace && process.stdout.isTTY === true) {
+          // One line, overwritten, at a terminal only: a pipe or a log file
+          // gets whole lines, because \r in a captured log is noise. A
+          // carriage return and nothing else — no erase-line escape, because
+          // C-9 is "no ANSI", not "no color" (a preview only ever grows, so
+          // there is nothing left behind to erase).
+          process.stdout.write(`\r${line.text}`);
+          return;
+        }
+        console.log(line.text);
       });
       // stream stays open until Ctrl-C / kill
     } catch (error) {
@@ -1308,6 +1347,175 @@ contacts
     } catch (error) {
       exitFor(error);
     }
+  });
+
+// ---- s5 Scenario 11: the adapter registry (§1.6 adapter routes, §3.8) ----
+
+/**
+ * The kinds `routes/adapters.ts` accepts. Duplicated here on purpose: an
+ * unknown kind is a USAGE error (exit 2), refused before the wire, not a
+ * daemon 400 rendered as a generic failure.
+ */
+const ADAPTER_KINDS: readonly AdapterKind[] = [
+  'sol',
+  'hermes',
+  'luna',
+  'openclaw',
+  'echo',
+  'generic',
+];
+
+function resolveKind(raw: string): AdapterKind {
+  if (!(ADAPTER_KINDS as readonly string[]).includes(raw)) {
+    fail(
+      `--kind must be one of ${ADAPTER_KINDS.join(', ')} (got "${raw}")`,
+      EXIT_USAGE,
+    );
+  }
+  return raw as AdapterKind;
+}
+
+const adapters = program
+  .command('adapters')
+  .description('agent registry: who may draft into your conversations (§1.6)');
+
+adapters
+  .command('list')
+  .description('list registered adapters; never prints token material')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      const items = await clientOrExit(opts.token).listAdapters();
+      console.log(
+        opts.json === true ? JSON.stringify(items) : renderAdapterTable(items),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+adapters
+  .command('show <id>')
+  .description('show one adapter; `token: set` is all it will ever say')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const adapter = await clientOrExit(opts.token).getAdapter(id);
+      console.log(
+        opts.json === true ? JSON.stringify(adapter) : renderAdapter(adapter),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+adapters
+  .command('add <id>')
+  .description('register an adapter and mint its token (shown once)')
+  .requiredOption('--kind <kind>', `adapter kind: ${ADAPTER_KINDS.join(' | ')}`)
+  .option('--name <name>', 'display name (defaults to the id)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      id: string,
+      opts: { kind: string; name?: string; json?: boolean; token?: string },
+    ) => {
+      const kind = resolveKind(opts.kind);
+      try {
+        const credential = await clientOrExit(opts.token).createAdapter({
+          id,
+          kind,
+          displayName: opts.name ?? id,
+        });
+        console.log(
+          opts.json === true
+            ? JSON.stringify(credential)
+            : renderMintedCredential(credential, { rotated: false }),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+adapters
+  .command('rm <id>')
+  .description('delete an adapter; refused while a rule still points at it')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const result = await clientOrExit(opts.token).deleteAdapter(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(result)
+          : `deleted ${result.deleted}`,
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+function registerAdapterEnableVerb(
+  name: 'enable' | 'disable',
+  enabled: boolean,
+): void {
+  adapters
+    .command(`${name} <id>`)
+    .description(
+      `${enabled ? 'enable' : 'disable'} an adapter (a disabled adapter cannot connect)`,
+    )
+    .option('--json', 'stable machine-readable output')
+    .option('-T, --token <token>', 'bearer token override')
+    .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+      const patch: AdapterPatch = { enabled };
+      try {
+        const adapter = await clientOrExit(opts.token).updateAdapter(id, patch);
+        console.log(
+          opts.json === true ? JSON.stringify(adapter) : renderAdapter(adapter),
+        );
+      } catch (error) {
+        exitFor(error);
+      }
+    });
+}
+registerAdapterEnableVerb('enable', true);
+registerAdapterEnableVerb('disable', false);
+
+adapters
+  .command('token-rotate <id>')
+  .description('mint a fresh token; the old one keeps working 60s (F-42)')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (id: string, opts: { json?: boolean; token?: string }) => {
+    try {
+      const credential = await clientOrExit(opts.token).rotateAdapterToken(id);
+      console.log(
+        opts.json === true
+          ? JSON.stringify(credential)
+          : renderMintedCredential(credential, { rotated: true }),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+adapters
+  .command('test <id>')
+  .description('run the adapter conformance kit against a live adapter')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(() => {
+    // Same posture as `resume --circuit`: an honest refusal beats a verb
+    // that prints something reassuring without having tested anything. The
+    // conformance kit lands in s5 scenario 13; this is replaced there.
+    fail(
+      'adapters test is not available yet: the conformance testkit lands in scenario 13',
+      EXIT_USAGE,
+    );
   });
 
 program

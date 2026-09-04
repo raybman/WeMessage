@@ -418,11 +418,68 @@ export class DaemonConflictError extends DaemonRequestError {
       from?: DraftState;
       requested?: string;
       attempts?: number;
+      /** s5 Sc11: `adapter-referenced` names the rules still pointing at it. */
+      ruleIds?: string[];
+      /** s5 Sc11: `adapter-exists` echoes the id that was already taken. */
+      id?: string;
     },
   ) {
     super(409, JSON.stringify(detail));
     this.name = 'DaemonConflictError';
   }
+}
+
+/**
+ * s5 adapter-registry DTOs (Scenario 11) — client-local, same "no
+ * @wemessage/core dep" convention as every DTO above; mirrors
+ * `AdapterRecord` in packages/core/src/domain/types.ts.
+ */
+export type AdapterKind =
+  'sol' | 'hermes' | 'luna' | 'openclaw' | 'echo' | 'generic';
+
+export type AdapterHealth =
+  'unknown' | 'connected' | 'disconnected' | 'unhealthy';
+
+export interface AdapterPayload {
+  id: string;
+  kind: AdapterKind;
+  displayName: string;
+  enabled: boolean;
+  /**
+   * A boolean, deliberately. The daemon mints an adapter token once and
+   * never reads it back (routes/adapters.ts): there is no route that returns
+   * stored token material, so there is no field here that could carry it.
+   */
+  hasToken: boolean;
+  health: AdapterHealth;
+  lastSeenAt?: string;
+  config: Record<string, unknown>;
+}
+
+export interface AdapterInput {
+  id: string;
+  kind: AdapterKind;
+  displayName: string;
+  config?: Record<string, unknown>;
+}
+
+export interface AdapterPatch {
+  enabled?: boolean;
+  displayName?: string;
+  config?: Record<string, unknown>;
+}
+
+/**
+ * The response of the two verbs that mint: create and token-rotate. This is
+ * the ONLY shape in this package that carries plaintext token material, and
+ * it exists for exactly one round trip — it is shown to the operator once
+ * and is not recoverable afterwards, by design. There is deliberately no
+ * `getAdapterToken`: losing it means rotating, not reading.
+ */
+export interface AdapterCredential {
+  adapter: AdapterPayload;
+  token: string;
+  connectCmd: string;
 }
 
 export interface WeMessageClient {
@@ -480,6 +537,14 @@ export interface WeMessageClient {
     opts?: { displayName?: string },
   ): Promise<ContactPolicyPayload>;
   deleteContactPolicy(handle: string): Promise<{ deleted: string }>;
+
+  // s5-execution Scenario 11: the adapter registry (§1.6 adapter routes).
+  listAdapters(): Promise<AdapterPayload[]>;
+  getAdapter(id: string): Promise<AdapterPayload>;
+  createAdapter(input: AdapterInput): Promise<AdapterCredential>;
+  updateAdapter(id: string, patch: AdapterPatch): Promise<AdapterPayload>;
+  deleteAdapter(id: string): Promise<{ deleted: string }>;
+  rotateAdapterToken(id: string): Promise<AdapterCredential>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -566,6 +631,8 @@ export function createClient(options: ClientOptions): WeMessageClient {
     `/v1/drafts/${encodeURIComponent(id)}`;
   const contactPath = (handle: string): string =>
     `/v1/contacts/${encodeURIComponent(handle)}`;
+  const adapterPath = (id: string): string =>
+    `/v1/adapters/${encodeURIComponent(id)}`;
 
   return {
     health: () => get('/v1/health') as Promise<{ status: string }>,
@@ -665,6 +732,32 @@ export function createClient(options: ClientOptions): WeMessageClient {
       ).contact,
     deleteContactPolicy: (handle) =>
       del(contactPath(handle)) as Promise<{ deleted: string }>,
+
+    listAdapters: async () =>
+      ((await get('/v1/adapters')) as { adapters: AdapterPayload[] }).adapters,
+    getAdapter: async (id) =>
+      ((await get(adapterPath(id))) as { adapter: AdapterPayload }).adapter,
+    createAdapter: (input) =>
+      post('/v1/adapters', {
+        id: input.id,
+        kind: input.kind,
+        displayName: input.displayName,
+        // Omitted, not `undefined`: the route body is a zod strictObject and
+        // an explicit `config: undefined` is a different request from none.
+        ...(input.config !== undefined ? { config: input.config } : {}),
+      }) as Promise<AdapterCredential>,
+    updateAdapter: async (id, patchBody) =>
+      (
+        (await patch(adapterPath(id), patchBody)) as {
+          adapter: AdapterPayload;
+        }
+      ).adapter,
+    deleteAdapter: async (id) => {
+      await del(adapterPath(id));
+      return { deleted: id };
+    },
+    rotateAdapterToken: (id) =>
+      post(`${adapterPath(id)}/token`) as Promise<AdapterCredential>,
 
     events(onEvent) {
       const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events`;

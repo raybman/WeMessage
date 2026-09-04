@@ -150,6 +150,22 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 25; i += 1) await new Promise(setImmediate);
 }
 
+/**
+ * s6 Sc5 (F-60): the inbound path now consults the gate, and the deny-all
+ * default (§1.3.5) means an unknown handle is refused. These S5 fixtures were
+ * green only because the gate was absent from this path — which is precisely
+ * the hole Sc5 closes — so every one that wants a draft must now say who it
+ * is willing to draft for. 'draft-only' is the weakest policy that permits
+ * drafting, which keeps these tests about dispatch and not about the gate.
+ */
+function permit(h: AgentHarness): void {
+  h.store.setContactPolicy({
+    handle: HANDLE,
+    mode: 'draft-only',
+    updatedAt: T0,
+  });
+}
+
 /** Boot + one registered, enabled, connected adapter + one matching rule. */
 async function ready(
   h: AgentHarness,
@@ -157,6 +173,7 @@ async function ready(
 ): Promise<FakeAdapterSocket> {
   const cred = await addAdapter(h, adapterId);
   h.store.insertRule(makeRule({ id: ruleId('R1'), adapterId }));
+  permit(h);
   return connectAuthed(h, cred);
 }
 
@@ -341,6 +358,7 @@ describe('inbound dispatch: unreachable adapter (F-45, no queue)', () => {
     const h = await bootAgent();
     const cred = await addAdapter(h, 'echo-1');
     h.store.insertRule(makeRule({ id: ruleId('R1') }));
+    permit(h);
     await deliverer(h)(inbound());
 
     expect(h.store.listDrafts()).toHaveLength(0);
@@ -371,6 +389,7 @@ describe('inbound dispatch: single winner (F-31)', () => {
     h.store.insertRule(
       makeRule({ id: ruleId('R2'), adapterId: 'echo-lose', priority: 2 }),
     );
+    permit(h);
     const winSock = await connectAuthed(h, winner);
     const loseSock = await connectAuthed(h, loser);
 

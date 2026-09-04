@@ -27,6 +27,31 @@
  *    `adapter.unreachable` (nobody decided anything). Collapsing the two
  *    would make `gate.denied` mean "something adapter-ish went wrong".
  *
+ * s6 Scenario 5 (F-60, closing C-3) adds the one thing this file was missing:
+ * it consults `evaluateGate`. Through S5 it checked the adapter row and the
+ * socket and then shipped a stranger's text to an agent, because §2.4.3's
+ * deny-all default was enforced at the human draft route, at `draft.submit`
+ * and at `proactive.propose` — every path EXCEPT the one an outsider can
+ * trigger unaided. That was a security hole, not a missing feature, and the
+ * consult below is the whole of the fix:
+ *
+ *  - a DENY means no frame, no draft, one `gate.denied` row. Ingestion is
+ *    still never gated: the mirror and `rule.matched` are already durable.
+ *  - a CLAMP (F-64) still builds the frame, but with the RESOLVED mode, so
+ *    an agent is never told 'auto' for a message that structurally cannot
+ *    auto-send. A clamp is not a denial and writes no `gate.denied` row.
+ *  - the one variance is `outsideWindow: 'ignore'` plus a window clamp,
+ *    which drops the message entirely (§1.7) — the rule author's explicit
+ *    opt-in to not drafting at all, audited all the same because a message
+ *    that produced nothing still deserves a row saying why.
+ *
+ * Ordering is load-bearing twice over. The consult sits AFTER the adapter-row
+ * check, per F-60: two facts are true of a stranger texting a disabled
+ * adapter, and the operator is told the one they can act on. It sits BEFORE
+ * the connectivity check, per the C-6 reading above: `adapter.unreachable`
+ * means nobody decided anything, and once the gate has refused somebody very
+ * much did.
+ *
  * This is the ONE file this slice adds to `PORT_IMPORTER_ALLOWLIST`
  * (ratchet update #16, F-46): it holds a `ChatDbReader` for `readChatTurns`,
  * because the conversation an agent needs to see includes our own replies and
@@ -36,12 +61,18 @@ import { ulid } from 'ulid';
 import type {
   ChatDbReader,
   Clock,
+  GateDenyReason,
   Message,
   MessageGuid,
   Rule,
   Store,
 } from '@wemessage/core';
-import { evaluateRules, systemActor } from '@wemessage/core';
+import {
+  evaluateGate,
+  evaluateRules,
+  readGateSettings,
+  systemActor,
+} from '@wemessage/core';
 import {
   WIRE_VERSION,
   type ConversationTurn,
@@ -113,23 +144,64 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
 
   const dispatch = async (rule: Rule, message: Message): Promise<boolean> => {
     const adapterId = rule.adapterId;
+    /** One shape for every refusal on this path, so the taxonomy cannot drift. */
+    const refuse = (reason: GateDenyReason): false => {
+      sink.append(
+        { type: 'gate.denied', reason, adapterId, guid: message.guid },
+        systemActor('rule-engine'),
+      );
+      return false;
+    };
     const adapter = store.getAdapter(adapterId);
     // Fail-closed on the row itself (§2.4.2). `hasToken` is the credential
     // check that matters here: a registered adapter whose token was revoked
     // could not authenticate anyway, and pretending otherwise would mean
     // building a frame for a socket that can never exist.
     if (adapter === null || !adapter.enabled || !adapter.hasToken) {
-      sink.append(
-        {
-          type: 'gate.denied',
-          reason: 'adapter-disabled',
-          adapterId,
-          guid: message.guid,
-        },
-        systemActor('rule-engine'),
-      );
-      return false;
+      return refuse('adapter-disabled');
     }
+
+    // F-60: the draft-moment consult. The gate is ONE pure function called at
+    // two moments (§2.4.1) and this is the first of them; the send moment is
+    // `dispatchApproved`'s re-gate. Context is real, not a placeholder: the
+    // winning rule (which carries the third scope, F-63), its schedule, and
+    // the SENDER's contact policy — `message.handle` rather than the chat
+    // guid's, because in a group it is this person who wrote, and core is
+    // handed the message's own fields rather than a re-parse of its guid.
+    // `counters` stay zero until S6 Sc 6/7/8 own them, exactly as the other
+    // two gate call sites leave them.
+    const decision = evaluateGate({
+      now: clock.now(),
+      settings: readGateSettings(store),
+      rule,
+      schedule:
+        rule.scheduleId === null ? null : store.getSchedule(rule.scheduleId),
+      contact: store.getContactPolicy(message.handle),
+      message: {
+        isGroup: message.isGroup,
+        service: message.service,
+        handle: message.handle,
+        chatGuid: message.chatGuid,
+      },
+      counters: {
+        contactAutoLastHour: 0,
+        globalAutoLastHour: 0,
+        consecutiveAutoInChat: 0,
+        circuitOpen: false,
+      },
+    });
+    if (!decision.allow) return refuse(decision.reason);
+    // The §1.7 variance, and the only place a CLAMP stops anything at this
+    // moment: the rule author asked for silence outside its window. F-69's
+    // unsupported 'queue' is deliberately not this branch — it falls through
+    // and drafts, which is the safer of the two readings.
+    if (
+      decision.clampedBy === 'outside-window' &&
+      rule.outsideWindow === 'ignore'
+    ) {
+      return refuse(decision.clampedBy);
+    }
+
     if (!transport.isConnected(adapterId)) {
       sink.append(
         { type: 'adapter.unreachable', adapterId, guid: message.guid },
@@ -169,7 +241,12 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
         context,
         // Identity, not internals: name and mode are what an agent needs to
         // answer well; the matcher and schedule are how we decided to ask.
-        rule: { id: rule.id, name: rule.name, respondMode: rule.respondMode },
+        //
+        // F-60: the RESOLVED mode, never the rule's declared one. A rule set
+        // to 'auto' whose contact is 'draft-only', or whose window is shut,
+        // cannot auto-send; telling the agent 'auto' would be telling it
+        // something false about its own draft's future.
+        rule: { id: rule.id, name: rule.name, respondMode: decision.mode },
         constraints: {
           maxChars: DRAFT_REQUEST_CONSTRAINTS.maxChars,
           deadlineMs: DRAFT_REQUEST_CONSTRAINTS.deadlineMs,

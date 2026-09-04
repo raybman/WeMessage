@@ -1014,6 +1014,13 @@ describe('arch invariants (dependency-cruiser)', () => {
           // guard exists to make visible. Rows for the other four stay at
           // their S1 shape until Sc 6/7/8/9 claim them one at a time.
           'packages/core/src/gate/index.ts',
+          // s6 Scenario 5, the SECOND deliberate edit: the inbound rule path
+          // now consults the gate at the draft moment (F-60), and it must
+          // read `clampedBy` to honour `rule.outsideWindow === 'ignore'` —
+          // the one clamp the daemon turns into a refusal instead of a
+          // narrowed mode. No new deny literal is minted; 'outside-window'
+          // simply gains a second, deliberate home.
+          'packages/daemon/src/adapters/dispatch.ts',
         ],
       ],
       [

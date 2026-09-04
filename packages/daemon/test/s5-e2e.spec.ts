@@ -610,13 +610,52 @@ describe('s5 Scenario 14: the agent demo, end to end', () => {
       reason: 'kill-switch',
     });
 
-    // Drafting is not sending: the pipeline still produces a draft...
+    // s6 Sc5 (F-60): the kill switch now binds the DRAFT moment on the rule
+    // path too. Through S5 this block asserted that inbound still produced a
+    // draft while the switch was on, because createInboundDispatch never
+    // consulted the gate (C-3) — a killed daemon still handed a stranger's
+    // text to an agent's process. The kill switch is a deny at BOTH moments,
+    // so the message is now refused in the daemon: no frame, no draft, one
+    // gate.denied row naming the message.
+    const requestsWhenKilled = framesOf(rig, 'draft.request').length;
     await deliver(inbound('GUID-4', 'tacos sunday?', h.clockCtl.clock.now()));
-    await waitUntil(
-      () => drafts(h).some((d) => d.inboundGuid === 'GUID-4'),
-      'a draft still lands under the kill switch',
+    expect(drafts(h).some((d) => d.inboundGuid === 'GUID-4')).toBe(false);
+    expect(framesOf(rig, 'draft.request')).toHaveLength(requestsWhenKilled);
+    expect(
+      events(h, 'gate.denied').filter(
+        (e) => (e as { guid?: string }).guid === 'GUID-4',
+      ),
+    ).toHaveLength(1);
+
+    // Drafting is still not sending. With the switch off a draft lands as
+    // before; flipping it back on refuses the approval and leaves the draft
+    // exactly where it was.
+    await h.server.app.inject({
+      method: 'POST',
+      url: '/v1/toggles/kill-switch',
+      headers: h.headers,
+      payload: { on: false },
+    });
+    await deliver(
+      inbound('GUID-6', 'tacos sunday, then?', h.clockCtl.clock.now()),
     );
-    const armed = drafts(h).find((d) => d.inboundGuid === 'GUID-4') as Draft;
+    await waitUntil(
+      () => drafts(h).some((d) => d.inboundGuid === 'GUID-6'),
+      'a draft lands once the kill switch is off',
+    );
+    const armed = drafts(h).find((d) => d.inboundGuid === 'GUID-6') as Draft;
+    expect(
+      (
+        await h.server.app.inject({
+          method: 'POST',
+          url: '/v1/toggles/kill-switch',
+          headers: h.headers,
+          payload: { on: true },
+        })
+      ).statusCode,
+    ).toBe(200);
+    // A pending draft is not in grace, so the switch does not cancel it...
+    expect(h.store.getDraft(armed.id)?.state).toBe('pending');
     // ...and it cannot be approved.
     const denied = await h.server.app.inject({
       method: 'POST',

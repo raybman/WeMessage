@@ -69,6 +69,14 @@ export {
   type InboundDispatchDeps,
 } from './adapters/dispatch.js';
 export {
+  createAgentRequests,
+  createAgentSubmitHandler,
+  type AgentRequests,
+  type AgentSubmitDeps,
+  type AgentSubmitHandler,
+  type IssuedRequest,
+} from './adapters/submit.js';
+export {
   createAdapterTransport,
   type AdapterTransportDeps,
   type AdapterTransportHandle,

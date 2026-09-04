@@ -35,6 +35,12 @@ export type GatewayEventPayload =
   | { event: 'message.unsent';   guid: MessageGuid }
   | { event: 'rule.matched';     guid: MessageGuid; ruleId: Ulid; adapterId: string }
   | { event: 'draft.created';    draft: DraftSummary }
+  // s5 Scenario 7 (F-44): THE one protocol addition of this slice. A
+  // streaming preview has to reach `wemessage watch`, and the client bus had
+  // no frame for it. Nothing here is persisted — the draft exists only once
+  // `draft.submit` lands, so a preview may legitimately evaporate.
+  | { event: 'draft.delta';      correlation: Correlation; seq: number;
+      textDelta: string }
   | { event: 'draft.approved' | 'draft.rejected' | 'draft.recalled';
       draftId: Ulid; actor: Actor; batchId?: Ulid }
   | { event: 'draft.sent';       draftId: Ulid; sentMessageGuid: MessageGuid }
@@ -248,6 +254,10 @@ export const FRAME_SPECS = {
       'value',
       'status',
       'state',
+      // s5 Scenario 7 (F-44): the `draft.delta` vocabulary variant's keys.
+      'correlation',
+      'seq',
+      'textDelta',
     ],
     direction: 'gateway->agent',
   },

@@ -21,6 +21,11 @@ import {
   createAdapterTransport,
   type AdapterTransportHandle,
 } from './adapters/transport.js';
+import {
+  createAgentRequests,
+  createAgentSubmitHandler,
+  type AgentRequests,
+} from './adapters/submit.js';
 
 /**
  * The §2.6 local API port, used only to render the connect command an
@@ -125,6 +130,12 @@ export interface DaemonServer {
   sink?: AuditSink;
   /** Present when opts.adapters was given (s5 Sc5): the WS /v1/agent owner. */
   agentTransport?: AdapterTransportHandle;
+  /**
+   * Present when opts.adapters was given (s5 Sc7): the issued-correlation
+   * registry. The dispatcher writes to it when a `draft.request` leaves; the
+   * submit handler reads it to tell a real answer from a forged one.
+   */
+  agentRequests?: AgentRequests;
 }
 
 const HEALTH_PATH = '/v1/health';
@@ -302,6 +313,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   }
 
   let agentTransport: AdapterTransportHandle | undefined;
+  let agentRequests: AgentRequests | undefined;
   if (opts.adapters && sink) {
     // §1.6 adapter registry (s5 Scenario 4). Ratchet update #14.
     registerAdapterRoutes(app, {
@@ -312,10 +324,19 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     });
     // s5 Scenario 5: the adapter wire itself. Ratchet update #15.
     const adapterOpts = opts.adapters;
+    // s5 Scenario 7: submit handling is composed HERE, next to the socket
+    // that carries it, so `agentRequests` has exactly one owner per server.
+    agentRequests = createAgentRequests();
     agentTransport = createAdapterTransport({
       store: adapterOpts.store,
       clock: adapterOpts.clock,
       sink,
+      submit: createAgentSubmitHandler({
+        store: adapterOpts.store,
+        clock: adapterOpts.clock,
+        sink,
+        requests: agentRequests,
+      }),
       ...(adapterOpts.helloDeadlineMs !== undefined
         ? { helloDeadlineMs: adapterOpts.helloDeadlineMs }
         : {}),
@@ -359,6 +380,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     routes,
     ...(sink ? { sink } : {}),
     ...(agentTransport ? { agentTransport } : {}),
+    ...(agentRequests ? { agentRequests } : {}),
   };
 }
 

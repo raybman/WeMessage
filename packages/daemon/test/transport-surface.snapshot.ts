@@ -144,6 +144,17 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'connection.state',
   'draft.approved',
   'draft.created',
+  // #17 deliberate (s5 Scenario 7, F-44): `draft.delta` is the ONE protocol
+  // addition of this slice. A streaming preview has to reach
+  // `wemessage watch` and the client bus had no frame for it, so exactly one
+  // `GatewayEventPayload` variant was added — and S4's F-39 pushes
+  // (draft.expired/superseded/redrafted) were re-deferred to S8 rather than
+  // shipped alongside it, because the adapter feedback channel handles agent
+  // re-convergence and those three would have no reader until a GUI exists.
+  // It joins BOTH lists in this one diff: the variant is new AND the daemon
+  // constructs it immediately (adapters/submit.ts), so there is no window in
+  // which the vocabulary is wider than what we emit.
+  'draft.delta',
   'draft.failed',
   'draft.recalled',
   'draft.rejected',
@@ -184,6 +195,9 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   'connection.state',
   'draft.approved',
   'draft.created',
+  // #17 deliberate (s5 Scenario 7, F-44): constructed in
+  // adapters/submit.ts's `onDelta`, relayed and persisted nowhere.
+  'draft.delta',
   'draft.failed',
   'draft.recalled',
   'draft.rejected',

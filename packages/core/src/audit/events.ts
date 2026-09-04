@@ -165,6 +165,10 @@ export type AuditEvent =
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)
   | { type: 'draft.superseded'; draftId: Ulid; supersededBy?: Ulid }
+  // s5 Scenario 7: the agent answered and declined to propose anything. The
+  // row exists because "the agent said nothing" and "the agent was never
+  // asked" are different facts, and only one of them is a bug.
+  | { type: 'draft.declined'; adapterId: string; requestId: string }
   | { type: 'draft.edited'; draftId: Ulid; approvalId?: Ulid } // body change only, no state change
   | { type: 'draft.redrafted'; fromDraftId: Ulid; toDraftId: Ulid } // F-40: link lives here, no schema change
   | {

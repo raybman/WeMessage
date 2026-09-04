@@ -36,6 +36,7 @@ import {
   type HelloFrame,
 } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
+import type { AgentSubmitHandler } from './submit.js';
 
 /** Close codes (RFC 6455 private range, 4000-4999). */
 const CLOSE_PROTOCOL = 4400;
@@ -52,6 +53,14 @@ export interface AdapterTransportDeps {
   clock: Clock;
   sink: AuditSink;
   helloDeadlineMs?: number;
+  /**
+   * s5 Scenario 7. The transport owns the socket and nothing else: it parses,
+   * authenticates and routes, then hands the payload to the handler that
+   * knows what a draft is. Optional so Scenario 5's transport still stands on
+   * its own — without it `draft.submit` remains an unhandled frame, which is
+   * exactly what Scenario 5 asserts.
+   */
+  submit?: AgentSubmitHandler;
 }
 
 export interface AdapterTransportHandle {
@@ -95,6 +104,7 @@ export function createAdapterTransport(
 ): AdapterTransportHandle {
   const { store, clock, sink } = deps;
   const helloDeadlineMs = deps.helloDeadlineMs ?? DEFAULT_HELLO_DEADLINE_MS;
+  const submit = deps.submit;
   const sessions = new Set<Session>();
 
   const violate = (s: Session, reason: string, close: boolean): void => {
@@ -262,11 +272,28 @@ export function createAdapterTransport(
         // A second hello would be a re-auth on an already-trusted socket.
         violate(s, 'duplicate-hello', false);
         return;
+      case 'draft.submit':
+        // s5 Scenario 7. Every refusal inside the handler is audited there,
+        // and none of them closes the socket: a confused agent gets to keep
+        // talking, and the log is what makes its confusion visible.
+        if (submit === undefined) {
+          violate(s, `unhandled:${parsed.frame.type}`, false);
+          return;
+        }
+        submit.onSubmit(s.adapterId, parsed.frame.payload);
+        return;
+      case 'draft.delta':
+        if (submit === undefined) {
+          violate(s, `unhandled:${parsed.frame.type}`, false);
+          return;
+        }
+        submit.onDelta(s.adapterId, parsed.frame.payload);
+        return;
       default:
-        // draft.submit / draft.delta / proactive.propose land in Sc 7 and 9.
-        // Until then they are well-formed frames with no handler, which is a
-        // protocol violation of OUR making, not the adapter's; recorded so
-        // the gap is visible rather than silent.
+        // proactive.propose lands in Sc 9. Until then it is a well-formed
+        // frame with no handler, which is a protocol violation of OUR making,
+        // not the adapter's; recorded so the gap is visible rather than
+        // silent.
         violate(s, `unhandled:${parsed.frame.type}`, false);
         return;
     }

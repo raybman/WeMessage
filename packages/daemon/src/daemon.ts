@@ -51,6 +51,7 @@ import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
 import { createInboundDispatch } from './adapters/dispatch.js';
 import type { AdapterTransportHandle } from './adapters/transport.js';
+import type { AgentRequests } from './adapters/submit.js';
 import { createScheduler } from './scheduler.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
@@ -324,6 +325,11 @@ export async function startDaemon(
   const agentTransport: { current: AdapterTransportHandle | undefined } = {
     current: undefined,
   };
+  // s5 Scenario 7, same late-bound reason: the issued-correlation registry is
+  // built by `buildServer` alongside the socket that reads it.
+  const agentRequests: { current: AgentRequests | undefined } = {
+    current: undefined,
+  };
   const dispatcher = createInboundDispatch({
     store,
     clock: options.clock,
@@ -333,6 +339,7 @@ export async function startDaemon(
       isConnected: (id) => agentTransport.current?.isConnected(id) ?? false,
       sendTo: (id, frame) => agentTransport.current?.sendTo(id, frame) ?? false,
     },
+    issueRequest: (req) => agentRequests.current?.issue(req),
   });
   const emitWinner = (message: Message): void => {
     // Fire-and-forget on purpose: reading conversation context is I/O, and
@@ -525,6 +532,7 @@ export async function startDaemon(
     },
   });
   agentTransport.current = server.agentTransport;
+  agentRequests.current = server.agentRequests;
   // s4-execution Scenario 6: the grace scheduler. It owns WHEN; the core
   // dispatcher owns HOW, so it gets a dispatch closure rather than the
   // backend. No interval is armed here — startDaemon's caller drives

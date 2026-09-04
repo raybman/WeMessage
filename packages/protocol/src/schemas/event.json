@@ -55,6 +55,15 @@
     },
     "state": {
       "type": "string"
+    },
+    "correlation": {
+      "type": "object"
+    },
+    "seq": {
+      "type": "number"
+    },
+    "textDelta": {
+      "type": "string"
     }
   }
 }

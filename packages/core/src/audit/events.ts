@@ -161,6 +161,18 @@ export type AuditEvent =
   // Distinct from `gate.denied` on purpose (C-6): nothing was refused, the
   // agent simply was not there.
   | { type: 'adapter.unreachable'; adapterId: string; guid: MessageGuid }
+  // s5 Scenario 8: the return leg could not be delivered. Feedback is
+  // best-effort and off the human's critical path, so a wedged or absent
+  // adapter costs a log line and nothing else — and there is no outbox, so
+  // this row is the ONLY trace that the agent will never learn what happened
+  // to its draft. Deliberately not `adapter.unreachable`: that row is about
+  // a request we never asked, this one about an answer we could not return.
+  | {
+      type: 'adapter.feedback-dropped';
+      adapterId: string;
+      draftId: Ulid;
+      kind: string;
+    }
   | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)

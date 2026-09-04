@@ -55,6 +55,14 @@ export interface SchedulerDeps {
   dispatch: (draftId: Ulid, approvalId: Ulid) => Promise<unknown>;
   /** Reported rather than thrown: one bad draft must not stop the sweep. */
   onError?: (draftId: Ulid, err: unknown) => void;
+  /**
+   * s5 Scenario 8: a draft that ran out its TTL is news the originating
+   * agent needs — it proposed something and a human never looked. Called
+   * AFTER the append (§1.8) and deliberately typed as a bare draft-id
+   * callback: the scheduler decides WHEN a draft expires and nothing else,
+   * and it has no business knowing whether an adapter exists.
+   */
+  onExpired?: (draftId: Ulid) => void;
 }
 
 export interface Scheduler {
@@ -63,7 +71,7 @@ export interface Scheduler {
 }
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
-  const { store, clock, sink, dispatch, onError } = deps;
+  const { store, clock, sink, dispatch, onError, onExpired } = deps;
   let running = false;
 
   const sweepExpired = (now: string): void => {
@@ -83,6 +91,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         continue;
       }
       sink.append({ type: 'draft.expired', draftId: draft.id }, expiry);
+      onExpired?.(draft.id);
     }
   };
 

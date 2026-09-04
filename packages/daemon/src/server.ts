@@ -10,7 +10,13 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
-import type { ChatDbReader, Clock, SendBackend, Store } from '@wemessage/core';
+import type {
+  ChatDbReader,
+  Clock,
+  Draft,
+  SendBackend,
+  Store,
+} from '@wemessage/core';
 import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
 import { registerAuditRoutes } from './routes/audit.js';
@@ -26,6 +32,11 @@ import {
   createAgentSubmitHandler,
   type AgentRequests,
 } from './adapters/submit.js';
+import {
+  createAgentFeedback,
+  type AgentFeedback,
+} from './adapters/feedback.js';
+import { createRequestSender } from './adapters/dispatch.js';
 
 /**
  * The §2.6 local API port, used only to render the connect command an
@@ -111,6 +122,13 @@ export interface DaemonOptions {
     port?: number;
     /** s5 Sc5: injected so tests drive the deadline without sleeping. */
     helloDeadlineMs?: number;
+    /**
+     * s5 Sc8: needed only to re-ask an agent on redraft (a `draft.request`
+     * carries conversation context, which is a chat.db read, F-46). Optional
+     * because a server booted without it still serves the whole adapter
+     * surface — the redraft simply stays the S4 body copy it always was.
+     */
+    reader?: ChatDbReader;
   };
 }
 
@@ -136,7 +154,17 @@ export interface DaemonServer {
    * submit handler reads it to tell a real answer from a forged one.
    */
   agentRequests?: AgentRequests;
+  /**
+   * Present when opts.adapters was given (s5 Sc8): the `draft.feedback`
+   * emitter. Exposed so the composition root can wrap its `dispatchApproved`
+   * closure with `observeDispatch` — the send path's outcome reaches the
+   * adapter through a daemon-side callback, never a core import (INV-1).
+   */
+  agentFeedback?: AgentFeedback;
 }
+
+/** F-22: the reserved adapter row humans draft under; it is never re-asked. */
+const HUMAN_ADAPTER_ID = 'human';
 
 const HEALTH_PATH = '/v1/health';
 /**
@@ -287,12 +315,22 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     });
   }
 
+  // s5 Scenario 8: the draft routes are registered before the adapter
+  // transport exists (they are the older surface, and they must register
+  // whether or not adapters are configured at all), so the feedback tap is
+  // reached through a late-bound ref rather than a value. Undefined here
+  // means "no agent era on this server", which is exactly the S1-S4 product.
+  let agentFeedback: AgentFeedback | undefined;
+  let redraftRequest: ((source: Draft) => void) | undefined;
+
   if (opts.drafts && sink) {
     // §1.6 routes: the draft queue humans actually review through.
     registerDraftRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,
+      feedback: (input) => agentFeedback?.emit(input),
+      onRedraft: (source) => redraftRequest?.(source),
     });
     // The kill switch rides with the draft surface: it exists to stop
     // drafts, and there is no configuration in which one is wanted without
@@ -327,6 +365,18 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // s5 Scenario 7: submit handling is composed HERE, next to the socket
     // that carries it, so `agentRequests` has exactly one owner per server.
     agentRequests = createAgentRequests();
+    agentFeedback = createAgentFeedback({
+      store: adapterOpts.store,
+      clock: adapterOpts.clock,
+      sink,
+      // Late-bound for the same reason the daemon's dispatcher is: the
+      // transport is built on the very next statement, and the feedback
+      // module must not capture `undefined` forever. Addressed to the
+      // ORIGINATING adapter and nobody else (teeth T8-broadcast-feedback).
+      transport: {
+        sendTo: (id, frame) => agentTransport?.sendTo(id, frame) ?? false,
+      },
+    });
     agentTransport = createAdapterTransport({
       store: adapterOpts.store,
       clock: adapterOpts.clock,
@@ -345,6 +395,36 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       counters.handlerCalls += 1;
       agentTransport?.accept(socket);
     });
+    // S4 F-40's other half. A redraft is not a match: the rule already won
+    // when the message arrived, so this re-asks that same rule's adapter
+    // directly rather than re-running evaluation (which `hasDraftForMessage`
+    // would suppress anyway, the body copy having just been minted).
+    const reader = adapterOpts.reader;
+    if (reader !== undefined) {
+      const sender = createRequestSender({
+        store: adapterOpts.store,
+        clock: adapterOpts.clock,
+        sink,
+        reader,
+        transport: {
+          isConnected: (id) => agentTransport?.isConnected(id) ?? false,
+          sendTo: (id, frame) => agentTransport?.sendTo(id, frame) ?? false,
+        },
+        issueRequest: (req) => agentRequests?.issue(req),
+      });
+      redraftRequest = (source) => {
+        // Human drafts have no agent to re-ask; a proactive draft (Sc 9)
+        // has no rule and no inbound message to re-ask about.
+        if (source.adapterId === HUMAN_ADAPTER_ID) return;
+        if (source.ruleId === null || source.inboundGuid === null) return;
+        const rule = adapterOpts.store.getRule(source.ruleId);
+        const message = adapterOpts.store.getInboundMessage(source.inboundGuid);
+        if (rule === null || message === null) return;
+        // Fire-and-forget: the redraft response is already decided, and
+        // reading conversation context must not hold the route open.
+        void sender.send(rule, message);
+      };
+    }
   }
 
   if (opts.connection && sink) {
@@ -381,6 +461,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     ...(sink ? { sink } : {}),
     ...(agentTransport ? { agentTransport } : {}),
     ...(agentRequests ? { agentRequests } : {}),
+    ...(agentFeedback ? { agentFeedback } : {}),
   };
 }
 

@@ -45,6 +45,7 @@ import {
 } from '@wemessage/core';
 import type { DraftSummary } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
+import type { DraftFeedbackTap } from '../adapters/feedback.js';
 
 /** Outcome of one draft-level operation, shared by the single and bulk paths. */
 type ApplyResult =
@@ -55,6 +56,21 @@ export interface DraftRouteDeps {
   store: Store;
   clock: Clock;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
+  /**
+   * s5 Scenario 8: tell the originating agent what a human decided. Optional
+   * so the S1-S4 product (a gateway with no adapters at all) registers these
+   * routes unchanged, and a bare function so a route can do exactly one
+   * thing with it. Always called AFTER this route's own append+broadcast
+   * (§1.8): the log is the record, the agent's copy is the courtesy.
+   */
+  feedback?: DraftFeedbackTap;
+  /**
+   * s5 Scenario 8 / S4 F-40: a redraft of an AGENT-originated draft re-asks
+   * the agent. The callback owns everything adapter-shaped (is it connected,
+   * what does a `draft.request` look like); this route owns only the S4 body
+   * copy, whose behaviour is identical whether the callback is wired or not.
+   */
+  onRedraft?: (source: Draft) => void;
 }
 
 /** F-22: the reserved, permanently-disabled adapter row humans draft under. */
@@ -174,6 +190,7 @@ export function registerDraftRoutes(
 ): void {
   const { store, clock, sink } = deps;
   const actor = humanApiActor();
+  const feedback = deps.feedback ?? ((): void => {});
 
   // ---- POST /v1/drafts (F-33 compose/dev surface) -----------------------
   app.post('/v1/drafts', async (req, reply) => {
@@ -390,6 +407,17 @@ export function registerDraftRoutes(
       actor,
       ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
     });
+    // Only an EDIT is news to the agent. A bare approve tells it nothing it
+    // will not learn from `send_verified` moments later, and firing both
+    // would teach an agent that every accepted draft was rewritten.
+    if (opts.editedBody !== undefined) {
+      feedback({
+        draftId: draft.id,
+        kind: 'draft_edited',
+        actor,
+        finalBody: opts.editedBody,
+      });
+    }
     return { ok: true, draft: updated, approvalId };
   };
 
@@ -467,6 +495,7 @@ export function registerDraftRoutes(
       actor,
       ...(batchId !== undefined ? { batchId } : {}),
     });
+    feedback({ draftId: draft.id, kind: 'draft_recalled', actor });
     return { ok: true, draft: updated, approvalId };
   };
 
@@ -714,6 +743,10 @@ export function registerDraftRoutes(
       // frame in S4, and a client that sees draft.created has everything it
       // needs to render the new row.
       sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+      // s5 Scenario 8: and, if this draft came from an agent, ask it again.
+      // Strictly after the S4 work above, so the body copy is durable
+      // whatever the adapter does or fails to do.
+      deps.onRedraft?.(source);
       return reply.send({ fromDraftId: source.id, draft });
     },
   );
@@ -768,6 +801,16 @@ export function registerDraftRoutes(
       // The reason, if given, lives in the audit row's approval, not on the
       // wire frame: GatewayEvent's draft.* shape is deliberately narrow.
       sink.broadcast({ event: 'draft.rejected', draftId: draft.id, actor });
+      // ...and it DOES ride on the feedback frame: a rejection an agent
+      // cannot see the reason for is a rejection it cannot learn from.
+      feedback({
+        draftId: draft.id,
+        kind: 'draft_rejected',
+        actor,
+        ...(parsed.data.reason !== undefined
+          ? { reason: parsed.data.reason }
+          : {}),
+      });
       return reply.send({ draft: updated, approvalId });
     },
   );

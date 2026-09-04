@@ -61,7 +61,18 @@ export {
   type RunDoctorDeps,
 } from './doctor.js';
 export {
+  createAgentFeedback,
+  type AgentFeedback,
+  type AgentFeedbackDeps,
+  type DispatchFn,
+  type DraftFeedbackTap,
+  type FeedbackInput,
+  type FeedbackTransport,
+} from './adapters/feedback.js';
+export {
   createInboundDispatch,
+  createRequestSender,
+  type RequestSender,
   CONTEXT_TURN_LIMIT,
   DRAFT_REQUEST_CONSTRAINTS,
   type DispatchTransport,

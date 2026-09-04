@@ -24,6 +24,7 @@ import type {
   Rule,
   SendBackend,
   Store,
+  Ulid,
 } from '@wemessage/core';
 import {
   dispatchApproved,
@@ -479,6 +480,9 @@ export async function startDaemon(
       store,
       clock: options.clock,
       sink,
+      // s5 Scenario 8: the F-40 redraft re-ask needs conversation context,
+      // which is the same chat.db reader POST /v1/send already holds.
+      reader: sendReaderHandle.reader,
       ...(options.port !== undefined ? { port: options.port } : {}),
     },
     // s3-execution Scenario 8: doctor/send routes, same shared sink.
@@ -538,35 +542,46 @@ export async function startDaemon(
   // backend. No interval is armed here — startDaemon's caller drives
   // `tick()`, which keeps the deadline where it belongs (the DB) and keeps
   // tests off wall-clock time.
+  // s5 Scenario 8: the send path's outcome becomes `draft.feedback` through
+  // this daemon-side wrapper. Core still knows nothing about adapters
+  // (INV-1) — it returns a DispatchOutcome, and the daemon decides who, if
+  // anyone, is told about it.
+  const rawDispatch = (draftId: Ulid, approvalId: Ulid) =>
+    dispatchApproved(
+      {
+        store,
+        reader: sendReaderHandle.reader,
+        backend: options.backend,
+        backendName: options.backendName,
+        clock: options.clock,
+        delay: options.delay ?? realDelay,
+        emit: (event: DispatchGateDenied) => {
+          for (const socket of sockets) {
+            socket.send(
+              JSON.stringify({
+                event: 'gate.denied',
+                reason: event.reason,
+                draftId: event.draftId,
+                chatGuid: store.getDraft(event.draftId)?.chatGuid ?? '',
+              } satisfies GatewayEventPayload),
+            );
+          }
+        },
+      },
+      draftId,
+      approvalId,
+    );
   const scheduler = createScheduler({
     store,
     clock: options.clock,
     sink,
-    dispatch: (draftId, approvalId) =>
-      dispatchApproved(
-        {
-          store,
-          reader: sendReaderHandle.reader,
-          backend: options.backend,
-          backendName: options.backendName,
-          clock: options.clock,
-          delay: options.delay ?? realDelay,
-          emit: (event: DispatchGateDenied) => {
-            for (const socket of sockets) {
-              socket.send(
-                JSON.stringify({
-                  event: 'gate.denied',
-                  reason: event.reason,
-                  draftId: event.draftId,
-                  chatGuid: store.getDraft(event.draftId)?.chatGuid ?? '',
-                } satisfies GatewayEventPayload),
-              );
-            }
-          },
-        },
+    dispatch: server.agentFeedback?.observeDispatch(rawDispatch) ?? rawDispatch,
+    onExpired: (draftId) =>
+      server.agentFeedback?.emit({
         draftId,
-        approvalId,
-      ),
+        kind: 'draft_expired',
+        actor: systemActor('expiry'),
+      }),
     onError: (draftId, err) => {
       options.onError?.(
         err instanceof Error

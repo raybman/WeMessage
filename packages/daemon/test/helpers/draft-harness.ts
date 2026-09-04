@@ -16,7 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
 import type { AuditEvent, Clock, Draft, Ulid } from '@wemessage/core';
-import { dispatchApproved, SETTING_CONNECTION_STATE } from '@wemessage/core';
+import {
+  dispatchApproved,
+  systemActor,
+  SETTING_CONNECTION_STATE,
+} from '@wemessage/core';
 import { createChatDbReader, type IngestChatDbReader } from '@wemessage/ingest';
 import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import { openStore, type SqliteStore } from '@wemessage/store';
@@ -177,6 +181,8 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
       store,
       clock: clockCtl.clock,
       sink,
+      // s5 Scenario 8: the redraft re-ask reads conversation context.
+      reader,
       ...(opts.helloDeadlineMs !== undefined
         ? { helloDeadlineMs: opts.helloDeadlineMs }
         : {}),
@@ -185,7 +191,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   servers.push(server);
   if (server.token === null) throw new Error('harness: no token');
 
-  const dispatch = (draftId: Ulid, approvalId: Ulid) =>
+  const rawDispatch = (draftId: Ulid, approvalId: Ulid) =>
     dispatchApproved(
       {
         store,
@@ -199,12 +205,25 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
       draftId,
       approvalId,
     );
+  // s5 Scenario 8: the send outcome reaches the originating adapter through
+  // a daemon-side wrapper, exactly as `daemon.ts` composes it. Core is not
+  // told that adapters exist (INV-1), and every S1-S4 suite that booted this
+  // harness keeps the same dispatch behaviour: `observeDispatch` returns the
+  // wrapped result unchanged and human drafts emit nothing.
+  const dispatch =
+    server.agentFeedback?.observeDispatch(rawDispatch) ?? rawDispatch;
 
   const scheduler = createScheduler({
     store,
     clock: clockCtl.clock,
     sink,
     dispatch,
+    onExpired: (draftId) =>
+      server.agentFeedback?.emit({
+        draftId,
+        kind: 'draft_expired',
+        actor: systemActor('expiry'),
+      }),
   });
 
   return {

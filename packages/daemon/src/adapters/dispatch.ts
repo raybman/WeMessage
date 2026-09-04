@@ -84,6 +84,19 @@ export interface InboundDispatchDeps {
   newRequestId?: () => string;
 }
 
+/**
+ * s5 Scenario 8: the "put a `draft.request` on the wire for this rule and
+ * this message" half of dispatch, extracted so the F-40 redraft route can
+ * re-ask an agent without re-running rule evaluation. A redraft is not a
+ * match — the rule already won, hours ago — so it must not consult
+ * `evaluateRules`, the seen-set, or `hasDraftForMessage` (the S4 body copy
+ * it was minted alongside would suppress it every time).
+ */
+export interface RequestSender {
+  /** True when the frame actually left. Every refusal is audited here. */
+  send(rule: Rule, message: Message): Promise<boolean>;
+}
+
 export interface InboundDispatch {
   /**
    * Match, record, then dispatch. Every observable side effect that must
@@ -94,24 +107,11 @@ export interface InboundDispatch {
   emitWinner(message: Message, rules: readonly Rule[]): Promise<void>;
 }
 
-export function createInboundDispatch(
-  deps: InboundDispatchDeps,
-): InboundDispatch {
+export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
   const { store, clock, sink, reader, transport } = deps;
   const newRequestId = deps.newRequestId ?? ulid;
-  // F-15: in-process (ruleId, guid) seen-set; a restart may re-audit a match.
-  const seenMatches = new Set<string>();
 
-  /**
-   * F-47. The store's default `listDrafts()` IS the queue: terminal states
-   * (rejected/expired/superseded/sent/...) are already excluded, so "a live
-   * draft exists for this message" is exactly a non-empty match here. A
-   * rejected draft leaves the queue, and the edit is free to re-match.
-   */
-  const hasDraftForMessage = (guid: MessageGuid): boolean =>
-    store.listDrafts().some((draft) => draft.inboundGuid === guid);
-
-  const dispatch = async (rule: Rule, message: Message): Promise<void> => {
+  const dispatch = async (rule: Rule, message: Message): Promise<boolean> => {
     const adapterId = rule.adapterId;
     const adapter = store.getAdapter(adapterId);
     // Fail-closed on the row itself (§2.4.2). `hasToken` is the credential
@@ -128,14 +128,14 @@ export function createInboundDispatch(
         },
         systemActor('rule-engine'),
       );
-      return;
+      return false;
     }
     if (!transport.isConnected(adapterId)) {
       sink.append(
         { type: 'adapter.unreachable', adapterId, guid: message.guid },
         systemActor('rule-engine'),
       );
-      return;
+      return false;
     }
 
     const turns = await reader.readChatTurns({
@@ -185,7 +185,7 @@ export function createInboundDispatch(
         { type: 'adapter.unreachable', adapterId, guid: message.guid },
         systemActor('rule-engine'),
       );
-      return;
+      return false;
     }
     // Only a request that actually LEFT is answerable. Recording it before
     // the send would make a dropped frame's requestId a valid credential.
@@ -196,7 +196,28 @@ export function createInboundDispatch(
       inboundGuid: message.guid,
       ruleId: rule.id,
     });
+    return true;
   };
+
+  return { send: dispatch };
+}
+
+export function createInboundDispatch(
+  deps: InboundDispatchDeps,
+): InboundDispatch {
+  const { store, sink } = deps;
+  const sender = createRequestSender(deps);
+  // F-15: in-process (ruleId, guid) seen-set; a restart may re-audit a match.
+  const seenMatches = new Set<string>();
+
+  /**
+   * F-47. The store's default `listDrafts()` IS the queue: terminal states
+   * (rejected/expired/superseded/sent/...) are already excluded, so "a live
+   * draft exists for this message" is exactly a non-empty match here. A
+   * rejected draft leaves the queue, and the edit is free to re-match.
+   */
+  const hasDraftForMessage = (guid: MessageGuid): boolean =>
+    store.listDrafts().some((draft) => draft.inboundGuid === guid);
 
   return {
     emitWinner(message, rules) {
@@ -225,7 +246,7 @@ export function createInboundDispatch(
         ruleId: winner.id,
         adapterId: winner.adapterId,
       });
-      return dispatch(winner, message);
+      return sender.send(winner, message).then(() => undefined);
     },
   };
 }

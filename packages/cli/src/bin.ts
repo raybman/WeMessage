@@ -1509,11 +1509,29 @@ adapters
   .option('--json', 'stable machine-readable output')
   .option('-T, --token <token>', 'bearer token override')
   .action(() => {
-    // Same posture as `resume --circuit`: an honest refusal beats a verb
-    // that prints something reassuring without having tested anything. The
-    // conformance kit lands in s5 scenario 13; this is replaced there.
+    // Same posture as `resume --circuit`: an honest refusal beats a verb that
+    // prints something reassuring without having tested anything.
+    //
+    // s5 Scenario 13 built the kit (`@wemessage/adapter-testkit`) and dogfooded
+    // it on echo and sol, but it does NOT reach this verb, for one structural
+    // reason and one scope reason:
+    //
+    //  - `cli-desktop-thin-clients` (.dependency-cruiser.cjs) allows
+    //    packages/cli/src to import client and protocol and nothing else. The
+    //    CLI cannot import the kit, or the adapters the kit runs, without
+    //    widening that rule — and the CLI's narrow reach is the point of it.
+    //  - F-52 ships the kit workspace-internal in S5 and defers its public
+    //    surface (`npx`, the `--transport ws --cmd "..."` subprocess runner
+    //    that this verb would drive) to S7. Wiring the verb before that runner
+    //    exists would mean the CLI spawning adapter processes, which F-55
+    //    refuses on a localhost daemon.
+    //
+    // Until then the kit is run where it lives, and the message says so rather
+    // than leaving the operator to guess.
     fail(
-      'adapters test is not available yet: the conformance testkit lands in scenario 13',
+      'adapters test is not available yet: the conformance testkit ships ' +
+        'workspace-internal in S5 (run `pnpm --filter @wemessage/adapter-testkit ' +
+        'test`); the CLI runner lands with its packaging in S7 (F-52)',
       EXIT_USAGE,
     );
   });

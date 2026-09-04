@@ -48,7 +48,18 @@ importers:
         specifier: ^7.6.0
         version: 7.6.13
 
-  packages/adapter-testkit: {}
+  packages/adapter-testkit:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@wemessage/adapter-echo':
+        specifier: workspace:*
+        version: link:../adapters/echo
+      '@wemessage/adapter-sol':
+        specifier: workspace:*
+        version: link:../adapters/sol
 
   packages/adapters/echo:
     dependencies:

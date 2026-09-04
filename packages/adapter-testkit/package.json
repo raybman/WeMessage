@@ -14,5 +14,13 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "private": true,
+  "dependencies": {
+    "@wemessage/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@wemessage/adapter-echo": "workspace:*",
+    "@wemessage/adapter-sol": "workspace:*"
   }
 }

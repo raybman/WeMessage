@@ -360,13 +360,21 @@ describe('wemessage adapters — token-rotate (F-42)', () => {
 });
 
 describe('wemessage adapters — usage refusals (exit 2, §3.8)', () => {
-  it('test refuses honestly until the conformance kit lands (Scenario 13)', async () => {
+  // s5 Scenario 13 REVISED this row deliberately. The conformance kit now
+  // exists and is green on echo and sol, but it is workspace-internal (F-52)
+  // and `cli-desktop-thin-clients` forbids packages/cli/src from importing it
+  // or the adapters it drives. The verb therefore still refuses — and the
+  // assertion moves from "the kit does not exist" to "the kit is not reachable
+  // from here yet, and here is where it is", which is the true statement.
+  it('test refuses honestly and points at where the kit does run (F-52)', async () => {
     const ctx = await boot();
     await addAdapter(ctx, 'echo-1');
     const res = await runCli(['adapters', 'test', 'echo-1'], envFor(ctx));
     // An honest refusal beats a verb that silently does nothing.
     expect(res.code).toBe(2);
-    expect(res.stderr).toContain('scenario 13');
+    expect(res.stderr).toContain('workspace-internal');
+    expect(res.stderr).toContain('@wemessage/adapter-testkit');
+    expect(res.stderr).toContain('S7');
     expect(res.stdout).toBe('');
   }, 20_000);
 

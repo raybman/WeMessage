@@ -372,6 +372,25 @@ export interface ChatDbReader {
     text: string;
     sinceIso: IsoUtc;
   }): Promise<{ guid: MessageGuid } | null>;
+  /**
+   * s5 §1.5 body extension (Scenario 6, F-46 — the ONE non-Store port growth
+   * this slice takes): the last `limit` turns of a conversation, OLDEST
+   * FIRST, both directions.
+   *
+   * It reads chat.db rather than our `inbound_messages` mirror because the
+   * mirror holds inbound only, and an agent that cannot see its own prior
+   * replies re-answers the same question forever. `text` is the decoded
+   * message text, still RAW — control-stripping happens at the wire boundary
+   * with the same sanitizer every other outbound shape uses, not here.
+   */
+  readChatTurns(q: { chatGuid: ChatGuid; limit: number }): Promise<ChatTurn[]>;
+}
+
+/** One prior turn of a conversation ({@link ChatDbReader.readChatTurns}). */
+export interface ChatTurn {
+  from: 'them' | 'me';
+  text: string | null;
+  at: IsoUtc;
 }
 
 /** One in-place mutation surfaced by {@link ChatDbReader.readMutatedSince}. */

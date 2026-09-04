@@ -199,6 +199,9 @@ function makeReader(cfg: {
       pollIndex++;
       return Promise.resolve(result);
     },
+    // s5 Scenario 6 (F-46): dispatch-time conversation context. The send
+    // path never reads it; present so the fake still satisfies the port.
+    readChatTurns: () => Promise.resolve([]),
   };
 }
 

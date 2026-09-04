@@ -367,6 +367,8 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       readMutatedSince: () => Promise.resolve([]),
       resolveChat: () => Promise.resolve(null),
       findOutboundMessage: () => Promise.resolve(null),
+      // s5 Scenario 6 (F-46): the port's one S5 body extension.
+      readChatTurns: () => Promise.resolve([]),
     };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {

@@ -15,6 +15,7 @@ import type {
   AttachmentRef,
   ChatDbReader,
   ChatGuid,
+  ChatTurn,
   Clock,
   Handle,
   Message,
@@ -151,6 +152,18 @@ const FIND_OUTBOUND_SQL = `
   LIMIT 1
 `;
 
+/**
+ * readChatTurns (Scenario 6, §1.5 F-46): the tail of one conversation, both
+ * directions. Ordered newest-first with a LIMIT so the database does the
+ * truncation (a chat with 40k messages must not be read to return 12); the
+ * caller reverses to oldest-first.
+ */
+const CHAT_TURNS_SQL = `${MESSAGE_SELECT_SQL}
+  WHERE c.guid = ?
+  ORDER BY m.date DESC, m.ROWID DESC
+  LIMIT ?
+`;
+
 interface DbMessageRow {
   rowid: bigint;
   guid: string;
@@ -218,6 +231,8 @@ export function createChatDbReader(
   const lastMessageDateStmt = db.prepare(LAST_MESSAGE_DATE_SQL);
   lastMessageDateStmt.safeIntegers(true);
   const findOutboundStmt = db.prepare(FIND_OUTBOUND_SQL);
+  const chatTurnsStmt = db.prepare(CHAT_TURNS_SQL);
+  chatTurnsStmt.safeIntegers(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -319,6 +334,28 @@ export function createChatDbReader(
         service: mapService(best.service),
         isGroup: countRow.n > 1,
       });
+    },
+
+    readChatTurns(q: {
+      chatGuid: ChatGuid;
+      limit: number;
+    }): Promise<ChatTurn[]> {
+      const rows = chatTurnsStmt.all(
+        q.chatGuid,
+        BigInt(Math.max(0, q.limit)),
+      ) as DbMessageRow[];
+      // Reversed here, not in SQL: the LIMIT has to bite on the NEWEST rows,
+      // so the query is descending and the presentation order is ours.
+      return Promise.resolve(
+        rows.reverse().map((r) => {
+          const message = toMessage(r);
+          return {
+            from: message.isFromMe ? ('me' as const) : ('them' as const),
+            text: message.text,
+            at: message.receivedAt,
+          };
+        }),
+      );
     },
 
     findOutboundMessage(q: {

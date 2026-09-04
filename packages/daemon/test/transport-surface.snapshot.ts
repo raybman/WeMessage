@@ -232,6 +232,10 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/core/src/drafts/recovery.ts',
   'packages/core/src/ports/index.ts',
   'packages/core/src/sending/dispatcher.ts',
+  // s5 Scenario 6 (F-46), deliberate ratchet update #16: the inbound
+  // dispatcher holds a ChatDbReader for `readChatTurns` — an agent that
+  // cannot see our prior replies re-answers the same question forever.
+  'packages/daemon/src/adapters/dispatch.ts',
   'packages/daemon/src/daemon.ts',
   'packages/daemon/src/main.ts',
   'packages/daemon/src/routes/send.ts',

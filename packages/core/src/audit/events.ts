@@ -154,6 +154,13 @@ export type AuditEvent =
     }
   | { type: 'adapter.protocol-violation'; adapterId?: string; reason: string }
   | { type: 'adapter.no-send-frame'; adapterId: string; frameType: string }
+  // s5 Scenario 6 (F-45): a rule matched, the adapter is registered, enabled
+  // and credentialed — and nobody is on the socket. The request is DROPPED,
+  // not queued: replaying yesterday's texts at reconnect would be worse than
+  // silence, and this row is what makes the drop visible after the fact.
+  // Distinct from `gate.denied` on purpose (C-6): nothing was refused, the
+  // agent simply was not there.
+  | { type: 'adapter.unreachable'; adapterId: string; guid: MessageGuid }
   | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)
@@ -166,7 +173,20 @@ export type AuditEvent =
       from: DraftState;
       event: DraftEvent;
     }
-  | { type: 'gate.denied'; draftId: Ulid; reason: GateDenyReason } // F-35: now audited before the throw
+  // F-35: audited before the throw. s5 Scenario 6 widens the anchor fields:
+  // the first `adapter-disabled` denial happens at DISPATCH time, before any
+  // draft exists, so `draftId` becomes optional and the inbound guid +
+  // adapter id identify the refusal instead. Additive under the F-16/F-28/
+  // F-30 precedent; every pre-existing emitter still writes `draftId`, and
+  // (exactOptionalPropertyTypes) an absent one is an OMITTED key, not
+  // `undefined`.
+  | {
+      type: 'gate.denied';
+      reason: GateDenyReason;
+      draftId?: Ulid;
+      guid?: MessageGuid;
+      adapterId?: string;
+    }
   | { type: 'toggle.changed'; key: string; on: boolean } // kill-switch flips
   | {
       type: 'contact.policy-changed';

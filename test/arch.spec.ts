@@ -390,7 +390,8 @@ describe('arch invariants (dependency-cruiser)', () => {
    * growth yet. Structural-only: no production code lands this scenario.
    *
    * (a) `SendBackend`/`ChatDbReader` are mentioned in production src by
-   *     exactly the 13 S3 files today — the send/scheduler surface must stay
+   *     exactly the 13 S3 files plus s5 Scenario 6's `adapters/dispatch.ts`
+   *     (F-46, ratchet update #16) — the send/scheduler surface must stay
    *     funneled through `dispatchApproved`; a new caller (e.g. a scheduler
    *     reaching around it straight to `SendBackend`) grows this list and
    *     must be reviewed here, not discovered later.
@@ -442,12 +443,18 @@ describe('arch invariants (dependency-cruiser)', () => {
         .filter((f) => codeIsh.test(f));
     }
 
-    // (a) importer allowlist: exactly these 13 files mention SendBackend or
-    // ChatDbReader in production source, as of S3's close (841cd27).
+    // (a) importer allowlist: exactly these 14 files mention SendBackend or
+    // ChatDbReader in production source — the 13-file S3 baseline (841cd27)
+    // plus the one deliberate s5 Scenario 6 addition (F-46) below.
     const SEND_BACKEND_CHAT_DB_READER_BASELINE = [
       'packages/core/src/drafts/recovery.ts',
       'packages/core/src/ports/index.ts',
       'packages/core/src/sending/dispatcher.ts',
+      // s5 Scenario 6 (F-46), the ONE deliberate growth of this list in S5:
+      // `adapters/dispatch.ts` reads conversation context through
+      // `ChatDbReader.readChatTurns`. Reviewed here, in the same commit as
+      // the file that joins it, exactly as this guard intends.
+      'packages/daemon/src/adapters/dispatch.ts',
       'packages/daemon/src/daemon.ts',
       'packages/daemon/src/main.ts',
       'packages/daemon/src/routes/send.ts',
@@ -528,7 +535,7 @@ describe('arch invariants (dependency-cruiser)', () => {
         );
     }
 
-    it('(a) SendBackend/ChatDbReader importers match the 13-file S3 baseline exactly', () => {
+    it('(a) SendBackend/ChatDbReader importers match the 14-file S3+S5 baseline exactly', () => {
       expect(sendBackendChatDbReaderImporters()).toEqual(
         SEND_BACKEND_CHAT_DB_READER_BASELINE,
       );
@@ -610,8 +617,9 @@ describe('arch invariants (dependency-cruiser)', () => {
    *    Scenario 2; putting a compile witness here would mean shipping the
    *    union in a scenario whose GREEN is "configs and a cruiser rule, no
    *    production logic". Scenario 2 owns the type half.
-   *  - (e) pins the allowlist at its S3/S4 baseline. It grows by exactly one
-   *    file in Scenario 6 (F-46), as a deliberate reviewed diff.
+   *  - (e) pins the allowlist. It grew by exactly one file in Scenario 6
+   *    (F-46, ratchet update #16 — `packages/daemon/src/adapters/dispatch.ts`),
+   *    as a deliberate reviewed diff, and by nothing since.
    */
   describe('S5 extensions (s5-execution Scenario 1: agent-era guards)', () => {
     // Local file-walk helpers. The S3 block has equivalents, but they are
@@ -720,9 +728,9 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
 
     // (e) the port allowlist pin lives in the S3 block, which already
-    // asserts the exact 13-file baseline. Restating it here would be a second
-    // copy of the same list to keep in sync when Scenario 6 grows it by one
-    // file (F-46); one pin, one edit.
+    // asserts the exact baseline — 14 files since Scenario 6 grew it by
+    // `adapters/dispatch.ts` (F-46). Restating it here would be a second copy
+    // of the same list to keep in sync; one pin, one edit.
 
     it('(f) every adapter package and the testkit has a vitest project', () => {
       for (const pkg of ADAPTER_PACKAGES) {

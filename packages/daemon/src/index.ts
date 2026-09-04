@@ -61,6 +61,14 @@ export {
   type RunDoctorDeps,
 } from './doctor.js';
 export {
+  createInboundDispatch,
+  CONTEXT_TURN_LIMIT,
+  DRAFT_REQUEST_CONSTRAINTS,
+  type DispatchTransport,
+  type InboundDispatch,
+  type InboundDispatchDeps,
+} from './adapters/dispatch.js';
+export {
   createAdapterTransport,
   type AdapterTransportDeps,
   type AdapterTransportHandle,

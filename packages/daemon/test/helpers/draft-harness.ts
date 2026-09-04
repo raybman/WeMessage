@@ -89,6 +89,12 @@ export interface Harness {
    */
   dispatch: (draftId: Ulid, approvalId: Ulid) => Promise<unknown>;
   backend: LoopbackSendBackend;
+  /**
+   * s5 Scenario 6: the same chat.db reader the harness already opened,
+   * exposed so a dispatcher can be composed against it (conversation context
+   * is read through `readChatTurns`, F-46).
+   */
+  reader: IngestChatDbReader;
   /** The one §1.8 sink the routes and scheduler share. */
   sink: ReturnType<typeof createAuditSink>;
   /** Every broadcast, with the audit log as it stood when it was sent. */
@@ -209,6 +215,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     scheduler,
     dispatch,
     backend,
+    reader,
     sink,
     broadcasts,
     clockCtl,

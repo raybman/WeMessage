@@ -28,7 +28,6 @@ import type {
 import {
   dispatchApproved,
   type DispatchGateDenied,
-  evaluateRules,
   runStartupRecovery,
   systemActor,
   SETTING_USER_DISCONNECTED,
@@ -50,6 +49,8 @@ import type { GatewayEventPayload } from '@wemessage/protocol';
 import { SqliteStore } from '@wemessage/store';
 import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
+import { createInboundDispatch } from './adapters/dispatch.js';
+import type { AdapterTransportHandle } from './adapters/transport.js';
 import { createScheduler } from './scheduler.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
@@ -204,6 +205,7 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       readMutatedSince: (sinceNs) => live().readMutatedSince(sinceNs),
       resolveChat: (handle) => live().resolveChat(handle),
       findOutboundMessage: (q) => live().findOutboundMessage(q),
+      readChatTurns: (q) => live().readChatTurns(q),
     },
     close: () => {
       current?.close();
@@ -310,34 +312,37 @@ export async function startDaemon(
   // bugs). F-15: in-process (ruleId, guid) seen-set; a restart may re-audit
   // a match (accepted in S2).
   let burstRules: Rule[] = [];
-  const seenMatches = new Set<string>();
+  // s5 Scenario 6: matching AND adapter dispatch now live in one place
+  // (`adapters/dispatch.ts`), so the daemon composes it rather than
+  // re-implementing single-winner policy here. The transport is reached
+  // through a late-bound indirection because `buildServer` (phase 3) owns it
+  // and the catch-up scan (phase 2) runs first — during that window nobody is
+  // connected, and `adapter.unreachable` is the honest record of it.
+  // (a one-field ref rather than a `let`: the closures below capture it
+  // before `buildServer` returns, and a `let` assigned exactly once reads as
+  // a `const` to the linter even though it cannot be one.)
+  const agentTransport: { current: AdapterTransportHandle | undefined } = {
+    current: undefined,
+  };
+  const dispatcher = createInboundDispatch({
+    store,
+    clock: options.clock,
+    sink,
+    reader: sendReaderHandle.reader,
+    transport: {
+      isConnected: (id) => agentTransport.current?.isConnected(id) ?? false,
+      sendTo: (id, frame) => agentTransport.current?.sendTo(id, frame) ?? false,
+    },
+  });
   const emitWinner = (message: Message): void => {
-    // F-12: core returns the FULL ordered list (priority ASC, id ASC);
-    // the daemon enforces single winner by taking the head.
-    const winner = evaluateRules(burstRules, message, {
-      // §1.3.8 edit re-match predicate; drafts do not exist until S4.
-      hasDraftForMessage: () => false,
-    })[0];
-    if (winner === undefined) return;
-    const seenKey = `${winner.id}\u0000${message.guid}`;
-    if (seenMatches.has(seenKey)) return;
-    seenMatches.add(seenKey);
-    // §1.8: the log is the record, the event is the courtesy — append first.
-    sink.append(
-      {
-        type: 'rule.matched',
-        guid: message.guid,
-        ruleId: winner.id,
-        adapterId: winner.adapterId,
-        ruleName: winner.name,
-      },
-      systemActor('rule-engine'),
-    );
-    sink.broadcast({
-      event: 'rule.matched',
-      guid: message.guid,
-      ruleId: winner.id,
-      adapterId: winner.adapterId,
+    // Fire-and-forget on purpose: reading conversation context is I/O, and
+    // the ingest loop must not block on a third party's socket. Everything
+    // §1.8 cares about (append, then broadcast) happens synchronously inside
+    // emitWinner before its first await.
+    void dispatcher.emitWinner(message, burstRules).catch((err: unknown) => {
+      options.onError?.(
+        err instanceof Error ? err : new Error(`dispatch: ${String(err)}`),
+      );
     });
   };
   // Both ingest paths (new rows + Scenario 8 mutation sweep) deliver here.
@@ -460,6 +465,15 @@ export async function startDaemon(
     rules: { store, clock: options.clock, sink },
     // s4-execution Scenario 5: the draft review surface, same shared sink.
     drafts: { store, clock: options.clock, sink },
+    // s5 Scenario 6: the composed daemon serves the adapter registry and the
+    // `/v1/agent` socket, which is what makes the dispatch above reachable at
+    // all — without it every match would audit `adapter.unreachable` forever.
+    adapters: {
+      store,
+      clock: options.clock,
+      sink,
+      ...(options.port !== undefined ? { port: options.port } : {}),
+    },
     // s3-execution Scenario 8: doctor/send routes, same shared sink.
     send: {
       store,
@@ -510,6 +524,7 @@ export async function startDaemon(
       );
     },
   });
+  agentTransport.current = server.agentTransport;
   // s4-execution Scenario 6: the grace scheduler. It owns WHEN; the core
   // dispatcher owns HOW, so it gets a dispatch closure rather than the
   // backend. No interval is armed here — startDaemon's caller drives

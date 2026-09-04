@@ -417,16 +417,23 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
         ['audit', 'list', '--json'],
         env2,
       );
-      return rows.length === auditRowCountBeforeRestart + 1;
+      // TWO rows since s5 Scenario 6, not one: the match, and then the
+      // dispatch's verdict on the rule's adapter. `echo` is a rule target
+      // here, never a registered adapter row, so the second row is the
+      // fail-closed `gate.denied {adapter-disabled}` — and the match is
+      // audited anyway, because ingestion is never gated (§2.4.3).
+      return rows.length === auditRowCountBeforeRestart + 2;
     }, 'post-restart rule.matched');
     const finalAudit = await cliJson<AuditRowPayload[]>(
       ['audit', 'list', '--json'],
       env2,
     );
-    expect(finalAudit).toHaveLength(auditRowCountBeforeRestart + 1);
-    expect(
-      (JSON.parse(finalAudit[0]!.eventJson) as { type: string }).type,
-    ).toBe('rule.matched');
+    expect(finalAudit).toHaveLength(auditRowCountBeforeRestart + 2);
+    const newTypes = finalAudit
+      .slice(0, 2)
+      .map((row) => (JSON.parse(row.eventJson) as { type: string }).type)
+      .sort();
+    expect(newTypes).toEqual(['gate.denied', 'rule.matched']);
 
     // ---- Step 9: posture check — this scenario introduces no new import
     // surface (pnpm dep:check is run as part of the scenario's own gate,

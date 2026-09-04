@@ -50,7 +50,11 @@ importers:
 
   packages/adapter-testkit: {}
 
-  packages/adapters/echo: {}
+  packages/adapters/echo:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
 
   packages/adapters/hermes: {}
 

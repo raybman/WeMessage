@@ -37,7 +37,9 @@ import type {
   DraftState,
   GateDenyReason,
   Handle,
+  IsoUtc,
   MessageGuid,
+  RespondMode,
   Rule,
   Schedule,
   Ulid,
@@ -98,6 +100,35 @@ export type AuditEvent =
       draftId: Ulid;
       approvalId: Ulid;
       actor: Actor;
+    }
+  // s6 Scenario 9 (§1.7): the machine's own decision to speak, written
+  // IMMEDIATELY BEFORE the `draft.approved` row it caused. Two rows rather
+  // than one widened row, because `draft.approved` is the same fact whoever
+  // decided it and a reader diffing a human's approval against a machine's
+  // should not have to ignore eight null fields to do it.
+  //
+  // Every field here exists so the decision is RECONSTRUCTIBLE months later
+  // from the log alone, without re-deriving it from settings and schedule
+  // rows that may since have been edited or deleted. `scopes` records the
+  // three values §2.4.3's ladder actually resolved (not the rule's mode
+  // copied three times); `scheduleId` names the window that was consulted
+  // and `armedUntil` when it would have shut. `armedUntil` is OMITTED — not
+  // null, not undefined — when the rule carries no schedule or the armed
+  // window has no close within the scan horizon: exactOptionalPropertyTypes,
+  // and an absent key is what a reader of the JSON will actually see.
+  | {
+      type: 'auto.approved';
+      draftId: Ulid;
+      approvalId: Ulid;
+      ruleId: Ulid;
+      adapterId: string;
+      scopes: {
+        global: RespondMode;
+        contact: ContactMode;
+        rule: RespondMode;
+      };
+      scheduleId: Ulid | null;
+      armedUntil?: IsoUtc;
     }
   | { type: 'send.attempted'; draftId: Ulid; attempt: number; backend: string }
   | { type: 'draft.sent'; draftId: Ulid; sentMessageGuid: MessageGuid }

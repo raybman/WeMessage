@@ -168,7 +168,15 @@ describe('s4 Scenario 10: contact policies', () => {
     h.store.setSetting('send.globalMode', 'auto');
     const message = {
       isGroup: false,
-      service: 'iMessage' as const,
+      // s6 Sc 9 (F-74): lower case. `Service` is
+      // 'imessage' | 'sms' | 'rcs' | 'unknown', and `mapService` lowercases
+      // whatever chat.db hands it, so 'imessage' is the only value this
+      // field ever holds in production. The mixed-case literal sat here
+      // unnoticed from s4 because nothing in the gate read the service until
+      // the SMS clamp landed; the clamp caught it on its first run. The chat
+      // GUID below keeps its capital M, which is Apple's own spelling of the
+      // guid prefix and a different string entirely.
+      service: 'imessage' as const,
       handle: HANDLE,
       chatGuid: `iMessage;-;${HANDLE}`,
     };

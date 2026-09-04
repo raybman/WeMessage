@@ -135,7 +135,25 @@ function assertActor(from: DraftState, event: DraftEvent, actor: Actor): void {
   };
 
   if (from === 'pending' && (event === 'approve' || event === 'edit')) {
-    if (actor.kind !== 'human') illegal();
+    // F-58 (s6 Sc 9): C-1 is widened by EXACTLY ONE disjunct — the system
+    // actor a machine wears when it approves on the operator's behalf. Not a
+    // broadened `kind !== 'agent'`, not a new actor kind, not a bypass
+    // parameter on `applyDraftTransition`: every other system reason and
+    // every agent stays illegal here, pinned reason by reason in
+    // `draft-transitions.spec.ts` so the disjunct cannot quietly become two.
+    //
+    // Scoped to `approve`, deliberately NARROWER than the flag's literal
+    // text. The two events share this branch only because they shared a
+    // constraint; they are not the same permission. Editing a pending draft
+    // is authorship — a machine that could take the `edit` edge could put
+    // words in the operator's mouth without ever approving anything, and
+    // nothing in Sc 9 needs it. `pending + edit` therefore stays human-only,
+    // and there is a row asserting it stayed that way.
+    const isAutoApprove =
+      event === 'approve' &&
+      actor.kind === 'system' &&
+      actor.reason === 'auto-respond';
+    if (actor.kind !== 'human' && !isAutoApprove) illegal();
     return;
   }
   if (event === 'reject' && (from === 'pending' || from === 'approved')) {

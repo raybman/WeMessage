@@ -57,6 +57,7 @@ import {
   evaluateGate,
   IllegalDraftActor,
   IllegalDraftTransition,
+  maybeAutoApprove,
   normalizeHandle,
   parseChatGuid,
   readGateSettings,
@@ -286,12 +287,12 @@ export function createAgentSubmitHandler(
     }
   };
 
-  const mint = (
+  const mint = async (
     adapterId: string,
     issued: Tracked,
     idempotencyKey: string,
     body: string,
-  ): void => {
+  ): Promise<void> => {
     const at = clock.now();
     const id = ulid();
     // Supersede BEFORE the insert: the new draft is the reason the old one is
@@ -321,6 +322,20 @@ export function createAgentSubmitHandler(
       agentActor(adapterId),
     );
     sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+    // s6 Sc 9, §1.7: the ONE auto-approval call site in the product. It
+    // runs INSIDE the mint, after the draft is durable and after its
+    // creation has been announced, so the ordering a reader sees in the
+    // audit log is always draft.created -> auto.approved -> draft.approved
+    // and never the other way round.
+    //
+    // Everything that decides whether this draft may speak for the operator
+    // lives behind this one call, in core, where `test/arch.spec.ts` can pin
+    // it to a single file. Nothing about autonomy is decided HERE: this
+    // module knows only that a rule-borne draft now exists, which is the
+    // only fact it is in a position to know. `maybeAutoApprove` returns
+    // 'withheld' for every reason it declines, and the draft simply stays in
+    // the human's queue — the outcome is deliberately not branched on.
+    await maybeAutoApprove({ store, clock, sink, newId: ulid }, draft.id);
   };
 
   /**
@@ -514,7 +529,11 @@ export function createAgentSubmitHandler(
       if (store.findDraftByIdempotencyKey(adapterId, idempotencyKey) !== null) {
         return;
       }
-      mint(adapterId, issued, idempotencyKey, body);
+      // `void` on the same precedent as `transport.ts`'s proactive dispatch:
+      // this handler's contract is synchronous, and the decision inside the
+      // mint performs no awaits of its own, so every effect above has
+      // already landed by the time this statement returns.
+      void mint(adapterId, issued, idempotencyKey, body);
     },
 
     onProactive,

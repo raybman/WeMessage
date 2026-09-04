@@ -33,11 +33,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuditEvent, Draft } from '@wemessage/core';
 import {
-  applyDraftTransition,
   evaluateGate,
-  IllegalDraftActor,
+  maybeAutoApprove,
   readGateSettings,
-  systemActor,
   SETTING_GLOBAL_MODE,
   SETTING_KILL_SWITCH,
 } from '@wemessage/core';
@@ -269,8 +267,15 @@ describe('s5 Sc 9 — proactive proposals', () => {
       schedule: null,
       contact: h.store.getContactPolicy(HANDLE),
       message: {
+        // s6 Sc 9 (F-74): lower case, because `Service` is
+        // 'imessage' | 'sms' | 'rcs' | 'unknown' and `mapService` lowercases
+        // every value it takes out of chat.db. This literal read 'iMessage'
+        // from the day it was written and nothing noticed, because until
+        // Sc 9 nothing in the gate looked at the service at all. The SMS
+        // clamp made the field load bearing and the typo failed instantly,
+        // which is the guard doing its job on its first day.
         isGroup: false,
-        service: 'iMessage',
+        service: 'imessage',
         handle: HANDLE,
         chatGuid: CHAT,
       },
@@ -287,14 +292,39 @@ describe('s5 Sc 9 — proactive proposals', () => {
     await h.scheduler.tick();
     expect(h.store.getDraft(draft.id)?.state).toBe('pending');
 
-    // And there is no actor but a human that can move it off `pending`.
-    expect(() =>
-      applyDraftTransition({
-        from: 'pending',
-        event: 'approve',
-        actor: systemActor('auto-respond'),
-      }),
-    ).toThrow(IllegalDraftActor);
+    // And the auto-approver itself refuses it.
+    //
+    // This assertion used to be `applyDraftTransition(pending + approve,
+    // systemActor('auto-respond'))` throws `IllegalDraftActor`, and it was
+    // TRUE but for a reason that had nothing to do with proposals: in S5 no
+    // system actor could approve anything, so the row passed for every draft
+    // in the product and would have passed had the proposal path been wide
+    // open. s6 Sc 9 (F-58) makes that actor legal, and the pin has to be
+    // re-earned against the world where autonomy exists.
+    //
+    // It is re-earned here where it belongs, on the proposal itself. Two
+    // independent mechanisms hold: the gate clamps `agentOrigin` to
+    // 'draft-only' (asserted above, under auto/auto, the settings that make
+    // every other draft self-send), and `maybeAutoApprove` withholds any
+    // draft whose `ruleId` is null, which every proposal's is. Either alone
+    // is sufficient; `proactive-draftonly.spec.ts` takes them apart one at a
+    // time and shows each one still refusing with the other disabled.
+    expect(h.store.getDraft(draft.id)?.ruleId).toBeNull();
+    expect(
+      await maybeAutoApprove(
+        {
+          store: h.store,
+          clock: h.clockCtl.clock,
+          sink: h.sink,
+          newId: () => {
+            throw new Error('a withheld decision must not mint an id');
+          },
+        },
+        draft.id,
+      ),
+    ).toBe('withheld');
+    expect(h.store.getDraft(draft.id)?.state).toBe('pending');
+    expect(h.store.listApprovals(draft.id)).toEqual([]);
   });
 
   it('row 7: the kill switch refuses a proposal outright', async () => {

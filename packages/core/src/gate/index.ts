@@ -700,6 +700,9 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   } else if (loopDetected(ctx)) {
     mode = 'draft-only';
     clampedBy = 'loop-detected';
+  } else if (smsAutoForbidden(ctx)) {
+    mode = 'draft-only';
+    clampedBy = 'sms-auto-forbidden';
   }
 
   return {
@@ -730,6 +733,33 @@ export function evaluateGate(ctx: GateContext): GateDecision {
  * includes them (F-71). That asymmetry lives in `bumpSendCounters`, which is
  * the single writer; nothing here needs to know who decided.
  */
+/**
+ * Is this conversation on a transport autonomy is not trusted with (F-70)?
+ *
+ * iMessage is the only service this gateway can VERIFY it sent on: the
+ * outbound row it polls for carries the service, and a green tick on an
+ * iMessage send means Apple accepted it for that address. Everything else
+ * leaves through a carrier the gateway cannot see, cannot verify with the
+ * same confidence, and cannot recall. `send.allowSmsAuto` defaults off for
+ * that reason, and an operator who turns it on is opting IN per install
+ * rather than discovering it after the fact.
+ *
+ * `'rcs'` and `'unknown'` are treated exactly as `'sms'` — the predicate is
+ * "not iMessage" rather than "is SMS", so a service literal that does not
+ * exist yet is refused autonomy by default instead of being granted it by
+ * omission. `'unknown'` in particular is what an unrecognised chat-guid
+ * prefix parses to, which is precisely when the gateway knows least.
+ *
+ * LAST in the §1.7 chain on purpose. It is the weakest of the six clamps —
+ * a shut window, a saturated cap, an open breaker or a loop are all facts
+ * about whether we should be speaking AT ALL, while this one is a fact
+ * about the wire. When two clamps apply the operator is better served by
+ * being told about the stronger one, and `clampedBy` is one field.
+ */
+function smsAutoForbidden(ctx: GateContext): boolean {
+  return ctx.message.service !== 'imessage' && !ctx.settings.allowSmsAuto;
+}
+
 function overRateCap(ctx: GateContext): boolean {
   const caps = ctx.settings.caps ?? DEFAULT_RATE_CAPS;
   return (

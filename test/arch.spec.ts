@@ -995,10 +995,13 @@ describe('arch invariants (dependency-cruiser)', () => {
 
     // (g) the dormant five, each with the explicit set of production files
     // allowed to name it TODAY. Sc 4/6/7/8/9 each edit their own row here,
-    // in their own commit, as the literal starts being emitted. Claimed so
-    // far: 'outside-window' (Sc 4/5), 'rate-limited' (Sc 6), 'circuit-open'
-    // (Sc 7), 'loop-detected' (Sc 8). Only 'sms-auto-forbidden' is still at
-    // its S1 shape.
+    // in their own commit, as the literal starts being emitted. Claimed:
+    // 'outside-window' (Sc 4/5), 'rate-limited' (Sc 6), 'circuit-open'
+    // (Sc 7), 'loop-detected' (Sc 8), 'sms-auto-forbidden' (Sc 9). None is
+    // dormant any longer, and the guard's job changes accordingly: it no
+    // longer asks "has anyone started emitting these", it asks "is each one
+    // still emitted from exactly the files we reviewed". A sixth reason
+    // appearing in a seventh file is still a build failure.
     const DORMANT_DENY_LITERALS: ReadonlyArray<
       readonly [string, readonly string[]]
     > = [
@@ -1091,7 +1094,28 @@ describe('arch invariants (dependency-cruiser)', () => {
       ],
       [
         'sms-auto-forbidden',
-        ['packages/client/src/index.ts', 'packages/core/src/domain/types.ts'],
+        [
+          'packages/client/src/index.ts',
+          'packages/core/src/domain/types.ts',
+          // s6 Scenario 9, the SIXTH deliberate edit to this guard and the
+          // last of the dormant five to be claimed: `evaluateGate` clamps a
+          // non-iMessage chat to 'draft-only' with
+          // `clampedBy: 'sms-auto-forbidden'` unless the operator has
+          // explicitly set `send.allowSmsAuto` (F-74). It sits LAST in the
+          // step-7 else-if chain, so a chat that is also out of window, rate
+          // limited, breaker-tripped or looping reports the reason it shares
+          // with iMessage rather than one that reads as "because it is SMS"
+          // — same clamp either way, but the operator is told the thing they
+          // can act on. Still a clamp and not a denial; the send-moment
+          // refusal that would write `gate.denied` is Sc 10's (F-59).
+          //
+          // Note this row, alone among the five, has never named
+          // `packages/core/src/audit/events.ts`: the other four appear there
+          // inside `gate.denied`'s documented reason prose, and this one
+          // does not, which is itself a small record of the fact that
+          // nothing has ever been DENIED for being SMS.
+          'packages/core/src/gate/index.ts',
+        ],
       ],
     ];
     function filesNamingLiteral(literal: string): string[] {

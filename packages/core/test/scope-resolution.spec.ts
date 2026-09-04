@@ -683,7 +683,19 @@ describe('every counter is now claimed, and each one is proved so', () => {
     ).toEqual({ allow: true, mode: 'auto' });
   });
 
-  it('a non-iMessage service is not yet clamped (Sc 9 owns allowSmsAuto)', () => {
+  /**
+   * Claimed by s6 Sc 9 (F-74). This row was written in Sc 7 as "not yet
+   * clamped", the last of the five counters still inert, and it is rewritten
+   * here in the commit that makes it bite rather than being deleted: the
+   * point of the block is that every field the context carries is now load
+   * bearing, and the way you prove a field is load bearing is that setting
+   * it hostile changes the answer.
+   *
+   * `allowSmsAuto` defaults false, so this needs no hostile setting at all,
+   * only a service that is not iMessage. Both halves are asserted, because
+   * an operator who turns the setting on must actually get autonomy back.
+   */
+  it('a non-iMessage service now clamps, and the setting un-clamps it', () => {
     const base = ctx({
       globalMode: 'auto',
       contact: policy('auto'),
@@ -693,6 +705,17 @@ describe('every counter is now claimed, and each one is proved so', () => {
       evaluateGate({
         ...base,
         message: { ...base.message, service: 'sms' },
+      }),
+    ).toEqual({
+      allow: true,
+      mode: 'draft-only',
+      clampedBy: 'sms-auto-forbidden',
+    });
+    expect(
+      evaluateGate({
+        ...base,
+        message: { ...base.message, service: 'sms' },
+        settings: { ...base.settings, allowSmsAuto: true },
       }),
     ).toEqual({ allow: true, mode: 'auto' });
   });

@@ -45,20 +45,26 @@
  * which cause wins. `circuit-breaker.spec.ts` recorded the same deferral for
  * the same reason and this suite follows it verbatim.
  *
- * **The one stand-in, named.** `autoApproveAndSend` is Sc 9's
- * `maybeAutoApprove` in miniature: it writes the `{kind:'system',
- * reason:'auto-respond'}` approval, drives `pending -> approved` through the
- * store's transition, spends the auto budget through the production
- * `bumpSendCounters`, and then lets the REAL scheduler, the REAL
- * `dispatchApproved` and the REAL verify poll carry it out. Nothing about
- * the send is faked: the `sent` draft and the `send_ledger` row it leaves are
- * the same rows a live auto send will leave, which is what makes them the
- * right rows for `consecutiveAutoInChat` to count. What it stands in for is
- * only the DECISION to approve, and only because the function that will make
- * that decision lands in the next scenario. It writes the approval through
- * the store rather than through core's pure transition table on purpose: C-1
- * still refuses a system `auto-respond` actor on the approve edge, and
- * widening C-1 is Sc 9's named work, not this suite's.
+ * **The stand-in is gone (s6 Sc 9).** This suite shipped with one hand-built
+ * helper, `autoApproveAndSend`, which wrote the `{kind:'system',
+ * reason:'auto-respond'}` approval itself because the function that makes
+ * that decision did not exist yet. Sc 9 landed `maybeAutoApprove` and wired
+ * it into the mint, so the helper's entire first half became not just
+ * unnecessary but WRONG: the real auto-approval now happens inside
+ * `draft.submit`, before `turn()` can return, and the stand-in's
+ * `pending -> approved` transition started failing with "draft is
+ * 'approved'". Rather than route around the production path, the helper was
+ * inverted. It is now `autoSend`, and it ASSERTS what it used to fake: the
+ * draft is already approved by the time anyone looks, and the approval bears
+ * the system actor. Then it does what it always did, which was never faked,
+ * advance past the undo grace and let the REAL scheduler, the REAL
+ * `dispatchApproved` and the REAL verify poll carry the send out.
+ *
+ * That inversion is worth more than the nine call sites it touches: every
+ * `consecutiveAutoInChat` count and every `recentSentBodies` entry this
+ * suite measures is now produced by the code that will produce them in the
+ * field, so Sc 8's loop defences are being fed by Sc 9's autonomy rather
+ * than by a test's impression of it.
  *
  * Every cap and limit this suite moves is written visibly in the test body or
  * in a helper named at its call site (F-66 — a raise that is invisible in
@@ -70,7 +76,6 @@
  * Handles are synthetic (`+1555…`); no real iMessage content.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { monotonicFactory } from 'ulid';
 import type {
   AuditEvent,
   ChatGuid,
@@ -81,7 +86,6 @@ import type {
   Rule,
 } from '@wemessage/core';
 import {
-  bumpSendCounters,
   evaluateGate,
   evaluateRules,
   normalizeBody,
@@ -126,10 +130,9 @@ const RULE_ID = `${'0'.repeat(24)}R1`;
 const HANDLE_B: Handle = '+15557654321';
 const CHAT_B: ChatGuid = 'iMessage;-;+15557654321';
 /** `DEFAULT_UNDO_GRACE_SECONDS` (routes/drafts.ts) in ms; F-78 gives autonomy
- *  a real grace rather than zero, so the stand-in takes the same one. */
+ *  a real grace rather than zero, and `send.autoGraceSeconds` defaults to the
+ *  operator's own, so one constant covers both paths in this suite. */
 const GRACE_MS = 10_000;
-
-const newUlid = monotonicFactory();
 
 function makeRule(): Rule {
   return {
@@ -306,28 +309,28 @@ async function turn(
   };
 }
 
-/** Sc 9's `maybeAutoApprove`, stood in for by hand — see the header. */
-async function autoApproveAndSend(
-  h: Harness,
-  draftId: string,
-  handle: Handle = HANDLE,
-): Promise<void> {
-  const at = h.clockCtl.clock.now();
-  h.store.applyDraftTransition({
-    id: draftId,
-    from: 'pending',
-    to: 'approved',
-    at,
-    sendNotBefore: new Date(Date.parse(at) + GRACE_MS).toISOString(),
-  });
-  h.store.insertApproval({
-    id: newUlid(Date.parse(at)),
-    draftId,
-    action: 'approve',
-    actor: { kind: 'system', reason: 'auto-respond' },
-    at,
-  });
-  bumpSendCounters(h.store, { now: at, auto: true, handle });
+/**
+ * The auto path, end to end and entirely real (s6 Sc 9) — see the header.
+ *
+ * Nothing here decides anything. `maybeAutoApprove` already ran, inside the
+ * mint, in the same turn as the `draft.submit` frame, which is why the two
+ * assertions at the top are safe to make without waiting: by the time
+ * `turn()` observed the draft row at all, the decision behind it had already
+ * been written. Both are asserted at every call site on purpose. A row that
+ * expects an auto SEND is only measuring what it thinks it is if the send was
+ * auto-DECIDED, and a suite about runaway autonomy would be hollow if its
+ * "machine turns" had quietly become human ones.
+ *
+ * The auto grace is `send.autoGraceSeconds`, which defaults to
+ * `send.undoGraceSeconds` (F-78), so `GRACE_MS` remains the right advance.
+ */
+async function autoSend(h: Harness, draftId: string): Promise<void> {
+  expect(h.store.getDraft(draftId)?.state, 'auto-approved at the mint').toBe(
+    'approved',
+  );
+  expect(h.store.listApprovals(draftId).map((a) => a.actor)).toEqual([
+    { kind: 'system', reason: 'auto-respond' },
+  ]);
   h.clockCtl.advance(GRACE_MS);
   await h.scheduler.tick();
   expect(h.store.getDraft(draftId)?.state).toBe('sent');
@@ -397,7 +400,7 @@ async function threeAutoTurns(a: Armed): Promise<void> {
   for (let i = 1; i <= 3; i += 1) {
     const t = await turn(a, `reply ${String(i)}`);
     expect(t.mode, `turn ${String(i)}`).toBe('auto');
-    await autoApproveAndSend(a.h, t.draft.id);
+    await autoSend(a.h, t.draft.id);
   }
 }
 
@@ -438,7 +441,7 @@ describe('s6 Sc8 row 1: the consecutive-auto streak', () => {
     expect(counters(a.h).consecutiveAutoInChat).toBe(0);
     for (let i = 1; i <= 3; i += 1) {
       const t = await turn(a, `reply ${String(i)}`);
-      await autoApproveAndSend(a.h, t.draft.id);
+      await autoSend(a.h, t.draft.id);
       expect(counters(a.h).consecutiveAutoInChat, `after ${String(i)}`).toBe(i);
     }
     // Derived, not stored (F-62): nothing was written to hold this number.
@@ -482,7 +485,7 @@ describe('s6 Sc8 row 2: a human approval resets the streak', () => {
 
     const fifth = await turn(a, 'reply 5');
     expect(fifth.mode).toBe('auto');
-    await autoApproveAndSend(a.h, fifth.draft.id);
+    await autoSend(a.h, fifth.draft.id);
     // One, rather than four. The streak is the LEADING run, newest first.
     expect(counters(a.h).consecutiveAutoInChat).toBe(1);
     expect(auditOf(a.h, 'gate.denied')).toEqual([]);
@@ -518,7 +521,7 @@ describe('s6 Sc8 row 3: a 30-second inbound pause resets the streak', () => {
 
     const fourth = await turn(a, 'reply 4');
     expect(fourth.mode).toBe('auto');
-    await autoApproveAndSend(a.h, fourth.draft.id);
+    await autoSend(a.h, fourth.draft.id);
     // And the reset is a reset, not an erasure: the run behind this send is
     // four long in the table and reads as four again, because the gap that
     // suppressed it has now been closed by a fresh auto send.
@@ -582,7 +585,7 @@ describe('s6 Sc8 row 5: near-duplicate denial', () => {
     streakOutOfTheWay(a.h);
 
     const sent = await turn(a, 'Sure!');
-    await autoApproveAndSend(a.h, sent.draft.id);
+    await autoSend(a.h, sent.draft.id);
     expect(a.h.store.recentSentBodies(CHAT, 5)).toEqual(['Sure!']);
 
     for (const collides of ['sure', '  SURE  ', 'Sure.', 'Sure!']) {
@@ -610,7 +613,7 @@ describe('s6 Sc8 row 5: near-duplicate denial', () => {
     capsOutOfTheWay(a.h);
     streakOutOfTheWay(a.h);
     const sent = await turn(a, 'Sure!');
-    await autoApproveAndSend(a.h, sent.draft.id);
+    await autoSend(a.h, sent.draft.id);
     // The lookback is bodies WE SENT, not messages in the chat: the inbound
     // that triggered all of this is in `inbound_messages` with its own text
     // and is not a candidate for comparison.
@@ -647,7 +650,7 @@ describe('s6 Sc8 row 6: the lookback is exactly five', () => {
 
     for (let i = 1; i <= 6; i += 1) {
       const t = await turn(a, `body ${String(i)}`);
-      await autoApproveAndSend(a.h, t.draft.id);
+      await autoSend(a.h, t.draft.id);
     }
     // Newest first, and exactly five of them.
     expect(a.h.store.recentSentBodies(CHAT, 5)).toEqual([
@@ -727,7 +730,7 @@ describe('s6 Sc8 row 7: both mechanisms are advisory to autonomy only', () => {
     capsOutOfTheWay(a.h);
     streakOutOfTheWay(a.h);
     const sent = await turn(a, 'Sure!');
-    await autoApproveAndSend(a.h, sent.draft.id);
+    await autoSend(a.h, sent.draft.id);
     // The machine would be stopped here...
     expect(decisionAt(a.h, { candidateBody: '  SURE  ' })).toMatchObject({
       clampedBy: 'loop-detected',
@@ -846,7 +849,7 @@ describe('s6 Sc8 row 9: composed — the §1.7 step-7 order, asserted', () => {
     // literal on purpose (§1.7), so there is exactly one thing to record.
     for (let i = 1; i <= 3; i += 1) {
       const t = await turn(a, `same ${String(i)}`);
-      await autoApproveAndSend(a.h, t.draft.id);
+      await autoSend(a.h, t.draft.id);
     }
     const decision = decisionAt(a.h, { candidateBody: 'SAME 3!' });
     expect(decision).toEqual({

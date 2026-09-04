@@ -27,6 +27,7 @@
     "ulid": "^3.0.0"
   },
   "devDependencies": {
+    "@wemessage/adapter-echo": "workspace:*",
     "@wemessage/client": "workspace:*",
     "@wemessage/fixtures": "workspace:*",
     "ws": "^8.0.0",

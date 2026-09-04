@@ -139,6 +139,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.0
         version: 8.18.1
+      '@wemessage/adapter-echo':
+        specifier: workspace:*
+        version: link:../adapters/echo
       '@wemessage/client':
         specifier: workspace:*
         version: link:../client

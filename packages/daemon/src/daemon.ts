@@ -519,7 +519,11 @@ export async function startDaemon(
       counts: {
         messagesToday: store.countInboundMessagesSince(utcMidnight()),
       },
-      adapters: [], // Open flag F-5: adapter health lands S5
+      // s5 Sc14: F-5's adapter list, filled in by the slice that made
+      // adapter health a real column. `AdapterRecord` carries `hasToken`
+      // and no hash of any kind (F-43), so the status payload cannot leak
+      // credential material by construction.
+      adapters: store.listAdapters(),
       killSwitch: null, // S4
       armed: null, // S6
     }),

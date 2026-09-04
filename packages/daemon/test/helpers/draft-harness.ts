@@ -123,6 +123,14 @@ export interface BootOptions {
    * row that refuses an agent's proposal, in the same process.
    */
   send?: boolean;
+  /**
+   * s5 Sc14: also register the S2 rule + audit routes. Opt-in and off by
+   * default for the same reason `send` is: no suite gains a route it did not
+   * ask for. The one caller is `s5-e2e.spec`, which drives §4.2's demo
+   * through the operator's own surfaces (`POST /v1/rules`, and the
+   * `wemessage audit verify` CLI, which reads `GET /v1/audit/verify`).
+   */
+  rules?: boolean;
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -183,6 +191,9 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const server = await buildServer({
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink },
+    ...(opts.rules === true
+      ? { rules: { store, clock: clockCtl.clock, sink } }
+      : {}),
     ...(opts.send === true
       ? {
           send: {

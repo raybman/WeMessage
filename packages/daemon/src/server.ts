@@ -250,12 +250,16 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   app.get('/v1/status', () => {
     counters.handlerCalls += 1;
     // F-5 proposed S1 payload: nulls for S4/S6 concepts, never fake values.
+    // s5 Sc14: `adapters` is the one F-5 field this slice can finally fill —
+    // adapter health lands here, so the registry IS the answer. It stays an
+    // empty list on a server booted without adapters, which is the honest
+    // reading of "there are none", not a placeholder.
     return (
       opts.getStatus?.() ?? {
         connectionState: 'disconnected',
         cursor: null,
         counts: { messagesToday: 0 },
-        adapters: [],
+        adapters: opts.adapters?.store.listAdapters() ?? [],
         killSwitch: null,
         armed: null,
       }

@@ -603,12 +603,20 @@ describe('a deny is never expressed as a clamp (s6 Scenario 4 row 8)', () => {
  * That shrinking is the point of keeping the row at all. A "we do not read
  * this" pin that is not narrowed the moment a field is claimed becomes a
  * green test asserting a lie, and the next scenario reads the lie as
- * permission. s6 Sc 7 has now claimed `circuitOpen`, so the row is down to
- * `consecutiveAutoInChat` alone; Sc 8 takes it, and this row should be empty
- * when it does.
+ * permission. s6 Sc 8 has now claimed `consecutiveAutoInChat`, the last one,
+ * so the unread half of this describe is EMPTY and every `GateCounters` field
+ * is live. What remains is the claimed half: each field proved to change a
+ * decision, so nobody can narrow a "we do not read this" row by deleting a
+ * field instead of implementing it.
  */
-describe('what this scenario deliberately still does NOT read', () => {
-  it('a runaway auto streak changes no decision', () => {
+describe('every counter is now claimed, and each one is proved so', () => {
+  /**
+   * Was 'a runaway auto streak changes no decision' — the last unread-field
+   * row, INVERTED by s6 Sc 8 rather than deleted. Deleting it would have
+   * removed the only place that says what changed; inverting it says the
+   * streak is read now and pins WHICH literal it clamps with.
+   */
+  it('a runaway auto STREAK now clamps, which is what "claimed" means', () => {
     const base = ctx({
       globalMode: 'auto',
       contact: policy('auto'),
@@ -619,7 +627,7 @@ describe('what this scenario deliberately still does NOT read', () => {
         ...base,
         counters: { ...base.counters, consecutiveAutoInChat: 9999 },
       }),
-    ).toEqual({ allow: true, mode: 'auto' });
+    ).toEqual({ allow: true, mode: 'draft-only', clampedBy: 'loop-detected' });
   });
 
   /**

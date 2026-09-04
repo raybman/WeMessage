@@ -46,6 +46,7 @@ import {
   auditActors,
   auditEvents,
   boot,
+  CHAT,
   cleanupHarness,
   createDraft,
   HANDLE,
@@ -74,6 +75,7 @@ function circuitOpen(h: Harness): boolean {
   return readGateCounters(h.store, {
     now: h.clockCtl.clock.now(),
     handle: HANDLE,
+    chatGuid: CHAT,
   }).circuitOpen;
 }
 

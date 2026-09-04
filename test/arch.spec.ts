@@ -997,8 +997,8 @@ describe('arch invariants (dependency-cruiser)', () => {
     // allowed to name it TODAY. Sc 4/6/7/8/9 each edit their own row here,
     // in their own commit, as the literal starts being emitted. Claimed so
     // far: 'outside-window' (Sc 4/5), 'rate-limited' (Sc 6), 'circuit-open'
-    // (Sc 7). 'loop-detected' and 'sms-auto-forbidden' are still at their S1
-    // shape.
+    // (Sc 7), 'loop-detected' (Sc 8). Only 'sms-auto-forbidden' is still at
+    // its S1 shape.
     const DORMANT_DENY_LITERALS: ReadonlyArray<
       readonly [string, readonly string[]]
     > = [
@@ -1074,6 +1074,19 @@ describe('arch invariants (dependency-cruiser)', () => {
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
+          // s6 Scenario 8, the FIFTH deliberate edit to this guard and the
+          // fourth dormant literal to be claimed: `evaluateGate` clamps to
+          // 'draft-only' with `clampedBy: 'loop-detected'` when a chat has
+          // run three consecutive machine turns, or when the body about to
+          // go out normalises to one of the last five we sent there (F-62).
+          // ONE file, and one literal for both mechanisms (C-6) — they are
+          // the same fact about the world and an operator can do the same
+          // one thing about either. Still a clamp and not a denial; no
+          // `gate.denied` row exists for it yet, and the send-moment refusal
+          // is Sc 10's (F-59). If a second file ever spells this literal,
+          // that is a second place deciding what a loop is, and this guard
+          // is how it gets noticed.
+          'packages/core/src/gate/index.ts',
         ],
       ],
       [

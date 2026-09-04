@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ContactPolicy, GateContext, Store } from '@wemessage/core';
 import {
+  DEFAULT_LOOP_LIMITS,
   DEFAULT_RATE_CAPS,
   evaluateGate,
   readGateSettings,
@@ -22,6 +23,8 @@ import {
   SETTING_CONNECTION_STATE,
   SETTING_GLOBAL_MODE,
   SETTING_KILL_SWITCH,
+  SETTING_LOOP_CONSECUTIVE_AUTO_MAX,
+  SETTING_LOOP_DUPLICATE_LOOKBACK,
 } from '@wemessage/core';
 
 const NOW = '2026-09-01T12:00:00.000Z';
@@ -103,7 +106,8 @@ describe('readGateSettings (s3 Scenario 6)', () => {
   // s6 Scenario 6 widened this function from four keys to seven: the three
   // rate caps are settings and are read where the other settings are read,
   // so an operator's raise takes effect at every gate call site at once
-  // rather than at whichever one remembered to look.
+  // rather than at whichever one remembered to look. s6 Scenario 8 widened it
+  // again to nine, for the two loop limits, on the same argument.
   it('every key it reads, set: reflected verbatim', () => {
     const store = fakeSettingsStore({
       [SETTING_KILL_SWITCH]: '1',
@@ -113,6 +117,8 @@ describe('readGateSettings (s3 Scenario 6)', () => {
       [SETTING_CAP_CONTACT_PER_2MIN]: '5',
       [SETTING_CAP_CONTACT_PER_HOUR]: '20',
       [SETTING_CAP_GLOBAL_PER_HOUR]: '60',
+      [SETTING_LOOP_CONSECUTIVE_AUTO_MAX]: '4',
+      [SETTING_LOOP_DUPLICATE_LOOKBACK]: '9',
     });
     expect(readGateSettings(store)).toEqual({
       killSwitch: true,
@@ -120,6 +126,7 @@ describe('readGateSettings (s3 Scenario 6)', () => {
       connectionState: 'fully-connected',
       allowSmsAuto: true,
       caps: { contactPer2Min: 5, contactPerHour: 20, globalPerHour: 60 },
+      loop: { consecutiveAutoMax: 4, duplicateLookback: 9 },
     });
   });
 
@@ -131,8 +138,10 @@ describe('readGateSettings (s3 Scenario 6)', () => {
       connectionState: 'disconnected',
       allowSmsAuto: false,
       // Note the direction: unset caps are NOT "unlimited". Fail-safe for a
-      // cap means the shipped bound applies (F-66).
+      // cap means the shipped bound applies (F-66). Same for the loop limits:
+      // an unset breaker is an ARMED breaker, not an absent one.
       caps: DEFAULT_RATE_CAPS,
+      loop: DEFAULT_LOOP_LIMITS,
     });
   });
 
@@ -147,6 +156,7 @@ describe('readGateSettings (s3 Scenario 6)', () => {
       connectionState: 'disconnected',
       allowSmsAuto: false,
       caps: DEFAULT_RATE_CAPS,
+      loop: DEFAULT_LOOP_LIMITS,
     });
   });
 

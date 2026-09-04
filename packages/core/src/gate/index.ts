@@ -12,11 +12,13 @@
  * TEXT table; there is no boolean column type to lean on).
  */
 import type {
+  ChatGuid,
   GateContext,
   GateDecision,
   GateDenyReason,
   Handle,
   IsoUtc,
+  LoopLimits,
   RateCaps,
   RespondMode,
 } from '../domain/types.js';
@@ -103,6 +105,10 @@ export function readGateSettings(
     // function, which is what makes an operator's raise take effect
     // everywhere at once instead of at whichever call site remembered.
     caps: readRateCaps(store),
+    // s6 Scenario 8: same reasoning as the caps one line up. Both loop limits
+    // are operator settings, so they are read where every other setting is
+    // read and a raise takes effect at every call site at once.
+    loop: readLoopLimits(store),
   };
 }
 
@@ -302,6 +308,102 @@ export function circuitOpenUntil(
   return Date.parse(now) < until ? new Date(until).toISOString() : null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Loop prevention (s6 Scenario 8, §1.7 "Loop prevention"; F-62)
+ * ------------------------------------------------------------------ */
+
+/** Consecutive machine turns in one chat before autonomy is withheld (default 3, floor 1). */
+export const SETTING_LOOP_CONSECUTIVE_AUTO_MAX = 'send.loopConsecutiveAutoMax';
+/** How many of our own recent sends a body is compared against (default 5, floor 1). */
+export const SETTING_LOOP_DUPLICATE_LOOKBACK = 'send.loopDuplicateLookback';
+
+/** The shipped limits, applied whenever a `GateContext` omits its own. */
+export const DEFAULT_LOOP_LIMITS: LoopLimits = {
+  consecutiveAutoMax: 3,
+  duplicateLookback: 5,
+};
+
+/**
+ * The inbound gap that ends a machine streak (§2.4.3 as ratified by F-62).
+ *
+ * A constant rather than a setting, and deliberately so: this is not a knob
+ * for tuning how chatty the daemon may be (that is
+ * `send.loopConsecutiveAutoMax`), it is the definition of where one exchange
+ * stops and the next begins. Two people trading messages inside half a minute
+ * are in one conversation; a reply half a minute later is a new one.
+ */
+export const LOOP_STREAK_RESET_MS = 30_000;
+
+export function readLoopLimits(store: Pick<Store, 'getSetting'>): LoopLimits {
+  return {
+    consecutiveAutoMax: readCap(
+      store,
+      SETTING_LOOP_CONSECUTIVE_AUTO_MAX,
+      DEFAULT_LOOP_LIMITS.consecutiveAutoMax,
+    ),
+    duplicateLookback: readCap(
+      store,
+      SETTING_LOOP_DUPLICATE_LOOKBACK,
+      DEFAULT_LOOP_LIMITS.duplicateLookback,
+    ),
+  };
+}
+
+/**
+ * The comparison key for "we have already said this" (F-62).
+ *
+ * NFKC folds compatibility forms (a full-width 'Ｓｕｒｅ' is the same
+ * sentence); lowercase and whitespace collapse fold the ways a generator
+ * varies its own output without varying its meaning; leading and trailing
+ * punctuation folds 'Sure', 'Sure.' and 'Sure!' together. INTERIOR
+ * punctuation is left alone, because "I'll be there" and "Ill be there" are
+ * not obviously the same string and a normaliser that guesses is worse than
+ * one that does not.
+ *
+ * Exact equality afterwards, never edit distance or any similarity threshold
+ * (F-62). A fuzzy matcher would make the breaker's behaviour un-reviewable —
+ * an operator could not predict which of two messages it will refuse — and
+ * every threshold is a number nobody can defend. Two normalised strings are
+ * either the same or they are not.
+ *
+ * Exported because `rate-loop.spec.ts` asserts it directly: a normaliser is
+ * far easier to review than to infer from end-to-end outcomes.
+ */
+export function normalizeBody(body: string): string {
+  return body
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/^\p{P}+|\p{P}+$/gu, '')
+    .trim();
+}
+
+/**
+ * Build the duplicate half of a `GateContext` for a body about to be sent.
+ *
+ * Separate from `readGateCounters` because the two halves are available at
+ * different moments: the streak is knowable the instant a message arrives,
+ * the body is not knowable until an adapter has written one. A caller with no
+ * candidate omits `ctx.candidate` entirely and only the streak can clamp,
+ * which is exactly the inbound draft moment.
+ *
+ * The bodies come back RAW; `normalizeBody` runs inside the pure gate. The
+ * store stays a ledger and the policy stays in one reviewable place.
+ */
+export function readLoopCandidate(
+  store: Pick<Store, 'getSetting' | 'recentSentBodies'>,
+  input: { chatGuid: ChatGuid; body: string },
+): NonNullable<GateContext['candidate']> {
+  return {
+    body: input.body,
+    recentSentBodies: store.recentSentBodies(
+      input.chatGuid,
+      readLoopLimits(store).duplicateLookback,
+    ),
+  };
+}
+
 /**
  * Read the autonomy history a gate decision is measured against (§1.7).
  *
@@ -310,13 +412,14 @@ export function circuitOpenUntil(
  * 59 seconds and make "121 seconds later" arrive early. Only the stored
  * bucket is minute-aligned; the edge that sweeps over it is not.
  *
- * `consecutiveAutoInChat` and `circuitOpen` are still placeholders — Sc 8 and
- * Sc 7 own them, and this function is where they will be read from the same
- * store handle.
+ * Every field is now read for real; nothing here is a placeholder.
  */
 export function readGateCounters(
-  store: Pick<Store, 'sumRateCounter' | 'getSetting'>,
-  input: { now: IsoUtc; handle: Handle },
+  store: Pick<
+    Store,
+    'sumRateCounter' | 'getSetting' | 'consecutiveAutoInChat' | 'lastAutoSentAt'
+  >,
+  input: { now: IsoUtc; handle: Handle; chatGuid: ChatGuid },
 ): GateContext['counters'] {
   const scope = contactRateScope(input.handle);
   return {
@@ -332,13 +435,49 @@ export function readGateCounters(
       RATE_SCOPE_GLOBAL,
       windowStart(input.now, RATE_WINDOW_HOUR_MS),
     ),
-    consecutiveAutoInChat: 0,
+    // s6 Scenario 8: derived from `drafts` + `approvals` (F-62), then zeroed
+    // when the pause since our last auto-send in this chat is longer than
+    // `LOOP_STREAK_RESET_MS`. The reset is applied HERE rather than in the
+    // store because it is a fact about `now`, and the store is not allowed a
+    // clock. Reading the streak second also means the common case (no
+    // machine turns behind us) costs one indexless scan, not two.
+    consecutiveAutoInChat: streakSince(store, input.now, input.chatGuid),
     // s6 Scenario 7: derived, never stored as a boolean. `circuitOpenUntil`
     // compares the persisted instant against `now`, so a context built from a
     // clock that has moved past the horizon sees a closed breaker even if
     // nothing has swept yet — the gate cannot be stale.
     circuitOpen: circuitOpenUntil(store, input.now) !== null,
   };
+}
+
+/**
+ * The machine streak, with the inbound-pause reset applied (§2.4.3 / F-62).
+ *
+ * `now` is the instant of the message being answered, so the comparison is
+ * "how long had this chat been quiet before they spoke", which is the gap the
+ * plan names. Strictly greater than: 30 seconds exactly is still inside the
+ * same exchange, and the boundary is asserted at 29, 30 and 31.
+ *
+ * An unparseable stored instant is treated as no reset, which keeps the
+ * breaker armed. Every other direction here would let a bad row restore
+ * autonomy, and a loop breaker that fails open is not one.
+ */
+function streakSince(
+  store: Pick<Store, 'consecutiveAutoInChat' | 'lastAutoSentAt'>,
+  now: IsoUtc,
+  chatGuid: ChatGuid,
+): number {
+  const lastAuto = store.lastAutoSentAt(chatGuid);
+  if (lastAuto !== null) {
+    const lastMs = Date.parse(lastAuto);
+    if (
+      Number.isFinite(lastMs) &&
+      Date.parse(now) - lastMs > LOOP_STREAK_RESET_MS
+    ) {
+      return 0;
+    }
+  }
+  return store.consecutiveAutoInChat(chatGuid);
 }
 
 /**
@@ -506,9 +645,11 @@ function narrower(a: RespondMode, b: RespondMode): RespondMode {
  * about the window, which is the condition that will still be true after the
  * breaker closes itself.
  *
- * The loop breaker and the SMS clamp are the remaining conditions in this
- * step and land in their own scenarios (S6 Sc 8/9); until then
- * `readGateCounters` reports `consecutiveAutoInChat` as inert.
+ * The loop breaker joined the chain in Sc 8 and sits LAST of the four, which
+ * is the same ordering argument: an operator whose rate window is saturated
+ * and who is also repeating themselves should be told about the cap, the
+ * condition that will still be true a minute from now. The SMS clamp is the
+ * one remaining condition in this step and lands in S6 Sc 9.
  */
 export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.killSwitch) {
@@ -556,6 +697,9 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   } else if (ctx.counters.circuitOpen) {
     mode = 'draft-only';
     clampedBy = 'circuit-open';
+  } else if (loopDetected(ctx)) {
+    mode = 'draft-only';
+    clampedBy = 'loop-detected';
   }
 
   return {
@@ -600,4 +744,42 @@ function scheduleClosed(ctx: GateContext): boolean {
   if (rule === null || rule.scheduleId === null) return false;
   if (ctx.schedule === null) return true;
   return !isArmed(ctx.schedule, ctx.now);
+}
+
+/**
+ * Are we talking to ourselves (§1.7 "Loop prevention")?
+ *
+ * Two mechanisms, one answer, because they are one question. A run of
+ * machine turns and a repeated sentence are both "this exchange has stopped
+ * being a conversation", and giving them separate deny literals would ask an
+ * operator to care about a distinction that changes nothing they can do.
+ * C-6 pins the pair to `loop-detected`.
+ *
+ * The streak arrives pre-reset in `ctx.counters` (`streakSince`), so this is
+ * a comparison and not a policy. `>=` for the same reason `overRateCap` uses
+ * it: a max of 3 means three machine turns are allowed and the fourth is the
+ * one that clamps.
+ *
+ * `ctx.candidate` is absent at the inbound draft moment, when no body exists
+ * yet, and its absence means only the streak half can fire — never that the
+ * duplicate half passed. An empty normalisation is never a duplicate either:
+ * a body of nothing but punctuation collides with every other such body, and
+ * "we both said nothing" is not a loop worth withholding autonomy over.
+ *
+ * Limits come from the context, and a context that omits them is measured
+ * against `DEFAULT_LOOP_LIMITS` — the shipped values, which are the strictest
+ * this ships with, so forgetting to plumb them can only withhold autonomy.
+ */
+function loopDetected(ctx: GateContext): boolean {
+  const limits = ctx.settings.loop ?? DEFAULT_LOOP_LIMITS;
+  if (ctx.counters.consecutiveAutoInChat >= limits.consecutiveAutoMax) {
+    return true;
+  }
+  const candidate = ctx.candidate;
+  if (candidate === undefined) return false;
+  const normalised = normalizeBody(candidate.body);
+  if (normalised === '') return false;
+  return candidate.recentSentBodies.some(
+    (sent) => normalizeBody(sent) === normalised,
+  );
 }

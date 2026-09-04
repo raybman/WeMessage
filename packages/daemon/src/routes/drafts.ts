@@ -362,7 +362,10 @@ export function registerDraftRoutes(
       // AUTONOMY, and there is no autonomy left to withhold here: a human is
       // approving this draft by hand. The one cap that binds a person is the
       // global bound, and it binds as a REFUSAL rather than a clamp, so it is
-      // enforced explicitly below where a 403 can be returned.
+      // enforced explicitly below where a 403 can be returned. s6 Sc 8 adds
+      // the loop clamps to the same reading: a breaker that vetoes a person
+      // is a bug, so a human may approve a duplicate or a streak-clamped
+      // draft and it goes out (`rate-loop.spec.ts` row 7).
       counters: {
         contactAutoLast2Min: 0,
         contactAutoLastHour: 0,

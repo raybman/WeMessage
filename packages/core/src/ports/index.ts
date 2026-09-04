@@ -153,6 +153,42 @@ export interface Store {
    */
   countSendFailuresSince(sinceInclusive: IsoUtc): number;
 
+  // --- autonomy history (s6 §1.5, Scenario 8; F-62 derived) ---
+  /**
+   * Leading run of system-'auto-respond' approvals among this chat's sent
+   * drafts, newest first, stopping at the first human-authored approval.
+   *
+   * Derived, not stored (F-62). `drafts` already records what we sent and
+   * `approvals` already records who authorised it; a `consecutive_auto`
+   * counter would be a second source of truth for a fact the two tables
+   * jointly hold, and it would drift the first time a draft was recalled.
+   * The walk is newest-first and stops at the first non-auto approval, so the
+   * work is bounded by the run length rather than by the chat's history.
+   *
+   * A sent draft with NO approve approval also stops the run. That cannot
+   * happen through the dispatcher (INV-2 makes approval the only door to a
+   * send), so if it ever does, the honest reading is "we do not know who
+   * authorised this" and the safe answer is to end the machine streak there.
+   */
+  consecutiveAutoInChat(chatGuid: ChatGuid): number;
+  /**
+   * Bodies of the last `limit` drafts WE sent in this chat, newest first
+   * (F-62). Raw as stored: normalisation is core's (`normalizeBody`), because
+   * the comparison rule is policy and the store is a ledger.
+   */
+  recentSentBodies(chatGuid: ChatGuid, limit: number): string[];
+  /**
+   * Instant of the most recent verified auto-send in a chat, for the 30-second
+   * inbound-pause streak reset (§2.4.3 as ratified by F-62); null when this
+   * chat has never auto-sent.
+   *
+   * "Auto" rather than "any send" tracks the method name and §1.7. The two
+   * readings can only differ when the latest send was human-approved, and a
+   * human approval has already reset the streak to zero, so the distinction
+   * cannot change a decision.
+   */
+  lastAutoSentAt(chatGuid: ChatGuid): IsoUtc | null;
+
   // --- inbound mirror (dry-run replay + mutation visibility; s2 §1.5) ---
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */
   listRecentInboundMessages(limit: number): Message[];

@@ -9,6 +9,7 @@ import type {
   AttachmentRef,
   AuditAppendResult,
   AuditRow,
+  ChatGuid,
   Clock,
   ContactPolicy,
   CursorState,
@@ -370,6 +371,10 @@ export class SqliteStore implements Store {
   // --- s6 §1.5 (Scenario 7): circuit breaker, derived + settings-only ---
   readonly #countSendFailuresSince: Database.Statement;
   readonly #deleteSetting: Database.Statement;
+  // --- s6 §1.5 (Scenario 8): autonomy history, derived from drafts+approvals ---
+  readonly #sentActorsInChat: Database.Statement;
+  readonly #recentSentBodies: Database.Statement;
+  readonly #lastAutoSentAt: Database.Statement;
   readonly #listRecentInbound: Database.Statement;
   readonly #getInbound: Database.Statement;
   readonly #updateInbound: Database.Statement;
@@ -548,6 +553,53 @@ export class SqliteStore implements Store {
         "AND COALESCE(json_extract(error, '$.code'), '') != 'gate-denied'",
     );
     this.#deleteSetting = this.db.prepare('DELETE FROM settings WHERE key = ?');
+    // s6 Scenario 8 (F-62 derived): the machine streak, newest sent draft
+    // first, each row carrying the actor of that draft's latest approve.
+    //
+    // The ORDER BY is over `drafts` alone and the approval lookup is a
+    // correlated subquery in the SELECT list, which is what lets the reader
+    // `.iterate()` and stop at the first human: SQLite evaluates that
+    // subquery per stepped row, so the approval work is bounded by the run
+    // length rather than by the chat's whole history. Sorting a joined result
+    // instead would cost every send in the chat before the first row came
+    // back. C-8 keeps the repo index-free, so the draft sort is a temp
+    // b-tree over one chat's sends, which on a single-operator daemon is
+    // small.
+    //
+    // NULL here means a sent draft with no approve approval. INV-2 says that
+    // row cannot exist; if it ever does, the reader ends the run on it,
+    // because "we do not know who authorised this send" must not read as
+    // "a machine did".
+    this.#sentActorsInChat = this.db.prepare(
+      'SELECT (SELECT a.actor FROM approvals a WHERE a.draft_id = d.id ' +
+        "AND a.action = 'approve' ORDER BY a.at DESC, a.id DESC LIMIT 1) " +
+        'AS actor FROM drafts d ' +
+        "WHERE d.chat_guid = ? AND d.state = 'sent' " +
+        'ORDER BY d.state_changed_at DESC, d.id DESC',
+    );
+    // Bodies as stored. Normalisation lives in core (`normalizeBody`) because
+    // what counts as "the same message" is policy, and the store is a ledger.
+    this.#recentSentBodies = this.db.prepare(
+      "SELECT body FROM drafts WHERE chat_guid = ? AND state = 'sent' " +
+        'ORDER BY state_changed_at DESC, id DESC LIMIT ?',
+    );
+    // Same latest-approve join as `#listGraceElapsed`, filtered to the system
+    // 'auto-respond' actor. json_extract over `approvals.actor` for the same
+    // reason `#countSendFailuresSince` uses it over `drafts.error`: the fact
+    // is already in a JSON blob and a second column would be a second source
+    // of truth. A NULL/unparseable actor yields NULL, `NULL = 'system'` is
+    // NULL, and SQLite treats that as false — here the fail-closed direction,
+    // since an unreadable actor must not extend a machine streak's clock.
+    this.#lastAutoSentAt = this.db.prepare(
+      'SELECT d.state_changed_at AS at FROM drafts d ' +
+        'JOIN approvals a ON a.draft_id = d.id ' +
+        'AND a.id = (SELECT a2.id FROM approvals a2 WHERE a2.draft_id = d.id ' +
+        "AND a2.action = 'approve' ORDER BY a2.at DESC, a2.id DESC LIMIT 1) " +
+        "WHERE d.chat_guid = ? AND d.state = 'sent' " +
+        "AND json_extract(a.actor, '$.kind') = 'system' " +
+        "AND json_extract(a.actor, '$.reason') = 'auto-respond' " +
+        'ORDER BY d.state_changed_at DESC, d.id DESC LIMIT 1',
+    );
     this.#listRecentInbound = this.db.prepare(
       'SELECT * FROM inbound_messages ORDER BY received_at DESC LIMIT ?',
     );
@@ -1040,6 +1092,47 @@ export class SqliteStore implements Store {
   countSendFailuresSince(sinceInclusive: IsoUtc): number {
     return (this.#countSendFailuresSince.get(sinceInclusive) as { n: number })
       .n;
+  }
+
+  /**
+   * Leading run of system-'auto-respond' approvals among this chat's sent
+   * drafts, newest first (§1.7 / F-62). `.iterate()` rather than `.all()`:
+   * the answer is a prefix, so the walk stops at the first human and the
+   * query is never asked for the rest. A `LIMIT` sized to the default cap
+   * would have been cheaper and wrong — an operator raising
+   * `send.loopConsecutiveAutoMax` above the scan bound would silently uncap
+   * the breaker, which is the one direction this must not fail in.
+   */
+  consecutiveAutoInChat(chatGuid: ChatGuid): number {
+    let run = 0;
+    const rows = this.#sentActorsInChat.iterate(chatGuid) as Iterable<{
+      actor: string | null;
+    }>;
+    for (const row of rows) {
+      if (row.actor === null) break;
+      const actor = JSON.parse(row.actor) as Actor;
+      if (actor.kind !== 'system' || actor.reason !== 'auto-respond') break;
+      run += 1;
+    }
+    return run;
+  }
+
+  /** Newest first, raw as stored; core normalises before comparing (F-62). */
+  recentSentBodies(chatGuid: ChatGuid, limit: number): string[] {
+    return (
+      this.#recentSentBodies.all(chatGuid, limit) as { body: string }[]
+    ).map((row) => row.body);
+  }
+
+  /**
+   * Most recent verified auto-send in a chat, for the 30-second inbound-pause
+   * streak reset. `state_changed_at` is the instant `markDraftSent` stamped,
+   * which is the verified send, not the approval.
+   */
+  lastAutoSentAt(chatGuid: ChatGuid): IsoUtc | null {
+    const row = this.#lastAutoSentAt.get(chatGuid) as
+      { at: string } | undefined;
+    return row === undefined ? null : row.at;
   }
 
   listRecentInboundMessages(limit: number): Message[] {

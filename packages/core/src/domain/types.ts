@@ -214,11 +214,37 @@ export interface RateCaps {
   globalPerHour: number;
 }
 
+/**
+ * The two loop-breaker limits (§1.7, F-62). Same posture as `RateCaps`:
+ * default-on, floored at 1 on read, with no value that disables either.
+ *
+ * `consecutiveAutoMax` bounds how many times in a row the machine may answer
+ * one chat without a person in the loop; `duplicateLookback` bounds how far
+ * back the near-duplicate comparison reaches. Both are counts, not durations:
+ * the one duration in this mechanism is `LOOP_STREAK_RESET_MS`, and it is a
+ * constant rather than a setting because it is a claim about how humans and
+ * bots differ, not an operator preference.
+ */
+export interface LoopLimits {
+  /** Consecutive machine turns in one chat before autonomy is withheld. */
+  consecutiveAutoMax: number;
+  /** How many of our own recent sends a candidate body is compared against. */
+  duplicateLookback: number;
+}
+
 export interface GateContext {
   now: IsoUtc;                             // injected Clock (never Date.now in core)
   settings: { killSwitch: boolean; globalMode: RespondMode;
               connectionState: 'fully-connected'|'read-only'|'disconnected';
               allowSmsAuto: boolean;
+              /**
+               * s6 Scenario 8 (F-62), additive and optional on the same
+               * precedent as `caps` directly below: `readGateSettings`
+               * always populates it, and a context that omits it is measured
+               * against `DEFAULT_LOOP_LIMITS`, so a forgotten field can only
+               * withhold autonomy and never grant it.
+               */
+              loop?: LoopLimits;
               /**
                * s6 Scenario 6 (F-66), additive and optional under the F-30
                * precedent: `readGateSettings` always populates it, and a
@@ -258,4 +284,23 @@ export interface GateContext {
   counters: { contactAutoLast2Min: number; contactAutoLastHour: number;
               globalSentLastHour: number;
               consecutiveAutoInChat: number; circuitOpen: boolean };
+  /**
+   * s6 Scenario 8 (F-62): what we are about to SAY, and the last few things
+   * we already said in this chat. Additive and optional under the `caps` /
+   * `agentOrigin` precedent.
+   *
+   * It is a field of its own rather than part of `message` because `message`
+   * is the INBOUND one — the thing somebody else wrote — and the near-
+   * duplicate check is about our own output. It is optional because at the
+   * INBOUND draft moment there is genuinely nothing to compare: no draft
+   * body exists yet, so `adapters/dispatch.ts` omits it and only the streak
+   * half of the loop breaker can fire there. Sc 9's auto-approval and Sc 10's
+   * send-moment re-gate both run after a body exists, and both populate it
+   * through `readLoopCandidate`.
+   *
+   * `recentSentBodies` is raw, not pre-normalised: normalisation is the
+   * gate's own business (§1.7), and a caller that normalised for us could
+   * silently disagree with the function doing the comparing.
+   */
+  candidate?: { body: string; recentSentBodies: readonly string[] };
 }

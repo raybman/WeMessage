@@ -188,7 +188,14 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
         handle: message.handle,
         chatGuid: message.chatGuid,
       },
-      counters: readGateCounters(store, { now, handle: message.handle }),
+      counters: readGateCounters(store, {
+        now,
+        handle: message.handle,
+        chatGuid: message.chatGuid,
+      }),
+      // No `candidate`: at the INBOUND moment no draft body exists yet, so
+      // only the streak half of the loop breaker can clamp here (s6 Sc 8).
+      // The duplicate half needs a body and belongs to the send moment.
     });
     if (!decision.allow) return refuse(decision.reason);
     // The §1.7 variance, and the only place a CLAMP stops anything at this

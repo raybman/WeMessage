@@ -103,6 +103,8 @@ export interface BootOptions {
   /** Reuse an already-built chat.db (required when reusing `dir`). */
   fixture?: ChatDbFixture;
   startIso?: string;
+  /** s5 Sc5: the adapter transport's hello deadline, injected for tests. */
+  helloDeadlineMs?: number;
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -165,7 +167,14 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     drafts: { store, clock: clockCtl.clock, sink },
     // s5 Scenario 4: the adapter registry rides along in the harness so the
     // agent-era suites boot the same server the composed daemon does.
-    adapters: { store, clock: clockCtl.clock, sink },
+    adapters: {
+      store,
+      clock: clockCtl.clock,
+      sink,
+      ...(opts.helloDeadlineMs !== undefined
+        ? { helloDeadlineMs: opts.helloDeadlineMs }
+        : {}),
+    },
   });
   servers.push(server);
   if (server.token === null) throw new Error('harness: no token');

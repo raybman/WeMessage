@@ -56,11 +56,25 @@ export const ROUTE_TABLE: readonly string[] = [
   // #14 deliberate (s5 Scenario 4): the adapter registry. Six routes plus
   // the two auto-HEAD twins of the GETs, 43 -> 51. The token a POST returns
   // is shown once and is not readable from any of these routes afterwards.
+  // #15 deliberate (s5 Scenario 5): GET /v1/agent, the WS adapter wire, plus
+  // its auto-HEAD twin — 51 -> 53. One route, two entries, because fastify's
+  // exposeHeadRoutes mints the twin for every GET and this ratchet counts
+  // reachable surface, not intent.
+  //
+  // This entry deserves more than a line. GET /v1/agent is the ONLY route
+  // that opts out of the operator-bearer onRequest hook (F-56): adapters
+  // authenticate with their own per-adapter `wm_` token inside the `hello`
+  // frame, so the upgrade itself is open and the first frame is the gate.
+  // The exemption is path-exact, GET-only, and conditional on the adapter
+  // registry being wired at all; an un-helloed socket may do nothing but
+  // send `hello`, and only until `helloDeadlineMs`. See server.ts's
+  // AGENT_PATH comment and adapters/transport.ts.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
   'GET /v1/adapters',
   'GET /v1/adapters/:id',
+  'GET /v1/agent',
   'GET /v1/audit',
   'GET /v1/audit/verify',
   'GET /v1/batches/:id',
@@ -76,6 +90,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/status',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
+  'HEAD /v1/agent',
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
   'HEAD /v1/batches/:id',
@@ -121,6 +136,11 @@ export const ROUTE_TABLE: readonly string[] = [
  * `connection.state` twin, once WS clients have seen the state flip.
  */
 export const WS_EVENT_VOCABULARY: readonly string[] = [
+  // #15 deliberate (s5 Scenario 5): the adapter transport broadcasts
+  // `adapter.health` on connect, on unhealthy and on disconnect. The variant
+  // has been in `GatewayEventPayload` since S1; this slice is the first time
+  // the daemon actually constructs it, so it joins BOTH lists in one diff.
+  'adapter.health',
   'connection.state',
   'draft.approved',
   'draft.created',
@@ -159,6 +179,8 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
  * batchId, which is already in the GatewayEvent shape.)
  */
 export const EMITTED_WS_EVENTS: readonly string[] = [
+  // #15 deliberate (s5 Scenario 5): constructed in adapters/transport.ts.
+  'adapter.health',
   'connection.state',
   'draft.approved',
   'draft.created',

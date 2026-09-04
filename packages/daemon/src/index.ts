@@ -60,3 +60,8 @@ export {
   type DoctorSnapshot,
   type RunDoctorDeps,
 } from './doctor.js';
+export {
+  createAdapterTransport,
+  type AdapterTransportDeps,
+  type AdapterTransportHandle,
+} from './adapters/transport.js';

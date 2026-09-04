@@ -132,6 +132,28 @@ export type AuditEvent =
     }
   | { type: 'adapter.token-rotated'; adapterId: string }
   | { type: 'adapter.deleted'; adapterId: string }
+  // s5 Scenario 5: the WS transport's own vocabulary (F-51). `no-send-frame`
+  // is deliberately NOT a gate deny — the C-6 taxonomy pin at the top of this
+  // file says so in as many words: a send frame is structurally impossible,
+  // so an attempt at one is evidence about the adapter, not a decision about
+  // a message. Giving it its own variant is what keeps `gate.denied` meaning
+  // "the gate said no" rather than "something adapter-ish went wrong".
+  | { type: 'adapter.connected'; adapterId: string }
+  | {
+      type: 'adapter.disconnected';
+      adapterId: string;
+      reason: 'closed' | 'revoked' | 'unhealthy';
+    }
+  // `adapterId` is OMITTED, never undefined, when the socket never named a
+  // real adapter (exactOptionalPropertyTypes; the row is still written —
+  // fail-closed refusals are exactly the ones worth keeping).
+  | {
+      type: 'adapter.auth-failed';
+      adapterId?: string;
+      reason: 'unknown-adapter' | 'bad-token' | 'disabled';
+    }
+  | { type: 'adapter.protocol-violation'; adapterId?: string; reason: string }
+  | { type: 'adapter.no-send-frame'; adapterId: string; frameType: string }
   | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)

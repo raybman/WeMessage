@@ -17,6 +17,10 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerRuleRoutes } from './routes/rules.js';
 import { registerDoctorRoutes } from './routes/doctor.js';
 import { registerAdapterRoutes } from './routes/adapters.js';
+import {
+  createAdapterTransport,
+  type AdapterTransportHandle,
+} from './adapters/transport.js';
 
 /**
  * The §2.6 local API port, used only to render the connect command an
@@ -95,7 +99,14 @@ export interface DaemonOptions {
    * from `drafts` because an operator can run the human compose surface with
    * no agents registered at all, which is the S1-S4 product.
    */
-  adapters?: { store: Store; clock: Clock; sink?: AuditSink; port?: number };
+  adapters?: {
+    store: Store;
+    clock: Clock;
+    sink?: AuditSink;
+    port?: number;
+    /** s5 Sc5: injected so tests drive the deadline without sleeping. */
+    helloDeadlineMs?: number;
+  };
 }
 
 export interface DaemonServer {
@@ -112,9 +123,27 @@ export interface DaemonServer {
   routes: string[];
   /** Present when opts.rules was given; Scenario 9 emits through it. */
   sink?: AuditSink;
+  /** Present when opts.adapters was given (s5 Sc5): the WS /v1/agent owner. */
+  agentTransport?: AdapterTransportHandle;
 }
 
 const HEALTH_PATH = '/v1/health';
+/**
+ * F-56 — the ONE route that opts out of the operator bearer, and the most
+ * security-sensitive decision in S5.
+ *
+ * An adapter is not the operator. It holds a per-adapter `wm_` token that the
+ * daemon stores only as a scrypt hash, and it presents that token in the
+ * `hello` frame. Requiring the operator bearer at upgrade would mean handing
+ * every agent on the machine the credential that can approve sends, rotate
+ * auth and purge the gateway — precisely the escalation the per-adapter token
+ * exists to prevent. So the upgrade is open and the FIRST FRAME is the gate:
+ * `adapters/transport.ts` accepts nothing but `hello` from an unauthenticated
+ * socket, closes it on anything else, and closes it on silence past the hello
+ * deadline. The exemption is also narrow by construction — exact path, GET
+ * only, and only when the adapter registry is actually wired.
+ */
+const AGENT_PATH = '/v1/agent';
 
 export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   const bootToken = loadOrCreateToken(opts.configDir);
@@ -153,6 +182,15 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // present, unauthenticated GET /v1/health is liveness-only. Everything else
     // requires the bearer; WS authenticates the same way at upgrade (§2.6).
     if (req.method === 'GET' && req.url.split('?')[0] === HEALTH_PATH) {
+      return;
+    }
+    // F-56 (see AGENT_PATH above): adapters authenticate in `hello`, never
+    // with the operator bearer.
+    if (
+      opts.adapters !== undefined &&
+      req.method === 'GET' &&
+      req.url.split('?')[0] === AGENT_PATH
+    ) {
       return;
     }
     const header = req.headers.authorization;
@@ -263,6 +301,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     });
   }
 
+  let agentTransport: AdapterTransportHandle | undefined;
   if (opts.adapters && sink) {
     // §1.6 adapter registry (s5 Scenario 4). Ratchet update #14.
     registerAdapterRoutes(app, {
@@ -270,6 +309,20 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       clock: opts.adapters.clock,
       sink,
       port: opts.adapters.port ?? DEFAULT_ADAPTER_PORT,
+    });
+    // s5 Scenario 5: the adapter wire itself. Ratchet update #15.
+    const adapterOpts = opts.adapters;
+    agentTransport = createAdapterTransport({
+      store: adapterOpts.store,
+      clock: adapterOpts.clock,
+      sink,
+      ...(adapterOpts.helloDeadlineMs !== undefined
+        ? { helloDeadlineMs: adapterOpts.helloDeadlineMs }
+        : {}),
+    });
+    app.get(AGENT_PATH, { websocket: true }, (socket) => {
+      counters.handlerCalls += 1;
+      agentTransport?.accept(socket);
     });
   }
 
@@ -305,6 +358,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     counters,
     routes,
     ...(sink ? { sink } : {}),
+    ...(agentTransport ? { agentTransport } : {}),
   };
 }
 

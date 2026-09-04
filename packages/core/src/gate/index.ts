@@ -15,6 +15,9 @@ import type {
   GateContext,
   GateDecision,
   GateDenyReason,
+  Handle,
+  IsoUtc,
+  RateCaps,
   RespondMode,
 } from '../domain/types.js';
 import type { Store } from '../ports/index.js';
@@ -95,7 +98,204 @@ export function readGateSettings(
     globalMode,
     connectionState,
     allowSmsAuto: parseBool(store.getSetting(SETTING_ALLOW_SMS_AUTO), false),
+    // s6 Scenario 6: the caps are settings, so they are read where the other
+    // settings are read. Every production gate call site goes through this
+    // function, which is what makes an operator's raise take effect
+    // everywhere at once instead of at whichever call site remembered.
+    caps: readRateCaps(store),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Rate caps and counters (s6 Scenario 6, §1.7 "Rate counters")
+ * ------------------------------------------------------------------ */
+
+/** Auto sends to one handle in a rolling 2 minutes (F-66: default 1, floor 1). */
+export const SETTING_CAP_CONTACT_PER_2MIN = 'send.capContactPer2Min';
+/** Auto sends to one handle in a rolling hour (default 10, floor 1). */
+export const SETTING_CAP_CONTACT_PER_HOUR = 'send.capContactPerHour';
+/** ALL sends this daemon originates in a rolling hour (default 30, floor 1). */
+export const SETTING_CAP_GLOBAL_PER_HOUR = 'send.capGlobalPerHour';
+
+/**
+ * The two scope shapes `0001_init.sql` pins, minted here so no caller has to
+ * remember the string. A third shape would silently partition the ledger and
+ * uncap whatever landed in it, which is why `rate-counters.spec.ts` asserts
+ * over `SELECT DISTINCT scope` rather than over these two constants.
+ */
+export const RATE_SCOPE_GLOBAL = 'global';
+export function contactRateScope(handle: Handle): string {
+  return `contact:${handle}`;
+}
+
+/** Counter buckets are minute-resolution (§1.7). */
+export const RATE_BUCKET_MS = 60_000;
+/** The pacing window: `send.capContactPer2Min` is measured over this. */
+export const RATE_WINDOW_PACING_MS = 2 * 60_000;
+/** The window both hourly caps are measured over. */
+export const RATE_WINDOW_HOUR_MS = 60 * 60_000;
+
+/**
+ * Floor an instant to its minute. Two sends 59 seconds apart share a row;
+ * a rolling window therefore reads at most 60 rows per scope however busy the
+ * hour was, which is the reason to bucket at all (C-8: there are no indexes
+ * in this repo, and a bounded scan is what makes that safe).
+ */
+export function rateBucketStart(at: IsoUtc): IsoUtc {
+  const ms = Date.parse(at);
+  return new Date(ms - (ms % RATE_BUCKET_MS)).toISOString();
+}
+
+/** The shipped caps, applied whenever a `GateContext` omits its own. */
+export const DEFAULT_RATE_CAPS: RateCaps = {
+  contactPer2Min: 1,
+  contactPerHour: 10,
+  globalPerHour: 30,
+};
+
+/** F-66: no cap can be set below this, and there is no disabling value. */
+const CAP_FLOOR = 1;
+
+/**
+ * Strict integer or the default — deliberately not `parseInt`, which reads
+ * '7.5' as 7 and '1e3' as 1. A settings value that is not an integer means
+ * nobody set this one on purpose, and the shipped default is the honest
+ * answer to that. A value that IS an integer and is zero or negative is
+ * different: somebody typed it, and F-66 says the floor answers them.
+ */
+function readCap(
+  store: Pick<Store, 'getSetting'>,
+  key: string,
+  fallback: number,
+): number {
+  const raw = store.getSetting(key);
+  if (raw === null || !/^-?\d+$/.test(raw)) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return parsed < CAP_FLOOR ? CAP_FLOOR : parsed;
+}
+
+export function readRateCaps(store: Pick<Store, 'getSetting'>): RateCaps {
+  return {
+    contactPer2Min: readCap(
+      store,
+      SETTING_CAP_CONTACT_PER_2MIN,
+      DEFAULT_RATE_CAPS.contactPer2Min,
+    ),
+    contactPerHour: readCap(
+      store,
+      SETTING_CAP_CONTACT_PER_HOUR,
+      DEFAULT_RATE_CAPS.contactPerHour,
+    ),
+    globalPerHour: readCap(
+      store,
+      SETTING_CAP_GLOBAL_PER_HOUR,
+      DEFAULT_RATE_CAPS.globalPerHour,
+    ),
+  };
+}
+
+/** `now` shifted back by `ms`, as the inclusive lower edge of a window. */
+function windowStart(now: IsoUtc, ms: number): IsoUtc {
+  return new Date(Date.parse(now) - ms).toISOString();
+}
+
+/**
+ * Read the autonomy history a gate decision is measured against (§1.7).
+ *
+ * The windows are rolling and computed from the RAW instant, never floored:
+ * flooring `now - 2min` to its minute would widen the pacing window by up to
+ * 59 seconds and make "121 seconds later" arrive early. Only the stored
+ * bucket is minute-aligned; the edge that sweeps over it is not.
+ *
+ * `consecutiveAutoInChat` and `circuitOpen` are still placeholders — Sc 8 and
+ * Sc 7 own them, and this function is where they will be read from the same
+ * store handle.
+ */
+export function readGateCounters(
+  store: Pick<Store, 'sumRateCounter'>,
+  input: { now: IsoUtc; handle: Handle },
+): GateContext['counters'] {
+  const scope = contactRateScope(input.handle);
+  return {
+    contactAutoLast2Min: store.sumRateCounter(
+      scope,
+      windowStart(input.now, RATE_WINDOW_PACING_MS),
+    ),
+    contactAutoLastHour: store.sumRateCounter(
+      scope,
+      windowStart(input.now, RATE_WINDOW_HOUR_MS),
+    ),
+    globalSentLastHour: store.sumRateCounter(
+      RATE_SCOPE_GLOBAL,
+      windowStart(input.now, RATE_WINDOW_HOUR_MS),
+    ),
+    consecutiveAutoInChat: 0,
+    circuitOpen: false,
+  };
+}
+
+/**
+ * Spend budget for a send this daemon has just decided to make (F-71: at
+ * APPROVAL, not at send — the cap limits how often the machine decides to
+ * speak, and counting at send makes it racy across the whole grace window).
+ *
+ * The global scope counts every approval, human or auto. The per-contact
+ * scope counts only the ones the machine decided, because pacing exists to
+ * stop a machine from hammering one person and a human sending three messages
+ * in a minute is a human having a conversation.
+ */
+export function bumpSendCounters(
+  store: Pick<Store, 'bumpRateCounter'>,
+  input: { now: IsoUtc; auto: boolean; handle: Handle },
+): void {
+  const bucket = rateBucketStart(input.now);
+  store.bumpRateCounter(RATE_SCOPE_GLOBAL, bucket);
+  if (input.auto) store.bumpRateCounter(contactRateScope(input.handle), bucket);
+}
+
+/**
+ * The first instant at which a saturated rolling window will have room again,
+ * for the `retryAfter` a human is owed when the global cap refuses them
+ * (F-71: "naming the cap and its reset instant").
+ *
+ * The window has room the moment enough of its oldest buckets have swept past
+ * its trailing edge, so the answer is always `<some bucket start> + windowMs +
+ * 1ms`. Rather than add a port method to list buckets, this binary-searches
+ * the candidate edges — the sum is monotonically non-increasing as the edge
+ * advances, and there are at most `windowMs / RATE_BUCKET_MS + 1` of them, so
+ * this is ~6 reads for an hour window and it is exact rather than rounded.
+ *
+ * Returns `now` itself when the window is not actually saturated: a caller
+ * that asks anyway gets "right now", never a fabricated future.
+ */
+export function nextRateCapReset(
+  store: Pick<Store, 'sumRateCounter'>,
+  input: { now: IsoUtc; scope: string; cap: number; windowMs: number },
+): IsoUtc {
+  const nowMs = Date.parse(input.now);
+  const oldestEdge = nowMs - input.windowMs;
+  const hasRoom = (edgeMs: number): boolean =>
+    store.sumRateCounter(input.scope, new Date(edgeMs).toISOString()) <
+    input.cap;
+  if (hasRoom(oldestEdge)) return input.now;
+
+  // Candidate edges are one millisecond past each bucket start that could be
+  // in the window; `k` counts minutes from the bucket the trailing edge is
+  // currently inside.
+  const firstBucket =
+    oldestEdge -
+    (((oldestEdge % RATE_BUCKET_MS) + RATE_BUCKET_MS) % RATE_BUCKET_MS);
+  const edgeAt = (k: number): number => firstBucket + k * RATE_BUCKET_MS + 1;
+  const maxK = Math.ceil(input.windowMs / RATE_BUCKET_MS) + 1;
+  let lo = 0;
+  let hi = maxK;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (hasRoom(edgeAt(mid))) hi = mid;
+    else lo = mid + 1;
+  }
+  return new Date(edgeAt(lo) + input.windowMs).toISOString();
 }
 
 /** Most-restrictive-wins: 'draft-only' beats 'auto' whenever the two disagree. */
@@ -167,12 +367,32 @@ function narrower(a: RespondMode, b: RespondMode): RespondMode {
  * `scheduleId: null` is genuinely always armed and is the only always-on
  * reading in the function.
  *
- * Rate caps, the circuit breaker, the loop breaker and the SMS clamp are the
- * remaining conditions in this step and land in their own scenarios (S6
- * Sc 6/7/8/9). Until then `ctx.counters` stays unread, and
- * scope-resolution.spec.ts pins that hostile values there change nothing —
- * the honest successor to the "plumbed-but-unread" row this scenario retires
- * from gate.spec.ts, now that schedules are read.
+ * **F-66/F-71 (s6 Scenario 6), the second clamp.** `ctx.counters` stops being
+ * decoration: three rolling sums are compared against three caps and any one
+ * of them at its limit clamps to 'draft-only' with `clampedBy:
+ * 'rate-limited'`. The caps ride in `ctx.settings.caps` because caps are
+ * settings, and they are optional there so that a context which omits them is
+ * measured against `DEFAULT_RATE_CAPS` — the strictest shipped values, which
+ * makes a forgotten field withhold autonomy rather than grant it.
+ *
+ * Rate NEVER denies here. A cap says "not automatically", never "not at all":
+ * the message still deserves a draft a human can look at, and the one place a
+ * cap refuses a person outright is the global bound at the approve route,
+ * which is a decision about a human's request and not about autonomy.
+ *
+ * **The clamps are an ELSE-IF chain, and that is load-bearing.** §1.7 lists
+ * them in priority order and the first one to fire is the one recorded. Two
+ * things turn on that. `mode` is identical either way (every clamp sets
+ * 'draft-only'), but `clampedBy` is what the draft-moment caller branches on:
+ * a rule with `outsideWindow: 'ignore'` drops the message entirely, and if a
+ * rate clamp could overwrite `outside-window` that rule would start drafting
+ * the moment it got busy. It is also what the send moment reports as the deny
+ * reason, and an operator asked to fix "rate-limited" when the real cause was
+ * a shut window has been sent to the wrong knob.
+ *
+ * The circuit breaker, the loop breaker and the SMS clamp are the remaining
+ * conditions in this step and land in their own scenarios (S6 Sc 7/8/9);
+ * until then `readGateCounters` reports them as inert.
  */
 export function evaluateGate(ctx: GateContext): GateDecision {
   if (ctx.settings.killSwitch) {
@@ -214,6 +434,9 @@ export function evaluateGate(ctx: GateContext): GateDecision {
   if (scheduleClosed(ctx)) {
     mode = 'draft-only';
     clampedBy = 'outside-window';
+  } else if (overRateCap(ctx)) {
+    mode = 'draft-only';
+    clampedBy = 'rate-limited';
   }
 
   return {
@@ -231,6 +454,28 @@ export function evaluateGate(ctx: GateContext): GateDecision {
  * fail-closed: a missing schedule row is NOT armed, which is what makes a
  * deleted schedule withdraw autonomy instead of granting it.
  */
+/**
+ * Is any of the three rolling counters at or over its cap (§1.7, F-66)?
+ *
+ * `>=`, not `>`: a cap of 1 means one send per window, so the second is the
+ * one that clamps. Caps come from the context rather than a store read
+ * because `evaluateGate` is pure; a context that omits them is measured
+ * against `DEFAULT_RATE_CAPS`, which are the strictest shipped values, so
+ * forgetting to plumb them can only withhold autonomy and never grant it.
+ *
+ * Both per-contact counters exclude human-approved sends and the global one
+ * includes them (F-71). That asymmetry lives in `bumpSendCounters`, which is
+ * the single writer; nothing here needs to know who decided.
+ */
+function overRateCap(ctx: GateContext): boolean {
+  const caps = ctx.settings.caps ?? DEFAULT_RATE_CAPS;
+  return (
+    ctx.counters.contactAutoLast2Min >= caps.contactPer2Min ||
+    ctx.counters.contactAutoLastHour >= caps.contactPerHour ||
+    ctx.counters.globalSentLastHour >= caps.globalPerHour
+  );
+}
+
 function scheduleClosed(ctx: GateContext): boolean {
   const rule = ctx.rule;
   if (rule === null || rule.scheduleId === null) return false;

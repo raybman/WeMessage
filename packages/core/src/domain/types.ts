@@ -192,11 +192,42 @@ export type GateDecision =
   | { allow: true; mode: RespondMode; clampedBy?: GateDenyReason }
   | { allow: false; reason: GateDenyReason };
 
+/**
+ * The three rate caps (§1.7, F-66). Every one is default-on with a floor of
+ * 1 applied on read: there is no value that disables any of them, because a
+ * cap that can be switched off is a cap that will be, first in a harness and
+ * then in production.
+ *
+ * The two `contact*` caps are PACING — they bound how often the machine
+ * speaks to one person, and they count auto-decided sends only. `globalPerHour`
+ * is a different kind of number: the blast-radius bound for the whole daemon,
+ * counting every send it originates including the ones a human approved. That
+ * asymmetry is F-71 and it is deliberate: a bound with an exception is not a
+ * bound.
+ */
+export interface RateCaps {
+  /** Auto sends to one handle in a rolling 2 minutes. */
+  contactPer2Min: number;
+  /** Auto sends to one handle in a rolling hour. */
+  contactPerHour: number;
+  /** ALL sends this daemon originates, human or auto, in a rolling hour. */
+  globalPerHour: number;
+}
+
 export interface GateContext {
   now: IsoUtc;                             // injected Clock (never Date.now in core)
   settings: { killSwitch: boolean; globalMode: RespondMode;
               connectionState: 'fully-connected'|'read-only'|'disconnected';
-              allowSmsAuto: boolean };
+              allowSmsAuto: boolean;
+              /**
+               * s6 Scenario 6 (F-66), additive and optional under the F-30
+               * precedent: `readGateSettings` always populates it, and a
+               * context that omits it is evaluated against
+               * `DEFAULT_RATE_CAPS` — the strictest shipped values, so a
+               * forgotten caps field can only ever withhold autonomy, never
+               * grant it.
+               */
+              caps?: RateCaps };
   rule: Rule | null; schedule: Schedule | null;
   /**
    * F-50 (s5 Scenario 9): this decision is being made ON BEHALF OF AN AGENT
@@ -213,6 +244,18 @@ export interface GateContext {
   agentOrigin?: boolean;
   contact: ContactPolicy | null;           // null => unknown => deny (deny-all default, §1.3.5/§2.4.3)
   message: Pick<Message, 'isGroup' | 'service' | 'handle' | 'chatGuid'>;
-  counters: { contactAutoLastHour: number; globalAutoLastHour: number;
+  /**
+   * The autonomy history this decision is measured against (§1.7). Every
+   * field is a COUNT the caller read from the store, never a store handle:
+   * `evaluateGate` stays a pure function of its argument, which is what lets
+   * the same function serve the draft moment and the send moment.
+   *
+   * `globalSentLastHour` counts human-approved sends as well as auto ones
+   * (§2.4.3, F-71) — it is named `Sent` rather than `Auto` for exactly that
+   * reason, because the two `contactAuto*` fields beside it genuinely do
+   * exclude humans and a reader must not have to guess which is which.
+   */
+  counters: { contactAutoLast2Min: number; contactAutoLastHour: number;
+              globalSentLastHour: number;
               consecutiveAutoInChat: number; circuitOpen: boolean };
 }

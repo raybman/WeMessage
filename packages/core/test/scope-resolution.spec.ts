@@ -122,8 +122,9 @@ function ctx(parts: CtxParts = {}): GateContext {
       chatGuid: CHAT_GUID,
     },
     counters: {
+      contactAutoLast2Min: 0,
       contactAutoLastHour: 0,
-      globalAutoLastHour: 0,
+      globalSentLastHour: 0,
       consecutiveAutoInChat: 0,
       circuitOpen: false,
     },
@@ -596,11 +597,17 @@ describe('a deny is never expressed as a clamp (s6 Scenario 4 row 8)', () => {
 /**
  * The honest successor to `gate.spec.ts`'s retired "schedules, counters and
  * the circuit are plumbed-but-unread" row (spec row 7). Schedules ARE read
- * now, so the old claim is false; counters and the circuit are still not,
- * and stay pinned here until Sc 6/7/8 claim them one at a time.
+ * now, so the old claim was already false for them; s6 Sc 6 made it false for
+ * the rate counters too, and the row shrank to exactly what remains unread.
+ *
+ * That shrinking is the point of keeping the row at all. A "we do not read
+ * this" pin that is not narrowed the moment a field is claimed becomes a
+ * green test asserting a lie, and the next scenario reads the lie as
+ * permission. The circuit and the streak are the two fields left; Sc 7 and
+ * Sc 8 take one each, and this row should be empty when they are done.
  */
 describe('what this scenario deliberately still does NOT read', () => {
-  it('hostile counter values and an open circuit change no decision', () => {
+  it('an open circuit and a runaway auto streak change no decision', () => {
     const base = ctx({
       globalMode: 'auto',
       contact: policy('auto'),
@@ -610,13 +617,31 @@ describe('what this scenario deliberately still does NOT read', () => {
       evaluateGate({
         ...base,
         counters: {
-          contactAutoLastHour: 9999,
-          globalAutoLastHour: 9999,
+          ...base.counters,
           consecutiveAutoInChat: 9999,
           circuitOpen: true,
         },
       }),
     ).toEqual({ allow: true, mode: 'auto' });
+  });
+
+  /**
+   * The other half of the same claim, now that the rate counters ARE read:
+   * hostile values there DO change the decision. Without this the row above
+   * could be narrowed by deleting fields rather than by implementing them.
+   */
+  it('hostile RATE counters now clamp, which is what "claimed" means', () => {
+    const base = ctx({
+      globalMode: 'auto',
+      contact: policy('auto'),
+      rule: makeRule(),
+    });
+    expect(
+      evaluateGate({
+        ...base,
+        counters: { ...base.counters, contactAutoLast2Min: 9999 },
+      }),
+    ).toEqual({ allow: true, mode: 'draft-only', clampedBy: 'rate-limited' });
   });
 
   it('a never-armed schedule changes nothing when the rule points at no schedule', () => {

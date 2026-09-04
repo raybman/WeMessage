@@ -109,6 +109,22 @@ export interface Store {
    */
   countRulesUsingSchedule(id: Ulid): number;
 
+  // --- rate counters (§2.3 `rate_counters`; s6 §1.5, Scenario 6) ---
+  /**
+   * UPSERT `count = count + 1` on the composite PK. `bucketStart` is a
+   * minute-floored ISO instant produced by `rateBucketStart` — the store is a
+   * ledger of counts and never a source of time (INV: every instant in this
+   * system comes from the injected Clock).
+   *
+   * `scope` is `'global'` or `'contact:<handle>'`, exactly the two shapes
+   * `0001_init.sql`'s column comment pins. It is a plain string rather than a
+   * union because the contact half is open-ended, and the two call sites that
+   * build one (`RATE_SCOPE_GLOBAL`, `contactRateScope`) are the pin.
+   */
+  bumpRateCounter(scope: string, bucketStart: IsoUtc): void;
+  /** Sum of every bucket at or after `sinceInclusive`; 0 when there are none. */
+  sumRateCounter(scope: string, sinceInclusive: IsoUtc): number;
+
   // --- inbound mirror (dry-run replay + mutation visibility; s2 §1.5) ---
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */
   listRecentInboundMessages(limit: number): Message[];

@@ -114,8 +114,9 @@ function drafts(h: AgentHarness): Draft[] {
 }
 
 const COUNTERS = {
+  contactAutoLast2Min: 0,
   contactAutoLastHour: 0,
-  globalAutoLastHour: 0,
+  globalSentLastHour: 0,
   consecutiveAutoInChat: 0,
   circuitOpen: false,
 };

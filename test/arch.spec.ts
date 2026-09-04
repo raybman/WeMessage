@@ -1029,6 +1029,20 @@ describe('arch invariants (dependency-cruiser)', () => {
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
+          // s6 Scenario 6, the THIRD deliberate edit to this guard and the
+          // second dormant literal to be claimed: `evaluateGate` clamps to
+          // 'draft-only' with `clampedBy: 'rate-limited'` when any of the
+          // three rolling counters is at its cap (F-66). A clamp, not a
+          // denial — the message still gets a draft a human can look at.
+          'packages/core/src/gate/index.ts',
+          // Same scenario, the other half, and the one place in this product
+          // where a rate limit refuses a PERSON: the approve route returns
+          // 403 when the global hourly bound is saturated (F-71), because
+          // that bound is the daemon's blast radius and a bound with an
+          // exception is not a bound. This is a genuine `gate.denied` row
+          // with a genuine deny reason, which is why the literal has to be
+          // spelled here rather than read out of `clampedBy`.
+          'packages/daemon/src/routes/drafts.ts',
         ],
       ],
       [

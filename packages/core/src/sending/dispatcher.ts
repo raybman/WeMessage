@@ -249,9 +249,15 @@ export async function dispatchApproved(
         handle: parsed.handle,
         chatGuid: draft.chatGuid,
       },
+      // Zeros: the send-moment re-gate reads the deny rules, and rate is a
+      // clamp rather than a deny. Converting a clamp into a send-moment
+      // refusal is S6 Sc 10's job (F-59), and it needs the approval's own
+      // provenance to do it — an approval a human made must not be refused
+      // by a cap that only ever bound the machine.
       counters: {
+        contactAutoLast2Min: 0,
         contactAutoLastHour: 0,
-        globalAutoLastHour: 0,
+        globalSentLastHour: 0,
         consecutiveAutoInChat: 0,
         circuitOpen: false,
       },

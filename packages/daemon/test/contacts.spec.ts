@@ -173,8 +173,9 @@ describe('s4 Scenario 10: contact policies', () => {
       chatGuid: `iMessage;-;${HANDLE}`,
     };
     const counters = {
+      contactAutoLast2Min: 0,
       contactAutoLastHour: 0,
-      globalAutoLastHour: 0,
+      globalSentLastHour: 0,
       consecutiveAutoInChat: 0,
       circuitOpen: false,
     };

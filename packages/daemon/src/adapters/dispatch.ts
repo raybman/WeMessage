@@ -69,6 +69,7 @@ import type {
 } from '@wemessage/core';
 import {
   evaluateGate,
+  readGateCounters,
   evaluateRules,
   readGateSettings,
   systemActor,
@@ -168,10 +169,14 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
     // the SENDER's contact policy — `message.handle` rather than the chat
     // guid's, because in a group it is this person who wrote, and core is
     // handed the message's own fields rather than a re-parse of its guid.
-    // `counters` stay zero until S6 Sc 6/7/8 own them, exactly as the other
-    // two gate call sites leave them.
+    // s6 Sc 6: `counters` are real here. This is the moment autonomy is
+    // decided, so it is the moment the rate windows have to be read — and
+    // `readGateCounters` reads them against the SAME instant the gate is
+    // evaluated at, because a window edge that moved between the read and the
+    // decision would be a cap that is off by whatever the two calls cost.
+    const now = clock.now();
     const decision = evaluateGate({
-      now: clock.now(),
+      now,
       settings: readGateSettings(store),
       rule,
       schedule:
@@ -183,12 +188,7 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
         handle: message.handle,
         chatGuid: message.chatGuid,
       },
-      counters: {
-        contactAutoLastHour: 0,
-        globalAutoLastHour: 0,
-        consecutiveAutoInChat: 0,
-        circuitOpen: false,
-      },
+      counters: readGateCounters(store, { now, handle: message.handle }),
     });
     if (!decision.allow) return refuse(decision.reason);
     // The §1.7 variance, and the only place a CLAMP stops anything at this

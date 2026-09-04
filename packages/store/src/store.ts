@@ -364,6 +364,9 @@ export class SqliteStore implements Store {
   readonly #updateSchedule: Database.Statement;
   readonly #deleteSchedule: Database.Statement;
   readonly #countRulesUsingSchedule: Database.Statement;
+  // --- s6 §1.5 (Scenario 6): rate counters, body-only over the 0001 table ---
+  readonly #bumpRateCounter: Database.Statement;
+  readonly #sumRateCounter: Database.Statement;
   readonly #listRecentInbound: Database.Statement;
   readonly #getInbound: Database.Statement;
   readonly #updateInbound: Database.Statement;
@@ -511,6 +514,24 @@ export class SqliteStore implements Store {
     // holds the foreign key, so it still blocks the delete.
     this.#countRulesUsingSchedule = this.db.prepare(
       'SELECT COUNT(*) AS n FROM rules WHERE schedule_id = ?',
+    );
+    // s6 Scenario 6. The composite PK is what makes this an accumulator
+    // rather than an append-only log: every send inside one minute folds
+    // into one row, so a rolling-window sum reads at most 60 rows however
+    // busy the minute was. `rate_counters.count` is qualified for the same
+    // reason `settings.version` is above — an unqualified `count` in a
+    // DO UPDATE reads as the aggregate function to anyone skimming.
+    this.#bumpRateCounter = this.db.prepare(
+      'INSERT INTO rate_counters (scope, bucket_start, count) VALUES (?, ?, 1) ' +
+        'ON CONFLICT(scope, bucket_start) DO UPDATE SET ' +
+        'count = rate_counters.count + 1',
+    );
+    // COALESCE, not a null check at the call site: SUM over zero rows is
+    // NULL in SQL, and a cap comparison against NULL would be false for
+    // every operator, which is the direction that silently uncaps.
+    this.#sumRateCounter = this.db.prepare(
+      'SELECT COALESCE(SUM(count), 0) AS n FROM rate_counters ' +
+        'WHERE scope = ? AND bucket_start >= ?',
     );
     this.#listRecentInbound = this.db.prepare(
       'SELECT * FROM inbound_messages ORDER BY received_at DESC LIMIT ?',
@@ -963,6 +984,21 @@ export class SqliteStore implements Store {
 
   countRulesUsingSchedule(id: Ulid): number {
     return (this.#countRulesUsingSchedule.get(id) as { n: number }).n;
+  }
+
+  bumpRateCounter(scope: string, bucketStart: IsoUtc): void {
+    this.#bumpRateCounter.run(scope, bucketStart);
+  }
+
+  /**
+   * Inclusive on `sinceInclusive` (`>=`), which is why the parameter says so
+   * in its name: a rolling window is computed as `now - windowMs` and the
+   * bucket sitting exactly on that instant is the oldest one still inside it.
+   * ISO-8601 UTC strings of fixed width compare lexicographically in the same
+   * order as the instants they denote, so no date parsing happens in SQL.
+   */
+  sumRateCounter(scope: string, sinceInclusive: IsoUtc): number {
+    return (this.#sumRateCounter.get(scope, sinceInclusive) as { n: number }).n;
   }
 
   listRecentInboundMessages(limit: number): Message[] {

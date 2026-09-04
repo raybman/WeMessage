@@ -425,9 +425,14 @@ export function createAgentSubmitHandler(
         handle: parsed.handle,
         chatGuid,
       },
+      // Zeros: a proactive proposal is clamped to 'draft-only' by
+      // `agentOrigin` before any counter could narrow it further, so a rate
+      // read here could not change the decision. The budget is spent where
+      // F-71 says it is — when a human approves the resulting draft.
       counters: {
+        contactAutoLast2Min: 0,
         contactAutoLastHour: 0,
-        globalAutoLastHour: 0,
+        globalSentLastHour: 0,
         consecutiveAutoInChat: 0,
         circuitOpen: false,
       },

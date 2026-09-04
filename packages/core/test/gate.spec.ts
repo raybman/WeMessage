@@ -12,9 +12,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ContactPolicy, GateContext, Store } from '@wemessage/core';
 import {
+  DEFAULT_RATE_CAPS,
   evaluateGate,
   readGateSettings,
   SETTING_ALLOW_SMS_AUTO,
+  SETTING_CAP_CONTACT_PER_2MIN,
+  SETTING_CAP_CONTACT_PER_HOUR,
+  SETTING_CAP_GLOBAL_PER_HOUR,
   SETTING_CONNECTION_STATE,
   SETTING_GLOBAL_MODE,
   SETTING_KILL_SWITCH,
@@ -42,8 +46,9 @@ function baseCtx(overrides: Partial<GateContext['settings']>): GateContext {
       chatGuid: 'iMessage;-;+15551234567',
     },
     counters: {
+      contactAutoLast2Min: 0,
       contactAutoLastHour: 0,
-      globalAutoLastHour: 0,
+      globalSentLastHour: 0,
       consecutiveAutoInChat: 0,
       circuitOpen: false,
     },
@@ -95,28 +100,39 @@ describe('evaluateGate (s3 Scenario 6, gate v0)', () => {
 });
 
 describe('readGateSettings (s3 Scenario 6)', () => {
-  it('all four keys set: reflects them verbatim', () => {
+  // s6 Scenario 6 widened this function from four keys to seven: the three
+  // rate caps are settings and are read where the other settings are read,
+  // so an operator's raise takes effect at every gate call site at once
+  // rather than at whichever one remembered to look.
+  it('every key it reads, set: reflected verbatim', () => {
     const store = fakeSettingsStore({
       [SETTING_KILL_SWITCH]: '1',
       [SETTING_GLOBAL_MODE]: 'auto',
       [SETTING_CONNECTION_STATE]: 'fully-connected',
       [SETTING_ALLOW_SMS_AUTO]: '1',
+      [SETTING_CAP_CONTACT_PER_2MIN]: '5',
+      [SETTING_CAP_CONTACT_PER_HOUR]: '20',
+      [SETTING_CAP_GLOBAL_PER_HOUR]: '60',
     });
     expect(readGateSettings(store)).toEqual({
       killSwitch: true,
       globalMode: 'auto',
       connectionState: 'fully-connected',
       allowSmsAuto: true,
+      caps: { contactPer2Min: 5, contactPerHour: 20, globalPerHour: 60 },
     });
   });
 
-  it('all four keys unset: fail-safe defaults (killSwitch false, draft-only, disconnected, allowSmsAuto false)', () => {
+  it('every key unset: fail-safe defaults (killSwitch false, draft-only, disconnected, allowSmsAuto false, caps at their shipped values)', () => {
     const store = fakeSettingsStore({});
     expect(readGateSettings(store)).toEqual({
       killSwitch: false,
       globalMode: 'draft-only',
       connectionState: 'disconnected',
       allowSmsAuto: false,
+      // Note the direction: unset caps are NOT "unlimited". Fail-safe for a
+      // cap means the shipped bound applies (F-66).
+      caps: DEFAULT_RATE_CAPS,
     });
   });
 
@@ -130,6 +146,7 @@ describe('readGateSettings (s3 Scenario 6)', () => {
       globalMode: 'draft-only',
       connectionState: 'disconnected',
       allowSmsAuto: false,
+      caps: DEFAULT_RATE_CAPS,
     });
   });
 

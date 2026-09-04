@@ -30,12 +30,17 @@ import { ulid } from 'ulid';
 import { z } from 'zod';
 import {
   applyDraftTransition,
+  bumpSendCounters,
   evaluateGate,
   humanApiActor,
   IllegalDraftActor,
   IllegalDraftTransition,
+  nextRateCapReset,
   parseChatGuid,
   readGateSettings,
+  readRateCaps,
+  RATE_SCOPE_GLOBAL,
+  RATE_WINDOW_HOUR_MS,
   SETTING_UNDO_GRACE_SECONDS,
   type Clock,
   type Draft,
@@ -352,9 +357,16 @@ export function registerDraftRoutes(
         handle: parsedGuid.handle,
         chatGuid: draft.chatGuid,
       },
+      // Zeros on purpose, and this is the one gate call site where that is a
+      // decision rather than a placeholder. The gate's rate clamp governs
+      // AUTONOMY, and there is no autonomy left to withhold here: a human is
+      // approving this draft by hand. The one cap that binds a person is the
+      // global bound, and it binds as a REFUSAL rather than a clamp, so it is
+      // enforced explicitly below where a 403 can be returned.
       counters: {
+        contactAutoLast2Min: 0,
         contactAutoLastHour: 0,
-        globalAutoLastHour: 0,
+        globalSentLastHour: 0,
         consecutiveAutoInChat: 0,
         circuitOpen: false,
       },
@@ -379,6 +391,56 @@ export function registerDraftRoutes(
     }
 
     const at = clock.now();
+    // F-71, the one place in this product where a rate limit tells a person
+    // no. Per-contact pacing deliberately does not appear here: it exists to
+    // stop a machine from hammering somebody, and a human sending three
+    // messages in a minute is a human having a conversation. The global cap
+    // is a different kind of number — the blast-radius bound for the whole
+    // daemon — and a bound with an exception is not a bound.
+    const caps = readRateCaps(store);
+    const globalSent = store.sumRateCounter(
+      RATE_SCOPE_GLOBAL,
+      new Date(Date.parse(at) - RATE_WINDOW_HOUR_MS).toISOString(),
+    );
+    if (globalSent >= caps.globalPerHour) {
+      // §1.8: durable first, then the broadcast, then the response. Same
+      // reason and same rows as any other gate refusal — a person refused by
+      // a cap must be as findable in the log as a stranger refused by the
+      // ladder.
+      sink.append(
+        { type: 'gate.denied', draftId: draft.id, reason: 'rate-limited' },
+        actor,
+      );
+      sink.broadcast({
+        event: 'gate.denied',
+        reason: 'rate-limited',
+        chatGuid: draft.chatGuid,
+        draftId: draft.id,
+      });
+      return {
+        ok: false,
+        status: 403,
+        body: {
+          // Top-level `reason` is the shape `DaemonGateDeniedError` parses;
+          // without it the client degrades this to a bare auth failure and
+          // the CLI loses its EXIT_GATE_DENIED. `detail` is F-71's shape and
+          // carries the one thing a refused human actually needs: when to
+          // come back.
+          error: 'gate-denied',
+          reason: 'rate-limited',
+          detail: {
+            reason: 'rate-limited',
+            retryAfter: nextRateCapReset(store, {
+              now: at,
+              scope: RATE_SCOPE_GLOBAL,
+              cap: caps.globalPerHour,
+              windowMs: RATE_WINDOW_HOUR_MS,
+            }),
+          },
+        },
+      };
+    }
+
     const updated = store.applyDraftTransition({
       id: draft.id,
       from: draft.state,
@@ -396,6 +458,17 @@ export function registerDraftRoutes(
       ...(opts.editedBody !== undefined ? { editedBody: opts.editedBody } : {}),
       ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
       at,
+    });
+    // F-71: the budget is spent when the APPROVAL is written, not when the
+    // send verifies. Counting at send would make every cap racy across the
+    // undo grace window, and a send that fails would silently refund itself —
+    // a backend failing thirty times an hour would get thirty more tries.
+    // `auto: false`: a human decided this one, so it counts against the
+    // global bound and against nobody's pacing.
+    bumpSendCounters(store, {
+      now: at,
+      auto: false,
+      handle: parsedGuid.handle,
     });
     sink.append(
       { type: 'draft.approved', draftId: draft.id, approvalId, actor },

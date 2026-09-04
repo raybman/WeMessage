@@ -103,7 +103,16 @@ export type Actor =
             // F-28 (s3-execution Scenario 7, coordinator-confirmed): additive
             // extension, same precedent as F-16. Probe-driven connection-state
             // flips (§2.2.3) need an actor; nothing pre-existing touched.
-            | 'capability-probe' };
+            | 'capability-probe'
+            // F-72 (s6 Scenario 10), additive under the same precedent. The
+            // ONE actor allowed to drive `approved + window-closed ->
+            // pending`: when a rule's schedule shuts during an auto
+            // approval's grace, the send-moment re-gate returns the draft to
+            // the queue instead of failing it. It is not the approver (the
+            // machine that approved is not the machine that withdrew), and it
+            // is not 'expiry' or 'circuit-breaker' (nothing expired and
+            // nothing broke). One reason, one row, one meaning.
+            | 'window-closed' };
 
 export interface Approval {
   id: Ulid; draftId: Ulid;

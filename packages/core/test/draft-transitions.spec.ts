@@ -63,6 +63,8 @@ const EVENTS: DraftEvent[] = [
   'verified',
   'send-failed',
   'retry',
+  // s6 Sc 10 (F-72): the only event that moves a draft BACKWARDS.
+  'window-closed',
 ];
 
 interface LegalRow {
@@ -113,6 +115,17 @@ const LEGAL: LegalRow[] = [
     to: 'approved',
     actor: HUMAN,
     retriesUsed: 0,
+  },
+  // s6 Sc 10 (F-72). Every other row in this table advances a draft toward
+  // a terminal state; this one hands it back to the queue. A schedule that
+  // shut while an auto approval sat in its grace has not made the draft
+  // wrong, only unauthorised, and the state that means "written, not yet
+  // authorised" is the one it came from.
+  {
+    from: 'approved',
+    event: 'window-closed',
+    to: 'pending',
+    actor: sys('window-closed'),
   },
 ];
 
@@ -281,6 +294,29 @@ describe('applyDraftTransition — the pure §1.7 table', () => {
       ).toThrow(IllegalDraftActor);
     });
 
+    it("window-closed demands system actor reason 'window-closed', exactly", () => {
+      // The narrowest actor rule in the table, and deliberately so: this row
+      // un-approves a draft, which no person and no agent may ask for by
+      // this verb (a person has 'recall', an operator has 'reject'). Only
+      // the dispatcher's own re-gate reaches it.
+      expect(
+        applyDraftTransition({
+          from: 'approved',
+          event: 'window-closed',
+          actor: sys('window-closed'),
+        }),
+      ).toBe('pending');
+      for (const actor of [HUMAN, AGENT, sys('auto-respond'), sys('expiry')]) {
+        expect(() =>
+          applyDraftTransition({
+            from: 'approved',
+            event: 'window-closed',
+            actor,
+          }),
+        ).toThrow(IllegalDraftActor);
+      }
+    });
+
     it('retry demands a human actor', () => {
       expect(() =>
         applyDraftTransition({
@@ -402,6 +438,13 @@ describe('s6 Sc9 rows 1-2: the one legal system approver (F-58)', () => {
     ingest: true,
     'rule-engine': true,
     'capability-probe': true,
+    // s6 Sc 10 (F-72), and the reason this Record is derived from the type
+    // rather than copied out of it: the union grew, so the loop below now
+    // proves that the requeueing actor may not APPROVE either. The machine
+    // that takes an approval back is not thereby licensed to grant one, and
+    // that is what keeps "a requeued draft is never re-auto-approved" a
+    // property of the type system rather than of the dispatcher's manners.
+    'window-closed': true,
   };
   const ALL_SYSTEM_REASONS = Object.keys(SYSTEM_REASONS) as Array<
     keyof typeof SYSTEM_REASONS

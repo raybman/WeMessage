@@ -217,6 +217,14 @@ export type AuditEvent =
   | { type: 'draft.rejected'; draftId: Ulid; approvalId?: Ulid } // human reject or system kill/disconnect/circuit
   | { type: 'draft.recalled'; draftId: Ulid; approvalId: Ulid }
   | { type: 'draft.expired'; draftId: Ulid } // system actor 'expiry', NEVER gate.denied (C-6 taxonomy pin)
+  // s6 Scenario 10 (F-72). The send moment refused an auto approval for a
+  // reason that is not the draft's fault, so the draft went back to the
+  // queue. Written ALONGSIDE the `gate.denied` row that carries the same
+  // reason, never instead of it: `gate.denied` says the gate said no, and
+  // this says what became of the draft afterwards. The pair is what
+  // distinguishes a requeue from the `draft.failed` + `gate.denied` pair
+  // every other send-moment denial writes.
+  | { type: 'draft.requeued'; draftId: Ulid; reason: GateDenyReason }
   | { type: 'draft.superseded'; draftId: Ulid; supersededBy?: Ulid }
   // s5 Scenario 7: the agent answered and declined to propose anything. The
   // row exists because "the agent said nothing" and "the agent was never

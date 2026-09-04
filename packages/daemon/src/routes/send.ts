@@ -182,6 +182,22 @@ export function registerSendRoutes(
       });
     }
 
+    /**
+     * s6 Sc 10 (F-72). Unreachable from this route, twice over: the draft it
+     * mints carries `ruleId: null`, so no schedule binds it and no window
+     * clamp can arise; and its approval is `{kind:'human', via:'api'}`,
+     * while the requeue path is scoped to the machine. Narrowed explicitly
+     * rather than folded into the failure branch below, because "put back in
+     * the queue" is not a failure and this route's 200 {outcome:'failed'}
+     * body would say it was. If this ever throws, one of those two facts
+     * changed and the response shape has to be decided on purpose.
+     */
+    if (outcome.outcome === 'requeued') {
+      throw new Error(
+        `invariant violated: POST /v1/send draft requeued (${outcome.reason})`,
+      );
+    }
+
     if (outcome.error.code === 'gate-denied') {
       // dispatchApproved's contract: emit() fires exactly once, only on a
       // gate denial, always before returning that outcome — this cannot be

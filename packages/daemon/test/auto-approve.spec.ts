@@ -31,13 +31,15 @@
  * it, so the negative table below covers all three `allow: false` denies and
  * all three scope narrowings as well as the six clamps §1.7 enumerates.
  *
- * **What is deferred, named.** A clamp is still not a denial (§1.7): nothing
- * here writes `gate.denied` for a withheld auto-approval, because there is
- * nobody to deny — no approval was minted, so no send was refused. Turning
- * the send-moment clamps into denials carrying the approval's own provenance
- * is Sc 10's work (F-59), and the re-gate `dispatchApproved` holds stays
- * context-blind until then. Rows below assert the honest inverse: zero
- * `Approval` rows, zero `auto.approved` rows, zero backend calls.
+ * **What was deferred, and why it did not move.** A clamp is still not a
+ * denial (§1.7): nothing here writes `gate.denied` for a withheld
+ * auto-approval, because there is nobody to deny — no approval was minted,
+ * so no send was refused. Sc 10 (F-59) since made the send-moment re-gate
+ * context-bearing, which turns those same clamps into denials carrying the
+ * approval's own provenance; every row below survived it untouched, because
+ * a withheld decision never produces the approval that conversion acts on.
+ * The rows assert the honest inverse and still do: zero `Approval` rows,
+ * zero `auto.approved` rows, zero backend calls.
  *
  * Handles are synthetic (`+1555…`); no real iMessage content.
  */
@@ -735,9 +737,10 @@ describe('s6 Sc9 row 6: nothing is minted when anything withholds', () => {
     h.store.setSetting(SETTING_GLOBAL_MODE, 'draft-only');
     const draft = pending(h);
     expect(await auto(h, draft.id)).toBe('withheld');
-    // §1.7, and Sc 7 and Sc 8 recorded the same deferral: turning a clamp
-    // into a send-moment refusal is Sc 10's job (F-59). Nobody was refused
-    // here — no approval existed to refuse.
+    // §1.7, and Sc 7 and Sc 8 recorded the same deferral. Sc 10 (F-59)
+    // discharged it at the send moment, which is precisely where it does
+    // not reach this row: nobody was refused here, because no approval ever
+    // existed to refuse.
     expect(events(h, 'gate.denied')).toEqual([]);
     // And nothing was broadcast either: a withheld draft is not an event.
     expect(h.broadcasts).toEqual([]);

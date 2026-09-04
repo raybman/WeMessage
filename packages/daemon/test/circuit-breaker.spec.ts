@@ -28,8 +28,10 @@
  * trips are rejected through the pre-existing `approved + reject` row with
  * the pre-existing `'circuit-breaker'` system actor, exactly as the kill
  * switch already cancels in-grace drafts. Turning a clamp into a send-moment
- * refusal is Sc 10's job (F-59, the context-bearing re-gate); nothing here
- * pretends otherwise.
+ * refusal was Sc 10's job (F-59, the context-bearing re-gate), and it landed
+ * without moving a single assertion here: that refusal binds an approval the
+ * MACHINE made, and every send in this suite is approved through the route
+ * by a person. A breaker that vetoes a person is a bug (Sc 8 row 7).
  *
  * Handles are synthetic (`+1555…`); no real iMessage content.
  */
@@ -452,8 +454,9 @@ describe('s6 Sc7 row 8: the in-grace rejection reuses what already exists', () =
     expect(h.store.getDraft(sixth)?.sendNotBefore).toBeUndefined();
 
     // A draft whose grace had ALREADY elapsed is not this mechanism's to
-    // stop — it belongs to the send-moment re-gate, which stays context-blind
-    // until Sc 10 (F-59). Nothing here pretends to have caught it.
+    // stop — it belongs to the send-moment re-gate, which since Sc 10 (F-59)
+    // reads the breaker for itself. It refuses the machine's approvals only,
+    // so a second tick still finds nothing here to reject.
     await h.scheduler.tick();
     expect(auditOf(h, 'draft.rejected')).toHaveLength(1);
   });

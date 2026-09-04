@@ -42,7 +42,11 @@ export type DraftEvent =
   | 'recall'
   | 'verified'
   | 'send-failed'
-  | 'retry';
+  | 'retry'
+  // F-72 (s6 Scenario 10): the send moment's one non-terminal refusal. A
+  // clamp is not a failure, so a shut window does not park an approved draft
+  // as 'failed'; it puts it back where a human can act on it.
+  | 'window-closed';
 
 export class IllegalDraftTransition extends Error {
   readonly from: DraftState;
@@ -109,6 +113,12 @@ const TABLE: {
     'grace-elapsed': 'sending',
     recall: 'recalled',
     reject: 'rejected',
+    // s6 Sc 10 (F-72). The only row in this table that moves BACKWARDS, and
+    // the only one that needs to: every other exit from 'approved' is either
+    // a send or a terminal state, and neither is honest about a window that
+    // shut nine seconds before the grace elapsed. The draft is unchanged and
+    // still wanted; what expired was the authority to send it without asking.
+    'window-closed': 'pending',
   },
   sending: {
     verified: 'sent',
@@ -177,6 +187,14 @@ function assertActor(from: DraftState, event: DraftEvent, actor: Actor): void {
   }
   if (from === 'pending' && event === 'superseded') {
     if (!(actor.kind === 'system' && actor.reason === 'supersede')) illegal();
+    return;
+  }
+  if (from === 'approved' && event === 'window-closed') {
+    // Exactly one legal actor, by name. A human recalls, a human rejects,
+    // and the three system rejecters are enumerated above; requeueing is
+    // none of those, so it gets its own reason rather than borrowing one.
+    if (!(actor.kind === 'system' && actor.reason === 'window-closed'))
+      illegal();
     return;
   }
   if (from === 'approved' && event === 'recall') {

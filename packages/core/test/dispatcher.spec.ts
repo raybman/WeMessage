@@ -15,12 +15,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import type {
+  AdapterRecord,
   Approval,
   AuditEvent,
   ChatDbReader,
   Clock,
+  ContactPolicy,
   Draft,
   DraftError,
+  Rule,
+  Schedule,
   SendBackend,
   SendOutcome,
   Store,
@@ -76,6 +80,19 @@ function makeStore(cfg: {
   auditEvents: AuditEvent[];
   /** s4 Scenario 4: the ledger attempt beginSendAttempt reports (retry threading). */
   attempt?: number;
+  /**
+   * s6 Sc 10: what `getAdapter(draft.adapterId)` answers. Defaults to null
+   * — "no such adapter", the fail-closed answer — because that is what the
+   * registry says about the F-22 'human' row every human-approved draft in
+   * this suite carries, and because a fake that invents a credential is a
+   * fake that hides the check. Only the rows exercising an AUTO approval
+   * hand one over, since only they reach the check.
+   */
+  adapter?: AdapterRecord | null;
+  /** s6 Sc 10: the draft's own rule/schedule/contact, rebuilt at send. */
+  rule?: Rule | null;
+  schedule?: Schedule | null;
+  contact?: ContactPolicy | null;
 }): Store {
   const settings = cfg.settings ?? {};
   return {
@@ -97,15 +114,22 @@ function makeStore(cfg: {
       cfg.calls.push(`markDraftFailed:${id}`);
     },
     listRules: () => [],
-    getRule: () => null,
+    getRule: (id: string) => {
+      cfg.calls.push(`getRule:${id}`);
+      return cfg.rule ?? null;
+    },
     insertRule: () => undefined,
     updateRule: () => undefined,
     deleteRule: () => false,
-    // s6 Scenario 3: the schedules half of the port. The dispatcher never
-    // reads them (arming is the gate's job, §2.4.2), so the fake answers
-    // "no schedules" — which is also the fail-closed answer.
+    // s6 Scenario 3: the schedules half of the port. Read by the send-moment
+    // re-gate since Sc 10 (F-59), and only through the draft's own rule, so
+    // a fixture without a rule never reaches it. Absent a fixture the answer
+    // is "no such schedule", which the gate treats as shut (fail-closed).
     listSchedules: () => [],
-    getSchedule: () => null,
+    getSchedule: (id: string) => {
+      cfg.calls.push(`getSchedule:${id}`);
+      return cfg.schedule ?? null;
+    },
     insertSchedule: () => undefined,
     updateSchedule: () => undefined,
     deleteSchedule: () => undefined,
@@ -147,8 +171,25 @@ function makeStore(cfg: {
     // S4 Scenario 3 body extensions (§1.5). Unused by this suite; present so
     // the fake stays a real `Store` and the interface keeps its teeth.
     listDrafts: () => [],
-    applyDraftTransition: () => {
-      throw new Error('not used in this suite');
+    // s6 Sc 10: was `throw new Error('not used in this suite')` through S4
+    // and S5, which was true until the send moment gained a transition of
+    // its own (F-72's requeue). Records rather than throws now, including
+    // the `sendNotBefore` key, because clearing that column is half of what
+    // makes a requeued draft invisible to the scheduler.
+    applyDraftTransition: (input) => {
+      cfg.calls.push(
+        `applyDraftTransition:${input.id}:${input.from}->${input.to}:snb=${
+          'sendNotBefore' in input ? String(input.sendNotBefore) : 'absent'
+        }`,
+      );
+      if (cfg.draft === null) throw new Error('no draft to transition');
+      // The port hands back the row as it now stands. `sendNotBefore` is
+      // dropped rather than echoed, since the only transition this suite
+      // drives is the one that clears it, and under
+      // exactOptionalPropertyTypes "cleared" means the key is gone.
+      const next = { ...cfg.draft, state: input.to, stateChangedAt: input.at };
+      delete next.sendNotBefore;
+      return next;
     },
     updateDraftBody: () => undefined,
     findDraftByIdempotencyKey: () => null,
@@ -166,14 +207,20 @@ function makeStore(cfg: {
       approved: 0,
       sending: 0,
     }),
-    getContactPolicy: () => null,
+    getContactPolicy: (handle: string) => {
+      cfg.calls.push(`getContactPolicy:${handle}`);
+      return cfg.contact ?? null;
+    },
     setContactPolicy: () => undefined,
     deleteContactPolicy: () => false,
     listContactPolicies: () => [],
     getSettingVersion: () => -1,
     // s5 Scenario 3: adapter registry additions to the Store port.
     listAdapters: () => [],
-    getAdapter: () => null,
+    getAdapter: (id: string) => {
+      cfg.calls.push(`getAdapter:${id}`);
+      return cfg.adapter ?? null;
+    },
     insertAdapter: () => undefined,
     updateAdapter: () => undefined,
     deleteAdapter: () => false,
@@ -388,9 +435,16 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const macroCalls = calls.filter(
       (c) => !c.startsWith('getSetting:') && !c.startsWith('appendAudit:'),
     );
+    // s6 Sc 10 (F-59) added the contact read: the send-moment re-gate now
+    // rebuilds the draft's own context instead of passing nulls. This draft
+    // is rule-less, so `getRule` and `getSchedule` are absent from the trace
+    // — which is the F-20 human pin visible as a call sequence rather than
+    // as an outcome. The read sits before `resolveChat` because the gate
+    // decides whether to send before anything reaches for the chat.
     expect(macroCalls).toEqual([
       'getDraft:D1',
       'getApproval:A1',
+      'getContactPolicy:+15551234567',
       'resolveChat:+15551234567',
       'beginSendAttempt:D1',
       'send:hello there',
@@ -726,6 +780,25 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
 const AUTO_ACTOR = { kind: 'system' as const, reason: 'auto-respond' as const };
 const GROUP_GUID = 'iMessage;+;chat123456789';
 
+/**
+ * s6 Sc 10. Every AUTO fixture below now names a registered adapter and
+ * hands the fake a row for it. Before Sc 10 they all inherited
+ * `adapterId: 'human'` and the dispatcher never looked, which was harmless
+ * while nothing read the registry and became a lie the moment it did: an
+ * autonomous send is made ON BEHALF of a credential, and a fixture that
+ * skips the credential is not testing the autonomous path.
+ */
+const AUTO_ADAPTER_ID = 'a-bot';
+const LIVE_ADAPTER: AdapterRecord = {
+  id: AUTO_ADAPTER_ID,
+  kind: 'generic',
+  displayName: 'bot',
+  enabled: true,
+  hasToken: true,
+  health: 'connected',
+  config: {},
+};
+
 function baseDeps(over: Partial<DispatchApprovedDeps>): DispatchApprovedDeps {
   const { clock, delay } = makeVirtualClock();
   return {
@@ -894,11 +967,16 @@ describe('dispatchApproved (s4 Scenario 4 revisions)', () => {
     const emitted: DispatchGateDenied[] = [];
     const deps = baseDeps({
       store: makeStore({
-        draft: makeDraft({ id: 'D1', chatGuid: GROUP_GUID }),
+        draft: makeDraft({
+          id: 'D1',
+          chatGuid: GROUP_GUID,
+          adapterId: AUTO_ADAPTER_ID,
+        }),
         approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
-        // Global auto: the ONLY thing standing between this and a send is
-        // the group clamp.
+        // Global auto and a live credential: the ONLY thing standing
+        // between this and a send is the group clamp.
         settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        adapter: LIVE_ADAPTER,
         calls,
         auditEvents,
       }),
@@ -948,13 +1026,14 @@ describe('dispatchApproved (s4 Scenario 4 revisions)', () => {
   });
 
   it('a system-auto approval on a 1:1 chat at global auto DOES send (the clamp is group-only)', async () => {
-    const draft = makeDraft({ id: 'D1' });
+    const draft = makeDraft({ id: 'D1', adapterId: AUTO_ADAPTER_ID });
     const backendCalls: string[] = [];
     const deps = baseDeps({
       store: makeStore({
         draft,
         approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
         settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        adapter: LIVE_ADAPTER,
         calls: [],
         auditEvents: [],
       }),
@@ -982,18 +1061,26 @@ describe('dispatchApproved (s4 Scenario 4 revisions)', () => {
     const backendCalls: string[] = [];
     const deps = baseDeps({
       store: makeStore({
-        draft: makeDraft({ id: 'D1' }),
+        draft: makeDraft({ id: 'D1', adapterId: AUTO_ADAPTER_ID }),
         approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
         settings: ALLOW_SETTINGS,
+        adapter: LIVE_ADAPTER,
         calls: [],
         auditEvents: [],
       }),
       backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
     });
 
+    // s6 Sc 10 sharpened the assertion from a bare `code: 'gate-denied'` to
+    // the reason: with an adapter check now sitting in front of the mode
+    // check, a row that only asserts the code would pass for entirely the
+    // wrong reason if the fixture's credential ever went missing.
     expect(await dispatchApproved(deps, 'D1', 'A1')).toEqual({
       outcome: 'failed',
-      error: expect.objectContaining({ code: 'gate-denied' }),
+      error: expect.objectContaining({
+        code: 'gate-denied',
+        message: 'gate denied: unapproved',
+      }),
     });
     expect(backendCalls).toEqual([]);
   });
@@ -1031,4 +1118,284 @@ describe('dispatchApproved (s4 Scenario 4 revisions)', () => {
       backend: 'applescript',
     });
   });
+});
+
+/**
+ * s6-execution Part 2 Scenario 10 — the send-moment re-gate becomes
+ * context-bearing (F-59), at the unit level.
+ *
+ * `outside-window.spec.ts` owns this scenario end to end against a real
+ * store, a real scheduler and real HTTP. These rows exist for the half of
+ * the behaviour that is a property of `dispatchApproved` itself and is
+ * cheaper to state without a daemon around it: WHICH ports the rebuilt
+ * context reads, and the fact that every consequence of a clamp is scoped
+ * to a machine approver. A denial that binds a person is a different
+ * product, and it should take more than an inattentive edit to ship one.
+ */
+describe('s6 Sc 10: the context-bearing re-gate (F-59)', () => {
+  const RULE_ID = '01J0000000000000000000RULE';
+  const SCHEDULE_ID = '01J0000000000000000000SCHD';
+  const HANDLE = '+15551234567';
+  const shutRule: Rule = {
+    id: RULE_ID,
+    name: 'r',
+    enabled: true,
+    // Never evaluated here: the matcher chose this rule long before the
+    // grace began, and the send moment only reads what the rule PERMITS.
+    matcher: { kind: 'keyword', keywords: ['hello'], mode: 'any' },
+    adapterId: AUTO_ADAPTER_ID,
+    respondMode: 'auto',
+    scheduleId: SCHEDULE_ID,
+    outsideWindow: 'draft-only',
+    allowGroupDrafts: false,
+    matchAttachmentOnly: false,
+    draftTtlMinutes: 240,
+    priority: 0,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  /**
+   * §1.3.5's deny-all default means a rule-borne draft to a handle with NO
+   * contact row is denied 'contact-denied' before any clamp is reached, so
+   * every rule-borne fixture here has to carry an allowing policy to be
+   * testing what it says it is testing. Overridden only by the row that
+   * wants the deny.
+   */
+  const allowedContact: ContactPolicy = {
+    handle: HANDLE,
+    mode: 'auto',
+    updatedAt: NOW,
+  };
+  // NOW is 12:00Z; this window shut two hours ago.
+  const shutSchedule: Schedule = {
+    id: SCHEDULE_ID,
+    name: 's',
+    timezone: 'UTC',
+    windows: [
+      {
+        days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+        start: '09:00',
+        end: '10:00',
+      },
+    ],
+    enabled: true,
+  };
+
+  const autoDeps = (over: {
+    calls: string[];
+    auditEvents: AuditEvent[];
+    backendCalls: string[];
+    adapter?: AdapterRecord | null;
+    rule?: Rule | null;
+    schedule?: Schedule | null;
+    contact?: ContactPolicy | null;
+    actor?: Approval['actor'];
+    emitted?: DispatchGateDenied[];
+  }): DispatchApprovedDeps => {
+    const draft = makeDraft({
+      id: 'D1',
+      adapterId: AUTO_ADAPTER_ID,
+      ...(over.rule === undefined || over.rule === null
+        ? {}
+        : { ruleId: over.rule.id }),
+    });
+    return baseDeps({
+      store: makeStore({
+        draft,
+        approval: makeApproval({
+          id: 'A1',
+          draftId: 'D1',
+          actor: over.actor ?? AUTO_ACTOR,
+        }),
+        settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        adapter: over.adapter === undefined ? LIVE_ADAPTER : over.adapter,
+        ...(over.rule === undefined ? {} : { rule: over.rule }),
+        ...(over.schedule === undefined ? {} : { schedule: over.schedule }),
+        contact: over.contact === undefined ? allowedContact : over.contact,
+        calls: over.calls,
+        auditEvents: over.auditEvents,
+      }),
+      reader: makeReader({
+        resolveChatResult: {
+          chatGuid: draft.chatGuid,
+          service: 'imessage',
+          isGroup: false,
+        },
+        calls: [],
+        findOutboundQueue: [{ guid: 'guid-1' }],
+      }),
+      backend: makeBackend({
+        result: { accepted: true },
+        calls: over.backendCalls,
+      }),
+      ...(over.emitted === undefined
+        ? {}
+        : { emit: (e: DispatchGateDenied) => over.emitted?.push(e) }),
+    });
+  };
+
+  it("rebuilds the DRAFT'S context: rule, then that rule's schedule, then the contact", async () => {
+    const calls: string[] = [];
+    await dispatchApproved(
+      autoDeps({
+        calls,
+        auditEvents: [],
+        backendCalls: [],
+        rule: { ...shutRule, scheduleId: null },
+      }),
+      'D1',
+      'A1',
+    );
+    // The schedule is reached THROUGH the rule and never independently: a
+    // rule with no schedule is always armed, so there is nothing to look up.
+    expect(calls.filter((c) => c.startsWith('getRule:'))).toEqual([
+      `getRule:${RULE_ID}`,
+    ]);
+    expect(calls.filter((c) => c.startsWith('getSchedule:'))).toEqual([]);
+    expect(calls.filter((c) => c.startsWith('getContactPolicy:'))).toEqual([
+      `getContactPolicy:${HANDLE}`,
+    ]);
+  });
+
+  it('a window that shut during the grace requeues instead of failing (F-72)', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const backendCalls: string[] = [];
+    const emitted: DispatchGateDenied[] = [];
+
+    const outcome = await dispatchApproved(
+      autoDeps({
+        calls,
+        auditEvents,
+        backendCalls,
+        emitted,
+        rule: shutRule,
+        schedule: shutSchedule,
+      }),
+      'D1',
+      'A1',
+    );
+
+    expect(outcome).toEqual({ outcome: 'requeued', reason: 'outside-window' });
+    // The state change and the cleared deadline are ONE statement: a
+    // requeued draft that kept its `send_not_before` would be picked up by
+    // the very next grace sweep, which is a resurrection, not a requeue.
+    expect(calls.filter((c) => c.startsWith('applyDraftTransition:'))).toEqual([
+      'applyDraftTransition:D1:approved->pending:snb=null',
+    ]);
+    // Neither the ledger nor the backend was touched: nothing was attempted,
+    // so nothing may be counted as an attempt.
+    expect(calls.filter((c) => c.startsWith('beginSendAttempt'))).toEqual([]);
+    expect(backendCalls).toEqual([]);
+    expect(auditEvents).toEqual([
+      { type: 'draft.requeued', draftId: 'D1', reason: 'outside-window' },
+      { type: 'gate.denied', draftId: 'D1', reason: 'outside-window' },
+    ]);
+    expect(emitted.map((e) => e.reason)).toEqual(['outside-window']);
+  });
+
+  it('a human approval on that same shut-window draft sends anyway', async () => {
+    // The whole point of F-72's requeue is to put the decision back in front
+    // of a person. A person then making it must not hit the same wall.
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const outcome = await dispatchApproved(
+      autoDeps({
+        calls,
+        auditEvents: [],
+        backendCalls,
+        rule: shutRule,
+        schedule: shutSchedule,
+        actor: humanApiActor(),
+      }),
+      'D1',
+      'A1',
+    );
+    expect(outcome).toEqual({ outcome: 'sent', sentMessageGuid: 'guid-1' });
+    expect(backendCalls).toHaveLength(1);
+    expect(calls.filter((c) => c.startsWith('applyDraftTransition:'))).toEqual(
+      [],
+    );
+  });
+
+  it('a contact flipped to deny binds BOTH approvers (a deny is not a clamp)', async () => {
+    const denied: ContactPolicy = {
+      handle: HANDLE,
+      mode: 'deny',
+      updatedAt: NOW,
+    };
+    for (const actor of [AUTO_ACTOR, humanApiActor()]) {
+      const backendCalls: string[] = [];
+      const outcome = await dispatchApproved(
+        autoDeps({
+          calls: [],
+          auditEvents: [],
+          backendCalls,
+          // Rule-borne on purpose: the F-20 human pin means a rule-less
+          // draft never consults the ladder at all, so a rule-less fixture
+          // could not tell a working deny from a skipped one.
+          rule: shutRule,
+          schedule: { ...shutSchedule, windows: [] },
+          contact: denied,
+          actor,
+        }),
+        'D1',
+        'A1',
+      );
+      expect(outcome).toMatchObject({
+        outcome: 'failed',
+        error: { message: 'gate denied: contact-denied' },
+      });
+      expect(backendCalls).toEqual([]);
+    }
+  });
+
+  for (const [label, adapter] of [
+    ['deregistered', null],
+    ['disabled', { ...LIVE_ADAPTER, enabled: false }],
+    ['token-revoked', { ...LIVE_ADAPTER, hasToken: false }],
+  ] as const) {
+    it(`an AUTO approval whose adapter was ${label} mid-grace fails adapter-disabled`, async () => {
+      const backendCalls: string[] = [];
+      const auditEvents: AuditEvent[] = [];
+      const outcome = await dispatchApproved(
+        autoDeps({ calls: [], auditEvents, backendCalls, adapter }),
+        'D1',
+        'A1',
+      );
+      expect(outcome).toMatchObject({
+        outcome: 'failed',
+        error: {
+          code: 'gate-denied',
+          message: 'gate denied: adapter-disabled',
+        },
+      });
+      expect(backendCalls).toEqual([]);
+      expect(auditEvents.map((e) => e.type)).toEqual([
+        'draft.failed',
+        'gate.denied',
+      ]);
+    });
+
+    it(`a HUMAN approval is unaffected by a ${label} adapter`, async () => {
+      // The asymmetry, stated once per revocation shape. Withdrawing an
+      // agent's credential withdraws the agent's authority to act; it does
+      // not reach back and undo a decision a person already made. A person
+      // who wants that has the kill switch, which binds everyone.
+      const backendCalls: string[] = [];
+      const outcome = await dispatchApproved(
+        autoDeps({
+          calls: [],
+          auditEvents: [],
+          backendCalls,
+          adapter,
+          actor: humanApiActor(),
+        }),
+        'D1',
+        'A1',
+      );
+      expect(outcome).toEqual({ outcome: 'sent', sentMessageGuid: 'guid-1' });
+      expect(backendCalls).toHaveLength(1);
+    });
+  }
 });

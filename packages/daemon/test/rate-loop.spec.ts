@@ -33,17 +33,21 @@
  * `adapters/dispatch.ts` builds, from the same store, at the same instant.
  *
  * The plan's rows 1 and 9 ask for "exactly one `gate.denied {loop-detected}`
- * row". That row cannot exist yet and this suite does not pretend otherwise.
- * §1.7 is explicit that a clamp is NEVER audited as `gate.denied`, and the
- * only place this daemon turns a clamp into a refusal today is the
- * `outside-window` + `rule.outsideWindow === 'ignore'` branch in
- * `dispatch.ts`. Turning a loop clamp into a send-moment DENIAL is Sc 10's
- * job (F-59, the context-bearing re-gate). So every row below asserts the
- * honest inverse — ZERO `gate.denied` rows — plus the fact the plan is
- * actually after: exactly one clamp, singular by construction because
- * `clampedBy` is one field on one else-if chain, and the §1.7 order decides
- * which cause wins. `circuit-breaker.spec.ts` recorded the same deferral for
- * the same reason and this suite follows it verbatim.
+ * row". §1.7 is explicit that a clamp is NEVER audited as `gate.denied`, so
+ * every row below asserts the honest inverse — ZERO `gate.denied` rows —
+ * plus the fact the plan is actually after: exactly one clamp, singular by
+ * construction because `clampedBy` is one field on one else-if chain, and
+ * the §1.7 order decides which cause wins.
+ *
+ * **The deferral, discharged (s6 Sc 10).** Every assertion below was written
+ * against a re-gate that could not see a clamp, and every one of them is
+ * unchanged now that it can. That is not luck: F-59's conversion is scoped
+ * to an approval the MACHINE made, and this suite's traffic is either
+ * clamped before any approval exists (no send, nothing to deny) or approved
+ * by a person, whom a loop breaker may not veto (Sc 8 row 7). The rows that
+ * DO watch a loop clamp kill a send live in `outside-window.spec.ts`, where
+ * there is an auto approval to refuse. `circuit-breaker.spec.ts` recorded
+ * the same deferral for the same reason and discharged it the same way.
  *
  * **The stand-in is gone (s6 Sc 9).** This suite shipped with one hand-built
  * helper, `autoApproveAndSend`, which wrote the `{kind:'system',
@@ -426,9 +430,10 @@ describe('s6 Sc8 row 1: the consecutive-auto streak', () => {
       clampedBy: 'loop-detected',
     });
 
-    // A clamp is not a denial (§1.7). The `gate.denied {loop-detected}` row
-    // the plan names belongs to the send-moment re-gate, which is Sc 10's
-    // work (F-59); nothing here pretends to have written it.
+    // A clamp is not a denial (§1.7). Sc 10 gave the send-moment re-gate
+    // the context to convert this one into `gate.denied {loop-detected}`,
+    // and it still does not fire here: the fourth draft was never approved,
+    // so there is no send to refuse and nobody to refuse it to.
     expect(auditOf(a.h, 'gate.denied')).toEqual([]);
     // Three sends attempted, three verified, and the fourth never reached the
     // backend at all because nobody approved it.
@@ -836,8 +841,8 @@ describe('s6 Sc8 row 9: composed — the §1.7 step-7 order, asserted', () => {
 
     // Nothing in that whole narrative was DENIED. Four causes, four clamps,
     // one `clampedBy` field, and no `gate.denied` row — because a clamp is
-    // not a denial and this slice never turns one into a refusal (Sc 10,
-    // F-59, owns that conversion).
+    // not a denial, and the send-moment conversion Sc 10 added (F-59) needs
+    // an auto approval to act on. None of these drafts ever got one.
     expect(auditOf(a.h, 'gate.denied')).toEqual([]);
   });
 

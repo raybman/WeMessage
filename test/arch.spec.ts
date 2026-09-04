@@ -1020,6 +1020,18 @@ describe('arch invariants (dependency-cruiser)', () => {
           // guard exists to make visible. Rows for the other four stay at
           // their S1 shape until Sc 6/7/8/9 claim them one at a time.
           'packages/core/src/gate/index.ts',
+          // s6 Scenario 10, the THIRD deliberate edit to this row and the
+          // first time the literal is COMPARED rather than recorded: the
+          // send-moment re-gate now rebuilds the draft's own context (F-59),
+          // so a window that shut during the grace shows up here as
+          // `clampedBy`. It is singled out by name because it is the one
+          // clamp that does not fail the draft — F-72 returns it to
+          // 'pending' — and telling it apart from the clamps that DO fail
+          // requires spelling it. The literal still reaches the audit log
+          // only through `clampedBy`; nothing new is minted. It sits above
+          // the Scenario 5 entry despite arriving after it because the scan
+          // returns paths sorted, not in the order the homes were claimed.
+          'packages/core/src/sending/dispatcher.ts',
           // s6 Scenario 5, the SECOND deliberate edit: the inbound rule path
           // now consults the gate at the draft moment (F-60), and it must
           // read `clampedBy` to honour `rule.outsideWindow === 'ignore'` —

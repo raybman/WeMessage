@@ -37,7 +37,13 @@ import type {
   Service,
   Ulid,
 } from '../domain/types.js';
-import { evaluateGate, readGateSettings } from '../gate/index.js';
+import { applyDraftTransition } from '../drafts/transitions.js';
+import {
+  evaluateGate,
+  readGateCounters,
+  readGateSettings,
+  readLoopCandidate,
+} from '../gate/index.js';
 import type {
   ChatDbReader,
   Clock,
@@ -73,7 +79,17 @@ export interface DispatchApprovedDeps {
 
 export type DispatchOutcome =
   | { outcome: 'sent'; sentMessageGuid: MessageGuid }
-  | { outcome: 'failed'; error: DraftError };
+  | { outcome: 'failed'; error: DraftError }
+  /**
+   * s6 Scenario 10 (F-72). Neither of the above: the draft was not sent and
+   * nothing failed. A rule's schedule shut during its auto approval's grace,
+   * so the approval was withdrawn and the draft put back in the queue for a
+   * human. Reporting this as 'failed' would be a lie with consequences —
+   * the daemon turns a 'failed' outcome into a `send_failed` feedback frame,
+   * and an agent told its draft failed will reasonably try again at a draft
+   * that is sitting in the queue perfectly intact.
+   */
+  | { outcome: 'requeued'; reason: GateDenyReason };
 
 // Deliberately duplicated from packages/sendkit/src/verify.ts (INV-1: core
 // has zero package deps, cannot import sendkit). Keep these two constants
@@ -237,30 +253,67 @@ export async function dispatchApproved(
 
   return withSendMutex(async () => {
     // THE re-gate, read after mutex acquisition (see the header note).
+    //
+    // s6 Scenario 10 (F-59): the context is the DRAFT'S OWN, rebuilt here.
+    // Until this scenario it was `rule: null, schedule: null, contact: null`
+    // and five zeroed counters, which was honest while nothing downstream
+    // read a clamp but made four of the six §1.7 clamps structurally
+    // unreachable at the send moment — a draft authorised at 09:59 could go
+    // out at 14:00 through a schedule that shut four hours earlier. The
+    // whole point of a re-gate is to read the world as late as possible;
+    // reading a world with the interesting fields blanked is not that.
+    //
+    // Everything below is read at ONE instant, for the reason the draft
+    // moment reads at one instant (`adapters/dispatch.ts`): a window edge
+    // that moved between two reads is a decision that is off by whatever
+    // the reads cost.
+    const now = clock.now();
+    const rule = draft.ruleId === null ? null : store.getRule(draft.ruleId);
+    const scheduleId = rule === null ? null : rule.scheduleId;
     const gate = evaluateGate({
-      now: clock.now(),
+      now,
       settings: readGateSettings(store),
-      rule: null,
-      schedule: null,
-      contact: null,
+      rule,
+      schedule: scheduleId === null ? null : store.getSchedule(scheduleId),
+      contact: store.getContactPolicy(parsed.handle),
       message: {
         isGroup: parsed.isGroup,
         service: parsed.service,
         handle: parsed.handle,
         chatGuid: draft.chatGuid,
       },
-      // Zeros: the send-moment re-gate reads the deny rules, and rate is a
-      // clamp rather than a deny. Converting a clamp into a send-moment
-      // refusal is S6 Sc 10's job (F-59), and it needs the approval's own
-      // provenance to do it — an approval a human made must not be refused
-      // by a cap that only ever bound the machine.
       counters: {
+        ...readGateCounters(store, {
+          now,
+          handle: parsed.handle,
+          chatGuid: draft.chatGuid,
+        }),
+        // The three rate windows are read as ZERO here, and this is the one
+        // field in the rebuilt context that is deliberately not live (F-71).
+        // `bumpSendCounters` runs at APPROVAL, not at send, so by the time a
+        // grace elapses the approval has already spent its own budget: with
+        // the shipped `contactPer2Min: 1` a live read would find
+        // `contactAutoLast2Min === 1 >= 1` and refuse the very send the cap
+        // had just authorised. Worse, step 7 is an else-if chain, so that
+        // self-denial would sit in front of the circuit, loop and SMS clamps
+        // and report the rate reason for all of them. (That reason goes
+        // unquoted in this comment on purpose: arch guard (g) reads a quoted
+        // deny literal in a production file as a HOME for it, and this file
+        // is a home only to the window clamp.) A cap governs how often the
+        // machine DECIDES to speak; it is not a second veto on a decision it
+        // already made. The one place a rate limit refuses anyone is the
+        // approve route's global bound (§2.4.3), and that is a decision
+        // about a request, taken at the moment the request is made.
         contactAutoLast2Min: 0,
         contactAutoLastHour: 0,
         globalSentLastHour: 0,
-        consecutiveAutoInChat: 0,
-        circuitOpen: false,
       },
+      // The duplicate half of the loop breaker needs a body, and at the send
+      // moment there finally is one (the draft moment has no draft yet).
+      candidate: readLoopCandidate(store, {
+        chatGuid: draft.chatGuid,
+        body: draft.body,
+      }),
     });
     const gateDeny = (reason: GateDenyReason): DispatchOutcome => {
       const error: DraftError = {
@@ -277,16 +330,93 @@ export async function dispatchApproved(
       emit({ type: 'gate.denied', draftId, reason, at: clock.now() });
       return outcome;
     };
+    /**
+     * F-72: a shut window does not fail a draft, it takes the approval back.
+     * `sendNotBefore` is cleared in the same statement as the state change,
+     * so the scheduler's grace sweep — which INNER JOINs on an armed
+     * deadline — cannot see this pair again. The draft keeps its original
+     * `expiresAt`: a window eight hours out and a four-hour TTL means the
+     * draft expires rather than waiting, which is the honest outcome.
+     */
+    const requeue = (reason: GateDenyReason): DispatchOutcome => {
+      const requeuedBy: Actor = { kind: 'system', reason: 'window-closed' };
+      const at = clock.now();
+      const to = applyDraftTransition({
+        from: 'approved',
+        event: 'window-closed',
+        actor: requeuedBy,
+      });
+      store.applyDraftTransition({
+        id: draftId,
+        from: 'approved',
+        to,
+        at,
+        sendNotBefore: null,
+      });
+      // What became of the draft, then why — the order `fail` has always
+      // used, so a reader scanning for a draft's fate finds it before the
+      // explanation. Both rows carry the requeueing actor rather than the
+      // approver: the machine that approved is not the machine that took it
+      // back.
+      appendAudit(store, clock, requeuedBy, {
+        type: 'draft.requeued',
+        draftId,
+        reason,
+      });
+      appendAudit(store, clock, requeuedBy, {
+        type: 'gate.denied',
+        draftId,
+        reason,
+      });
+      emit({ type: 'gate.denied', draftId, reason, at: clock.now() });
+      return { outcome: 'requeued', reason };
+    };
+
     if (!gate.allow) {
       return gateDeny(gate.reason);
     }
-    // An auto-approval is only honored if the gate ALSO resolved to auto.
-    // The commonest way it does not is INV-5's group clamp, which is exactly
-    // the 'group-auto-forbidden' reason. A HUMAN approval on a group falls
-    // through to the S3 'group-send-disabled' path below, unchanged (F-36:
-    // both rows are pinned side by side in dispatcher.spec.ts).
-    if (isAutoApproval && gate.mode !== 'auto') {
-      return gateDeny(parsed.isGroup ? 'group-auto-forbidden' : 'unapproved');
+    /**
+     * s6 Scenario 10: a DENY binds everyone, a CLAMP binds autonomy only.
+     * That is §2.4.1's own division ("steps 1-2 deny at both gate moments;
+     * the clamps are what the two moments read differently") applied at the
+     * moment it finally has an approval to judge. The deny above already ran
+     * for both kinds of approver — a contact flipped to `deny` mid-grace
+     * kills the send whoever authorised it, because revocation that only
+     * binds machines is not revocation. Everything in this block is scoped
+     * to the machine, because a cap, a breaker, a loop or a shut window that
+     * could veto a person would be a system that stops taking instructions
+     * from its operator (Sc 6 row 7 and Sc 8 row 7 are the pins).
+     */
+    if (isAutoApproval) {
+      // Fail-closed on the adapter row itself, exactly as the draft moment
+      // does it, and checked here rather than inside `evaluateGate` because
+      // core is adapter-blind by construction (INV-1) — the gate takes a
+      // message and three policies, not a registry. A human approval is NOT
+      // subject to this: revoking an agent's credential must not destroy a
+      // decision a person already made.
+      const adapter = store.getAdapter(draft.adapterId);
+      if (adapter === null || !adapter.enabled || !adapter.hasToken) {
+        return gateDeny('adapter-disabled');
+      }
+      // The one clamp that is not a failure. It must be tested before the
+      // generic clamp branch below, and both before the mode check, or a
+      // shut window would be reported as 'unapproved' — the reason that
+      // means "nobody authorised this", which is the opposite of true here.
+      if (gate.clampedBy === 'outside-window') {
+        return requeue(gate.clampedBy);
+      }
+      if (gate.clampedBy !== undefined) {
+        return gateDeny(gate.clampedBy);
+      }
+      // An auto-approval is only honored if the gate ALSO resolved to auto.
+      // The commonest way it does not is INV-5's group clamp, which is
+      // exactly the 'group-auto-forbidden' reason. A HUMAN approval on a
+      // group falls through to the S3 'group-send-disabled' path below,
+      // unchanged (F-36: both rows are pinned side by side in
+      // dispatcher.spec.ts).
+      if (gate.mode !== 'auto') {
+        return gateDeny(parsed.isGroup ? 'group-auto-forbidden' : 'unapproved');
+      }
     }
 
     if (parsed.isGroup) {

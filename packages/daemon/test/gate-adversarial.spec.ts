@@ -85,6 +85,56 @@ function sweep(h: Harness): void {
   });
 }
 
+/**
+ * s6 Sc 10 raised the bar for a forged AUTO approval, and this is how the
+ * attacker meets it. The send-moment re-gate now checks the draft's adapter
+ * before it reads any clamp, and `POST /v1/drafts` mints against the F-22
+ * reserved 'human' anchor, for which `getAdapter` returns null by design. A
+ * forged auto approval on such a draft is therefore refused
+ * 'adapter-disabled' — a true refusal, but one layer shallower than the
+ * mechanism the group row exists to attack, and a row that accepted it
+ * would silently stop testing INV-5.
+ *
+ * So the attacker is given the credential too: a registered, enabled,
+ * token-bearing adapter and a draft minted against it, straight through the
+ * store, exactly as it already mints approvals through the store. Making
+ * the attack stronger is the only honest way to keep the assertion.
+ */
+function plantCredentialledDraft(
+  h: Harness,
+  body: string,
+  chatGuid: string,
+): Ulid {
+  const at = h.clockCtl.clock.now();
+  const adapterId = `a-${ulid()}`;
+  h.store.insertAdapter({
+    id: adapterId,
+    kind: 'generic',
+    displayName: 'planted',
+    enabled: true,
+    hasToken: false,
+    health: 'connected',
+    config: {},
+  });
+  h.store.setAdapterTokenHash(adapterId, '0'.repeat(64), null);
+  const id = ulid();
+  h.store.insertDraft({
+    id,
+    inboundGuid: null,
+    chatGuid,
+    ruleId: null,
+    adapterId,
+    idempotencyKey: ulid(),
+    body,
+    originalBody: body,
+    state: 'pending',
+    stateChangedAt: at,
+    expiresAt: '2126-01-01T00:00:00.000Z',
+    createdAt: at,
+  });
+  return id;
+}
+
 /** Approve for real, then dispatch under a FORGED approval of `actor`. */
 async function approveThenForge(
   h: Harness,
@@ -197,12 +247,11 @@ describe('s4 Scenario 12: T-9.4 adversarial suite (§4.0)', () => {
 
   it('(e) an auto approval on a group chat is denied group-auto-forbidden (INV-5)', async () => {
     const h = await boot();
-    const { draftId, forgedId } = await approveThenForge(
-      h,
-      'auto into a group',
-      AUTO_ACTOR,
-      { chatGuid: GROUP_CHAT },
+    const draftId = plantCredentialledDraft(h, 'auto into a group', GROUP_CHAT);
+    expect((await post(h, `/v1/drafts/${draftId}/approve`)).statusCode).toBe(
+      200,
     );
+    const forgedId = forgeApproval(h, draftId, AUTO_ACTOR);
     await h.dispatch(draftId, forgedId).catch(() => undefined);
 
     const parked = h.store.getDraft(draftId);

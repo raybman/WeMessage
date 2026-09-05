@@ -41,7 +41,6 @@ import {
   readRateCaps,
   RATE_SCOPE_GLOBAL,
   RATE_WINDOW_HOUR_MS,
-  SETTING_UNDO_GRACE_SECONDS,
   type Clock,
   type Draft,
   type DraftState,
@@ -51,6 +50,7 @@ import {
 import type { DraftSummary } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
 import type { DraftFeedbackTap } from '../adapters/feedback.js';
+import { readUndoGraceSeconds } from '../settings/schema.js';
 
 /** Outcome of one draft-level operation, shared by the single and bulk paths. */
 type ApplyResult =
@@ -82,8 +82,6 @@ export interface DraftRouteDeps {
 const HUMAN_ADAPTER_ID = 'human';
 /** §2.3 rules-DDL default, reused for a hand-composed draft's TTL. */
 const DEFAULT_TTL_MINUTES = 240;
-/** §1.3.3 default undo window when `send.undoGraceSeconds` is unset. */
-const DEFAULT_UNDO_GRACE_SECONDS = 10;
 /** C-10 (§1.3.3): one first try plus two retries, then the draft is done. */
 const RETRY_CEILING = 3;
 /**
@@ -154,21 +152,6 @@ const DRAFT_STATES: readonly string[] = [
   'recalled',
   'failed',
 ];
-
-/**
- * Unset -> the 10s default. Set-but-garbage -> also the default: a
- * corrupted settings row must not silently mean "send instantly."
- * Explicit '0' -> zero, the one value that legitimately disables the window.
- */
-function undoGraceSeconds(store: Pick<Store, 'getSetting'>): number {
-  const raw = store.getSetting(SETTING_UNDO_GRACE_SECONDS);
-  if (raw === null) return DEFAULT_UNDO_GRACE_SECONDS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_UNDO_GRACE_SECONDS;
-  }
-  return parsed;
-}
 
 function addSeconds(iso: string, seconds: number): string {
   return new Date(Date.parse(iso) + seconds * 1000).toISOString();
@@ -449,7 +432,7 @@ export function registerDraftRoutes(
       from: draft.state,
       to,
       at,
-      sendNotBefore: addSeconds(at, undoGraceSeconds(store)),
+      sendNotBefore: addSeconds(at, readUndoGraceSeconds(store)),
       ...(opts.editedBody !== undefined ? { body: opts.editedBody } : {}),
     });
     const approvalId = ulid();
@@ -734,7 +717,7 @@ export function registerDraftRoutes(
         from: draft.state,
         to,
         at,
-        sendNotBefore: addSeconds(at, undoGraceSeconds(store)),
+        sendNotBefore: addSeconds(at, readUndoGraceSeconds(store)),
       });
       const approvalId = ulid();
       store.insertApproval({

@@ -374,3 +374,15 @@ export interface GateContext {
    */
   candidate?: { body: string; recentSentBodies: readonly string[] };
 }
+
+/**
+ * s7 Sc4: the TYPED value a settings key carries — over `GET /v1/settings`,
+ * in a `PATCH` body, and in a `setting.changed` audit row.
+ *
+ * The settings table stores TEXT and always will; this is what the daemon
+ * and the operator agree those bytes MEAN. Keeping the meaning in the type
+ * system is what lets an audit row say "the cap went from 1 to 3" as numbers
+ * rather than as strings a reader would have to re-parse to compare. `null`
+ * is a real value here (an unset deadline), not an absent one.
+ */
+export type SettingValue = number | boolean | string | null;

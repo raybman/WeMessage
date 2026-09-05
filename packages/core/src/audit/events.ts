@@ -43,6 +43,7 @@ import type {
   RespondMode,
   Rule,
   Schedule,
+  SettingValue,
   Ulid,
 } from '../domain/types.js';
 import type { CursorHealReason } from '../drafts/recovery.js';
@@ -254,6 +255,30 @@ export type AuditEvent =
       adapterId?: string;
     }
   | { type: 'toggle.changed'; key: string; on: boolean } // kill-switch flips
+  /* --- s7 Scenario 4 (F-85): the settings surface -----------------------
+   *
+   * A sibling of `toggle.changed` rather than a widening of it, because a
+   * toggle IS a boolean and a settings key is a number, a string or a
+   * deadline. Squeezing "the per-contact cap went from 1 to 3" into `on`
+   * would either lose the values or make `on` mean something different
+   * depending on which key it was about.
+   *
+   * `from` is recorded as well as `to` because the question an operator asks
+   * of this log is never "what is the cap" — `GET /v1/settings` answers that
+   * — it is "what changed, and what was it before". Both are the TYPED value
+   * (`SettingValue`), not the stored bytes: a row that said '3' would leave
+   * a reader guessing whether the cap had been three or the string three.
+   *
+   * Every writer is `PATCH /v1/settings` under the human API actor. The
+   * routes that own the read-only keys keep writing `toggle.changed`, so
+   * this variant never describes a flip the kill switch made.
+   */
+  | {
+      type: 'setting.changed';
+      key: string;
+      from: SettingValue;
+      to: SettingValue;
+    }
   /* --- s6 Scenario 11 (§1.6): arming ------------------------------------
    *
    * Three of these four are OPERATOR ACTIONS and carry the human API actor:

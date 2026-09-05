@@ -454,7 +454,13 @@ describe('SSE, event filters and WS/SSE parity (s7 Scenario 3, ★)', () => {
     expect(ROUTE_TABLE).toContain(`HEAD ${SSE_PATH}`);
     // Ratchet #21 arithmetic: one GET is +2 (itself plus fastify's auto-HEAD
     // twin); a POST would be +1. 62 -> 64.
-    expect(ROUTE_TABLE).toHaveLength(64);
+    //
+    // s7 Sc4 (ratchet #22) then added the settings surface: a GET (+2 with
+    // its twin) and a PATCH (+1, no twin), 64 -> 67. This row's claim is the
+    // two SSE entries named above; the total is the tripwire that catches a
+    // route nobody meant to add, so it moves with the ratchet rather than
+    // being deleted.
+    expect(ROUTE_TABLE).toHaveLength(67);
 
     const h = await bootAgent({ greeting: true });
     const before = h.sink.subscriberCount();

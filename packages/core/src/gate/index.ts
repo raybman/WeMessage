@@ -211,8 +211,14 @@ export const DEFAULT_RATE_CAPS: RateCaps = {
   globalPerHour: 30,
 };
 
-/** F-66: no cap can be set below this, and there is no disabling value. */
-const CAP_FLOOR = 1;
+/**
+ * F-66: no cap can be set below this, and there is no disabling value.
+ *
+ * Exported since s7 Sc4 so `PATCH /v1/settings` refuses a sub-floor write
+ * using the same number the reader clamps to. A route with its own copy of
+ * the floor would be a route that could quietly stop agreeing with the gate.
+ */
+export const CAP_FLOOR = 1;
 
 /**
  * Strict integer or the default — deliberately not `parseInt`, which reads

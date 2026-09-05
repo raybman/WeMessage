@@ -1,0 +1,101 @@
+{
+  "arming.pauseUntil": {
+    "type": "iso",
+    "readOnly": true,
+    "use": "POST /v1/toggles/pause",
+    "default": null
+  },
+  "send.autoGraceSeconds": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 5,
+    "ceiling": 300,
+    "default": 10
+  },
+  "send.capContactPer2Min": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 60,
+    "default": 1
+  },
+  "send.capContactPerHour": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 600,
+    "default": 10
+  },
+  "send.capGlobalPerHour": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 10000,
+    "default": 30
+  },
+  "send.circuitFailureThreshold": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 1000,
+    "default": 5
+  },
+  "send.circuitFailureWindowMin": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 1440,
+    "default": 10
+  },
+  "send.circuitOpenMinutes": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 1440,
+    "default": 15
+  },
+  "send.circuitOpenedAt": {
+    "type": "iso",
+    "readOnly": true,
+    "use": "POST /v1/toggles/kill-switch {\"circuit\": true}",
+    "default": null
+  },
+  "send.globalMode": {
+    "type": "enum",
+    "readOnly": true,
+    "use": "POST /v1/toggles/global-mode",
+    "default": "draft-only"
+  },
+  "send.killSwitch": {
+    "type": "bool",
+    "readOnly": true,
+    "use": "POST /v1/toggles/kill-switch",
+    "default": false
+  },
+  "send.loopConsecutiveAutoMax": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 100,
+    "default": 3
+  },
+  "send.loopDuplicateLookback": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 1,
+    "ceiling": 100,
+    "default": 5
+  },
+  "send.retryAsSms": {
+    "type": "bool",
+    "readOnly": false,
+    "default": false
+  },
+  "send.undoGraceSeconds": {
+    "type": "int",
+    "readOnly": false,
+    "floor": 0,
+    "ceiling": 300,
+    "default": 10
+  }
+}

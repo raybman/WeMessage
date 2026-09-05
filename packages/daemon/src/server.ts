@@ -50,6 +50,7 @@ const DEFAULT_ADAPTER_PORT = 47100;
 import { registerDraftRoutes } from './routes/drafts.js';
 import { registerToggleRoutes } from './routes/toggles.js';
 import { registerContactRoutes } from './routes/contacts.js';
+import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
@@ -429,6 +430,16 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       sink,
     });
     registerToggleRoutes(app, {
+      store: opts.drafts.store,
+      clock: opts.drafts.clock,
+      sink,
+    });
+    // s7 Sc4: the settings surface rides with the toggles for the same
+    // reason the contact policies do — a toggle is a setting an operator
+    // reaches for in a hurry, and the rest of them are the same table. It
+    // is registered AFTER the toggle routes so the `use:` pointers this
+    // route hands back always name routes that exist in the same server.
+    registerSettingsRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,

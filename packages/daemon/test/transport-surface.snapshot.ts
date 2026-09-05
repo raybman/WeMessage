@@ -133,6 +133,41 @@ export const ROUTE_TABLE: readonly string[] = [
   // anything in the SSE path so much as names a SendBackend. An event
   // stream is read-only surface (INV-2); approve-before-send must not be
   // reachable from a subscription.
+  //
+  // #22 deliberate (s7 Scenario 4): the settings surface, 64 -> 67.
+  //   GET   /v1/settings  — the closed list, typed, with defaults + versions
+  //   HEAD  /v1/settings  — fastify's auto-twin for the GET above
+  //   PATCH /v1/settings  — a write over that same closed list
+  //   2 routes + 1 auto-HEAD twin = +3; 64 + 3 = 67.
+  // The asymmetry is #21's note applied to a mixed pair: `exposeHeadRoutes`
+  // mints twins for GET routes ONLY, so the PATCH brings no twin with it and
+  // a GET+PATCH pair costs three entries rather than four. That closes S7's
+  // §1.6 projection of 62 -> 67 exactly: #21's +2 and this +3.
+  //
+  // PATCH rather than PUT because the body is the keys an operator CHANGED,
+  // not the settings table as they believe it to be. A PUT would make every
+  // save a claim about all fifteen keys, and two screens open at once would
+  // silently revert each other's edits.
+  //
+  // NO WS event moves, and the reasoning is worth pinning because it looks
+  // at first like it should. The route DOES broadcast on every accepted
+  // mutation — `toggle.changed {key, value, actor}`, the variant S4 minted
+  // for the kill switch, whose `value` is unconstrained in the schema and
+  // therefore already carries a number. The AUDIT side needed a new variant
+  // (`setting.changed`, with `from` and `to`) because audit `toggle.changed`
+  // carries `on: boolean` and cannot say what a cap moved from. Audit events
+  // are not WS events: `GATEWAY_EVENT_NAMES` stays at 17, both lists below
+  // stay at 17, and Sc 2's completeness report is confirmed rather than
+  // contradicted. A seventeenth-plus-one name here would have meant every
+  // existing subscriber had to learn a frame to keep seeing settings change.
+  //
+  // NO port importer moves, and as with #21 that is enforced rather than
+  // observed: neither `src/settings/schema.ts` nor `src/routes/settings.ts`
+  // appears in PORT_IMPORTER_ALLOWLIST below, so the importer scan fails the
+  // moment either file so much as names a SendBackend. No settings key may
+  // open a path to the send backend that goes around `dispatchApproved`
+  // (INV-2); the only effect any key in the list has is a row some reader
+  // consults later.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -155,6 +190,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/rules/:id/dry-run',
   'GET /v1/schedules',
   'GET /v1/schedules/:id',
+  'GET /v1/settings',
   'GET /v1/status',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
@@ -174,10 +210,12 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/rules/:id/dry-run',
   'HEAD /v1/schedules',
   'HEAD /v1/schedules/:id',
+  'HEAD /v1/settings',
   'HEAD /v1/status',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
   'PATCH /v1/schedules/:id',
+  'PATCH /v1/settings',
   'POST /v1/adapters',
   'POST /v1/adapters/:id/token',
   'POST /v1/connect',

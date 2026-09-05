@@ -81,7 +81,7 @@ export const SETTING_AUTO_GRACE_SECONDS = 'send.autoGraceSeconds';
 export const AUTO_GRACE_FLOOR_SECONDS = 5;
 
 /** §1.3.3's shipped undo window, the default this one inherits. */
-const DEFAULT_AUTO_GRACE_SECONDS = 10;
+export const DEFAULT_AUTO_GRACE_SECONDS = 10;
 
 /**
  * How long an auto-approved draft waits before the scheduler may send it.

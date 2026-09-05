@@ -953,7 +953,13 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     // now 64. The row's actual claim is unchanged and still checked below:
     // BOTH arming POSTs are reachable surface. The total is updated rather
     // than deleted because it is what catches a route nobody meant to add.
-    expect(ROUTE_TABLE).toHaveLength(64);
+    //
+    // s7 Sc4 (ratchet #22) added `GET /v1/settings`, its auto-HEAD twin and
+    // `PATCH /v1/settings` — +3, because the PATCH brings no twin — taking
+    // the total to 67 and closing S7 at its projected 62 -> 67. Same story
+    // as the paragraph above: the claim this row makes is about the two
+    // arming POSTs, and the total is the tripwire riding along with it.
+    expect(ROUTE_TABLE).toHaveLength(67);
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/pause');
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/global-mode');
   });

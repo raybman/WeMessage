@@ -233,7 +233,7 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
     expect(h.store.getDraft(redraft.id)?.state).toBe('sent');
   });
 
-  it('F-38: send.retryAsSms exists, defaults to absent, and nothing reads it', async () => {
+  it('F-38: send.retryAsSms exists, defaults to absent, and nothing acts on it', async () => {
     const h = await boot();
     expect(SETTING_RETRY_AS_SMS).toBe('send.retryAsSms');
     // Absent, treated as '0'. S4 ships the key, not the behaviour.
@@ -245,6 +245,15 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
     // the semantics are still undecided (global vs per-contact, whether SMS
     // send is v1 at all) is worse than no key: it would ship an untested
     // fallback that silently re-sends over a different carrier.
+    //
+    // s7 Sc4 adds the SECOND file, and the distinction it draws is why this
+    // row's title changed from "nothing reads it" to "nothing ACTS on it".
+    // `settings/schema.ts` is the closed list behind `/v1/settings`: it
+    // reads the key to show the operator its value and writes the key when
+    // they change it, and that is the whole of its involvement. No send
+    // path, no retry, no carrier decision consults it, which is the property
+    // F-38 was protecting. A third file here means somebody gave the key
+    // behaviour, and that is a decision this row wants a reviewer to see.
     const readers = productionSourceFiles()
       .filter((abs) => {
         const text = readFileSync(abs, 'utf8');
@@ -253,7 +262,10 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
         );
       })
       .map((abs) => relative(REPO_ROOT, abs));
-    expect(readers).toEqual(['packages/core/src/gate/index.ts']);
+    expect(readers).toEqual([
+      'packages/core/src/gate/index.ts',
+      'packages/daemon/src/settings/schema.ts',
+    ]);
   });
 
   it('F-39: expiry, supersede and redraft emit audit rows but no WS events', async () => {

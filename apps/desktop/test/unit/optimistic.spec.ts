@@ -707,3 +707,266 @@ describe('s8 Sc7: a verb the card cannot take never reaches the wire', () => {
     expect(store.chip('d1')).toBeUndefined();
   });
 });
+
+/* ── s8 Sc9: one operator act, N things in the world ─────────────────── */
+
+/**
+ * s8-execution Scenario 9 — bulk, one batch, partial failure.
+ *
+ * Sc5 proved the store MIRRORS a non-atomic bulk: one hypothesis per id,
+ * one shared token, per-id refusals, no rollback. Sc9 needs one thing more,
+ * and it is a display fact rather than a state fact: after `⇧A` over three
+ * cards the operator performed ONE act, and the screen owes them one place
+ * that says how that one act turned out. The daemon has that place — a
+ * `batchId` on every Approval row and `GET /v1/batches/:id` over it — so
+ * the store's job is to remember which local batch is which daemon batch,
+ * and to hold the counts somebody else fetched.
+ *
+ * Three decisions worth naming:
+ *
+ *  - **The batch is remembered by TOKEN first and `batchId` second.** The
+ *    token is minted here, at the keystroke; the `batchId` is the daemon's
+ *    and arrives with the HTTP answer, which is after the first frames can
+ *    already have landed. A model that could only name the batch once the
+ *    answer came back would drop the very first `draft.sent`.
+ *  - **`refused` ids leave the batch.** They produced no Approval row, so
+ *    they are not in `GET /v1/batches/:id` either, and a card that is
+ *    counted in `3 SELECTED` but can never appear in the report would make
+ *    the tallies never add up.
+ *  - **The counts are held generically.** `BatchReport` has keys this store
+ *    must not name (an arch row bans any `/send/i` identifier under the
+ *    store root, and `sending` is one of them). The store keeps whatever
+ *    numeric-valued keys it is handed; `derive/batch.ts` knows what they
+ *    mean.
+ */
+describe('s8 Sc9: the batch the operator thinks they performed', () => {
+  it('remembers the batch at the keystroke, before any answer comes back', () => {
+    const { store } = seeded(['d1', 'd2', 'd3']);
+    expect(store.batch()).toBeUndefined();
+
+    const started = store.bulk(['d1', 'd2', 'd3'], 'approve');
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error('unreachable');
+
+    const batch = store.batch();
+    expect(batch?.token).toBe(started.batchToken);
+    expect(batch?.action).toBe('approve');
+    expect(batch?.ids).toEqual(['d1', 'd2', 'd3']);
+    // Nobody has answered yet, so the daemon's name for it is not knowable.
+    expect(batch?.batchId).toBeNull();
+    expect(batch?.counts).toBeUndefined();
+    // …and every member can be asked which batch it is in, which is how a
+    // frame about one draft finds the batch it should refresh.
+    for (const id of ['d1', 'd2', 'd3'])
+      expect(store.batchMemberOf(id)).toBe(started.batchToken);
+    expect(store.batchMemberOf('d9')).toBeUndefined();
+  });
+
+  it('takes the daemon’s name for the batch and drops the ids it refused', () => {
+    const { store } = seeded(['d1', 'd2', 'd3']);
+    store.bulk(['d1', 'd2', 'd3'], 'approve');
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 3,
+      applied: 2,
+      appliedIds: ['d1', 'd3'],
+      refused: [{ id: 'd2', error: 'gate-denied' }],
+    });
+
+    expect(store.batch()?.batchId).toBe('B1');
+    expect(store.batch()?.ids).toEqual(['d1', 'd3']);
+    expect(store.batch()?.refused).toEqual([
+      { id: 'd2', error: 'gate-denied' },
+    ]);
+    // d2 produced no Approval row, so it is in no report and belongs to no
+    // batch: asking it which batch to refresh must answer nothing.
+    expect(store.batchMemberOf('d2')).toBeUndefined();
+    expect(store.batchMemberOf('d1')).toBeDefined();
+  });
+
+  it('holds whatever counts it is handed, for the batch it is holding', () => {
+    const { store, notifications } = seeded(['d1', 'd2', 'd3']);
+    store.bulk(['d1', 'd2', 'd3'], 'approve');
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 3,
+      applied: 3,
+      appliedIds: ['d1', 'd2', 'd3'],
+      refused: [],
+    });
+
+    const seen = notifications();
+    store.setBatchCounts('B1', { approved: 0, sent: 2, failed: 1 });
+    expect(store.batch()?.counts).toEqual({ approved: 0, sent: 2, failed: 1 });
+    expect(notifications()).toBe(seen + 1);
+
+    // A report for a batch this store is not holding is a late answer to a
+    // question that has been replaced, and it must not overwrite the one on
+    // screen.
+    store.setBatchCounts('B0', { approved: 9, sent: 9, failed: 9 });
+    expect(store.batch()?.counts).toEqual({ approved: 0, sent: 2, failed: 1 });
+  });
+
+  it('replaces the batch on the next one, because there is only one card', () => {
+    const { store } = seeded(['d1', 'd2', 'd3']);
+    store.bulk(['d1', 'd2'], 'approve');
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 2,
+      applied: 2,
+      appliedIds: ['d1', 'd2'],
+      refused: [],
+    });
+    const second = store.bulk(['d3'], 'reject');
+    expect(second.ok).toBe(true);
+    expect(store.batch()?.action).toBe('reject');
+    expect(store.batch()?.ids).toEqual(['d3']);
+    expect(store.batch()?.batchId).toBeNull();
+    // The previous batch's members stop pointing at a batch that is no
+    // longer on screen.
+    expect(store.batchMemberOf('d1')).toBeUndefined();
+  });
+
+  it('records no batch for a bulk that never left the building', () => {
+    const { store } = seeded(['d1', 'd2']);
+    store.setStream('reconnecting');
+    expect(store.bulk(['d1', 'd2'], 'approve')).toEqual({
+      ok: false,
+      refused: 'offline',
+    });
+    expect(store.batch()).toBeUndefined();
+  });
+
+  it('a snapshot keeps the batch, because the batch is not a row', () => {
+    const { store } = seeded(['d1', 'd2']);
+    store.bulk(['d1', 'd2'], 'approve');
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 2,
+      applied: 2,
+      appliedIds: ['d1', 'd2'],
+      refused: [],
+    });
+    // The wiring refetches immediately after a bulk (a `BulkResult` carries
+    // no draft payloads, so the rings have no window until it does). If the
+    // snapshot cleared the batch, the batch card would be destroyed by the
+    // very fetch that makes the cards it summarises tick.
+    store.snapshot([draft('d1', 'approved'), draft('d2', 'approved')], {
+      at: AT,
+      missed: 0,
+    });
+    expect(store.batch()?.batchId).toBe('B1');
+  });
+});
+
+/* ── s8 Sc9: what the batch says about the cards it refused ──────────── */
+
+describe('s8 Sc9: a refusal that arrives twice still reads once', () => {
+  it('does not overwrite a chip the frame already wrote', () => {
+    const { store } = seeded(['d1', 'd2', 'd3']);
+    store.bulk(['d1', 'd2', 'd3'], 'approve');
+
+    // The daemon refuses the third approval on the hourly cap. That refusal
+    // reaches this renderer TWICE and by two roads: a `gate.denied` frame
+    // over the socket carrying the real reason, and the `refused` entry in
+    // the HTTP answer carrying the route's generic error name. The frame is
+    // the specific one — `rate-limited` tells an operator when to try again,
+    // `gate-denied` tells them only that something said no — and the two
+    // races, so whichever lands first, the specific one has to survive.
+    store.event({
+      event: 'gate.denied',
+      chatGuid: 'iMessage;-;+15550001111',
+      draftId: 'd3',
+      reason: 'rate-limited',
+    });
+    expect(store.chip('d3')).toEqual({
+      kind: 'denied',
+      reason: 'rate-limited',
+    });
+
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 3,
+      applied: 2,
+      appliedIds: ['d1', 'd2'],
+      refused: [{ id: 'd3', error: 'gate-denied' }],
+    });
+
+    expect(store.chip('d3')).toEqual({
+      kind: 'denied',
+      reason: 'rate-limited',
+    });
+    // The hypothesis is still cleared: not overwriting the chip is about the
+    // WORDS on the card, not about leaving it lying that it was approved.
+    expect(store.row('d3')?.pending).toBeUndefined();
+    expect(store.stateOf('d3')).toBe('pending');
+  });
+
+  it('writes its own chip when nothing got there first', () => {
+    const { store } = seeded(['d1', 'd2']);
+    store.bulk(['d1', 'd2'], 'approve');
+    store.applyBulk({
+      batchId: 'B1',
+      matched: 2,
+      applied: 1,
+      appliedIds: ['d1'],
+      refused: [{ id: 'd2', error: 'illegal-transition' }],
+    });
+    expect(store.chip('d2')).toEqual({
+      kind: 'denied',
+      reason: 'illegal-transition',
+    });
+  });
+});
+
+/* ── s8 Sc9: retry is a verb, and it is not a bulk verb ──────────────── */
+
+describe('s8 Sc9: retry, the one verb a failed card has', () => {
+  const failedEvent = (draftId: string): GatewayEventPayload => ({
+    event: 'draft.failed',
+    draftId,
+    error: { code: 'unverified', message: 'synthetic unverified', at: AT },
+  });
+
+  it('starts only from failed, and mints the approved hypothesis', () => {
+    const { store } = seeded(['d1', 'd2']);
+    // A pending card has `a` for approve. Retry is not a second name for it.
+    expect(store.retry('d1')).toEqual({ ok: false, refused: 'wrong-state' });
+
+    store.event(failedEvent('d1'));
+    expect(store.stateOf('d1')).toBe('failed');
+    expect(store.retry('d1')).toEqual({ ok: true });
+    // `POST /v1/drafts/:id/retry` puts the draft back to `approved` with a
+    // FRESH grace window, so the card goes back to ringing and the
+    // hypothesis has to say so.
+    expect(store.stateOf('d1')).toBe('approved');
+    expect(store.row('d1')?.pending?.action).toBe('retry');
+    expect(store.row('d1')?.pending?.hypothesis).toBe('approved');
+  });
+
+  it('refuses a second retry while the first is in flight, and refuses offline', () => {
+    const { store } = seeded(['d1']);
+    store.event(failedEvent('d1'));
+    expect(store.retry('d1')).toEqual({ ok: true });
+    expect(store.retry('d1')).toEqual({ ok: false, refused: 'in-flight' });
+
+    const other = seeded(['d2']);
+    other.store.event(failedEvent('d2'));
+    other.store.setStream('reconnecting');
+    expect(other.store.retry('d2')).toEqual({ ok: false, refused: 'offline' });
+    expect(other.store.retry('gone')).toEqual({
+      ok: false,
+      refused: 'offline',
+    });
+  });
+
+  it('cannot be bulked, at the type level', () => {
+    const { store } = seeded(['d1']);
+    // The route's action enum is `z.enum(['approve','recall','reject'])`.
+    // `bulk` takes the NARROWER union so a fourth verb cannot be posted to
+    // a route that would 400 on it — and so nobody can retry twelve cards
+    // with one keystroke, which is a decision, not an oversight.
+    // @ts-expect-error 'retry' is not a BulkAction
+    store.bulk(['d1'], 'retry');
+  });
+});

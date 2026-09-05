@@ -73,7 +73,16 @@ function draft(over: Partial<DraftPayload> = {}): DraftPayload {
  */
 function context(over: Partial<CardContext> = {}): CardContext {
   return {
-    catalogue: { rules: new Map(), contacts: new Map(), watching: [] },
+    // `settings` is s8 Sc9's addition to the catalogue and is read only by
+    // the batch card, never by a draft card — so it is empty here on
+    // purpose rather than absent, which under exactOptionalPropertyTypes is
+    // a different type.
+    catalogue: {
+      rules: new Map(),
+      contacts: new Map(),
+      watching: [],
+      settings: new Map(),
+    },
     state: 'pending',
     chip: undefined,
     clampedBy: undefined,

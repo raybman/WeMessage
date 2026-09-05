@@ -4126,16 +4126,36 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
      * and is asserted separately below: no identifier under the store may
      * match /send/i, so the store still cannot reach the one channel that
      * could dispatch.
+     *
+     * s8 Sc9 widens it to eleven, again in one diff, for the batch card and
+     * the one verb a failed card has:
+     *
+     *  - `batch` — `GET /v1/batches/:id`, a read of the tallies over one
+     *    `batchId`. It is what lets ONE operator act have one answer when
+     *    the daemon performed N separate ones.
+     *  - `settings` — a read, and the reason it is here rather than
+     *    hard-coded: the retry footnote states whether a retry would fall
+     *    back to SMS, and a GUI that assumed that would be making a claim
+     *    about a different network on the operator's behalf.
+     *  - `retry` — the only write, and the closest thing on this list to a
+     *    send. It passes the same test `recall` did. It asks the DAEMON to
+     *    move a failed draft back to `approved` with a fresh grace window;
+     *    the dispatch that eventually follows is the scheduler's, through
+     *    `dispatchApproved`, with an Approval row, exactly as for any other
+     *    approval. The renderer still cannot send. It can only ask.
      */
     const ALLOWED = [
       'approve',
+      'batch',
       'bulk',
       'contacts',
       'drafts',
       'on',
       'recall',
       'reject',
+      'retry',
       'rules',
+      'settings',
     ];
 
     /** Every `bridge.<member>` the store's CODE names, sorted and unique. */
@@ -4158,7 +4178,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       return [...new Set(out)].sort();
     }
 
-    it('the store reaches exactly seven request channels and one subscription', () => {
+    it('the store reaches exactly ten request channels and one subscription', () => {
       const files = archFiles(STORE_ROOT);
       expect(files).toContain(WIRING);
       expect(bridgeReach(files)).toEqual(ALLOWED);
@@ -4171,12 +4191,15 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
         [...(declared?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]),
       ).toEqual([
         'approve',
+        'batch',
         'bulk',
         'contacts',
         'drafts',
         'recall',
         'reject',
+        'retry',
         'rules',
+        'settings',
       ]);
       // Written across lines in the source, so the type is matched by its
       // members rather than by one spelling of the union's whitespace.
@@ -4950,6 +4973,218 @@ describe('S8 extensions (s8-execution Scenario 8: keyboard triage)', () => {
           rel,
           codeOf(archRead(rel)).includes('undoGraceSeconds'),
         ]).toEqual([rel, false]);
+    });
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 9: bulk, and one batch)', () => {
+  const sc9Planted: string[] = [];
+  function sc9Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc9Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc9Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/queue/__s8_sc9_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc9_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc9_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const WIRING = `${RENDERER}/store/index.ts`;
+
+  /**
+   * Row 1 — the three channels Sc9 opened get the same treatment as the
+   * three Sc7 and Sc8 opened before them.
+   *
+   * Bulk is where "one keystroke, one request" is most tempting to break,
+   * in both directions. A second `bridge.bulk(` call site is how `⇧A` ends
+   * up posting twice under a double press; a second `bridge.retry(` is how
+   * a failed card acquires a second, unguarded way to be re-sent; and a
+   * second `bridge.batch(` is how a report fetch escapes the one place that
+   * knows a batch is being held and becomes the poll this scenario's plan
+   * explicitly forbids.
+   */
+  describe('row 1: the batch verbs have exactly one call site each', () => {
+    for (const verb of ['bulk', 'batch', 'retry'] as const) {
+      const one = new RegExp(`\\bbridge\\s*\\.\\s*${verb}\\s*\\(`);
+      const all = new RegExp(`\\bbridge\\s*\\.\\s*${verb}\\s*\\(`, 'g');
+      it(`calls bridge.${verb} from one file, once`, () => {
+        const callers = archFiles(RENDERER).filter((rel) =>
+          one.test(codeOf(archRead(rel))),
+        );
+        expect(callers).toEqual([WIRING]);
+        expect(codeOf(archRead(WIRING)).match(all)).toHaveLength(1);
+      });
+    }
+
+    it('PLANTED: a screen that fetches its own batch report is caught', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/screens/queue/__s8_sc9_probe__/Tally.tsx`,
+        [
+          'export const refresh = (bridge: { batch: (id: string) => unknown }) =>',
+          "  bridge.batch('01J000000000000000000000');",
+          '',
+        ].join('\n'),
+      );
+      const callers = archFiles(RENDERER).filter((f) =>
+        /\bbridge\s*\.\s*batch\s*\(/.test(codeOf(archRead(f))),
+      );
+      expect(callers).toContain(rel);
+      expect(callers).not.toEqual([WIRING]);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a component that RENDERS the report is clean', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/screens/queue/__s8_sc9_probe__/Summary.tsx`,
+        [
+          '/**',
+          ' * The tallies arrive as props. Nothing here calls bridge.batch(',
+          ' * — the wiring fetches on a terminal frame and hands the counts',
+          ' * down, which is why there is no poll on this screen.',
+          ' */',
+          'export function Summary(props: { sent: number }): unknown {',
+          '  return <p class="batch-tally">{props.sent}</p>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      const callers = archFiles(RENDERER).filter((f) =>
+        /\bbridge\s*\.\s*batch\s*\(/.test(codeOf(archRead(f))),
+      );
+      expect(callers).not.toContain(rel);
+      expect(callers).toEqual([WIRING]);
+    });
+  });
+
+  /**
+   * Row 2 — the batchId on screen is the daemon's, because the renderer
+   * cannot mint one.
+   *
+   * The whole wire proof of Scenario 9 rests on one identity: the id the
+   * operator can see on the batch card is the id stamped on the Approval
+   * rows. A renderer that minted its own — a ULID, a UUID, a counter it
+   * called a batch id — could show a perfectly consistent summary of a
+   * batch the daemon never recorded, and every e2e assertion about
+   * `GET /v1/batches/:id` would still pass while proving nothing.
+   *
+   * The store's LOCAL batch token is deliberately not an id and is
+   * deliberately not id-shaped: it is `b1`, `b2`, minted by incrementing an
+   * integer, and it never leaves the renderer. This row bans the two
+   * standard ways to mint a real one.
+   */
+  describe('row 2: no renderer file mints an identifier', () => {
+    const MINTS = /\b(ulid|randomUUID|nanoid|uuidv4)\s*\(/g;
+
+    function minters(): string[] {
+      const out: string[] = [];
+      for (const rel of archFiles(RENDERER))
+        for (const m of codeOf(archRead(rel)).matchAll(MINTS))
+          out.push(`${rel}: ${m[1] ?? ''}(`);
+      return [...new Set(out)].sort();
+    }
+
+    it('mints nothing, anywhere under the renderer', () => {
+      expect(archFiles(RENDERER).length).toBeGreaterThan(0);
+      expect(minters()).toEqual([]);
+      // Non-vacuous: the daemon really does mint the batchId, with `ulid()`,
+      // in the bulk route. The ban is on the renderer, not on the concept.
+      expect(
+        codeOf(archRead('packages/daemon/src/routes/drafts.ts')),
+      ).toContain('const batchId = ulid();');
+    });
+
+    it('PLANTED: a store that mints its own batch id is caught', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/store/__s8_sc9_probe__/mint.ts`,
+        [
+          'declare const ulid: () => string;',
+          'export const batchId = (): string => ulid();',
+          '',
+        ].join('\n'),
+      );
+      expect(minters()).toContain(`${rel}: ulid(`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a local counter, and prose about ulid, is clean', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/store/__s8_sc9_probe__/token.ts`,
+        [
+          '/**',
+          ' * A LOCAL token, not an id. The daemon mints the batchId with',
+          ' * ulid() and it arrives with the answer; this only has to tell',
+          ' * one in-flight batch from the next.',
+          ' */',
+          'let batches = 0;',
+          'export const nextToken = (): string => {',
+          '  batches += 1;',
+          '  return `b${String(batches)}`;',
+          '};',
+          '',
+        ].join('\n'),
+      );
+      expect(minters().filter((o) => o.startsWith(rel))).toEqual([]);
+    });
+  });
+
+  /**
+   * Row 3 — the batch card is a summary, not a control.
+   *
+   * Sc7 banned every clickable shape under `screens/queue`, and its planted
+   * offender is literally the RETRY NOW button this slice's plan asked for.
+   * Scenario 9 is the scenario that would have added it, so the ban is
+   * re-asserted here against the file that now exists, together with the
+   * thing that replaced the button: a key, legended on the card.
+   */
+  describe('row 3: the batch card carries no control', () => {
+    const CARD = `${RENDERER}/screens/queue/BatchCard.tsx`;
+    const CLICKABLE = /<button\b|<a\s[^>]*href|<input\b|onClick=|tabIndex=/;
+
+    it('renders the summary with nothing an operator could click', () => {
+      const body = codeOf(archRead(CARD));
+      expect(body.length).toBeGreaterThan(0);
+      expect(CLICKABLE.test(body)).toBe(false);
+      // …and it is really a summary: it names the id it was given and the
+      // tally class the e2e reads.
+      expect(body).toContain('batch-tally');
+    });
+
+    it('PLANTED: the retry button the plan asked for is caught', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/screens/queue/__s8_sc9_probe__/Retry.tsx`,
+        [
+          'export function Retry(props: { onRetry: () => void }): unknown {',
+          '  return <button onClick={props.onRetry}>Retry</button>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(CLICKABLE.test(codeOf(archRead(rel)))).toBe(true);
+    });
+
+    it('LEGITIMATE NEAR-MISS: the same affordance as a legended key is clean', () => {
+      const rel = sc9Plant(
+        `${RENDERER}/screens/queue/__s8_sc9_probe__/RetryKey.tsx`,
+        [
+          '/**',
+          ' * The retry affordance. Not a <button onClick=...>: this screen',
+          ' * has one tab stop and the keymap owns every verb, so a failed',
+          ' * card legends A as retry and the listbox handles the stroke.',
+          ' */',
+          'export function RetryKey(): unknown {',
+          '  return <span class="card-keys">A retry</span>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(CLICKABLE.test(codeOf(archRead(rel)))).toBe(false);
     });
   });
 });

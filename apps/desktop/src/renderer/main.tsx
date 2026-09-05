@@ -32,6 +32,7 @@ import './theme/tokens.css';
 import './app.css';
 import { StateStrip } from './components/StateStrip.js';
 import { armingGlance } from './derive/armingGlance.js';
+import { batchOf } from './derive/batch.js';
 import { byAge, cardOf, type CardModel } from './derive/queue.js';
 import { moveTo, type QueueVerb } from './keys/index.js';
 import { DEFAULT_SCREEN } from './router.js';
@@ -92,7 +93,22 @@ function asStream(payload: unknown): StreamPayload | null {
 let activeId: string | null = null;
 /** The draft whose context turns are open inline, or none. */
 let expandedId: string | null = null;
-/** Sc9 fills this in; the listbox already declares itself multi-selectable. */
+/**
+ * The marked cards, by draft id (s8 Sc9).
+ *
+ * A mutable Set held here rather than derived, because a selection is the
+ * one piece of queue state that is PURELY the operator's: nothing the daemon
+ * says creates or removes a mark, and a selection recomputed from the rows
+ * would be a selection that quietly changed every time a draft arrived.
+ *
+ * Insertion order is the order the operator picked, and it is the order the
+ * bulk request names them in. That costs nothing and means a `refused` entry
+ * can be read against the sequence the person actually performed.
+ *
+ * It is PRUNED at paint time, not here. A card that has left the queue
+ * cannot be acted on, so a mark on it would make the header's count a
+ * promise about drafts that are gone.
+ */
 const selected = new Set<string>();
 /**
  * The body being edited, or `null` when the editor is closed, and the draft
@@ -256,8 +272,39 @@ function onVerb(verb: QueueVerb): void {
     schedulePaint();
     return;
   }
+  if (verb === 'clear-selection') {
+    selected.clear();
+    schedulePaint();
+    return;
+  }
+  if (verb === 'bulk-approve' || verb === 'bulk-reject') {
+    // Nothing selected is not a bulk. The keymap already refuses the stroke,
+    // and this is the second half of the same statement: a shifted verb must
+    // never quietly become its unshifted twin over the card under the cursor.
+    if (selected.size === 0) return;
+    const ids = [...selected];
+    // Spent, and cleared BEFORE the request rather than after it. The act is
+    // over the instant the keystroke is taken; a selection left standing
+    // while the answer is in flight is a selection a second ⇧A could spend
+    // twice.
+    selected.clear();
+    void binding.bulk(ids, verb === 'bulk-approve' ? 'approve' : 'reject');
+    // The cursor deliberately does not move. A batch has no single "next
+    // card" to advance to, and staying put is also what makes `z`
+    // immediately afterwards mean the card the operator is looking at.
+    schedulePaint();
+    return;
+  }
   if (verb === 'undo') {
-    const id = lastApprovedId;
+    // The single-approve case names its card exactly; the BULK case has no
+    // single card to name, so `Z` falls back to the one under the cursor —
+    // which, because a bulk does not advance the cursor, is the card the
+    // operator is looking at. The fallback is guarded on `approved` rather
+    // than offered blindly: a recall of a pending or sent card is a refusal
+    // the operator would have to read to understand.
+    const id =
+      lastApprovedId ??
+      (current?.state === 'approved' ? current.draftId : null);
     if (id === null) return;
     void binding.recall(id);
     // Back to the card that was taken back. The operator's next keystroke is
@@ -268,9 +315,27 @@ function onVerb(verb: QueueVerb): void {
     return;
   }
   if (current === undefined) return;
+  if (verb === 'select') {
+    // Toggle, and only ever the card under the cursor. The cursor does not
+    // move: an operator picking three cards out of twenty is READING each
+    // one, and a jump after `x` would put the next `x` somewhere they were
+    // not looking.
+    if (!selected.delete(current.draftId)) selected.add(current.draftId);
+    schedulePaint();
+    return;
+  }
   if (verb === 'approve') {
+    // One key, two verbs, decided by the card rather than by the operator
+    // remembering a second binding. A failed card cannot be approved —
+    // `STARTABLE.approve` is `{pending}` — so `A` on one would be refused
+    // locally with `wrong-state`, which is correct and useless to somebody
+    // looking at a send that did not verify. `retry` is the verb that state
+    // actually has, and the legend on the card says so.
+    const retrying = current.state === 'failed';
     lastApprovedId = current.draftId;
-    void binding.approve(current.draftId);
+    void (retrying
+      ? binding.retry(current.draftId)
+      : binding.approve(current.draftId));
     advancePast(view, current.draftId);
     schedulePaint();
     return;
@@ -355,6 +420,7 @@ function Shell({
           activeIndex={view.activeIndex}
           expandedId={expandedId}
           selected={selected}
+          batch={batchOf(binding.store.batch(), binding.store.catalogue())}
           thread={view.thread}
           demo={current.demo}
           // From the STORE, not from `current`. Both are narrowed from the
@@ -414,6 +480,14 @@ function paint(): void {
   // active card expired keeps re-resolving to the top on every paint; naming
   // the card it landed on makes the next `j` move from there.
   activeId = view.cards[view.activeIndex]?.draftId ?? null;
+  // A mark on a card that has left the queue is a promise about a draft that
+  // is gone: `⇧A` could not act on it, and the header's count would be
+  // describing a selection the operator cannot see. Pruned against the rows
+  // that are actually on screen, in the same paint that renders them.
+  if (selected.size > 0) {
+    const present = new Set(view.cards.map((card) => card.draftId));
+    for (const id of selected) if (!present.has(id)) selected.delete(id);
+  }
   paintStore();
   const wasEditing = painted;
   painted = editing;

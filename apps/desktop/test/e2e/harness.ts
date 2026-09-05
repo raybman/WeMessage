@@ -164,10 +164,31 @@ export async function bootFixtureDaemon(
   const clock = createTestClock(options.clockAt);
   const probes: DoctorProbes = { ...DEFAULT_PROBES, ...options.probes };
   const loopback = createLoopbackSendBackend(fixture, clock);
+  /**
+   * The verify poll's wait, which ADVANCES the fixture clock instead of the
+   * wall (s8 Sc9; the same closure `packages/daemon/test/helpers/draft-
+   * harness.ts` has had since s4).
+   *
+   * `dispatchApproved` verifies a send by re-reading the fixture chat.db
+   * until the outbound row appears or `VERIFY_BUDGET_MS` of CLOCK time has
+   * elapsed. This suite's clock is FROZEN (C-11), so with the real timer the
+   * budget can never be spent: a send that is accepted and never lands —
+   * which is exactly what `loopback.sabotageBody` simulates and what Sc9's
+   * partial-failure row is about — would poll for ever and the tick would
+   * never return. Advancing the clock through the wait is what makes the
+   * failure terminate, and it costs the happy path nothing: a verified send
+   * finds its row on the FIRST poll, before any wait, so no row that does
+   * not deliberately fail moves this clock by a millisecond.
+   */
+  const delay = (ms: number): Promise<void> => {
+    clock.set(new Date(clock.nowMs() + ms).toISOString());
+    return Promise.resolve();
+  };
   const daemon = await startDaemon({
     configDir,
     chatDbPath,
     clock,
+    delay,
     watcher: fakeWatcher(),
     doctorProbes: probes,
     backend: loopback,

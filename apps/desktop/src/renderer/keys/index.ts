@@ -33,7 +33,21 @@ export type QueueVerb =
   | 'edit'
   | 'undo'
   | 'approve-edited'
-  | 'cancel-edit';
+  | 'cancel-edit'
+  /**
+   * s8 Scenario 9. Four verbs for one idea: a selection, and the two things
+   * that can be done with one. `select` toggles the card under the cursor;
+   * `clear-selection` drops the lot; `bulk-approve` and `bulk-reject` spend
+   * it in a single request.
+   *
+   * Kept in the SAME union rather than given their own, because the screen
+   * dispatches on one verb and a second union would mean a second dispatch
+   * and a second place for a stroke to fall through unhandled.
+   */
+  | 'select'
+  | 'clear-selection'
+  | 'bulk-approve'
+  | 'bulk-reject';
 
 /**
  * Which keyboard the operator is at.
@@ -56,13 +70,27 @@ export type KeyMode = 'list' | 'editing' | 'offline';
 /**
  * Everything the keymap is allowed to know beyond the stroke itself.
  *
- * An OBJECT with one field rather than a bare `KeyMode`, deliberately:
- * Scenario 9's `⇧A` needs to know whether anything is selected, and a field
- * added here changes no call site, where a second positional argument would
- * change every one of them and every row that tests them.
+ * An OBJECT rather than a bare `KeyMode`, deliberately: Scenario 9's `⇧A`
+ * needs to know whether anything is selected, and a field added here is one
+ * shape to widen, where a second positional argument would change every call
+ * site and every row that tests them. (Scenario 8 predicted this would
+ * change "no call site". It changed both of them, because the field is
+ * REQUIRED — see below — and that is the honest correction.)
+ *
+ * `selected` is a COUNT, not the set. The only question the keymap asks of a
+ * selection is whether there is one, and a count answers it without handing
+ * a pure function a collection it could be tempted to read an id out of and
+ * start making decisions about particular cards.
+ *
+ * Required rather than optional, and this is the load-bearing choice. An
+ * optional `selected` would make `⇧A` mean `null` at every call site that
+ * forgot to pass it, which is the failure that looks like nothing happening
+ * and gets diagnosed as a broken key. Required means the composition root
+ * cannot build a context without answering the question.
  */
 export interface KeyContext {
   readonly mode: KeyMode;
+  readonly selected: number;
 }
 
 /**
@@ -165,8 +193,15 @@ export function verbOf(
   stroke: KeyStroke,
   context: KeyContext,
 ): QueueVerb | null {
+  // Editing first, and BEFORE the selection is consulted: a person typing a
+  // sentence has the whole alphabet, and Escape means "out of this box"
+  // whether or not twelve cards are standing selected behind it.
   if (context.mode === 'editing') return editingOf(stroke);
   if (stroke.metaKey || stroke.ctrlKey || stroke.altKey) return null;
+  // Offline is untouched by Sc9. Selecting writes nothing by itself, but the
+  // only two things a selection is FOR are two verbs the store refuses while
+  // the link is down, and a twelve-card selection built offline is a
+  // selection the reconnect's refetch throws away without being asked.
   if (context.mode === 'offline') return navigationOf(stroke.key);
   switch (stroke.key) {
     case 'a':
@@ -175,6 +210,23 @@ export function verbOf(
       return 'reject';
     case 'e':
       return 'edit';
+    // Unshifted, next to the two shifted keys that spend it, and on the home
+    // row's reach. `X` is a different key and stays unbound.
+    case 'x':
+      return 'select';
+    // The two verbs a selection buys. `null` with an empty selection is the
+    // point: a shifted key that silently degraded into its unshifted twin is
+    // how an operator whose selection was cleared by a refetch approves ONE
+    // draft while believing they approved twelve.
+    case 'A':
+      return context.selected > 0 ? 'bulk-approve' : null;
+    case 'R':
+      return context.selected > 0 ? 'bulk-reject' : null;
+    // Claimed only when there is something to clear. With an empty selection
+    // Escape keeps whatever the platform gives it, rather than being eaten
+    // by a screen that had nothing to do with it.
+    case 'Escape':
+      return context.selected > 0 ? 'clear-selection' : null;
     // `z` and not ⌘Z. The system undo is a text-editing verb that belongs to
     // whatever has focus, and this one recalls a message from a send window:
     // binding it to the platform's undo would make ⌘Z mean two different
@@ -182,11 +234,10 @@ export function verbOf(
     case 'z':
       return 'undo';
     default:
-      // `A` and `R` are shifted letters, so they arrive as different keys
-      // and are simply not bound. That is how "⇧A with an empty selection
-      // does nothing" holds with no selection in the context at all —
-      // Scenario 9 gives them a meaning, and until it does they are unknown
-      // keys like any other.
+      // `G` reaches here, and reaching here is what keeps it working. `A`,
+      // `R` and `G` are all shifted letters, so a keymap that had claimed
+      // the bulk verbs by testing `shiftKey` would have claimed the
+      // last-card key along with them.
       return navigationOf(stroke.key);
   }
 }
@@ -235,6 +286,16 @@ export function moveTo(verb: QueueVerb, index: number, length: number): number {
     case 'undo':
     case 'approve-edited':
     case 'cancel-edit':
+    // Sc9's four, and the answer for all four is the same. Marking a card
+    // does not leave it — an operator picking three cards out of twenty is
+    // reading each one, and a cursor that jumped after `x` would make the
+    // second `x` land somewhere they were not looking. A batch has no single
+    // card to advance TO afterwards, and the cursor staying put is also what
+    // makes `z` mean something immediately after `⇧A` (Sc9 row 2).
+    case 'select':
+    case 'clear-selection':
+    case 'bulk-approve':
+    case 'bulk-reject':
       return clamp(index);
   }
 }
@@ -248,8 +309,25 @@ export function moveTo(verb: QueueVerb, index: number, length: number): number {
  * mis-remembered. `group` is a caveat rather than a different key — v1
  * cannot send to a room, and the honest place to say so is next to the key
  * that would try.
+ *
+ * `retry` is Scenario 9's, and it REPLACES the approve legend rather than
+ * appending to it. A card whose send failed cannot be approved again — the
+ * store's `STARTABLE.approve` is `{pending}` and a failed card is not
+ * pending — so a legend that offered both would be offering one key two
+ * meanings and one of them a lie. The plan asked for an "A retry" button
+ * here; there are no buttons under `screens/queue` (an arch row bans them,
+ * and its planted offender is that exact button), so the retry affordance
+ * takes the shape every other verb on this screen has: a key, legended on
+ * the card it acts on.
  */
-export function legendFor(options: { readonly group: boolean }): string {
-  const approve = options.group ? 'A approve (drafts only in v1)' : 'A approve';
-  return `${approve} · R reject · E edit · SPACE context · J/K move`;
+export function legendFor(options: {
+  readonly group: boolean;
+  readonly retry: boolean;
+}): string {
+  const first = options.retry
+    ? 'A retry'
+    : options.group
+      ? 'A approve (drafts only in v1)'
+      : 'A approve';
+  return `${first} · R reject · E edit · SPACE context · J/K move · X select`;
 }

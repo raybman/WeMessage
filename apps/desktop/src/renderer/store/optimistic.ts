@@ -32,8 +32,20 @@
 import type { BulkResult, DraftPayload, DraftState } from '@wemessage/client';
 import type { GatewayEventPayload } from '@wemessage/protocol';
 
-/** The three verbs Sc3's bulk route takes, and the three a card offers. */
-export type QueueAction = 'approve' | 'recall' | 'reject';
+/**
+ * The verbs a CARD offers, one at a time.
+ *
+ * `retry` is Scenario 9's and is deliberately not in `BulkAction` below: the
+ * bulk route's own enum is `z.enum(['approve','recall','reject'])`, so a
+ * fourth verb posted there is a 400. Keeping the two unions separate makes
+ * that a compile error instead of a round trip, and it also encodes a
+ * product decision — retrying twelve failed sends with one keystroke is a
+ * way to hammer a Messages bridge that is already unwell.
+ */
+export type QueueAction = 'approve' | 'recall' | 'reject' | 'retry';
+
+/** The three verbs Sc3's bulk route takes. A strict subset of the above. */
+export type BulkAction = Exclude<QueueAction, 'retry'>;
 
 export type ConnState = 'connected' | 'reconnecting' | 'down';
 
@@ -160,12 +172,29 @@ export interface Catalogue {
    * last night that six rules are watching.
    */
   readonly watching: readonly string[];
+  /**
+   * The daemon's settings, flattened to `key -> value as a string`.
+   *
+   * s8 Scenario 9. The batch card owes an operator one footnote after a
+   * partial failure — whether a send that failed over iMessage will be
+   * retried over SMS — and that is a daemon setting, not a fact about the
+   * draft. It is catalogue-shaped in every way that matters: read once, tiny,
+   * changed by somebody else's window, and never worth a round trip per card.
+   *
+   * Values are STRINGS, uniformly, including the booleans and the numbers.
+   * Not laziness: the payload's values are `number | boolean | string | null`
+   * and this map is read by a component that renders words, so parsing them
+   * back into three types here would be inventing a schema for a screen that
+   * only ever prints them. `derive/batch.ts` compares against the spelling.
+   */
+  readonly settings: ReadonlyMap<string, string>;
 }
 
 export const EMPTY_CATALOGUE: Catalogue = {
   contacts: new Map(),
   rules: new Map(),
   watching: [],
+  settings: new Map(),
 };
 
 /**
@@ -194,6 +223,14 @@ const STARTABLE: Readonly<Record<QueueAction, ReadonlySet<DraftState>>> = {
   approve: new Set<DraftState>(['pending']),
   reject: new Set<DraftState>(['pending']),
   recall: new Set<DraftState>(['approved']),
+  // Exactly one state, and it is the whole reason retry is a separate verb
+  // rather than a second `approve`. A failed card is NOT pending, so `a`
+  // would be refused on it locally with `wrong-state` — which is correct and
+  // also useless to an operator looking at a send that did not verify. And
+  // `recalled` is terminal (there is no row out of it in the transition
+  // table), so a card the operator undid stays undone: retry is not a way
+  // back in either.
+  retry: new Set<DraftState>(['failed']),
 };
 
 export type Started =
@@ -206,6 +243,51 @@ export type BulkStarted =
       readonly started: readonly string[];
     }
   | { readonly ok: false; readonly refused: Refusal };
+
+/**
+ * s8 Scenario 9. The one act the operator performed, as opposed to the N
+ * things the world did about it.
+ *
+ * A bulk is non-atomic all the way down: one shared `batchId` on every
+ * Approval row, one `draft.rejected`-shaped frame PER draft carrying it,
+ * per-id `refused` entries, and no rollback. The cards render the N; this
+ * renders the one, and the whole reason it exists is that an operator who
+ * pressed ⇧A once and then watched two cards go quiet and one go red has no
+ * way to know whether the third belonged to the thing they did.
+ *
+ * `token` and `batchId` are BOTH here, and the order matters. The token is
+ * minted at the keystroke, locally, before anything has left the app; the
+ * `batchId` is the daemon's and arrives with the HTTP answer, which is
+ * strictly after the first `draft.sent` frame can already have landed. A
+ * model that could only name the batch once the answer came back would drop
+ * that first frame on the floor. `batchId` is therefore `null` — not absent
+ * — for the window between the two, because "we have not been told yet" is a
+ * state this card has to be able to render.
+ *
+ * `counts` is `Record<string, number>` rather than a `BatchReport`, and that
+ * is not laziness. Sc5's arch row bans any identifier matching `/send/i`
+ * anywhere under the store root, and `BatchReport` has a `sending` key: a
+ * store that destructured it by name would trip a guard that exists to stop
+ * this layer from growing a send path. The store keeps the numbers;
+ * `derive/batch.ts` is where they get their names back.
+ */
+export interface BatchFacts {
+  /** Minted locally, at the keystroke. Stable for the life of the batch. */
+  readonly token: string;
+  /** The daemon's name for it. `null` until the HTTP answer says. */
+  readonly batchId: string | null;
+  readonly action: BulkAction;
+  /**
+   * The ids that are actually IN the batch, which is not the ids the
+   * operator picked. A card the daemon refused produced no Approval row, so
+   * it carries no `batchId`, so it can never appear in `GET /v1/batches/:id`
+   * — counting it here would give the batch card tallies that never add up
+   * to the number beside them.
+   */
+  readonly ids: readonly string[];
+  readonly refused: readonly { readonly id: string; readonly error: string }[];
+  readonly counts?: Readonly<Record<string, number>>;
+}
 
 export interface OptimisticStore {
   subscribe(listener: () => void): () => void;
@@ -289,10 +371,41 @@ export interface OptimisticStore {
    */
   outcome(): 'sent' | 'failed' | undefined;
 
+  /**
+   * The one batch this window is showing, or `undefined`.
+   *
+   * ONE, singular, and replaced by the next bulk rather than appended to.
+   * There is one batch card on the screen, so a second batch in the model
+   * would be a fact with nowhere to be rendered — and an operator who
+   * performed a second act is asking about the second act.
+   */
+  batch(): BatchFacts | undefined;
+  /**
+   * Which batch a card belongs to, if it belongs to one.
+   *
+   * The index that makes a frame about ONE draft find the batch it should
+   * refresh, without the wiring scanning an array on every event. Answers
+   * with the TOKEN, because the frame can arrive before the `batchId` does.
+   */
+  batchMemberOf(id: string): string | undefined;
+  /**
+   * Hold the counts somebody else fetched, for the batch named.
+   *
+   * Named rather than implicit: `GET /v1/batches/:id` is in flight while the
+   * operator can already have started another batch, and a late answer to a
+   * question that has been replaced must not overwrite the one on screen.
+   */
+  setBatchCounts(
+    batchId: string,
+    counts: Readonly<Record<string, number>>,
+  ): void;
+
   approve(id: string): Started;
   reject(id: string): Started;
   recall(id: string): Started;
-  bulk(ids: readonly string[], action: QueueAction): BulkStarted;
+  /** The one verb a failed card has. Legal only from `failed` (F-99). */
+  retry(id: string): Started;
+  bulk(ids: readonly string[], action: BulkAction): BulkStarted;
   ack(id: string, answer: { draft: DraftPayload }): void;
   applyBulk(result: BulkResult): void;
   conflict(id: string, answer: { from: DraftState }): void;
@@ -311,6 +424,11 @@ const HYPOTHESIS: Readonly<Record<QueueAction, DraftState>> = {
   approve: 'approved',
   recall: 'recalled',
   reject: 'rejected',
+  // `POST /v1/drafts/:id/retry` puts the draft back to `approved` with a
+  // FRESH grace window, so the card goes back to ringing. Not 'sending':
+  // Sc8 considered minting a `draft.sending` state and declined on the
+  // record, and a hypothesis has to name a state that exists.
+  retry: 'approved',
 };
 
 export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
@@ -322,6 +440,8 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
   let syncedAt: string | undefined;
   let lastOutcome: 'sent' | 'failed' | undefined;
   let batches = 0;
+  let batch: BatchFacts | undefined;
+  let batchOf = new Map<string, string>();
   let turns = new Map<string, Conversation>();
   let clamps = new Map<string, string>();
   let failures = new Map<string, string>();
@@ -474,6 +594,8 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
     catalogue: () => catalogue,
     clampOf: (id) => clamps.get(id),
     failureOf: (id) => failures.get(id),
+    batch: () => batch,
+    batchMemberOf: (id) => batchOf.get(id),
     needsSnapshot: () => stale,
     missed: () => gap,
     syncedAt: () => syncedAt,
@@ -486,6 +608,15 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
 
     setCatalogue(next) {
       catalogue = next;
+      notify();
+    },
+
+    setBatchCounts(batchId, counts) {
+      // Two guards, one condition. No batch is the trivial case; a batch
+      // with a different name is the real one — the operator has moved on
+      // and this is an answer to the previous question arriving late.
+      if (batch === undefined || batch.batchId !== batchId) return;
+      batch = { ...batch, counts };
       notify();
     },
 
@@ -692,6 +823,7 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
     approve: (id) => began(start(id, 'approve')),
     reject: (id) => began(start(id, 'reject')),
     recall: (id) => began(start(id, 'recall')),
+    retry: (id) => began(start(id, 'retry')),
 
     bulk(ids, action) {
       if (stream !== 'connected') return { ok: false, refused: 'offline' };
@@ -699,6 +831,20 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
       const token = `b${batches}`;
       const started: string[] = [];
       for (const id of ids) if (start(id, action, token).ok) started.push(id);
+      // Recorded HERE, at the keystroke, and provisionally: `batchId` is
+      // null until the answer names it, and membership covers only the ids
+      // that actually started. A card the keymap let through but the store
+      // refused locally (an expired draft, a card somebody rejected from
+      // another terminal) never reaches the wire, so it is in no batch — and
+      // the batch card must not count it.
+      batch = {
+        token,
+        batchId: null,
+        action,
+        ids: started,
+        refused: [],
+      };
+      batchOf = new Map(started.map((id) => [id, token]));
       notify();
       return { ok: true, batchToken: token, started };
     },
@@ -727,7 +873,30 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
         const row = map.get(id);
         if (!row) continue;
         put(id, settled(row));
-        setChip(id, { kind: 'denied', reason: error });
+        // NOT overwritten if something got here first, and the something is
+        // a `gate.denied` frame carrying the same refusal in better words.
+        // The socket and the HTTP answer race: the frame names the specific
+        // gate reason, which tells an operator when to try again, and the
+        // route's per-id entry says `gate-denied`, which tells them only
+        // that something said no. Whichever lands second must not be the one
+        // that wins. (The specific reason is deliberately not spelled here:
+        // S6's dormant-deny-literal guard counts a quoted mention in a
+        // comment as a naming, and this renderer does not name it.) Clearing the hypothesis is unconditional — this is
+        // about the WORDS on the card, not about leaving it claiming it was
+        // approved.
+        if (!chips.has(id)) setChip(id, { kind: 'denied', reason: error });
+      }
+      // Promote the provisional batch to the daemon's name for it, and drop
+      // the ids that produced no Approval row.
+      if (batch !== undefined) {
+        const token = batch.token;
+        batch = {
+          ...batch,
+          batchId: result.batchId,
+          ids: result.appliedIds,
+          refused: result.refused,
+        };
+        batchOf = new Map(result.appliedIds.map((id) => [id, token]));
       }
       notify();
     },

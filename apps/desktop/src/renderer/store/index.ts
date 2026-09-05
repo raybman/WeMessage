@@ -35,33 +35,56 @@ import type { StreamFrame } from '../../main/event-stream.js';
 import type { WmBridge } from '../../preload/api.js';
 import {
   createOptimisticStore,
+  type BulkAction,
   type Catalogue,
   type ConnState,
   type OptimisticStore,
-  type QueueAction,
   type Started,
 } from './optimistic.js';
 
 /**
- * The five request channels the queue may reach, sorted.
+ * The ten request channels the queue may reach, sorted.
  *
  * A list rather than a comment, so `store-wiring.spec.ts` can assert that
  * none of them matches the send pattern and that the set has not grown by
  * accident. s8 Sc6 grew it from three to five, on purpose: a card that
  * renders a rule NAME and a contact's DISPLAY name needs the two catalogues
- * those names live in. Both are READS, both channels were already declared
- * in `ipc-channels.ts`, and nothing was opened at the IPC boundary to get
- * them — the arch row over this file moved in the same diff and says so.
+ * those names live in. s8 Sc8 grew it to seven for the undo verb and the
+ * edited approve; s8 Sc9 grows it to ten, for `batch` (the tallies of one
+ * bulk), `retry` (the one verb a failed card has) and `settings` (the one
+ * value the retry footnote reads).
+ *
+ * Every one of the three was already declared in `ipc-channels.ts` and
+ * already had a handler in `main/gateway.ts`. S8 adds no route and opens
+ * nothing at the IPC boundary (F-107): what widens is the queue's REACH, and
+ * the arch row over this file moves in the same diff and says so out loud.
  */
 export const STORE_CHANNELS = [
   'approve',
+  'batch',
   'bulk',
   'contacts',
   'drafts',
   'recall',
   'reject',
+  'retry',
   'rules',
+  'settings',
 ] as const;
+
+/**
+ * The tallies the batch card renders, and the only keys kept off a report.
+ *
+ * An ALLOWLIST, not a filter over whatever came back, and the reason is a
+ * guard rather than taste: `BatchReport` has a `sending` key, and an arch
+ * row bans every identifier matching `/send/i` anywhere under this root —
+ * including inside string literals, because the scanner strips comments and
+ * keeps strings. So the store cannot name that field even to exclude it.
+ * Naming the four it DOES render sidesteps that entirely, and has the
+ * better property anyway: a key added to the report upstream cannot appear
+ * on a card until somebody decides what it means.
+ */
+const TALLIES = ['approved', 'sent', 'failed', 'recalled'] as const;
 
 /**
  * The bridge, cut down to what the queue needs.
@@ -74,13 +97,16 @@ export const STORE_CHANNELS = [
 export type StoreBridge = Pick<
   WmBridge,
   | 'approve'
+  | 'batch'
   | 'bulk'
   | 'contacts'
   | 'drafts'
   | 'on'
   | 'recall'
   | 'reject'
+  | 'retry'
   | 'rules'
+  | 'settings'
 >;
 
 export interface StoreBinding {
@@ -98,7 +124,16 @@ export interface StoreBinding {
   reject(id: string): Promise<void>;
   /** Recall an approved draft while the daemon's grace window is open. */
   recall(id: string): Promise<void>;
-  bulk(ids: readonly string[], action: QueueAction): Promise<void>;
+  bulk(ids: readonly string[], action: BulkAction): Promise<void>;
+  /**
+   * Retry a failed send.
+   *
+   * Singular, and there is no bulk twin. `POST /v1/drafts/bulk` takes
+   * `z.enum(['approve','recall','reject'])`, so a fourth verb there is a
+   * 400 — and retrying twelve failed sends with one keystroke is a way to
+   * hammer a Messages bridge that has already told us it is unwell.
+   */
+  retry(id: string): Promise<void>;
   /**
    * Fetch the two name catalogues, once.
    *
@@ -169,7 +204,7 @@ function asConnState(payload: unknown): ConnState | null {
 
 /** The three answers a draft action can come back with, as DATA. */
 interface Refusals {
-  conflict?: { from: string; code?: string };
+  conflict?: { from?: string; code?: string };
   denied?: { reason: string; retryAfter?: string };
 }
 
@@ -187,10 +222,16 @@ const NOT_A_MOVE = new Set(['grace-elapsed']);
 function refusalOf(answer: unknown): Refusals | null {
   const a = asRecord(answer);
   if (a === null) return null;
-  if (a['refused'] === 'conflict' && typeof a['from'] === 'string')
+  if (a['refused'] === 'conflict')
     return {
       conflict: {
-        from: a['from'],
+        // `from` is OPTIONAL, and its absence is a fact rather than a hole.
+        // The daemon answers 409 for two different kinds of thing: "the
+        // draft is somewhere else now", which carries the state it is in,
+        // and "you may not do that again", which carries no state because
+        // nothing moved. `retry-limit` is the second kind. Reporting it as
+        // a move would tell the operator somebody else touched their draft.
+        ...(typeof a['from'] === 'string' ? { from: a['from'] } : {}),
         ...(typeof a['code'] === 'string' ? { code: a['code'] } : {}),
       },
     };
@@ -252,6 +293,39 @@ function watchedRules(rows: unknown): readonly string[] {
     const name = record['name'];
     if (record['enabled'] === true && typeof name === 'string' && name !== '')
       out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Flatten the settings payload to `key -> value`, as strings.
+ *
+ * GENERIC, one entry at a time, and that is a constraint rather than a
+ * style. `SettingsPayload` is `Record<string, {value, default, version,
+ * type, readOnly, floor?, ceiling?, use?}>` and the one setting this screen
+ * cares about is named after the thing this module is forbidden to name — an
+ * arch row rejects any identifier matching `/send/i` under this root, and
+ * the scanner keeps string literals. So the narrowing knows about `value`
+ * and about nothing else; `derive/batch.ts` is where a key gets its meaning.
+ *
+ * An entry that is not a record, or that carries no `value`, is DROPPED
+ * rather than stored as an empty string: absence is what a caller checks,
+ * and a blank would read as a setting that exists and says nothing.
+ */
+function settingValues(payload: unknown): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  const rows = asRecord(payload);
+  if (rows === null) return out;
+  for (const [key, entry] of Object.entries(rows)) {
+    const record = asRecord(entry);
+    if (record === null) continue;
+    const value = record['value'];
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    )
+      out.set(key, String(value));
   }
   return out;
 }
@@ -324,6 +398,65 @@ export function bindStore(
     );
   }
 
+  /** How many batch reads have been asked for, and the newest applied. */
+  let batchAsks = 0;
+  let batchApplied = 0;
+
+  /**
+   * Re-read the batch tallies, because one of its drafts has just ended.
+   *
+   * Fetched on the ENDING and on nothing else, which is the whole design.
+   * There is no interval here — this renderer owns no timers at all, and a
+   * poll would be one — and there is no fetch on the frames that merely move
+   * a card along, because a batch's tallies cannot have changed until one of
+   * its drafts is finished. So the request rate is bounded by the size of
+   * the batch: N drafts, at most N gets, and then silence.
+   *
+   * Narrowed by VALUE against an allowlist of names. The answer crosses the
+   * bridge as `unknown` and a field that came back as a string must not
+   * become `NaN` on a card, so each key is taken only if it is a number.
+   */
+  function refreshBatch(batchId: string): void {
+    // Answers applied in the order they were ASKED FOR, not the order they
+    // came back in. Three drafts ending in quick succession put three reads
+    // in flight at once, and a slow first answer landing after a fast third
+    // would repaint the card with a report that is a draft or two behind —
+    // a summary that goes backwards in front of somebody watching it.
+    const asked = (batchAsks += 1);
+    void track(
+      bridge
+        .batch(batchId)
+        .then((answer) => {
+          if (asked < batchApplied) return;
+          batchApplied = asked;
+          const report = asRecord(answer);
+          if (report === null) return;
+          const counts: Record<string, number> = {};
+          for (const key of TALLIES) {
+            const value = report[key];
+            if (typeof value === 'number') counts[key] = value;
+          }
+          store.setBatchCounts(batchId, counts);
+        })
+        .catch(() => {
+          // A report that will not load costs the tallies and nothing else.
+          // The cards are the queue; this line is a summary of them.
+        }),
+    );
+  }
+
+  /**
+   * True for the two frames that END a draft's journey through a batch.
+   *
+   * `draft.sent` and `draft.failed`, and deliberately not `draft.approved`:
+   * approval is what the bulk itself did, so a report fetched on it would
+   * describe the batch a millisecond after it was created and tell the
+   * operator nothing they did not just watch happen.
+   */
+  function isTerminalFrame(event: GatewayEventPayload): boolean {
+    return event.event === 'draft.sent' || event.event === 'draft.failed';
+  }
+
   function onFrame(payload: unknown): void {
     const frame = asFrame(payload);
     if (frame === null) return;
@@ -336,6 +469,23 @@ export function bindStore(
     else store.event(frame.event);
     if (gap) store.markStale();
     if (store.needsSnapshot()) refetch();
+    if (frame.kind === 'event' && isTerminalFrame(frame.event)) {
+      // Membership is asked of the STORE rather than tested against an array
+      // here, and it answers for the ids that actually started: a card the
+      // operator picked but the daemon refused produced no Approval row, so
+      // it is in no report. A single-card approve is in no batch either, and
+      // a `GET /v1/batches/:id` over one would be a request for a page that
+      // does not exist.
+      const batchId = store.batch()?.batchId;
+      const draftId = (frame.event as { draftId?: string }).draftId;
+      if (
+        batchId !== undefined &&
+        batchId !== null &&
+        draftId !== undefined &&
+        store.batchMemberOf(draftId) !== undefined
+      )
+        refreshBatch(batchId);
+    }
   }
 
   function onStream(payload: unknown): void {
@@ -386,8 +536,15 @@ export function bindStore(
         // The daemon distinguished these; so does the card. A window that
         // collapsed them would tell the operator their draft was changed
         // elsewhere when in fact nothing changed and the clock ran out.
-        if (code !== undefined && NOT_A_MOVE.has(code))
-          store.refused(id, { reason: code });
+        //
+        // Two ways to be "not a move" and they compose. A named code on the
+        // list is one (`grace-elapsed`); a conflict with no `from` at all is
+        // the other, and it is the general case — a 409 that names no state
+        // is a 409 about a rule, and `retry-limit` is the first of them.
+        // Falling through to `conflict` there would hand `undefined` to a
+        // card as the state somebody else moved the draft to.
+        if (from === undefined || (code !== undefined && NOT_A_MOVE.has(code)))
+          store.refused(id, { reason: code ?? 'conflict' });
         else store.conflict(id, { from: from as DraftPayload['state'] });
         return;
       }
@@ -436,6 +593,10 @@ export function bindStore(
       await settle(id, store.recall(id), () => bridge.recall(id));
     },
 
+    async retry(id) {
+      await settle(id, store.retry(id), () => bridge.retry(id));
+    },
+
     /**
      * One request for the whole selection, and per-id outcomes applied
      * exactly as the route reports them. Sc3's bulk is not atomic, so a
@@ -457,18 +618,55 @@ export function bindStore(
       } catch {
         for (const id of started.started)
           store.failed(id, { reason: 'daemon-unavailable' });
+      } finally {
+        // ONE refetch, in the `finally`, never one per card — and ONLY for
+        // approve.
+        //
+        // WHY IT IS NEEDED AT ALL. `BulkResult` carries no draft payloads:
+        // it is ids and counts. The `draft.approved` frame carries no
+        // payload either — it is `{event, draftId, actor}` — so neither
+        // source supplies `sendNotBefore` or the new `stateChangedAt`, and
+        // those two instants ARE the undo ring. Without this the cards the
+        // operator just approved would sit there with no indication of how
+        // long they have to change their mind, which is the one thing an
+        // approval owes them. A single approve does not need it because the
+        // route answers with the draft itself.
+        //
+        // WHY ONLY APPROVE. A resync is not free: `snapshot` REPLACES, and
+        // the daemon's default listing excludes the terminal states, so
+        // every re-read prunes the cards that have finished. That is the
+        // right rule and it has been the rule since Sc7 — the queue is what
+        // the daemon says it is — but it means a refetch after a bulk
+        // REJECT would take the three cards the operator just rejected off
+        // the screen the instant they acted on them, in exchange for
+        // learning nothing: a rejected draft is terminal, it has no
+        // deadline, and there is no second instant to go and fetch. Recall
+        // is the same. So the re-read happens exactly where it buys
+        // something.
+        //
+        // In the `finally` rather than the happy path because the case that
+        // most needs the queue re-read is the one where the answer was LOST:
+        // the renderer then knows least about what the daemon did.
+        if (action === 'approve') refetch();
       }
     },
 
     async loadCatalogue(): Promise<void> {
-      const [rules, contacts] = await Promise.all([
+      // Three parallel reads and ONE entry point, rather than a second
+      // `loadSettings` beside it. They have the same lifetime, the same
+      // failure mode and the same answer to "when is this refetched?"
+      // (never), so a second method would be a second thing the composition
+      // root has to remember to call at mount.
+      const [rules, contacts, settings] = await Promise.all([
         track(bridge.rules()).catch(() => []),
         track(bridge.contacts()).catch(() => []),
+        track(bridge.settings()).catch(() => ({})),
       ]);
       const next: Catalogue = {
         rules: nameMap(rules, 'id', 'name'),
         contacts: nameMap(contacts, 'handle', 'displayName'),
         watching: watchedRules(rules),
+        settings: settingValues(settings),
       };
       store.setCatalogue(next);
     },

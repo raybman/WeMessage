@@ -118,6 +118,60 @@ body {
   letter-spacing: 0.04em;
 }
 
+/*
+ * The selection, in the header, beside the count it qualifies.
+ *
+ * Dim rather than tinted: it is a MODE the operator put the app into, not a
+ * state the daemon reported, and giving it a hue would put it in the same
+ * visual register as the words on the cards underneath (§3.10).
+ */
+#queue-selected {
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The batch summary. s8 Sc9.
+ *
+ * Bordered like the stale banner and the disconnected overlay, because it is
+ * the same kind of object: a statement ABOUT the list rather than a row in
+ * it. Monochrome throughout, including the failure tally — this card is the
+ * one place in the app where a success/failure hue would be most tempting
+ * and would most clearly make colour the semantics, which §3.10 forbids and
+ * the runtime green sweep checks. The glyph and the uppercase word carry it.
+ */
+#batch-card {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.batch-head {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.batch-tallies {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.batch-tally {
+  color: var(--ink);
+}
+
+.batch-note {
+  margin: 4px 0 0;
+}
+
 #demo-badge {
   padding: 1px 7px;
   border: 1px solid var(--warn);

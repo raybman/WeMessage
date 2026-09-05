@@ -59,6 +59,7 @@ import {
   type FixtureDaemon,
   type LaunchedApp,
 } from './harness.js';
+import { runtimeGreenOffenders } from './no-green-runtime.js';
 
 /** Synthetic, and the only kind a PUBLIC repo may carry (arch row 13). */
 const HANDLE = '+15550001111';
@@ -184,6 +185,11 @@ interface Wire {
   readonly approves: readonly string[];
   readonly rejects: readonly string[];
   readonly recalls: readonly string[];
+  readonly retries: readonly string[];
+  /** `POST /v1/drafts/bulk` — one entry per OPERATOR act, s8 Sc9. */
+  readonly bulks: readonly string[];
+  /** `GET /v1/batches/:id` — one entry per terminal frame, s8 Sc9. */
+  readonly batchGets: readonly string[];
   /** Anything at all whose method or path smells like a dispatch. */
   readonly sendShaped: readonly string[];
 }
@@ -196,6 +202,13 @@ function wire(fixture: FixtureDaemon): Wire {
     approves: write('approve'),
     rejects: write('reject'),
     recalls: write('recall'),
+    retries: write('retry'),
+    // Anchored, so the bulk route can never be counted as a per-draft verb
+    // and vice versa: `bulk` is a draft ID-shaped path segment away from
+    // `POST /v1/drafts/:id/...`, and the whole of Sc9 turns on the
+    // difference between one request and N.
+    bulks: all.filter((u) => u === 'POST /v1/drafts/bulk'),
+    batchGets: all.filter((u) => /^GET \/v1\/batches\/[^/]+$/.test(u)),
     sendShaped: all.filter((u) => /send/i.test(u)),
   };
 }
@@ -228,8 +241,32 @@ interface TriageCard {
   readonly glyph: string;
   readonly label: string;
   readonly active: string | null;
+  /** `aria-selected`, which the listbox has declared since Sc6 (s8 Sc9). */
+  readonly selected: string | null;
   readonly badges: readonly string[];
   readonly ringTotal: string | null;
+  /** The key legend, rendered on the active card only. */
+  readonly keys: string | null;
+}
+
+/**
+ * The batch card: one operator act, summarised (s8 Sc9).
+ *
+ * Read as TEXT rather than as structure. The rows below are about what an
+ * operator can see and read — a tally, a glyph, a note about what undo can
+ * still take back — and a reader that pulled out named fields would make
+ * those rows pass on a card that renders them somewhere unreadable.
+ */
+interface BatchView {
+  readonly present: boolean;
+  readonly batchId: string | null;
+  readonly action: string | null;
+  readonly text: string;
+  readonly tallies: readonly string[];
+  /** Interactive descendants, which must be zero: nothing here is clickable. */
+  readonly interactive: number;
+  /** Whether it sits INSIDE the listbox, which it must not. */
+  readonly insideList: boolean;
 }
 
 interface TriageView {
@@ -244,6 +281,10 @@ interface TriageView {
   readonly live: string;
   readonly liveRole: string | null;
   readonly pendingCards: number;
+  /** The whole header line, which carries the selection count (s8 Sc9). */
+  readonly head: string;
+  readonly selectedCards: number;
+  readonly batch: BatchView;
   readonly cards: readonly TriageCard[];
 }
 
@@ -254,6 +295,7 @@ async function readTriage(app: LaunchedApp): Promise<TriageView> {
     const editor = document.querySelector('textarea');
     const options = [...document.querySelectorAll('[role="option"]')];
     const focused = document.activeElement;
+    const batch = document.getElementById('batch-card');
     const text = (el: Element | null): string => el?.textContent ?? '';
     return {
       focusId: focused?.id ?? '',
@@ -276,6 +318,26 @@ async function readTriage(app: LaunchedApp): Promise<TriageView> {
       pendingCards: document.querySelectorAll(
         '[role="option"][data-state="pending"]',
       ).length,
+      head: text(document.getElementById('queue-head'))
+        .replace(/\s+/g, ' ')
+        .trim(),
+      selectedCards: document.querySelectorAll(
+        '[role="option"][aria-selected="true"]',
+      ).length,
+      batch: {
+        present: batch !== null,
+        batchId: batch?.getAttribute('data-batch-id') ?? null,
+        action: batch?.getAttribute('data-action') ?? null,
+        text: text(batch).replace(/\s+/g, ' ').trim(),
+        tallies: [...(batch?.querySelectorAll('.batch-tally') ?? [])].map((t) =>
+          (t.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        ),
+        interactive:
+          batch?.querySelectorAll(
+            'a[href], button, input, textarea, [tabindex], [role="button"]',
+          ).length ?? 0,
+        insideList: batch !== null && list !== null && list.contains(batch),
+      },
       cards: options.map((el) => ({
         draftId: el.id.replace(/^draft-/, ''),
         state: el.getAttribute('data-state') ?? '',
@@ -283,12 +345,14 @@ async function readTriage(app: LaunchedApp): Promise<TriageView> {
         glyph: text(el.querySelector('.card-glyph')).trim(),
         label: el.getAttribute('aria-label') ?? '',
         active: el.getAttribute('data-active'),
+        selected: el.getAttribute('aria-selected'),
         badges: [...el.querySelectorAll('.card-badge')].map((b) =>
           (b.textContent ?? '').trim(),
         ),
         ringTotal:
           el.querySelector('.card-ring')?.getAttribute('data-ring-total') ??
           null,
+        keys: el.querySelector('.card-keys')?.textContent?.trim() ?? null,
       })),
     };
   });
@@ -1062,4 +1126,654 @@ describe('s8 Sc8 — reconciliation', () => {
       (await fixture.directClient.getDraft(String(ids[0]))).draft.state,
     ).toBe('rejected');
   }, 180_000);
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * s8 Sc9 — bulk: one batch, and the partial failure it is allowed to be.
+ *
+ * Everything above is one card at a time, which is the honest shape of the
+ * daemon: one keystroke, one request, one Approval row, one frame. Bulk is
+ * the first place the GUI tells a story the world does not quite match, and
+ * the whole scenario is about telling it honestly.
+ *
+ * What the daemon actually does (S4, `bulk-partial-failure.spec.ts`): mints
+ * ONE `batchId`, loops the ids, stamps that batchId on every Approval row it
+ * writes, emits one frame PER DRAFT carrying it, collects `{id, error}` for
+ * the ones it refused, and rolls NOTHING back. A batch of three where the
+ * second is refused leaves two approved drafts and one untouched one, and
+ * that is the correct outcome rather than a failure of the operation.
+ *
+ * So the GUI's job is not to hide the seam. It is to let the operator ACT
+ * once — three `X`s and a `⇧A` — while showing them, truthfully, that three
+ * separate things happened, which of them worked, and which of them they can
+ * still take back. The three claims these rows exist to hold:
+ *
+ *  - **INV-2 survives the shortcut.** Bulk is the sharpest edge in S8:
+ *    a keystroke that approves twelve drafts is exactly where somebody
+ *    eventually writes a loop that sends without an Approval row. So the
+ *    proof is at the DAEMON, per draft: N approvals produce N Approval rows
+ *    carrying one shared batchId, the refused ids produce NONE, the batchId
+ *    on screen is the one on those rows, and nothing matching /send/i ever
+ *    crosses the socket.
+ *  - **One request, not N.** The plan's teeth mutation is a `⇧R` implemented
+ *    as three per-draft rejects; it typechecks and it looks identical on
+ *    screen. `w.bulks` and the shared batchId are what catch it.
+ *  - **Undo stays per card.** A batch has no single undo target, so the
+ *    batch card says so in words, and `Z` takes back exactly the card the
+ *    cursor is on — never the batch, and never a card that has already gone.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/** Select the card under the cursor, move down, select, move down, select. */
+async function selectThree(app: LaunchedApp): Promise<void> {
+  await press(app, 'x');
+  await press(app, 'j');
+  await press(app, 'x');
+  await press(app, 'j');
+  await press(app, 'x');
+}
+
+/** Every Approval row the daemon wrote for `id`, with its batchId. */
+async function approvalsOf(
+  fixture: FixtureDaemon,
+  id: string,
+): Promise<Array<{ action: string; batchId: string | undefined }>> {
+  const detail = await fixture.directClient.getDraft(id);
+  return detail.approvals.map((a) => ({
+    action: a.action,
+    ...(a.batchId !== undefined ? { batchId: a.batchId } : {}),
+  })) as Array<{ action: string; batchId: string | undefined }>;
+}
+
+/* ── rows 1 and 4: the selection, and what it survives ────────────────── */
+
+describe('s8 Sc9 — selection', () => {
+  it('marks three cards, says so in the header, and survives the cursor', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three', 'four']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 4);
+    await focusList(app);
+
+    await selectThree(app);
+    const picked = await readTriage(app);
+    // `aria-selected` was declared on this listbox in Sc6 and has read
+    // `false` on every card ever since. Sc9 is the scenario that gives the
+    // attribute something to say.
+    expect(picked.selectedCards).toBe(3);
+    expect(picked.cards.map((c) => c.selected)).toEqual([
+      'true',
+      'true',
+      'true',
+      'false',
+    ]);
+    // The header names the count and the two keys that spend it. Without
+    // this line, `⇧A` is a keystroke whose blast radius the operator is
+    // holding in their head.
+    expect(picked.head).toContain('3 SELECTED');
+    expect(picked.head).toContain('⇧A/⇧R ONE BATCH');
+    // Selecting is not acting: nothing has crossed the wire.
+    const quiet = wire(fixture);
+    expect(quiet.bulks).toEqual([]);
+    expect(quiet.approves).toEqual([]);
+    expect(quiet.sendShaped).toEqual([]);
+
+    // Navigation does not disturb it. A selection that a `J` could silently
+    // drop would make `⇧A` a different act every time the operator glanced
+    // at a card before pressing it.
+    await press(app, 'j');
+    await press(app, 'k');
+    await press(app, 'G');
+    await press(app, 'g');
+    const moved = await readTriage(app);
+    expect(moved.selectedCards).toBe(3);
+    expect(moved.head).toContain('3 SELECTED');
+    expect(moved.activedescendant).toBe(`draft-${String(ids[0])}`);
+
+    // `X` again on a selected card takes it back out.
+    await press(app, 'x');
+    const untoggled = await readTriage(app);
+    expect(untoggled.selectedCards).toBe(2);
+    expect(untoggled.head).toContain('2 SELECTED');
+
+    // Escape clears the lot, and the header stops claiming a selection.
+    await press(app, 'Escape');
+    const cleared = await readTriage(app);
+    expect(cleared.selectedCards).toBe(0);
+    expect(cleared.head).not.toContain('SELECTED');
+    expect(cleared.head).toContain('4 PENDING');
+    expect(cleared.focusId).toBe('queue-list');
+    expect(cleared.tabbables).toBe(1);
+  }, 180_000);
+
+  it('does nothing at all on ⇧A with nothing selected', async () => {
+    const fixture = await boot();
+    await seedDrafts(fixture, ['one', 'two']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 2);
+    await focusList(app);
+
+    await press(app, 'Shift+A');
+    await press(app, 'Shift+R');
+    await settled(app);
+    // Not "approve the card under the cursor". A shifted verb that
+    // degrades into its unshifted twin is how an operator whose selection
+    // was cleared approves one draft believing they approved twelve.
+    const w = wire(fixture);
+    expect(w.bulks).toEqual([]);
+    expect(w.approves).toEqual([]);
+    expect(w.rejects).toEqual([]);
+    const view = await readTriage(app);
+    expect(view.pendingCards).toBe(2);
+    expect(view.batch.present).toBe(false);
+  }, 180_000);
+});
+
+/* ── row 1: one act, one request, N Approval rows, one batchId ────────── */
+
+describe('s8 Sc9 — bulk approve', () => {
+  it('turns three X and one ⇧A into one request and three shared approvals', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three', 'four']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 4);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+A');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'approved')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(3);
+
+    // ── at the wire: ONE request for three cards ──────────────────────
+    const w = wire(fixture);
+    expect(w.bulks).toEqual(['POST /v1/drafts/bulk']);
+    // …and NOT three per-draft approvals wearing a batch's clothes. This is
+    // the clause the plan's teeth mutation is aimed at.
+    expect(w.approves).toEqual([]);
+    expect(w.sendShaped).toEqual([]);
+
+    // ── at the daemon: three Approval rows, one batchId, INV-2 intact ──
+    const selected = [ids[0], ids[1], ids[2]].map(String);
+    const batchIds = new Set<string>();
+    for (const id of selected) {
+      const approvals = await approvalsOf(fixture, id);
+      // Exactly one row per draft. Bulk is not a way to approve without an
+      // Approval record, and it is not a way to write two either.
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0]?.action).toBe('approve');
+      expect(typeof approvals[0]?.batchId).toBe('string');
+      batchIds.add(String(approvals[0]?.batchId));
+      expect((await fixture.directClient.getDraft(id)).draft.state).toBe(
+        'approved',
+      );
+    }
+    expect(batchIds.size).toBe(1);
+    const batchId = [...batchIds][0] as string;
+
+    // The fourth draft was never selected: no row, no batch, untouched.
+    expect(await approvalsOf(fixture, String(ids[3]))).toEqual([]);
+    expect(
+      (await fixture.directClient.getDraft(String(ids[3]))).draft.state,
+    ).toBe('pending');
+
+    // The daemon's own index agrees: three drafts carry this batchId.
+    const inBatch = await fixture.directClient.listDrafts({ batchId });
+    expect(inBatch.map((d) => d.id).sort()).toEqual([...selected].sort());
+
+    // ── on screen: the id came from the daemon, and three rings started ─
+    const view = await readTriage(app);
+    expect(view.batch.present).toBe(true);
+    expect(view.batch.batchId).toBe(batchId);
+    expect(view.batch.action).toBe('approve');
+    // Nothing here is clickable and none of it is inside the listbox: a
+    // summary is not an option, and an option is the only thing the cursor
+    // may land on.
+    expect(view.batch.interactive).toBe(0);
+    expect(view.batch.insideList).toBe(false);
+    for (const card of view.cards.slice(0, 3)) {
+      expect(card.state).toBe('approved');
+      // The ring is drawn from the daemon's two instants, so its presence
+      // is proof the refetch after the bulk actually happened: a
+      // `BulkResult` carries no draft payloads at all.
+      expect(card.ringTotal).not.toBeNull();
+    }
+    expect(view.cards[3]?.state).toBe('pending');
+    // The act is spent, so the selection is gone.
+    expect(view.selectedCards).toBe(0);
+    expect(view.head).not.toContain('SELECTED');
+    expect(view.tabbables).toBe(1);
+    expect(view.focusId).toBe('queue-list');
+  }, 240_000);
+
+  it('undoes ONE card of the batch, and says that is all it can do', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+A');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'approved')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(3);
+
+    // The card is honest about the one thing undo cannot do. `Z` is a
+    // recall of ONE draft — `POST /v1/drafts/:id/recall` — and there is no
+    // route, and no daemon concept, for taking a batch back.
+    const before = await readTriage(app);
+    expect(before.batch.text).toContain('Z UNDOES ONE CARD, NOT THE BATCH');
+    // The cursor did not advance: a batch has no "next card", and moving
+    // would put `Z` on a draft the operator did not just act on.
+    expect(before.activedescendant).toBe(`draft-${String(ids[2])}`);
+
+    await press(app, 'z');
+    await settled(app);
+    await expect
+      .poll(async () => (await readTriage(app)).cards[2]?.state, {
+        timeout: 30_000,
+      })
+      .toBe('recalled');
+
+    const w = wire(fixture);
+    expect(w.recalls).toEqual([`POST /v1/drafts/${String(ids[2])}/recall`]);
+    expect(w.sendShaped).toEqual([]);
+    const after = await readTriage(app);
+    expect(after.cards.map((c) => c.state)).toEqual([
+      'approved',
+      'approved',
+      'recalled',
+    ]);
+
+    // `recalled` is TERMINAL: `transitions.ts` has no row out of it, and
+    // the store's `STARTABLE.approve` is `{pending}`. So a second thought
+    // is refused HERE, locally, and never reaches the wire — the operator
+    // gets a chip, not a 409.
+    await press(app, 'a');
+    await settled(app);
+    expect(wire(fixture).approves).toEqual([]);
+    const retried = await readTriage(app);
+    expect(retried.cards[2]?.state).toBe('recalled');
+    expect(retried.cards[2]?.badges.join(' ')).toContain('RECALLED');
+
+    // At the daemon: one recall row for that draft, and the two others
+    // still hold their approvals. Undo is per card at every layer.
+    expect((await approvalsOf(fixture, String(ids[2]))).map((a) => a.action)) //
+      .toEqual(['approve', 'recall']);
+    const undone = await fixture.directClient.getDraft(String(ids[2]));
+    expect(undone.draft.state).toBe('recalled');
+    expect('sendNotBefore' in undone.draft).toBe(false);
+    for (const id of [ids[0], ids[1]])
+      expect(
+        (await fixture.directClient.getDraft(String(id))).draft.state,
+      ).toBe('approved');
+  }, 240_000);
+});
+
+/* ── row 2: ⇧R, one request, Sc3's action enum ───────────────────────── */
+
+describe('s8 Sc9 — bulk reject', () => {
+  it('turns ⇧R into one request with action reject and three shared rows', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+R');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'rejected')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(3);
+
+    const w = wire(fixture);
+    expect(w.bulks).toEqual(['POST /v1/drafts/bulk']);
+    // The teeth mutation implements this as three `rejectDraft` calls: it
+    // typechecks, and the screen is identical. These two clauses are the
+    // difference.
+    expect(w.rejects).toEqual([]);
+    expect(w.approves).toEqual([]);
+    expect(w.sendShaped).toEqual([]);
+
+    // The action reached the daemon as `reject` (Sc3's
+    // `z.enum(['approve','recall','reject'])`), one Approval row per draft,
+    // all carrying the same batchId — bulk reject records exactly as much
+    // as bulk approve does.
+    const batchIds = new Set<string>();
+    for (const id of ids.map(String)) {
+      const approvals = await approvalsOf(fixture, id);
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0]?.action).toBe('reject');
+      batchIds.add(String(approvals[0]?.batchId));
+      expect((await fixture.directClient.getDraft(id)).draft.state).toBe(
+        'rejected',
+      );
+    }
+    expect(batchIds.size).toBe(1);
+
+    const view = await readTriage(app);
+    expect(view.batch.action).toBe('reject');
+    expect(view.batch.batchId).toBe([...batchIds][0]);
+    expect(view.selectedCards).toBe(0);
+    // Nothing was ever approved, so nothing can be dispatched. Bulk reject
+    // is the one bulk verb that cannot possibly send.
+    expect(fixture.loopback.callCount()).toBe(0);
+  }, 240_000);
+});
+
+/* ── row 3: the partial failure, which is the point of the scenario ──── */
+
+describe('s8 Sc9 — partial failure', () => {
+  it('shows 2 SENT and 1 FAILED, polls once per ending, and offers a retry', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['alpha', 'bravo', 'charlie']);
+    // The middle draft is accepted by the backend and never lands in the
+    // Messages history, which is `dispatchApproved`'s `unverified` — the
+    // most honest failure this product has, because the send DID leave and
+    // the daemon still refuses to claim it arrived.
+    fixture.loopback.sabotageBody('bravo');
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+A');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'approved')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(3);
+
+    const batchId = (await readTriage(app)).batch.batchId;
+    expect(typeof batchId).toBe('string');
+    const getsBeforeSweep = wire(fixture).batchGets.length;
+
+    // Let the grace elapse on the daemon's own clock and sweep once.
+    fixture.clock.set(new Date(Date.now() + 3_600_000).toISOString());
+    await fixture.daemon.tick();
+
+    await expect
+      .poll(async () => (await readTriage(app)).batch.text, { timeout: 60_000 })
+      .toContain('2 SENT');
+    const view = await readTriage(app);
+
+    // ── the tally: monochrome, glyph-carried, and never green-vs-red ────
+    //
+    // The plan asks for `✓` on the success count. The glyph set is CLOSED
+    // (C-6) and `✓` is not in it, so the success tally wears the glyph its
+    // own state already has — `●` for sent, `⊘` for failed — which is the
+    // same alphabet every card on this screen uses. The requirement behind
+    // the plan's wording is met exactly: the `2 SENT` figure is
+    // monochrome, and nothing about it is coloured by success.
+    expect(view.batch.tallies).toContain('● 2 SENT');
+    expect(view.batch.tallies).toContain('⊘ 1 FAILED');
+
+    // ── the failed card names the code, in words ────────────────────────
+    const failed = view.cards.find((c) => c.draftId === String(ids[1]));
+    expect(failed?.state).toBe('failed');
+    expect(failed?.word).toBe('FAILED');
+    expect(failed?.glyph).toBe('⊘');
+    expect(failed?.badges.join(' ')).toContain('UNVERIFIED');
+    for (const i of [0, 2]) {
+      const card = view.cards.find((c) => c.draftId === String(ids[i]));
+      expect(card?.state).toBe('sent');
+    }
+
+    // ── the retry affordance, and the footnote (delta #1) ───────────────
+    //
+    // The plan asks for an "A retry" BUTTON. There are no buttons under
+    // `screens/queue` — an arch row bans them and its planted offender is
+    // literally the one this plan asked for — so `A` on a failed card
+    // retries it, legended on the card exactly like every other verb.
+    await press(app, 'G');
+    const onFailed = await readTriage(app);
+    const active = onFailed.cards.find((c) => c.active === 'true');
+    expect(active?.draftId).toBe(String(ids[2]));
+    await press(app, 'k');
+    const legend = (await readTriage(app)).cards.find(
+      (c) => c.draftId === String(ids[1]),
+    )?.keys;
+    expect(legend).toContain('A retry');
+    expect(legend).not.toContain('A approve');
+    // The footnote says what a retry would DO, read from the daemon's
+    // settings rather than assumed: `send.retryAsSms` defaults off, and a
+    // GUI that guessed would be guessing about a fallback that sends over
+    // a different network.
+    expect(view.batch.text).toContain('SMS RETRY: OFF (SETTINGS)');
+
+    // ── one batch GET per ENDING, and not one on a timer ────────────────
+    //
+    // Three drafts finished — two `draft.sent`, one `draft.failed` — so
+    // there are exactly three reads of the report and no more. This is the
+    // clause that fails if anybody reaches for an interval, and it is
+    // checked twice with real time in between.
+    const gets = wire(fixture).batchGets.length - getsBeforeSweep;
+    expect(gets).toBe(3);
+    for (const u of wire(fixture).batchGets)
+      expect(u).toBe(`GET /v1/batches/${String(batchId)}`);
+    await settled(app);
+    expect(wire(fixture).batchGets.length - getsBeforeSweep).toBe(3);
+
+    // ── the retry is one request, and only the daemon can send ──────────
+    expect(wire(fixture).retries).toEqual([]);
+    await press(app, 'a');
+    await settled(app);
+    expect(wire(fixture).retries).toEqual([
+      `POST /v1/drafts/${String(ids[1])}/retry`,
+    ]);
+    expect(wire(fixture).sendShaped).toEqual([]);
+    // Back to `approved`, with a fresh grace window: a retry the operator
+    // cannot take back would be a worse affordance than no retry at all.
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.find(
+            (c) => c.draftId === String(ids[1]),
+          )?.state,
+        { timeout: 30_000 },
+      )
+      .toBe('approved');
+    const retried = (await readTriage(app)).cards.find(
+      (c) => c.draftId === String(ids[1]),
+    );
+    expect(retried?.ringTotal).not.toBeNull();
+
+    // Two sends left the building, both through `dispatchApproved`, both
+    // with the approved body; the third was attempted and refused to claim
+    // success.
+    expect(
+      fixture.loopback
+        .calls()
+        .map((c) => c.body)
+        .sort(),
+    ).toEqual(['alpha', 'bravo', 'charlie']);
+  }, 300_000);
+
+  it('is not green, anywhere, including the batch card and the failure', async () => {
+    const fixture = await boot();
+    await seedDrafts(fixture, ['alpha', 'bravo', 'charlie']);
+    fixture.loopback.sabotageBody('bravo');
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+A');
+    await settled(app);
+    fixture.clock.set(new Date(Date.now() + 3_600_000).toISOString());
+    await fixture.daemon.tick();
+    await expect
+      .poll(async () => (await readTriage(app)).batch.text, { timeout: 60_000 })
+      .toContain('FAILED');
+
+    // The runtime sweep reads COMPUTED colour, so a green that arrived
+    // through a class, a variable or a cascade is caught the same as a
+    // literal. Danger is `--danger` and the success tally is ink: the batch
+    // card must not become the one place in this app where colour is the
+    // semantics.
+    expect(await runtimeGreenOffenders(app.page)).toEqual([]);
+  }, 300_000);
+});
+
+/* ── row 5: the two ways a card can be left out of its own batch ─────── */
+
+describe('s8 Sc9 — refusals inside a batch', () => {
+  it('keeps the card the DAEMON refused, and gives it no approval row', async () => {
+    const fixture = await boot();
+    // Two sends an hour, and three drafts selected. The gate's counters are
+    // bumped AT APPROVAL TIME, so the first two approvals of the batch pass
+    // and the third is refused — deterministically, in order, with no
+    // dependence on the clock. This is the plan's row 5 with a refusal the
+    // daemon can actually produce: the plan asks for an EXPIRED draft in
+    // `refused`, which cannot happen, because the optimistic store refuses
+    // a terminal card locally and the id never reaches the wire at all.
+    // Both halves are proven — the daemon's here, the local one below.
+    await fixture.directClient.setSettings({ 'send.capGlobalPerHour': 2 });
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    await selectThree(app);
+    await press(app, 'Shift+A');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'approved')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(2);
+
+    // One request still: a partial batch is not a reason to retry the rest
+    // one at a time.
+    const w = wire(fixture);
+    expect(w.bulks).toEqual(['POST /v1/drafts/bulk']);
+    expect(w.approves).toEqual([]);
+    expect(w.sendShaped).toEqual([]);
+
+    // The refused draft produced NO Approval row. This is the INV-2 clause
+    // that matters most in a partial batch: the one the gate said no to has
+    // no record, so there is nothing for the scheduler to ever pick up.
+    expect(await approvalsOf(fixture, String(ids[2]))).toEqual([]);
+    expect(
+      (await fixture.directClient.getDraft(String(ids[2]))).draft.state,
+    ).toBe('pending');
+    const batchId = (await readTriage(app)).batch.batchId as string;
+    const inBatch = await fixture.directClient.listDrafts({ batchId });
+    expect(inBatch.map((d) => d.id).sort()).toEqual(
+      [String(ids[0]), String(ids[1])].sort(),
+    );
+
+    // On screen the card KEEPS its place, loses its hypothesis, and says
+    // why in words. The reason is the gate's own — `rate-limited`, which
+    // tells an operator when to try again — and not the route's generic
+    // `gate-denied`, because the `gate.denied` frame carries the specific
+    // one and a later HTTP answer must not overwrite it with a vaguer word.
+    const view = await readTriage(app);
+    expect(view.cards).toHaveLength(3);
+    expect(view.cards[2]?.state).toBe('pending');
+    expect(view.cards[2]?.badges.join(' ')).toContain('DENIED: RATE-LIMITED');
+    expect(view.cards[2]?.ringTotal).toBeNull();
+    for (const i of [0, 1]) expect(view.cards[i]?.ringTotal).not.toBeNull();
+    // Two applied, one refused, and the batch card counts the two it has.
+    expect(view.batch.text).toContain('1 REFUSED');
+  }, 240_000);
+
+  it('never puts a terminal card on the wire in the first place', async () => {
+    const fixture = await boot();
+    const ids = await seedDrafts(fixture, ['one', 'two', 'three']);
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await waitForRows(app, 3);
+    await focusList(app);
+
+    // Somebody else rejects the middle one while the selection is being
+    // built — the everyday race this whole store exists for.
+    await selectThree(app);
+    await fixture.directClient.rejectDraft(String(ids[1]));
+    await expect
+      .poll(async () => (await readTriage(app)).cards[1]?.state, {
+        timeout: 30_000,
+      })
+      .toBe('rejected');
+
+    await press(app, 'Shift+A');
+    await settled(app);
+    await expect
+      .poll(
+        async () =>
+          (await readTriage(app)).cards.filter((c) => c.state === 'approved')
+            .length,
+        { timeout: 30_000 },
+      )
+      .toBe(2);
+
+    // The refusal is LOCAL: `STARTABLE.approve` is `{pending}`, so the id
+    // is dropped before the request is built. One bulk went out and it
+    // named two drafts, not three — which is why the plan's "the bulk
+    // result's `refused` lists it" can never be observed for this case.
+    const w = wire(fixture);
+    expect(w.bulks).toEqual(['POST /v1/drafts/bulk']);
+    expect(w.sendShaped).toEqual([]);
+    expect(await approvalsOf(fixture, String(ids[1]))).toEqual([
+      { action: 'reject', batchId: undefined },
+    ]);
+    const batchId = (await readTriage(app)).batch.batchId as string;
+    const inBatch = await fixture.directClient.listDrafts({ batchId });
+    expect(inBatch.map((d) => d.id).sort()).toEqual(
+      [String(ids[0]), String(ids[2])].sort(),
+    );
+
+    // AS BUILT, and the correction is worth stating. A bulk approve
+    // REFETCHES — that is the only way the cards it moved acquire the two
+    // instants their undo rings are drawn from, since neither `BulkResult`
+    // nor the `draft.approved` frame carries a payload — and a resync
+    // prunes the terminal states, which has been this app's rule since Sc7:
+    // the queue is what the daemon says it is. So the card somebody else
+    // rejected leaves the list at this point, having been on it, visibly
+    // REJECTED, at the moment the operator pressed the key. What is left is
+    // the two that moved, ringing, and a batch card that counts two rather
+    // than the three that were selected.
+    const view = await readTriage(app);
+    expect(view.cards.map((c) => c.draftId)).toEqual([
+      String(ids[0]),
+      String(ids[2]),
+    ]);
+    expect(view.cards.map((c) => c.state)).toEqual(['approved', 'approved']);
+    for (const card of view.cards) expect(card.ringTotal).not.toBeNull();
+    expect(view.batch.text).toContain('2 IN ONE BATCH');
+    expect(view.selectedCards).toBe(0);
+  }, 240_000);
 });

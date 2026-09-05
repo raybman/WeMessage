@@ -51,9 +51,26 @@ function stroke(key: string, mods: Partial<KeyStroke> = {}): KeyStroke {
   };
 }
 
-const LIST: KeyContext = { mode: 'list' };
-const EDITING: KeyContext = { mode: 'editing' };
-const OFFLINE: KeyContext = { mode: 'offline' };
+/**
+ * The three worlds, with NOTHING selected.
+ *
+ * `selected` is a COUNT and not a set, and it is required rather than
+ * optional. The keymap's whole question about a selection is "is there one",
+ * and a count answers it without handing a pure function a mutable
+ * collection it could be tempted to read an id out of. Required because the
+ * alternative — `selected?: number` defaulted to zero — is a screen that
+ * forgets to pass it and gets `⇧A does nothing`, silently, for ever: the
+ * failure would look exactly like an empty selection, which is the one case
+ * that is supposed to do nothing.
+ */
+const LIST: KeyContext = { mode: 'list', selected: 0 };
+const EDITING: KeyContext = { mode: 'editing', selected: 0 };
+const OFFLINE: KeyContext = { mode: 'offline', selected: 0 };
+
+/** The same three worlds with a selection standing. */
+const LIST_SELECTED: KeyContext = { mode: 'list', selected: 3 };
+const EDITING_SELECTED: KeyContext = { mode: 'editing', selected: 3 };
+const OFFLINE_SELECTED: KeyContext = { mode: 'offline', selected: 3 };
 
 const MODES: readonly KeyMode[] = ['list', 'editing', 'offline'];
 
@@ -123,7 +140,10 @@ describe('s8 Sc8 — the triage keymap', () => {
     // fall through to the accelerator that actually owns it.
     for (const mode of MODES)
       expect(
-        verbOf(stroke('K', { metaKey: true, shiftKey: true }), { mode }),
+        verbOf(stroke('K', { metaKey: true, shiftKey: true }), {
+          mode,
+          selected: 0,
+        }),
       ).toBeNull();
   });
 
@@ -145,9 +165,10 @@ describe('s8 Sc8 — the triage keymap', () => {
   });
 
   it('does not leak the editor’s verbs into the list, or the list’s into the editor', () => {
-    // The two ends of the same rule. `Escape` in the list is not ours (Sc9
-    // gives it the selection to clear; today it belongs to the window), and
-    // ⌘↩ in the list is a modified stroke like any other.
+    // The two ends of the same rule. `Escape` in the list is not ours with
+    // nothing selected — Sc9 gives it a selection to clear and nothing else,
+    // so an empty selection leaves it to the window — and ⌘↩ in the list is
+    // a modified stroke like any other.
     expect(verbOf(stroke('Escape'), LIST)).toBeNull();
     expect(verbOf(stroke('Enter', { metaKey: true }), LIST)).toBeNull();
     expect(verbOf(stroke('a'), EDITING)).toBeNull();
@@ -171,7 +192,7 @@ describe('s8 Sc8 — the triage keymap', () => {
   it('returns null for keys nobody bound, in every context', () => {
     for (const mode of MODES)
       for (const key of ['q', '1', 'F5', 'Tab', 'Backspace', 'Shift'])
-        expect(verbOf(stroke(key), { mode })).toBeNull();
+        expect(verbOf(stroke(key), { mode, selected: 0 })).toBeNull();
   });
 
   it('leaves the cursor where it is for every verb that is not navigation', () => {
@@ -200,13 +221,166 @@ describe('s8 Sc8 — the triage keymap', () => {
   it('legends the keys that exist, and keeps the group caveat on approve', () => {
     // Sc6 asserts the legend CONTAINS 'A approve'; this widens it without
     // moving that substring, which is the shape a growing legend has to have.
-    const solo = legendFor({ group: false });
+    const solo = legendFor({ group: false, retry: false });
     expect(solo).toContain('A approve');
     expect(solo).toContain('R reject');
     expect(solo).toContain('E edit');
     expect(solo).toContain('SPACE context');
     expect(solo).toContain('J/K move');
-    expect(legendFor({ group: true })).toContain(
+    expect(legendFor({ group: true, retry: false })).toContain(
+      'A approve (drafts only in v1)',
+    );
+  });
+});
+
+/* ── s8 Sc9: the selection verbs ──────────────────────────────────────── */
+
+/**
+ * s8-execution Scenario 9 rows 1, 2 and 4 — one batch, at the keymap.
+ *
+ * Bulk is the sharpest edge in the whole slice: `⇧A` is one keystroke that
+ * asks the daemon to approve N drafts, so every question about what it is
+ * allowed to mean is decided here, in a pure function, before any of it
+ * reaches a screen or a socket.
+ *
+ * The three decisions this file pins:
+ *
+ *  - **`⇧A` and `⇧R` mean NOTHING with an empty selection.** Not "act on the
+ *    card under the cursor" — that is what `a` and `r` are for, and a
+ *    shifted key that silently degrades into the unshifted one is how an
+ *    operator whose selection was cleared by a refetch approves one draft
+ *    while believing they approved twelve. `null` here means the browser
+ *    gets the key back and the screen does not `preventDefault` it.
+ *  - **Escape is context-dependent, and only in `list`.** With a selection
+ *    it clears it; without one it is not ours at all, so it keeps whatever
+ *    meaning the platform gives it. In `editing` it stays `cancel-edit`
+ *    whether or not a selection is standing: a person mid-sentence pressing
+ *    Escape means "out of this box", never "and also discard the twelve
+ *    cards I picked".
+ *  - **`offline` is unchanged.** Selection is a WRITE affordance in
+ *    disguise: `x` on its own writes nothing, but the only two things a
+ *    selection is for are two verbs the store would refuse, and a screen
+ *    that let an operator build a twelve-card selection while the link was
+ *    down would be a screen that quietly loses it on the reconnect that
+ *    refetches the queue.
+ */
+describe('s8 Sc9 — the selection keymap', () => {
+  it('binds x to select, and only in the list', () => {
+    expect(verbOf(stroke('x'), LIST)).toBe('select');
+    expect(verbOf(stroke('x'), LIST_SELECTED)).toBe('select');
+    // A letter in the editor is a letter.
+    expect(verbOf(stroke('x'), EDITING)).toBeNull();
+    expect(verbOf(stroke('x'), EDITING_SELECTED)).toBeNull();
+    // Offline allows reading, and selecting is the first half of writing.
+    expect(verbOf(stroke('x'), OFFLINE)).toBeNull();
+    expect(verbOf(stroke('x'), OFFLINE_SELECTED)).toBeNull();
+    // `X` is a different key and is not bound: the selection verb is one
+    // stroke, unshifted, next to the two shifted ones that spend it.
+    expect(verbOf(stroke('X', { shiftKey: true }), LIST)).toBeNull();
+  });
+
+  it('gives ⇧A and ⇧R a meaning only while something is selected', () => {
+    expect(verbOf(stroke('A', { shiftKey: true }), LIST)).toBeNull();
+    expect(verbOf(stroke('R', { shiftKey: true }), LIST)).toBeNull();
+    expect(verbOf(stroke('A', { shiftKey: true }), LIST_SELECTED)).toBe(
+      'bulk-approve',
+    );
+    expect(verbOf(stroke('R', { shiftKey: true }), LIST_SELECTED)).toBe(
+      'bulk-reject',
+    );
+    // The unshifted verbs are untouched by a standing selection. `a` still
+    // approves the card under the cursor, which is what Sc8's checkpoint
+    // measures and what an operator's muscle memory expects.
+    expect(verbOf(stroke('a'), LIST_SELECTED)).toBe('approve');
+    expect(verbOf(stroke('r'), LIST_SELECTED)).toBe('reject');
+  });
+
+  it('refuses the bulk verbs in every context that is not the list', () => {
+    for (const context of [
+      EDITING,
+      EDITING_SELECTED,
+      OFFLINE,
+      OFFLINE_SELECTED,
+    ]) {
+      expect(verbOf(stroke('A', { shiftKey: true }), context)).toBeNull();
+      expect(verbOf(stroke('R', { shiftKey: true }), context)).toBeNull();
+    }
+  });
+
+  it('still refuses a modified ⇧A, because a modifier is never ours', () => {
+    for (const mods of [
+      { shiftKey: true, metaKey: true },
+      { shiftKey: true, ctrlKey: true },
+      { shiftKey: true, altKey: true },
+    ])
+      expect(verbOf(stroke('A', mods), LIST_SELECTED)).toBeNull();
+  });
+
+  it('clears the selection on Escape, and only when there is one', () => {
+    expect(verbOf(stroke('Escape'), LIST_SELECTED)).toBe('clear-selection');
+    // Nothing selected: Escape is not ours, so it keeps its platform
+    // meaning rather than being claimed and thrown away.
+    expect(verbOf(stroke('Escape'), LIST)).toBeNull();
+    // The editor keeps Escape whatever else is standing.
+    expect(verbOf(stroke('Escape'), EDITING)).toBe('cancel-edit');
+    expect(verbOf(stroke('Escape'), EDITING_SELECTED)).toBe('cancel-edit');
+    expect(verbOf(stroke('Escape'), OFFLINE_SELECTED)).toBeNull();
+  });
+
+  it('keeps G as the last-card key, which is also a shifted letter', () => {
+    // The one that would break if `A` and `R` had been claimed by matching
+    // on `shiftKey` instead of on the key itself.
+    expect(verbOf(stroke('G', { shiftKey: true }), LIST_SELECTED)).toBe('last');
+    expect(verbOf(stroke('G', { shiftKey: true }), OFFLINE_SELECTED)).toBe(
+      'last',
+    );
+  });
+
+  it('the kill switch is still nobody’s, selection or not', () => {
+    for (const context of [LIST_SELECTED, EDITING_SELECTED, OFFLINE_SELECTED])
+      expect(
+        verbOf(stroke('K', { metaKey: true, shiftKey: true }), context),
+      ).toBeNull();
+  });
+
+  it('none of the four new verbs moves the cursor by itself', () => {
+    // The exhaustive switch in `moveTo` is what forces this decision to be
+    // made rather than defaulted, and the answer for all four is the same:
+    // selecting a card does not leave it, and a batch has no single card to
+    // advance to afterwards.
+    for (const verb of [
+      'select',
+      'clear-selection',
+      'bulk-approve',
+      'bulk-reject',
+    ] as const)
+      expect(moveTo(verb, 3, 20)).toBe(3);
+    for (const verb of [
+      'select',
+      'clear-selection',
+      'bulk-approve',
+      'bulk-reject',
+    ] as const)
+      expect(moveTo(verb, 0, 0)).toBe(-1);
+  });
+
+  it('legends the select key, and swaps approve for retry on a failed card', () => {
+    // Sc6's and Sc8's rows assert the legend CONTAINS its substrings, so it
+    // can grow without moving them.
+    const solo = legendFor({ group: false, retry: false });
+    expect(solo).toContain('A approve');
+    expect(solo).toContain('X select');
+    expect(solo).toContain('J/K move');
+
+    // The plan's row 3 asks for an "A retry" BUTTON. There are no buttons
+    // under `screens/queue` — an arch row bans them, and its planted
+    // offender is literally the button this plan asked for — so the retry
+    // affordance is the same shape every other verb on this screen has: a
+    // key, legended on the card it acts on. A failed card's `A` retries it.
+    const failed = legendFor({ group: false, retry: true });
+    expect(failed).toContain('A retry');
+    expect(failed).not.toContain('A approve');
+    expect(legendFor({ group: true, retry: false })).toContain(
       'A approve (drafts only in v1)',
     );
   });

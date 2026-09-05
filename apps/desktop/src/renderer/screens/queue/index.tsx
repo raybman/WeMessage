@@ -44,7 +44,9 @@ import type {
   Conversation as Thread,
   Turn,
 } from '../../store/optimistic.js';
+import type { BatchModel } from '../../derive/batch.js';
 import { Editor } from '../../components/Editor.js';
+import { BatchCard } from './BatchCard.js';
 import { Card } from './Card.js';
 import { Conversation } from './Conversation.js';
 import { DisconnectedOverlay } from './DisconnectedOverlay.js';
@@ -93,7 +95,23 @@ export interface QueueScreenProps {
   readonly activeIndex: number;
   /** The draft whose context turns are open inline, or none. */
   readonly expandedId: string | null;
+  /**
+   * The marked cards, by draft id (s8 Sc9).
+   *
+   * A SET rather than a count, because this screen has to answer the
+   * question per row — `aria-selected` is on every option, always present
+   * and never inferred — and the count the header and the keymap need is
+   * one read of `.size` away. The set is the composition root's; the screen
+   * still owns no state.
+   */
   readonly selected: ReadonlySet<string>;
+  /**
+   * The last bulk, summarised, or `null` when there has not been one.
+   *
+   * Above the list and never inside it: a batch is not a draft, the cursor
+   * may not land on it, and every child of a listbox has to be an option.
+   */
+  readonly batch: BatchModel | null;
   /** The active card's thread, for the right pane. */
   readonly thread: Thread;
   readonly demo: boolean;
@@ -203,7 +221,14 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
           card={card}
           legend={
             card.draftId === active?.draftId
-              ? legendFor({ group: card.isGroup })
+              ? legendFor({
+                  group: card.isGroup,
+                  // A failed card cannot be approved — the store's
+                  // `STARTABLE.approve` is `{pending}` — so `A` on one means
+                  // retry, and the legend says the word it means rather than
+                  // offering a key two meanings and a card one lie.
+                  retry: card.state === 'failed',
+                })
               : null
           }
           expanded={expanded}
@@ -222,7 +247,11 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
         altKey: event.altKey,
         shiftKey: event.shiftKey,
       },
-      { mode },
+      // The COUNT, not the set. The only question the keymap asks of a
+      // selection is whether there is one, and `⇧A` returning null with an
+      // empty selection is what stops a shifted verb degrading into its
+      // unshifted twin.
+      { mode, selected: props.selected.size },
     );
     if (verb === null) return;
     // Only for keys we claimed. A handler that preventDefault'd everything
@@ -246,8 +275,28 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
     >
       <div id="queue-head">
         <span id="queue-count">{`${String(cards.length)} PENDING`}</span>
+        {/*
+          The selection, and the two keys that spend it, in the one place
+          an operator is already looking. Absent rather than `0 SELECTED`
+          when there is nothing marked: a permanent counter reading zero is
+          a counter people stop reading, and the header would then be
+          claiming a mode the app is not in. Without this line `⇧A` is a
+          keystroke whose blast radius the operator is holding in their
+          head.
+        */}
+        {props.selected.size === 0 ? null : (
+          <span id="queue-selected">
+            {`${String(props.selected.size)} SELECTED · ⇧A/⇧R ONE BATCH`}
+          </span>
+        )}
         {props.demo ? <span id="demo-badge">DEMO DATA</span> : null}
       </div>
+      {/*
+        The batch summary, between the header and the list, and a SIBLING of
+        the listbox in every sense: the cursor cannot reach it, nothing on
+        it is clickable, and it disappears when the next bulk replaces it.
+      */}
+      {props.batch === null ? null : <BatchCard batch={props.batch} />}
       {/*
         The one live region. `role="status"` rather than `alert`: a draft
         arriving or leaving is not an interruption, and `status` is polite,

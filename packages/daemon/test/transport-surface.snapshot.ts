@@ -106,6 +106,33 @@ export const ROUTE_TABLE: readonly string[] = [
   // No port importer moves: arming reaches the store through the same
   // `Store` port everything else does, and nothing here touches a
   // SendBackend or a ChatDbReader.
+  //
+  // #21 deliberate (s7 Scenario 3): `GET /v1/events/sse`, the read-only SSE
+  // event transport, 62 -> 64.
+  //   1 route + 1 auto-HEAD twin = +2; 62 + 2 = 64.
+  // The arithmetic is the #20 note run the other way. A new GET costs TWO
+  // entries because fastify's exposeHeadRoutes mints the twin for GET routes
+  // only; a new POST costs one. S7's own §1.6 projection is 62 -> 67 across
+  // the whole slice, and this scenario's +2 is the share that lands here.
+  // The twin is not decoration: it runs the same handler, so the route has
+  // an explicit HEAD branch that answers with the SSE headers, a 200, an
+  // empty body and NO subscriber. Without it the twin would hijack and
+  // stream forever, and every client that probes a URL before opening it
+  // would hang on the probe.
+  //
+  // NO WS event moves with it, and that is the point of the scenario. SSE
+  // carries the SAME 17-name vocabulary over a different frame syntax; the
+  // sink serializes once and hands both transports the identical string, so
+  // there is nothing here for `WS_EVENT_VOCABULARY` (17) or
+  // `EMITTED_WS_EVENTS` (17) to learn. A new name in either list would mean
+  // parity had been broken by the very commit that claimed to prove it.
+  //
+  // NO port importer moves either, and that one is enforced rather than
+  // observed: `routes/events-sse.ts` is deliberately absent from
+  // PORT_IMPORTER_ALLOWLIST below, so the importer scan fails the moment
+  // anything in the SSE path so much as names a SendBackend. An event
+  // stream is read-only surface (INV-2); approve-before-send must not be
+  // reachable from a subscription.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -121,6 +148,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/drafts',
   'GET /v1/drafts/:id',
   'GET /v1/events',
+  'GET /v1/events/sse',
   'GET /v1/health',
   'GET /v1/rules',
   'GET /v1/rules/:id',
@@ -139,6 +167,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/drafts',
   'HEAD /v1/drafts/:id',
   'HEAD /v1/events',
+  'HEAD /v1/events/sse',
   'HEAD /v1/health',
   'HEAD /v1/rules',
   'HEAD /v1/rules/:id',

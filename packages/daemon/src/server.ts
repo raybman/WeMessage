@@ -10,6 +10,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
+import type { GatewayEventPayload } from '@wemessage/protocol';
 import { SETTING_KILL_SWITCH } from '@wemessage/core';
 import type {
   ChatDbReader,
@@ -51,6 +52,8 @@ import { registerToggleRoutes } from './routes/toggles.js';
 import { registerContactRoutes } from './routes/contacts.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
+import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
+import { closeReasonFor, parseEventFilter } from './events-filter.js';
 import { readConnectionState, type DoctorProbes } from './doctor.js';
 import { resolveArming } from './arming.js';
 
@@ -133,6 +136,25 @@ export interface DaemonOptions {
      */
     reader?: ChatDbReader;
   };
+
+  /**
+   * s7 Scenario 3: the `connection.state` frame BOTH event transports open
+   * with. One closure, read by the WS route and the SSE route, because the
+   * whole point of the parity rows is that a client cannot tell which
+   * transport it picked from the bytes it receives — and two greetings built
+   * in two places is the first place that would stop being true.
+   *
+   * Optional because a bare S1 transport harness has no store to derive a
+   * connection state from. `daemon.ts` always passes it.
+   */
+  greeting?: () => GatewayEventPayload;
+
+  /**
+   * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they
+   * fire by hand; production defaults to a real unref'd interval inside the
+   * route, so nothing here reads a wall clock.
+   */
+  sse?: { keepaliveMs?: number; timer?: SseTimer };
 }
 
 export interface DaemonServer {
@@ -300,12 +322,43 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     );
   });
 
-  app.get('/v1/events', { websocket: true }, (socket) => {
+  app.get('/v1/events', { websocket: true }, (socket, req) => {
     counters.handlerCalls += 1;
     // auth already enforced at upgrade by the onRequest hook (§2.6)
-    sink?.addClient(socket);
+    //
+    // s7 Scenario 3: `?events=` is parsed by the SAME module the SSE route
+    // uses, before the socket joins the fan-out. A bad filter closes the
+    // socket with 4400 and NEVER sends the greeting: a subscription that
+    // was refused must not look briefly alive, or a client will report the
+    // stream as working right up until it notices it received nothing.
+    const parsed = parseEventFilter((req.query as { events?: unknown }).events);
+    if (!parsed.ok) {
+      socket.close(4400, closeReasonFor(parsed.name));
+      return;
+    }
+    const greeting = opts.greeting?.();
+    if (greeting !== undefined) socket.send(JSON.stringify(greeting));
+    sink?.addClient(socket, parsed.filter);
     opts.onEventsClient?.(socket);
   });
+
+  if (sink) {
+    // §1.6: `GET /v1/events/sse` (+ fastify's auto-HEAD twin) — ratchet #21.
+    // Gated on the sink for the same reason every other surface is gated on
+    // its dependency: a stream with nothing to subscribe to is a route that
+    // exists only to hang. Read-only by construction (INV-2).
+    registerSseRoute(app, {
+      sink,
+      ...(opts.greeting !== undefined ? { greeting: opts.greeting } : {}),
+      ...(opts.sse?.keepaliveMs !== undefined
+        ? { keepaliveMs: opts.sse.keepaliveMs }
+        : {}),
+      ...(opts.sse?.timer !== undefined ? { timer: opts.sse.timer } : {}),
+      onHandled: () => {
+        counters.handlerCalls += 1;
+      },
+    });
+  }
 
   if (opts.rules && sink) {
     // §1.6 routes 1-6 (S2 Scenario 7). The transport-surface ratchet pins

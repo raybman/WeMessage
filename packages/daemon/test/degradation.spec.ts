@@ -170,11 +170,14 @@ function recordingAuditSink(real: AuditSink): AuditSink & {
   const stateChanges: AuditEvent[] = [];
   const broadcasts: unknown[] = [];
   return {
+    // s7 Sc3: spread rather than enumerate. The sink grew `subscribe` and
+    // `subscriberCount` when SSE landed, and a wrapper that lists the methods
+    // it forwards is a wrapper that silently stops forwarding the next one.
+    ...real,
     append(event, actor) {
       if (event.type === 'connection.state-changed') stateChanges.push(event);
       return real.append(event, actor);
     },
-    addClient: (socket) => real.addClient(socket),
     broadcast: (payload) => {
       broadcasts.push(payload);
       real.broadcast(payload);

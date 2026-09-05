@@ -28,9 +28,12 @@ import {
   buildServer,
   createAuditSink,
   createScheduler,
+  readConnectionState,
   type DaemonServer,
   type Scheduler,
+  type SseTimer,
 } from '@wemessage/daemon';
+import type { GatewayEventPayload } from '@wemessage/protocol';
 import {
   createLoopbackSendBackend,
   type LoopbackSendBackend,
@@ -131,6 +134,18 @@ export interface BootOptions {
    * `wemessage audit verify` CLI, which reads `GET /v1/audit/verify`).
    */
   rules?: boolean;
+  /**
+   * s7 Sc3: wire the `connection.state` greeting both event transports open
+   * with. Opt-in for the same reason `send` and `rules` are — no suite gains
+   * a frame it did not ask for, and the WS suites written before S7 count
+   * frames from index 0. `daemon.ts` always passes it in production.
+   */
+  greeting?: boolean;
+  /**
+   * s7 Sc3: the SSE keepalive seam (C-5). A test hands in a timer it can fire
+   * by hand; production defaults to a real unref'd interval inside the route.
+   */
+  sse?: { keepaliveMs?: number; timer?: SseTimer };
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -191,6 +206,18 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const server = await buildServer({
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink },
+    // s7 Sc3: ONE greeting closure, read by BOTH event transports inside
+    // `server.ts` — the parity rows would be meaningless if WS and SSE each
+    // built their own idea of what "connection.state" says.
+    ...(opts.greeting === true
+      ? {
+          greeting: (): GatewayEventPayload => ({
+            event: 'connection.state',
+            state: readConnectionState(store),
+          }),
+        }
+      : {}),
+    ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
     ...(opts.rules === true
       ? { rules: { store, clock: clockCtl.clock, sink } }
       : {}),

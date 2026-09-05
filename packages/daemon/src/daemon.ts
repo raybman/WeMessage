@@ -537,14 +537,18 @@ export async function startDaemon(
     onEventsClient: (socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
-      // greeting frame (§3.4 connection.state): proves the stream is live
-      socket.send(
-        JSON.stringify({
-          event: 'connection.state',
-          state: readConnectionState(store),
-        } satisfies GatewayEventPayload),
-      );
     },
+    // greeting frame (§3.4 connection.state): proves the stream is live.
+    //
+    // s7 Scenario 3 moved this out of `onEventsClient` and into a closure
+    // `server.ts` reads for BOTH transports. It used to be a `socket.send`
+    // that only a WebSocket could reach, which would have left SSE either
+    // greeting-less or greeting itself from a second, drifting copy of
+    // "what connection.state says". One closure, one answer, both wires.
+    greeting: (): GatewayEventPayload => ({
+      event: 'connection.state',
+      state: readConnectionState(store),
+    }),
   });
   agentTransport.current = server.agentTransport;
   agentRequests.current = server.agentRequests;

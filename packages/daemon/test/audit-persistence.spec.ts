@@ -187,12 +187,13 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       createAuditSink: (deps) => {
         const real = createAuditSink(deps);
         return {
+          // s7 Sc3: spread, so the wrapper keeps forwarding whatever the
+          // sink grows next (SSE added `subscribe`/`subscriberCount`).
+          ...real,
           append(event, actor) {
             order.push(`append:${event.type}`);
             return real.append(event, actor);
           },
-          addClient: (socket) => real.addClient(socket),
-          broadcast: (payload) => real.broadcast(payload),
         };
       },
     });

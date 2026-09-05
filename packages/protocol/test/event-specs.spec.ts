@@ -33,7 +33,10 @@ import {
   isGatewayEventName,
 } from '../src/index.js';
 import type { GatewayEventName } from '../src/index.js';
-import { schemaErrors, type JsonSchema } from './helpers/schema-check.js';
+// s7 Sc 3 relocated this checker into `@wemessage/fixtures` (the repo's
+// test-support package) so the daemon's WS/SSE parity rows can use the very
+// same validator against real wire bytes. Import path only; behaviour identical.
+import { schemaErrors, type JsonSchema } from '@wemessage/fixtures';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const eventSchemaDir = join(here, '../src/schemas/events');

@@ -176,6 +176,10 @@ importers:
       '@wemessage/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@wemessage/fixtures':
+        specifier: workspace:*
+        version: link:../../fixtures
 
   packages/sendkit:
     dependencies:

@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "@wemessage/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@wemessage/fixtures": "workspace:*"
   }
 }

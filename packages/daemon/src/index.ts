@@ -7,7 +7,25 @@ export {
   type DaemonOptions,
   type DaemonServer,
 } from './server.js';
-export { createAuditSink, type AuditSink } from './audit-sink.js';
+export {
+  createAuditSink,
+  type AuditSink,
+  type EventSubscriber,
+} from './audit-sink.js';
+// s7 Scenario 3: the `?events=` filter, shared by both event transports.
+export {
+  closeReasonFor,
+  parseEventFilter,
+  type EventFilter,
+  type EventFilterResult,
+} from './events-filter.js';
+export {
+  registerSseRoute,
+  SSE_KEEPALIVE_MS,
+  SSE_PATH,
+  type SseRouteDeps,
+  type SseTimer,
+} from './routes/events-sse.js';
 export {
   createScheduler,
   type Scheduler,

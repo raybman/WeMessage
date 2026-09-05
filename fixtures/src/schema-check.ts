@@ -1,12 +1,28 @@
 /**
- * s7 Scenario 2 — a test-only structural checker over the JSON Schema subset
- * this package actually emits (§1.2).
+ * A test-only structural checker over the JSON Schema subset
+ * `@wemessage/protocol` actually emits (§1.2). Written in s7 Scenario 2.
  *
- * Deliberately NOT ajv, and deliberately not in `src/`. `protocol-zero-runtime-deps`
- * is a live dependency-cruiser rule and F-54 stands: the schemas exist so a
+ * Deliberately NOT ajv. `protocol-zero-runtime-deps` is a live
+ * dependency-cruiser rule and F-54 stands: the schemas exist so a
  * stranger can validate our frames with THEIR validator, not so we can ship
  * one. What we owe ourselves is proof that the schemas say what we think they
  * say, and that is a ~100 line walk over six keywords.
+ *
+ * **Why it lives in `@wemessage/fixtures` and not in `packages/protocol/test`
+ * (moved in s7 Scenario 3).** Sc 3 has to validate the bytes the daemon puts
+ * on TWO wires against the same per-event schemas the protocol package pins,
+ * and a daemon spec cannot import another package's `test/` directory: there
+ * is no export map into it, and a relative climb out of one package into
+ * another's test tree is the kind of edge that survives exactly until someone
+ * runs one package's suite alone. `@wemessage/fixtures` is the repo's existing
+ * test-support package — private, never shipped (§2.1), already a devDep of
+ * every suite that needs it — so the checker moves there rather than being
+ * copied. One checker, one behaviour, two callers. The alternative the
+ * tooling notes allowed (duplicate it) would have put a hundred lines of
+ * validator in two places and made a fix to one of them silently partial.
+ *
+ * `no-fixtures-in-prod-path` is untouched: no `packages/[asterisk]/src` imports this,
+ * only `packages/protocol/test` and `packages/daemon/test`.
  *
  * Supported: `type` (object|array|string|number|integer|boolean|null),
  * `const`, `enum`, `required`, `additionalProperties: false`, `properties`,

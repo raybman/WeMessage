@@ -942,10 +942,18 @@ describe('s6 Sc11 row 10: connectionState unsupported denies', () => {
 // --- Row 11: ratchet #20 ---------------------------------------------------
 
 describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () => {
-  it('ROUTE_TABLE is 62 and names both new POSTs', () => {
+  it('ROUTE_TABLE names both new POSTs, and the ratchet has moved on', () => {
     // 60 after Sc 3's +7. Two POSTs, and POST routes never get an auto-HEAD
-    // twin (the POST /v1/rules precedent), so +2 and not +4.
-    expect(ROUTE_TABLE).toHaveLength(62);
+    // twin (the POST /v1/rules precedent), so +2 and not +4: 62 at the close
+    // of S6, which is what this row pinned when it was written.
+    //
+    // s7 Sc3 (ratchet #21) added `GET /v1/events/sse` and the auto-HEAD twin
+    // fastify mints for it — +2 the other way round from this row's +2, since
+    // a GET costs two entries and a POST costs one — so the absolute total is
+    // now 64. The row's actual claim is unchanged and still checked below:
+    // BOTH arming POSTs are reachable surface. The total is updated rather
+    // than deleted because it is what catches a route nobody meant to add.
+    expect(ROUTE_TABLE).toHaveLength(64);
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/pause');
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/global-mode');
   });

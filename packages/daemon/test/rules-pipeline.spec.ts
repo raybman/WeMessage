@@ -462,11 +462,13 @@ describe('match pipeline (§3.4 rule.matched, S1 deviation #1 resolved)', () => 
       createAuditSink: (deps) => {
         const real = createAuditSink(deps);
         return {
+          // s7 Sc3: spread, so the wrapper keeps forwarding whatever the sink
+          // grows next (SSE added `subscribe`/`subscriberCount`).
+          ...real,
           append(event, actor) {
             calls.push(`append:${event.type}`);
             return real.append(event, actor);
           },
-          addClient: (socket) => real.addClient(socket),
           broadcast(payload) {
             calls.push(`broadcast:${payload.event}`);
             real.broadcast(payload);

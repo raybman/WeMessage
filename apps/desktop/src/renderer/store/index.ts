@@ -195,6 +195,29 @@ function nameMap(
   return out;
 }
 
+/**
+ * The names of the rules that are switched ON, in the order they came back.
+ *
+ * A second pass over the same answer rather than a field on `nameMap`,
+ * because they are different questions with different failure modes: an
+ * unreadable row costs the id index one name, and costs this list one
+ * WATCHER — and a watcher we could not read must be omitted rather than
+ * counted, since the empty queue's whole claim is that these are the rules
+ * that will still be drafting after the operator walks away.
+ */
+function watchedRules(rows: unknown): readonly string[] {
+  const out: string[] = [];
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows as readonly unknown[]) {
+    const record = asRecord(row);
+    if (record === null) continue;
+    const name = record['name'];
+    if (record['enabled'] === true && typeof name === 'string' && name !== '')
+      out.push(name);
+  }
+  return out;
+}
+
 function reasonOf(error: unknown): string {
   return error instanceof Error && error.message !== ''
     ? error.message
@@ -366,6 +389,7 @@ export function bindStore(
       const next: Catalogue = {
         rules: nameMap(rules, 'id', 'name'),
         contacts: nameMap(contacts, 'handle', 'displayName'),
+        watching: watchedRules(rules),
       };
       store.setCatalogue(next);
     },

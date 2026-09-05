@@ -34,9 +34,15 @@ import type { VNode } from 'preact';
 import { Listbox, type ListboxOption } from '../../components/Listbox.js';
 import type { CardModel } from '../../derive/queue.js';
 import { legendFor, verbOf, type QueueVerb } from '../../keys/index.js';
-import type { Conversation as Thread, Turn } from '../../store/optimistic.js';
+import type {
+  ConnState,
+  Conversation as Thread,
+  Turn,
+} from '../../store/optimistic.js';
 import { Card } from './Card.js';
 import { Conversation } from './Conversation.js';
+import { DisconnectedOverlay } from './DisconnectedOverlay.js';
+import { Empty } from './Empty.js';
 
 /**
  * How many options are mounted at once.
@@ -85,6 +91,26 @@ export interface QueueScreenProps {
   /** The active card's thread, for the right pane. */
   readonly thread: Thread;
   readonly demo: boolean;
+  /**
+   * The link, as the STORE has it.
+   *
+   * Deliberately the reducer's `ConnState` and not the stream payload's
+   * state, even though both are narrowed from the same push. This value is
+   * the one that gates `start()`, so `#queue[data-link]` is a statement
+   * about whether a keystroke can reach the wire rather than a second
+   * opinion about the socket that could drift from the first.
+   */
+  readonly link: ConnState;
+  /** Which reconnect attempt is in flight; zero while the link is up. */
+  readonly attempt: number;
+  /** True when the app knows its map may be wrong and is fetching a new one. */
+  readonly stale: boolean;
+  /** The last instant a fetch actually answered, or absent if none has. */
+  readonly syncedAt: string | undefined;
+  /** `ARMED`, `ARMED UNTIL hh:mm`, or `DISARMED · QUEUE-ONLY`. */
+  readonly arming: string;
+  /** The enabled rules, for an empty queue to account for itself with. */
+  readonly watching: readonly string[];
   /** What assistive technology is told last happened. May be empty. */
   readonly announcement: string;
   readonly onVerb: (verb: QueueVerb) => void;
@@ -120,6 +146,14 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
   const slice = windowOf(cards.length, activeIndex);
   const mounted = cards.slice(slice.start, slice.end);
 
+  // Disconnected is the one state where the list is INERT rather than
+  // merely wrong. Stale is not: a stale queue is a queue the app is already
+  // refetching, every card on it was really there a moment ago, and locking
+  // an operator out of a list that is about to be confirmed correct trades a
+  // small honesty problem for a large one. Stale says so and stays usable;
+  // disconnected says so and refuses.
+  const inert = props.link !== 'connected';
+
   const options: ListboxOption[] = mounted.map((card) => {
     const expanded = props.expandedId === card.draftId;
     return {
@@ -144,6 +178,7 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
               ? legendFor({ group: card.isGroup })
               : null
           }
+          expanded={expanded}
           turns={expanded ? tail(props.thread.recent, CARD_TURNS) : []}
         />
       ),
@@ -170,6 +205,9 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
     <div
       id="queue"
       data-count={String(cards.length)}
+      data-link={props.link}
+      data-stale={props.stale ? 'yes' : 'no'}
+      data-empty={cards.length === 0 ? 'yes' : 'no'}
       // The ACTIVE conversation's observed total, not the length of what the
       // pane mounted. A truncated render must never become a smaller number
       // on screen.
@@ -187,6 +225,22 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
       <p id="queue-live" role="status">
         {props.announcement}
       </p>
+      {/*
+        The stale banner, above the list and not over it. An operator MAY act
+        on a stale queue — the rows on it were real when they were fetched
+        and the refetch is already in flight — but they may not do it without
+        being told, so the fact is on screen at all times rather than
+        attached to the card that turns out to be wrong.
+      */}
+      {props.stale ? (
+        <p id="queue-stale">◌ STALE · QUEUE MAY BE OUT OF DATE</p>
+      ) : null}
+      {props.link === 'reconnecting' ? (
+        <DisconnectedOverlay
+          attempt={props.attempt}
+          syncedAt={props.syncedAt}
+        />
+      ) : null}
       <div id="queue-body">
         {/*
           The virtualization spacers are SIBLINGS of the listbox, never
@@ -207,8 +261,19 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
             label="Drafts waiting for approval"
             options={options}
             activeId={active?.domId ?? null}
+            disabled={inert}
             onKeyDown={onKeyDown}
           />
+          {/*
+            BESIDE the listbox, never instead of it. An empty state that
+            replaced the list would unmount the window's only tab stop, drop
+            focus to `<body>`, and make the first draft to arrive land in a
+            document where the next keystroke goes nowhere. The list stays,
+            with no options in it, and this says what that means.
+          */}
+          {cards.length === 0 ? (
+            <Empty arming={props.arming} watching={props.watching} />
+          ) : null}
           {slice.end >= cards.length ? null : (
             <div
               id="queue-spacer-bottom"

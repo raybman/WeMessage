@@ -4507,3 +4507,260 @@ describe('S8 extensions (s8-execution Scenario 6: the queue’s structure)', () 
     });
   });
 });
+
+describe('S8 extensions (s8-execution Scenario 7: the queue’s edge states)', () => {
+  const sc7Planted: string[] = [];
+  function sc7Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc7Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc7Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    rmSync(
+      join(
+        repoRoot,
+        'apps/desktop/src/renderer/screens/queue/__s8_sc7_probe__',
+      ),
+      { recursive: true, force: true },
+    );
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const QUEUE = 'apps/desktop/src/renderer/screens/queue';
+
+  /** Every renderer file, as comment-free code keyed by path. */
+  function rendererCode(): ReadonlyArray<readonly [string, string]> {
+    return archFiles(RENDERER).map(
+      (rel) => [rel, codeOf(archRead(rel))] as const,
+    );
+  }
+
+  /* ── INV-2: recovery paths do not multiply the send ────────────────── */
+
+  describe('the edge states added no second way to approve', () => {
+    /**
+     * The row this whole scenario exists to make cheap.
+     *
+     * S7 Sc13 proved there is exactly one call site of the send port in the
+     * daemon. This is the same claim one layer out, where the edge states
+     * live: a disconnected overlay with a working RETRY, a stale banner with
+     * a REFRESH AND APPROVE, an expiry handler that re-approves the
+     * replacement — every one of those is a plausible, well-meant feature
+     * and every one of them is a second dispatch wearing a recovery's
+     * clothes. There is one `bridge.approve(` in the renderer, and a search
+     * for it is how a reviewer finds every path that can reach the daemon's
+     * approval row at all.
+     */
+    const SITE = 'apps/desktop/src/renderer/store/index.ts';
+    // Two spellings of one pattern, on purpose. A `/g` regex carries
+    // `lastIndex` across `.test()` calls, so the one that walks every file
+    // is deliberately NOT global and the one that counts is used only with
+    // `.match()`, which resets.
+    const CALL = /\bbridge\s*\.\s*approve\s*\(/;
+    const CALLS = /\bbridge\s*\.\s*approve\s*\(/g;
+
+    function approveSites(): string[] {
+      return rendererCode()
+        .filter(([, body]) => CALL.test(body))
+        .map(([rel]) => rel);
+    }
+
+    it('exactly one file in the renderer calls the approve channel', () => {
+      expect(approveSites()).toEqual([SITE]);
+    });
+
+    it('and it calls it exactly once', () => {
+      // One FILE is not one call. A wiring module that approved from both a
+      // keystroke path and a "retry the ones that failed" path would satisfy
+      // the row above and would be the bug.
+      expect(codeOf(archRead(SITE)).match(CALLS)).toHaveLength(1);
+    });
+
+    it('exactly one place mints a hypothesis, and it is the guarded one', () => {
+      // The TABLE READ, not the field name: `Pending.hypothesis` is declared
+      // once as a type and written once as a value, and only the second is
+      // the thing worth pinning. `start()` is where the link check, the
+      // in-flight check and Sc7's wrong-state check all live, so a second
+      // writer would be a card that moves on screen without passing any of
+      // them — which is precisely how an operator ends up looking at an
+      // `approved` card that nothing ever asked the daemon about.
+      const MINT = /\bhypothesis\s*:\s*HYPOTHESIS\[/;
+      const MINTS = /\bhypothesis\s*:\s*HYPOTHESIS\[/g;
+      const sites = rendererCode().filter(([, body]) => MINT.test(body));
+      expect(sites.map(([rel]) => rel)).toEqual([
+        'apps/desktop/src/renderer/store/optimistic.ts',
+      ]);
+      expect((sites[0]?.[1] ?? '').match(MINTS)).toHaveLength(1);
+    });
+
+    it('PLANTED: an overlay that retries the approve itself is caught', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/Retry.tsx`,
+        [
+          'declare const bridge: { approve(id: string): Promise<unknown> };',
+          '// The well-meant version: the link came back, so push the ones',
+          '// the operator already pressed. It is a second dispatch.',
+          'export async function retryAll(ids: string[]): Promise<void> {',
+          '  for (const id of ids) await bridge.approve(id);',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(approveSites()).toContain(rel);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a screen that only names the refusal is clean', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/Refused.tsx`,
+        [
+          '// Says that approve is refused while disconnected. Saying it is',
+          '// not doing it: no bridge, no channel, one string.',
+          'export function refusal(): string {',
+          "  return 'APPROVE IS REFUSED WHILE DISCONNECTED';",
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(approveSites()).not.toContain(rel);
+    });
+  });
+
+  /* ── one tab stop, structurally ────────────────────────────────────── */
+
+  describe('nothing in the queue screen is clickable', () => {
+    /**
+     * The plan drew two buttons on the disconnected overlay, and the reason
+     * they are static text instead is not taste.
+     *
+     * The window has exactly ONE tabbable node — the listbox container,
+     * which holds focus for the whole `aria-activedescendant` contract. Sc8's
+     * checkpoint triages twenty drafts on the keyboard alone, and a control
+     * that appears only in a transient state is the worst possible place for
+     * a stray tab stop: it passes every test that does not happen to be run
+     * while the link is down, and then it eats a `Tab` in front of an
+     * operator working at speed.
+     *
+     * So the ban is on the SUBTREE rather than on the overlay. The listbox
+     * itself lives under `components/` and is not swept here, which is what
+     * keeps the one legitimate tab stop legitimate.
+     */
+    const INTERACTIVE: ReadonlyArray<readonly [string, RegExp]> = [
+      ['<button', /<button\b/],
+      ['<a href', /<a\s[^>]*\bhref\b/],
+      ['<input', /<input\b/],
+      ['onClick', /\bonClick\s*=/],
+      ['tabIndex', /\btabIndex\s*=/],
+    ];
+
+    function clickables(): string[] {
+      const out: string[] = [];
+      for (const rel of archFiles(QUEUE)) {
+        const body = codeOf(archRead(rel));
+        for (const [label, re] of INTERACTIVE)
+          if (re.test(body)) out.push(`${rel}: ${label}`);
+      }
+      return out.sort();
+    }
+
+    it('the whole queue subtree mints no control and no tab stop', () => {
+      expect(archFiles(QUEUE).length).toBeGreaterThan(0);
+      expect(clickables()).toEqual([]);
+    });
+
+    it('the listbox, which is outside it, does declare the one tab stop', () => {
+      // Non-vacuity from the other side: the pattern exists in this app,
+      // once, in the file whose whole job is to own it.
+      expect(
+        codeOf(archRead('apps/desktop/src/renderer/components/Listbox.tsx')),
+      ).toContain('tabIndex={0}');
+    });
+
+    it('PLANTED: the RETRY NOW button the plan asked for is caught', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/RetryButton.tsx`,
+        [
+          'export function RetryNow(props: { go: () => void }): unknown {',
+          '  return <button onClick={props.go}>RETRY NOW</button>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(clickables()).toContain(`${rel}: <button`);
+      expect(clickables()).toContain(`${rel}: onClick`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: the same affordance as text, naming its key, is clean', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/RetryText.tsx`,
+        [
+          'export function RetryNow(): unknown {',
+          '  return <span class="queue-overlay-action">RETRY NOW</span>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(clickables().filter((o) => o.startsWith(rel))).toEqual([]);
+    });
+  });
+
+  /* ── one live region, however many things go wrong at once ─────────── */
+
+  describe('the queue has exactly one live region', () => {
+    /**
+     * Sc7 adds three surfaces that all want to announce themselves: the
+     * empty state, the stale banner and the disconnected overlay. Each of
+     * them is a reasonable candidate for `role="status"`, and a screen with
+     * four polite live regions announces a dropped link four times over a
+     * card the operator is having read to them — which is how a blind
+     * operator loses the queue, not a cosmetic problem.
+     *
+     * `alert` is banned outright rather than counted. An assertive region
+     * interrupts, and nothing on this screen is worth interrupting a
+     * sentence the operator is in the middle of.
+     */
+    function regionSites(role: string): string[] {
+      return rendererCode()
+        .filter(([, body]) => body.includes(`role="${role}"`))
+        .map(([rel]) => rel);
+    }
+
+    it('one polite region, in the screen that owns the queue', () => {
+      expect(regionSites('status')).toEqual([`${QUEUE}/index.tsx`]);
+    });
+
+    it('and no assertive one anywhere', () => {
+      expect(regionSites('alert')).toEqual([]);
+      expect(regionSites('alertdialog')).toEqual([]);
+    });
+
+    it('PLANTED: an overlay that announces itself as well is caught', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/Loud.tsx`,
+        [
+          'export function Loud(props: { text: string }): unknown {',
+          '  return <p role="status">{props.text}</p>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(regionSites('status')).toContain(rel);
+    });
+
+    it('PLANTED: and an assertive one is caught even though it is the only one', () => {
+      const rel = sc7Plant(
+        `${QUEUE}/__s8_sc7_probe__/Urgent.tsx`,
+        [
+          'export function Urgent(props: { text: string }): unknown {',
+          '  return <p role="alert">{props.text}</p>;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(regionSites('alert')).toEqual([rel]);
+    });
+  });
+});

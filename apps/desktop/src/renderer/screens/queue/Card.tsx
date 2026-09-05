@@ -21,7 +21,7 @@
  * and never the only one.
  */
 import type { VNode } from 'preact';
-import type { CardModel } from '../../derive/queue.js';
+import { clampBody, type CardModel } from '../../derive/queue.js';
 import type { Turn } from '../../store/optimistic.js';
 
 export interface CardProps {
@@ -37,10 +37,20 @@ export interface CardProps {
   readonly legend: string | null;
   /** The turns to show inline, empty unless this card is expanded. */
   readonly turns: readonly Turn[];
+  /**
+   * Whether the operator has opened this card.
+   *
+   * One flag for two things — the inline context turns AND the full body —
+   * because they are one question. A card with a second "show more" state
+   * would need a second key, and the keymap Sc8's checkpoint runs on is
+   * already the tightest thing in the app.
+   */
+  readonly expanded: boolean;
 }
 
 export function Card(props: CardProps): VNode {
   const { card } = props;
+  const body = clampBody(card.body, props.expanded);
   return (
     <div class="card">
       <div class="card-head">
@@ -56,12 +66,29 @@ export function Card(props: CardProps): VNode {
           {card.timeLabel}
         </span>
       </div>
-      <p class="card-body">{card.body}</p>
+      {/* Clamped by ARITHMETIC, not by a CSS line clamp: a clamp that hid
+          lines the DOM still held would make "what does this card show"
+          unanswerable from the DOM, which is the only thing the e2e and a
+          screen reader both read. */}
+      <p class="card-body" data-clamped={body.clamped ? 'yes' : 'no'}>
+        {body.text}
+      </p>
+      {body.clamped ? (
+        <p class="card-more">{`SHOW ALL · ${String(body.lines)} LINES · SPACE`}</p>
+      ) : null}
       {card.badges.length === 0 ? null : (
         <div class="card-badges">
           {card.badges.map((badge) => (
-            <span key={badge} class="card-badge">
-              {badge}
+            <span
+              key={badge.text}
+              class="card-badge"
+              // Conditional, never `title={undefined}`: under
+              // exactOptionalPropertyTypes an absent key and an undefined
+              // one are different types, and only one of them leaves the
+              // attribute off the element.
+              {...(badge.title === undefined ? {} : { title: badge.title })}
+            >
+              {badge.text}
             </span>
           ))}
         </div>

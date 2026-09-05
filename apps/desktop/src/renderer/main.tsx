@@ -31,6 +31,7 @@ import type { VNode } from 'preact';
 import './theme/tokens.css';
 import './app.css';
 import { StateStrip } from './components/StateStrip.js';
+import { armingGlance } from './derive/armingGlance.js';
 import { byAge, cardOf, type CardModel } from './derive/queue.js';
 import { moveTo, type QueueVerb } from './keys/index.js';
 import { DEFAULT_SCREEN } from './router.js';
@@ -241,6 +242,17 @@ function Shell({
           selected={selected}
           thread={view.thread}
           demo={current.demo}
+          // From the STORE, not from `current`. Both are narrowed from the
+          // same push, but this is the value that decides whether a
+          // keystroke reaches the wire, and a screen that said `connected`
+          // while the reducer refused would be the exact lie this scenario
+          // exists to make impossible.
+          link={binding.store.streamState()}
+          attempt={current.state === 'reconnecting' ? current.attempt : 0}
+          stale={binding.store.needsSnapshot()}
+          syncedAt={binding.store.syncedAt()}
+          arming={armingGlance(current.armed)}
+          watching={binding.store.catalogue().watching}
           announcement={announcementFor(view)}
           onVerb={onVerb}
         />

@@ -370,3 +370,153 @@ body {
   font-size: 11px;
   color: var(--ink-dim);
 }
+
+/* ── s8 Sc7: the edge states ──────────────────────────────────────────────
+ *
+ * Four surfaces, one rule between them: every state below is already carried
+ * by a GLYPH and an uppercase WORD in the markup before any of this loads,
+ * so nothing here is the sole carrier of anything. Opacity is the only
+ * "colour" any of it uses, and opacity has no hue to be green.
+ */
+
+/*
+ * The empty state sits BESIDE the (still-mounted, zero-option) list, which
+ * is why it is laid out as a block in the scroll container rather than as an
+ * overlay: there is nothing underneath it to obscure.
+ */
+#queue-empty {
+  padding: 24px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#queue-empty-head {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+#queue-empty-arming {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+#queue-empty-rules {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.watched-rule,
+.watched-none {
+  padding: 1px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+/*
+ * The stale banner is a BANNER and not a scrim. A stale queue is still a
+ * usable queue — every row on it was real when it was fetched and a refetch
+ * is already in flight — so this says so in the flow of the screen and takes
+ * nothing away.
+ */
+#queue-stale {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The disconnected overlay is the opposite decision, and looks like it: a
+ * bordered block above the list, and the list below it dimmed and marked
+ * `aria-disabled`.
+ */
+#queue-overlay {
+  padding: 10px 12px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 10px;
+  background: var(--layer-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#queue-overlay p {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+#queue-overlay-head {
+  font-weight: 600;
+}
+
+#queue-overlay-detail,
+#queue-overlay-sync {
+  color: var(--ink-dim);
+}
+
+#queue-overlay-refused {
+  color: var(--warn);
+}
+
+#queue-overlay-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/*
+ * Static text, deliberately: see the component's header. It is styled to
+ * look unavailable rather than to look like a button somebody forgot to
+ * wire, because an affordance that cannot act is worse than a sentence.
+ */
+.queue-overlay-action {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+/*
+ * The third carrier of "you are looking at a memory". The word is in the
+ * overlay and `aria-disabled` is on the list; this is for the reader who is
+ * looking at the cards and not at either.
+ */
+#queue[data-link='reconnecting'] #queue-list > [role='option'] {
+  opacity: 0.45;
+}
+
+/*
+ * A dead draft's body, struck through. Never alone: `data-state` says
+ * `expired` in the DOM, `.card-glyph` renders ◌ and `.card-word` renders
+ * EXPIRED, all three before this rule resolves.
+ */
+[data-state='expired'] .card-body,
+[data-state='superseded'] .card-body,
+[data-state='recalled'] .card-body,
+[data-state='rejected'] .card-body {
+  text-decoration: line-through;
+}
+
+/*
+ * The clamp affordance names its own key, because there is no control to
+ * click: an option with a button in it is an option with a second tab stop
+ * in it, and the window has exactly one.
+ */
+.card-more {
+  margin: 4px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}

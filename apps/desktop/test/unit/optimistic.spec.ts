@@ -600,3 +600,110 @@ describe('s8 Sc6: the failure sidecar remembers what the frame said', () => {
     expect(store.failureOf('d2')).toBe('no-conversation');
   });
 });
+
+/* ── s8 Sc7: the local refusal, which is where INV-2 hides ───────────── */
+
+describe('s8 Sc7: a verb the card cannot take never reaches the wire', () => {
+  /**
+   * The edge-state half of INV-2.
+   *
+   * Every other refusal in this file is about the LINK or about a request
+   * already in flight. This one is about the CARD: a draft that expired
+   * under the cursor, a draft somebody else approved from the CLI, a draft
+   * the operator is looking at a stale copy of. The daemon would answer all
+   * three with a 409, and answering them here instead is not an
+   * optimisation — it is the property that makes "no edge-state recovery
+   * path becomes a second dispatch" provable by counting requests rather
+   * than by reading rollback code.
+   *
+   * Deliberately NOT the three-layer read. There is no hypothesis to read
+   * (the line above this guard proved the row has none), so the comparison
+   * is against the same two layers the daemon would compare against.
+   */
+  const settledStore = (state: DraftState): OptimisticStore => {
+    const store = createOptimisticStore({ now: () => AT });
+    store.setStream('connected');
+    store.snapshot([draft('d1', state)], { at: AT, missed: 0 });
+    return store;
+  };
+
+  it('refuses approve on every state that is not pending, and chips the truth', () => {
+    const states: readonly DraftState[] = [
+      'approved',
+      'sending',
+      'sent',
+      'rejected',
+      'recalled',
+      'expired',
+      'superseded',
+      'failed',
+    ];
+    for (const state of states) {
+      const store = settledStore(state);
+      expect(store.approve('d1'), state).toEqual({
+        ok: false,
+        refused: 'wrong-state',
+      });
+      // No hypothesis was written, so nothing on screen moved…
+      expect(store.row('d1')?.pending, state).toBeUndefined();
+      expect(store.stateOf('d1'), state).toBe(state);
+      // …and the keystroke is still accounted for, in the daemon's own word
+      // for where the card actually is.
+      expect(store.chip('d1'), state).toEqual({ kind: 'error', reason: state });
+    }
+  });
+
+  it('still allows the one state approve is legal from', () => {
+    // The guard has to be narrow as well as present: a refusal that also
+    // refused `pending` would pass every row above and break the app.
+    const store = settledStore('pending');
+    expect(store.approve('d1')).toEqual({ ok: true });
+    expect(store.chip('d1')).toBeUndefined();
+  });
+
+  it('reads the EVENT layer, not only the last fetch', () => {
+    // The realistic shape: the row was fetched while pending, a
+    // `draft.expired` frame arrived, and nothing has refetched. An event may
+    // not write `server`, so a guard that read `server.state` alone would
+    // wave this approve straight through to a 409.
+    const store = settledStore('pending');
+    store.event({ event: 'draft.expired', draftId: 'd1' });
+    expect(store.row('d1')?.server.state).toBe('pending');
+    expect(store.approve('d1')).toEqual({ ok: false, refused: 'wrong-state' });
+    expect(store.chip('d1')).toEqual({ kind: 'error', reason: 'expired' });
+  });
+
+  it('notifies, because a chip nobody paints is a keystroke that vanished', () => {
+    let seen = 0;
+    const store = settledStore('expired');
+    store.subscribe(() => {
+      seen += 1;
+    });
+    store.approve('d1');
+    expect(seen).toBe(1);
+  });
+
+  it('recall is legal from approved and refused from pending', () => {
+    // §1.7's human rows, and the reason the table is per-verb rather than a
+    // single `state === 'pending'` test: a shared guard would make the
+    // recall key dead on exactly the cards it exists for.
+    const settled = settledStore('approved');
+    expect(settled.bulk(['d1'], 'recall').ok).toBe(true);
+
+    const fresh = settledStore('pending');
+    fresh.bulk(['d1'], 'recall');
+    expect(fresh.row('d1')?.pending).toBeUndefined();
+    expect(fresh.chip('d1')).toEqual({ kind: 'error', reason: 'pending' });
+  });
+
+  it('the link is checked BEFORE the card, so a dropped link never chips', () => {
+    // Order matters for what the operator is told. Offline is a fact about
+    // the app; wrong-state is a fact about the draft. A disconnected queue
+    // that chipped every card the operator pressed `a` on would be blaming
+    // the drafts for the socket.
+    const store = settledStore('expired');
+    store.setStream('reconnecting');
+    expect(store.approve('d1')).toEqual({ ok: false, refused: 'offline' });
+    expect(store.chip('d1')).toBeUndefined();
+  });
+});

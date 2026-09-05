@@ -56,6 +56,16 @@ export interface ListboxProps {
   /** Already windowed by the caller: this component renders what it is given. */
   readonly options: readonly ListboxOption[];
   readonly activeId: string | null;
+  /**
+   * Whether the list is inert because the app cannot vouch for it.
+   *
+   * `aria-disabled` rather than removing the tab stop: the list still holds
+   * the window's only focusable node, and a disabled control that cannot be
+   * focused is a control an operator cannot ask about. It announces as
+   * unavailable, keeps focus, and the keys it would have claimed are
+   * refused one layer up — where the refusal can be explained.
+   */
+  readonly disabled: boolean;
   readonly onKeyDown: (event: KeyboardEvent) => void;
 }
 
@@ -66,6 +76,7 @@ export function Listbox(props: ListboxProps): VNode {
       role="listbox"
       aria-label={props.label}
       aria-multiselectable="true"
+      aria-disabled={props.disabled ? 'true' : 'false'}
       // Omitted rather than empty when there is no active row: an
       // `aria-activedescendant` pointing at nothing is a dangling reference,
       // and an empty one is a reference to an element whose id is ''.

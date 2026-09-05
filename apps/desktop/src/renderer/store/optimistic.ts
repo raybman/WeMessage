@@ -136,14 +136,53 @@ const TURN_CEILING = 200;
 export interface Catalogue {
   readonly contacts: ReadonlyMap<string, string>;
   readonly rules: ReadonlyMap<string, string>;
+  /**
+   * The names of the rules that are currently ENABLED, in fetch order.
+   *
+   * Not derivable from `rules`, which is an id index built for lookup and
+   * deliberately keeps every rule so that a draft made by a rule somebody
+   * has since switched off still renders its name. This is the other
+   * question — "if I walk away, what will still be drafting?" — and it is
+   * the only honest thing an empty queue has to say. A screen that answered
+   * it from `rules.size` would tell an operator who disabled everything
+   * last night that six rules are watching.
+   */
+  readonly watching: readonly string[];
 }
 
 export const EMPTY_CATALOGUE: Catalogue = {
   contacts: new Map(),
   rules: new Map(),
+  watching: [],
 };
 
-export type Refusal = 'offline' | 'unknown-draft' | 'in-flight';
+/**
+ * Why a verb never left the renderer.
+ *
+ * Four, and the fourth is the interesting one. `wrong-state` is a refusal
+ * the DAEMON would also make — approving an expired draft is a 409 — caught
+ * one layer earlier so that the operator is told before the round trip
+ * rather than after it. It is not an optimisation. An edge state is where a
+ * second dispatch would hide, and the cheapest way to prove no recovery path
+ * becomes one is for the request never to be made: the e2e counts approve
+ * POSTs in the daemon's own request log and expects zero.
+ */
+export type Refusal = 'offline' | 'unknown-draft' | 'in-flight' | 'wrong-state';
+
+/**
+ * The state each verb is legal FROM, mirroring §1.7's human rows.
+ *
+ * Narrower than the daemon's table on purpose: `reject` is legal from
+ * `approved` there, but only for a SYSTEM actor with a recorded reason (a
+ * kill switch, a dropped link, an open circuit). A human recalls an approved
+ * draft; they do not reject it. Encoding the human subset is what makes a
+ * local refusal honest rather than a guess at the daemon's answer.
+ */
+const STARTABLE: Readonly<Record<QueueAction, ReadonlySet<DraftState>>> = {
+  approve: new Set<DraftState>(['pending']),
+  reject: new Set<DraftState>(['pending']),
+  recall: new Set<DraftState>(['approved']),
+};
 
 export type Started =
   { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
@@ -327,6 +366,21 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
       return { ok: false, refused: 'unknown-draft' };
     }
     if (row.pending !== undefined) return { ok: false, refused: 'in-flight' };
+    // The three-layer read WITHOUT the hypothesis layer, because there is no
+    // hypothesis: the line above proved that. What is left is the daemon's
+    // news if we heard any, else the row as last fetched — which is exactly
+    // the state the daemon would compare against, so a refusal here and a
+    // 409 there disagree only in how long the operator waited to hear it.
+    const state = row.observed?.state ?? row.server.state;
+    if (!STARTABLE[action].has(state)) {
+      // The chip carries the daemon's own word for where the card actually
+      // is. Not a sentence about what was refused: the card is already
+      // wearing that state's glyph and word, and the chip's job is to say
+      // that the keystroke landed and was answered, not to re-describe the
+      // row underneath it.
+      setChip(id, { kind: 'error', reason: state });
+      return { ok: false, refused: 'wrong-state' };
+    }
     put(id, {
       ...row,
       pending: {
@@ -573,10 +627,17 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
 
     approve(id) {
       const outcome = start(id, 'approve');
-      // A refusal is not a change. `unknown-draft` is the exception: it
-      // learned the map is stale, and the screen has to be told so the
-      // wiring can go and fix it.
-      if (outcome.ok || outcome.refused === 'unknown-draft') notify();
+      // A refusal is USUALLY not a change. Two are. `unknown-draft` learned
+      // the map is stale and the wiring has to be told so it can go and fix
+      // it; `wrong-state` wrote a chip, and a chip nobody repaints is a
+      // keystroke that vanished — which on this screen reads as the app
+      // having done the thing silently.
+      if (
+        outcome.ok ||
+        outcome.refused === 'unknown-draft' ||
+        outcome.refused === 'wrong-state'
+      )
+        notify();
       return outcome;
     },
 

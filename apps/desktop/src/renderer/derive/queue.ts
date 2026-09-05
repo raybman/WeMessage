@@ -18,6 +18,22 @@ import { chatParts } from './chat.js';
 import { ago } from './format.js';
 import { STATE_GLYPH, STATE_WORD } from './state.js';
 
+/**
+ * One badge, and the explanation a badge sometimes owes.
+ *
+ * A pair rather than a string because exactly one badge in this app has a
+ * fact it cannot fit in its own word: `HELD` with no reason (F-108) is the
+ * app saying "this draft was clamped and I cannot know by what", and an
+ * operator reading a bare `HELD` deserves to be able to find out why it is
+ * bare. `title` is the only carrier available inside an option — a popover
+ * would be an interactive descendant, and there are none of those.
+ */
+export interface CardBadge {
+  readonly text: string;
+  /** The `title` attribute, present only where the word needs one. */
+  readonly title?: string;
+}
+
 export interface CardModel {
   readonly draftId: string;
   /** The DOM id, so `aria-activedescendant` and the e2e agree on one string. */
@@ -32,7 +48,7 @@ export interface CardModel {
   readonly timeLabel: string;
   readonly createdAt: string;
   readonly body: string;
-  readonly badges: readonly string[];
+  readonly badges: readonly CardBadge[];
   /** Why an agent proposed this unprompted, or absent. */
   readonly why: string | null;
   /** A signpost when the app knows nothing about this handle. */
@@ -85,20 +101,104 @@ function chipBadge(chip: Chip): string {
   }
 }
 
+/**
+ * F-108's ratified explanation for a `HELD` badge with no reason on it.
+ *
+ * Verbatim, because it is a product string rather than a description of
+ * one: it tells the operator that the absence is a property of when this
+ * window started listening, not a property of their draft.
+ */
+export const HELD_WITHOUT_REASON =
+  'reason known only while the daemon that created this draft is running';
+
+/**
+ * Whether a card is held with no reason we could have learned.
+ *
+ * Proactive AND still pending. `proactiveReason` is the marker for a draft
+ * an agent proposed unprompted, and the gate clamps every one of those to
+ * draft-only before it becomes a row — so a proactive draft sitting in the
+ * queue is by construction a held one. Once it moves out of `pending` the
+ * hold is over and the badge would be describing history.
+ */
+function heldWithoutReason(draft: DraftPayload, state: DraftState): boolean {
+  return draft.proactiveReason !== undefined && state === 'pending';
+}
+
+/**
+ * How many lines of a body a card shows before it asks to be opened.
+ *
+ * Six, because the queue is a LIST: a forty-line answer rendered in full
+ * pushes the next nineteen drafts off the screen, and the operator's job is
+ * to see that there are nineteen. Six is enough to judge tone and topic,
+ * which is what the collapsed card is for.
+ */
+export const BODY_LINES = 6;
+
+/** A body, and what was left out of it. */
+export interface ClampedBody {
+  readonly text: string;
+  readonly clamped: boolean;
+  readonly lines: number;
+}
+
+/**
+ * The body a collapsed card shows, and the count the affordance names.
+ *
+ * Arithmetic over the text rather than a CSS line clamp, for two reasons
+ * that both matter here: a CSS clamp hides lines the DOM still contains, so
+ * "what does this card show" stops being answerable from the DOM the e2e
+ * reads; and the count in `SHOW ALL · 40 LINES` has to be a real number
+ * rather than an ellipsis, or the operator cannot tell a body with one
+ * hidden line from one with thirty.
+ */
+export function clampBody(body: string, expanded: boolean): ClampedBody {
+  const lines = body.split('\n');
+  if (expanded || lines.length <= BODY_LINES)
+    return { text: body, clamped: false, lines: lines.length };
+  return {
+    text: lines.slice(0, BODY_LINES).join('\n'),
+    clamped: true,
+    lines: lines.length,
+  };
+}
+
 export function cardOf(draft: DraftPayload, context: CardContext): CardModel {
   const parts = chatParts(draft.chatGuid);
   const named = context.catalogue.contacts.get(parts.handle);
-  const badges: string[] = [];
-  if (draft.proactiveReason !== undefined) badges.push('PROACTIVE');
-  if (parts.isGroup) badges.push('GROUP');
+  const badges: CardBadge[] = [];
+  if (draft.proactiveReason !== undefined) badges.push({ text: 'PROACTIVE' });
+  if (parts.isGroup) badges.push({ text: 'GROUP' });
+  // HELD, in the two shapes F-108 ratified and no third one.
+  //
   // The clamp comes from the sidecar, never from the payload: `clampedBy`
   // rides the live `draft.created` frame and is not on the REST record, so
   // reading it off `draft` would produce a badge that vanishes on refetch.
+  // The reason is the gate's own word uppercased, never a friendlier
+  // synonym — the operator will read the same word in the CLI's output and
+  // in a support thread, and a second vocabulary here would strand them.
   if (context.clampedBy !== undefined)
-    badges.push(`CLAMPED: ${context.clampedBy.toUpperCase()}`);
+    badges.push({ text: `HELD · ${context.clampedBy.toUpperCase()}` });
+  else if (heldWithoutReason(draft, context.state))
+    // The honest half. A proactive draft that is still pending WAS clamped
+    // to draft-only by the gate — that is what proactive-and-pending means —
+    // and a window that fetched the row rather than watching it arrive
+    // cannot know which dimension did it. So the badge says the fact it has
+    // and the title says why it has no more, rather than rendering
+    // `HELD · NONE`, which would be a reason.
+    badges.push({ text: 'HELD', title: HELD_WITHOUT_REASON });
+  // The one terminal state with a KNOB behind it.
+  //
+  // `EXPIRED` says the draft is over; `TTL` says what ended it, which is the
+  // rule's own `draftTtlMinutes` and therefore the one thing on this card
+  // the operator can change. It is not a second spelling of the word: the
+  // other ways a draft dies (a person rejected it, a newer one replaced it,
+  // the dispatcher refused it) each have a different badge or none, and an
+  // operator who keeps finding expired cards is being told where to look.
+  if (context.state === 'expired') badges.push({ text: 'TTL' });
   const failure = draft.error?.code ?? context.failedWith;
-  if (failure !== undefined) badges.push(failure.toUpperCase());
-  if (context.chip !== undefined) badges.push(chipBadge(context.chip));
+  if (failure !== undefined) badges.push({ text: failure.toUpperCase() });
+  if (context.chip !== undefined)
+    badges.push({ text: chipBadge(context.chip) });
 
   const who = parts.isGroup
     ? // A room has no counterparty to name, so the card names the ROOM. The

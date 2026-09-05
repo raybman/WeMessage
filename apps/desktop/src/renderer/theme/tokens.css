@@ -44,6 +44,13 @@
   --stroke: rgba(255, 255, 255, 0.12);
   --stroke-strong: rgba(255, 255, 255, 0.24);
 
+  /* ---- material -------------------------------------------------------- */
+  /* The blur behind every `--layer-*`. A token rather than a literal in the
+     component sheet because reduced transparency has to be able to turn it
+     off in one place, and because `backdrop-filter: none` and a still-blurred
+     panel is a difference nobody notices until a screenshot test does. */
+  --backdrop: blur(30px) saturate(180%);
+
   /* ---- motion ---------------------------------------------------------- */
   --dur-fast: 120ms;
   --dur-base: 220ms;
@@ -70,7 +77,29 @@
 
 @media (prefers-reduced-transparency: reduce) {
   :root {
+    --layer-0: #1c1c1e;
     --layer-1: #1c1c1e;
     --layer-2: #2c2c2e;
+    --backdrop: none;
   }
+}
+
+/*
+ * The same swap, driven by main rather than by the media query.
+ *
+ * Both are needed and they are not redundant. The media query is what makes
+ * the FIRST paint correct, before any IPC has happened. The attribute is what
+ * lets main move the layers and the window's vibrancy in the same moment: the
+ * renderer cannot remove vibrancy and main cannot restyle the document, so a
+ * media query alone would give a window that is still translucent behind
+ * panels that are no longer expecting it. Sc 4 row 4 asserts the pair.
+ *
+ * The attribute is spelled `off` as well as `on` so that "main has told us"
+ * and "main has not spoken yet" are distinguishable states in the DOM.
+ */
+:root[data-reduced-transparency='on'] {
+  --layer-0: #1c1c1e;
+  --layer-1: #1c1c1e;
+  --layer-2: #2c2c2e;
+  --backdrop: none;
 }

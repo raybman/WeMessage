@@ -1,0 +1,27 @@
+<!doctype html>
+<html
+  lang="en"
+  data-conn="down"
+  data-screen="wizard"
+  data-wizard-step="welcome"
+  data-reduced-transparency="off"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      The document carries the state attributes from the very first byte, so
+      the shell's first paint is the "no connection yet" shell rather than a
+      blank frame that becomes one. `main.tsx` moves them from there.
+
+      There is no <meta http-equiv="Content-Security-Policy"> here on purpose:
+      the policy is a REAL header, served by the app: scheme handler in main,
+      where a compromised document cannot reach it. See src/main/policy.ts.
+    -->
+    <title>WeMessage</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

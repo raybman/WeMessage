@@ -10,6 +10,14 @@ export default defineConfig({
     globals: false,
     retry: 0,
     include: ['test/**/*.spec.ts'],
+    // s8 Sc4. Launching a real Electron binary, loading a document and
+    // handshaking with a real daemon does not fit in vitest's 5s default,
+    // and a per-test timeout argument on thirty rows is thirty places for
+    // one to be forgotten. The waits inside the suite are all bounded by
+    // their own selector timeouts, so this ceiling only ever converts a hang
+    // into a named failure.
+    testTimeout: 30_000,
+    hookTimeout: 120_000,
     // s7 Sc1 (F-80), obeyed by the newest package in the tree: every package
     // with a test/ directory typechecks its tests. `test/arch.spec.ts` row
     // (a) keys off structure, so `apps/desktop` gaining a test/ directory

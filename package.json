@@ -8,7 +8,7 @@
   },
   "packageManager": "pnpm@10.34.5",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && pnpm --filter @wemessage/desktop run bundle",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -9,6 +9,12 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # s8 Sc4 (F-99). Electron's postinstall IS the binary download, so it has
+    # to land somewhere cacheable: without this the shell is fetched from
+    # GitHub releases on every run, and a rate-limited or offline fetch turns
+    # into "the desktop suite failed" rather than "the download failed".
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -18,9 +24,21 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Keyed on the EXACT pinned version, not on the lockfile hash: the
+      # payload is one binary for one version, and a lockfile key would evict
+      # a perfectly good download every time an unrelated dependency moved.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-44.2.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm dep:check
       - run: pnpm licenses:check
-      - run: pnpm test
+      # The desktop e2e launches a real Chromium. `ubuntu-latest` has no
+      # display, and an Electron app on a headless Linux box does not fail
+      # loudly, it hangs until the suite times out. `xvfb-run -a` gives it one.
+      # This is the ONE step that runs the suite, so nothing is excluded from
+      # it: an excluded file is an untested file.
+      - run: xvfb-run -a pnpm test

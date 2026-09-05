@@ -3,20 +3,23 @@
   "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/main/index.js",
+  "types": "./dist/main/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/main/index.d.ts",
+      "import": "./dist/main/index.js"
     }
   },
   "scripts": {
     "build": "tsc -b",
+    "bundle": "vite build --config vite.config.ts && vite build --config vite.preload.config.ts",
     "test": "vitest run"
   },
   "private": true,
   "dependencies": {
+    "@wemessage/client": "workspace:*",
+    "@wemessage/protocol": "workspace:*",
     "preact": "^10.29.8"
   },
   "devDependencies": {

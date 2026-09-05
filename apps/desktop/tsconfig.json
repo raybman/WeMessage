@@ -4,7 +4,16 @@
     "rootDir": "src",
     "outDir": "dist",
     "jsx": "react-jsx",
-    "jsxImportSource": "preact"
+    "jsxImportSource": "preact",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    {
+      "path": "../../packages/client"
+    },
+    {
+      "path": "../../packages/protocol"
+    }
+  ]
 }

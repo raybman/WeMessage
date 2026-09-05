@@ -89,3 +89,56 @@ export const CHANNELS = {
 
 /** A channel name, for the preload bridge and the typed handler table. */
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+/**
+ * The four push channels: main to renderer, `webContents.send`.
+ *
+ * Spelled as its own list rather than derived by a name pattern, because
+ * "which direction does this channel go" is the difference between a
+ * handler the renderer can call and a message the renderer can only
+ * receive. A pattern would make that distinction depend on spelling.
+ */
+export const PUSH_KEYS = ['event', 'stream', 'theme', 'navigate'] as const;
+
+export type PushKey = (typeof PUSH_KEYS)[number];
+
+/** Every other key: request/response, `ipcMain.handle`. */
+export type RequestKey = Exclude<keyof typeof CHANNELS, PushKey>;
+
+const PUSH_KEY_SET: ReadonlySet<string> = new Set<string>(PUSH_KEYS);
+
+/**
+ * The request keys, derived from `CHANNELS` by subtracting the push set.
+ *
+ * Derivation is the point. The preload builds `window.wm` from this list and
+ * `gateway.ts` builds the handler table from it, so a channel that is added
+ * to `CHANNELS` and to neither side cannot exist: Sc 4 row 2 asserts the
+ * renderer's key set and `ipcMain`'s handler map against it in both
+ * directions, and the handler table is typed as a total `Record<RequestKey>`
+ * so a missing implementation is a compile error rather than a runtime one.
+ */
+export const REQUEST_KEYS: readonly RequestKey[] = Object.keys(CHANNELS).filter(
+  (key): key is RequestKey => !PUSH_KEY_SET.has(key),
+);
+
+/** The channel VALUES the renderer may invoke. */
+export const REQUEST_CHANNELS: readonly string[] = REQUEST_KEYS.map(
+  (key) => CHANNELS[key],
+);
+
+/** The channel VALUES main may push. */
+export const PUSH_CHANNELS: readonly string[] = PUSH_KEYS.map(
+  (key) => CHANNELS[key],
+);
+
+/**
+ * Whether `value` names a push channel.
+ *
+ * The preload's `on(key, listener)` calls this and throws `unknown-channel`
+ * when it is false, which is what makes the bridge CLOSED rather than merely
+ * conventional: a renderer cannot subscribe to a channel nobody wrote down,
+ * and cannot subscribe to a REQUEST channel at all.
+ */
+export function isPushKey(value: string): value is PushKey {
+  return PUSH_KEY_SET.has(value);
+}

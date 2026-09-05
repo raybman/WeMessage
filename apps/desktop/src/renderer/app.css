@@ -1,0 +1,88 @@
+/*
+ * The shell's layout. Every colour is a `var(--…)` from `theme/tokens.css`;
+ * `no-green-static.ts` rule 1 fails this file for a literal of any form.
+ */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  /* Transparent so the window's own material shows through. `transparent`
+     is not a hue and the colour-locality lint exempts it by name. */
+  background: transparent;
+  color: var(--ink);
+  font:
+    13px/1.45 system-ui,
+    -apple-system,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 44px 20px 20px;
+  background: var(--layer-1);
+  backdrop-filter: var(--backdrop);
+  transition: background var(--dur-base) ease;
+}
+
+#state-strip {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: var(--layer-2);
+}
+
+#state-strip-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+#state-strip[data-state='connected'] #state-strip-label {
+  color: var(--tint);
+}
+
+#state-strip[data-state='down'] #state-strip-label {
+  color: var(--danger);
+}
+
+#state-strip[data-state='reconnecting'] #state-strip-label {
+  color: var(--warn);
+}
+
+#state-strip-arming {
+  color: var(--ink-dim);
+  letter-spacing: 0.04em;
+}
+
+#daemon-not-found {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 12px;
+  background: var(--layer-0);
+}
+
+#daemon-not-found h1 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+
+#daemon-not-found p {
+  margin: 0 0 12px;
+  color: var(--ink-dim);
+  max-width: 60ch;
+}
+
+#daemon-not-found code {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--layer-2);
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}

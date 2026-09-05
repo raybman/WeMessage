@@ -38,6 +38,12 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@wemessage/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       preact:
         specifier: ^10.29.8
         version: 10.29.8

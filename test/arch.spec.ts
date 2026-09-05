@@ -3274,7 +3274,19 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
     it('dependencies and devDependencies are exactly §1.2', () => {
       // `preact` is a dependency and not a devDependency on purpose: it ships
       // inside the renderer bundle. Everything else is build- or test-time.
-      expect(Object.keys(pkg().dependencies ?? {}).sort()).toEqual(['preact']);
+      //
+      // s8 Sc4 added the two workspace links. They are not a widening of the
+      // §1.2 list, they are the list becoming TRUE: `desktop-thin-client`
+      // has said since Sc 1 that this app may reach `@wemessage/client` and
+      // `@wemessage/protocol` and nothing else, and pnpm does not hoist, so
+      // an undeclared dependency is one that does not resolve. The row that
+      // matters is the cruiser rule; this one keeps the manifest honest
+      // about what the rule permits.
+      expect(Object.keys(pkg().dependencies ?? {}).sort()).toEqual([
+        '@wemessage/client',
+        '@wemessage/protocol',
+        'preact',
+      ]);
       expect(Object.keys(pkg().devDependencies ?? {}).sort()).toEqual([
         '@preact/preset-vite',
         'axe-core',
@@ -3284,6 +3296,11 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         'pngjs',
         'vite',
       ]);
+      // Workspace protocol, not a version range: a semver range here would
+      // silently resolve to a published copy the day one exists.
+      const deps = pkg().dependencies ?? {};
+      expect(deps['@wemessage/client']).toBe('workspace:*');
+      expect(deps['@wemessage/protocol']).toBe('workspace:*');
     });
 
     it('the list is not decorative: every entry is actually installed', () => {
@@ -3295,7 +3312,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         ...Object.keys(p.dependencies ?? {}),
         ...Object.keys(p.devDependencies ?? {}),
       ];
-      expect(names.length).toBe(8);
+      expect(names.length).toBe(10);
       expect(
         names.filter(
           (n) =>
@@ -3623,6 +3640,224 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       expect(suppressionOffenders().filter((o) => o.startsWith(rel))).toEqual(
         [],
       );
+    });
+  });
+});
+
+/**
+ * s8 Sc 4 — the shell's static guards.
+ *
+ * Three of Sc 4's claims cannot be made from inside a running app, so they
+ * are made here:
+ *
+ *  - **The harness runs in CI.** A harness that only runs on laptops is not
+ *    a harness. Electron needs a display, so the Linux job has to provide
+ *    one, and the binary download has to be cached or every run pays for it.
+ *  - **The token has a LOCALITY, like colour does.** `tokens.css` is the one
+ *    file that may name a colour; `main/auth.ts` is the one file that may
+ *    name the credential. The renderer and the preload — the two things that
+ *    live in, or hand things to, a Chromium process — may not mention it at
+ *    all, so "can the renderer reach the token" is a question answerable by
+ *    reading two directories and finding nothing.
+ *  - **The window is constructed once, from one frozen options object.** The
+ *    e2e reads those options back through the test-state mirror, and that
+ *    reading is only worth anything if there is exactly one construction
+ *    site and it is handed exactly that object.
+ */
+describe('S8 extensions (s8-execution Scenario 4: the Electron shell)', () => {
+  const read = (rel: string): string =>
+    readFileSync(join(repoRoot, rel), 'utf8');
+  const listFiles = (rel: string): string[] => {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else
+          out.push(
+            full
+              .slice(repoRoot.length + 1)
+              .split('\\')
+              .join('/'),
+          );
+      }
+    };
+    if (existsSync(join(repoRoot, rel))) walk(join(repoRoot, rel));
+    return out.sort();
+  };
+
+  /* ── row 8: the harness runs on Linux, in CI, with a cached binary ── */
+
+  describe('row 8: ci-linux runs the desktop lane under a display', () => {
+    interface Step {
+      readonly run: string | null;
+      readonly uses: string | null;
+      readonly body: string;
+    }
+    /**
+     * A step reader, not a YAML parser.
+     *
+     * The repo has no YAML dependency and this scenario does not ratify one
+     * (`js-yaml` exists in the store as somebody else's transitive, which is
+     * not the same as being installed). The file being read is one this repo
+     * writes and this row pins the shape of, so a reader for THAT shape is
+     * honest where a general parser would be a new dependency.
+     */
+    const steps = (text: string): Step[] =>
+      text
+        .split(/\n {6}- /)
+        .slice(1)
+        .map((body) => ({
+          run: /(?:^|\n)\s*run: (.*)/.exec(body)?.[1]?.trim() ?? null,
+          uses: /(?:^|\n)\s*uses: (.*)/.exec(body)?.[1]?.trim() ?? null,
+          body,
+        }));
+
+    const WORKFLOW = '.github/workflows/ci-linux.yml';
+
+    it('the reader sees a real job, not an empty file', () => {
+      const parsed = steps(read(WORKFLOW));
+      expect(parsed.length).toBeGreaterThanOrEqual(6);
+      expect(parsed.filter((s) => s.uses !== null).length).toBeGreaterThan(0);
+      expect(
+        parsed.map((s) => s.run).filter((r) => r === 'pnpm build'),
+      ).toEqual(['pnpm build']);
+    });
+
+    it('the one step that runs the suite runs it under xvfb', () => {
+      // `xvfb-run -a` and not a bare `pnpm test`: on Linux the Electron
+      // window has nowhere to open without a display, so the desktop project
+      // would fail — or worse, be quietly excluded, which is the failure Sc
+      // 17's meta rows exist to catch.
+      const testSteps = steps(read(WORKFLOW)).filter(
+        (s) => s.run !== null && / pnpm test\b|^pnpm test\b/.test(s.run),
+      );
+      expect(testSteps.length).toBe(1);
+      expect(testSteps[0]?.run).toBe('xvfb-run -a pnpm test');
+    });
+
+    it('the electron download is cached, keyed on the pinned version', () => {
+      const text = read(WORKFLOW);
+      const cacheSteps = steps(text).filter((s) =>
+        (s.uses ?? '').startsWith('actions/cache@'),
+      );
+      expect(cacheSteps.length).toBe(1);
+      const electron = (
+        JSON.parse(read('apps/desktop/package.json')) as {
+          devDependencies: Record<string, string>;
+        }
+      ).devDependencies['electron'];
+      expect(electron).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(cacheSteps[0]?.body).toContain(String(electron));
+      // The cache is worthless unless the download lands where it is cached.
+      expect(text).toContain('ELECTRON_CACHE');
+      expect(cacheSteps[0]?.body).toContain('.cache/electron');
+    });
+  });
+
+  /* ── the token has a locality ──────────────────────────────────────── */
+
+  describe('the credential is named in main and nowhere else', () => {
+    /** Everything that lives in, or is loaded into, the Chromium process. */
+    const RENDERER_SIDE = [
+      'apps/desktop/src/renderer',
+      'apps/desktop/src/preload',
+    ];
+    /**
+     * What a credential looks like, rather than the WORD "token".
+     *
+     * The distinction is deliberate and was found the hard way: the wizard's
+     * card has to say "token rejected" in prose, and the renderer imports a
+     * file called `tokens.css`. Banning the word would have banned the copy
+     * and the design system along with the credential. These five are the
+     * ways a renderer could actually COME TO HOLD one — the env var, the
+     * reader, the header, the file it lives in, and its own prefix.
+     */
+    const CREDENTIAL: ReadonlyArray<readonly [string, RegExp]> = [
+      ['WEMESSAGE_TOKEN', /WEMESSAGE_TOKEN/],
+      ['readTokenFile', /readTokenFile/],
+      ['Bearer', /Bearer/],
+      ['daemon.token', /daemon\.token/],
+      ['token prefix', new RegExp(`wm${'_'}`)],
+    ];
+    function credentialOffenders(): string[] {
+      const out: string[] = [];
+      for (const root of RENDERER_SIDE)
+        for (const rel of listFiles(root)) {
+          if (!/\.(ts|tsx|js|mjs|cjs|html)$/.test(rel)) continue;
+          const text = read(rel);
+          for (const [label, re] of CREDENTIAL)
+            if (re.test(text)) out.push(`${rel}: ${label}`);
+        }
+      return out.sort();
+    }
+
+    it('no renderer or preload file mentions the credential', () => {
+      // Non-vacuity: both trees exist and carry files.
+      for (const root of RENDERER_SIDE)
+        expect(listFiles(root).length, root).toBeGreaterThan(0);
+      expect(credentialOffenders()).toEqual([]);
+    });
+
+    it('PLANTED: a preload that reads the token file is caught', () => {
+      const rel = 'apps/desktop/src/preload/__s8_probe__token.ts';
+      const abs = join(repoRoot, rel);
+      mkdirSync(join(abs, '..'), { recursive: true });
+      writeFileSync(
+        abs,
+        'export const carry = (t: string): string => `Bearer ${t}`;\n',
+      );
+      try {
+        const offenders = credentialOffenders();
+        expect(offenders).toContain(`${rel}: Bearer`);
+      } finally {
+        rmSync(abs, { force: true });
+      }
+    });
+
+    it('main is where it lives, and it is one file', () => {
+      const owners = listFiles('apps/desktop/src/main')
+        .filter((rel) => /\.ts$/.test(rel))
+        .filter((rel) => /readTokenFile|WEMESSAGE_TOKEN/.test(read(rel)));
+      expect(owners).toEqual(['apps/desktop/src/main/auth.ts']);
+    });
+  });
+
+  /* ── one window, one frozen options object ─────────────────────────── */
+
+  describe('the BrowserWindow is constructed once, from a frozen constant', () => {
+    const WINDOW = 'apps/desktop/src/main/window.ts';
+
+    it('there is exactly one construction site and it passes WINDOW_OPTIONS', () => {
+      const text = read(WINDOW);
+      expect([...text.matchAll(/new BrowserWindow\(/g)].length).toBe(1);
+      expect(text).toContain('new BrowserWindow(WINDOW_OPTIONS)');
+      expect(text).toMatch(/Object\.freeze\(/);
+      // Every construction site in the whole app, not just this file: a
+      // second window built somewhere else would be a second set of
+      // webPreferences that no e2e row reads.
+      const everywhere = listFiles('apps/desktop/src')
+        .filter((rel) => /\.(ts|tsx)$/.test(rel))
+        .filter((rel) => /new BrowserWindow\(/.test(read(rel)));
+      expect(everywhere).toEqual([WINDOW]);
+    });
+
+    it('the hardening flags are written down, and the e2e reads them back', () => {
+      // Belt: the source says it. Braces: `shell.e2e.spec.ts` asks the
+      // running Chromium what it actually received. Neither alone is enough
+      // — a source scan cannot see a flag Electron ignored, and a runtime
+      // read cannot fail a file that never shipped.
+      const text = read(WINDOW);
+      for (const flag of [
+        'contextIsolation: true',
+        'nodeIntegration: false',
+        'sandbox: true',
+        'webSecurity: true',
+      ])
+        expect(text).toContain(flag);
+      expect(text).toContain('setWindowOpenHandler');
+      expect(text).toContain('will-navigate');
     });
   });
 });

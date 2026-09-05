@@ -24,11 +24,24 @@ import { join, resolve } from 'node:path';
 // s7 Sc9: the verification ledger reads BUILT modules, so it needs a file URL.
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PORT_IMPORTER_ALLOWLIST } from '../packages/daemon/test/transport-surface.snapshot.js';
+import {
+  PORT_IMPORTER_ALLOWLIST,
+  // s7 Sc12: a public document may only name a route that exists. The
+  // ratchet snapshot is already the arbiter of the route surface, so the
+  // documentation sweep asks it rather than growing a second list.
+  ROUTE_TABLE,
+} from '../packages/daemon/test/transport-surface.snapshot.js';
 // s7 Sc11: the public-repo predicates now have ONE home, shared with the
 // transcript linter. Precedent for a root spec importing a package's test
 // helper is the line above, which has done exactly this since s5.
-import { publicStringOffenders } from '../packages/cli/test/helpers/transcript-lint.js';
+// s7 Sc12 adds `lintTranscript` and `parseSkillBlocks` here rather than a
+// fourth copy of the rules: the shipped documents are swept by the same
+// implementation that sweeps a live transcript and a committed DRYRUN.md.
+import {
+  lintTranscript,
+  parseSkillBlocks,
+  publicStringOffenders,
+} from '../packages/cli/test/helpers/transcript-lint.js';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
@@ -2125,12 +2138,19 @@ describe('arch invariants (dependency-cruiser)', () => {
       // vanishes must not make this row vacuously true, and the next adapter
       // to grow one has to decide what it is claiming in the same commit.
       expect(adapterReadmes().map((f) => `${f}: ${declaredTier(f)}`)).toEqual([
+        // s7 Sc12 closes the Sc 9 debt: echo and sol had no README at all,
+        // which meant the ledger enumerated three of five adapters and read
+        // as complete. Both declare the same tier, for different reasons —
+        // echo has no external system to reach and sol has one this tree is
+        // forbidden to touch (F-95).
+        'packages/adapters/echo/README.md: conformance-only',
         'packages/adapters/hermes/README.md: conformance-only',
         'packages/adapters/luna/README.md: conformance-only',
         // s7 Sc10. The OpenClaw shim's child contract is ours and is fully
         // exercised; what has never happened is a byte exchanged with an
         // OpenClaw. Same tier, same sentence, different reason (F-92).
         'packages/adapters/openclaw/README.md: conformance-only',
+        'packages/adapters/sol/README.md: conformance-only',
       ]);
     });
 
@@ -2434,5 +2454,243 @@ describe('arch invariants (dependency-cruiser)', () => {
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * s7-execution Scenario 12 — the public document set (F-79, F-94, F-95).
+ *
+ * F-79 is the fact that shapes this whole scenario: `docs/` is wholly
+ * gitignored and a `!` negation cannot rescue a subdirectory of an ignored
+ * directory, so there is no path by which a file under `docs/` becomes
+ * public. Everything a stranger is meant to read therefore lives BESIDE THE
+ * CODE — `packages/protocol/PROTOCOL.md`, `packages/adapter-testkit/
+ * README.md`, and one README per adapter — and this block is the guard on
+ * that set as a set.
+ *
+ * The rows come in three kinds, and the ordering is deliberate:
+ *
+ *  1. ENUMERATION. The document set is asserted as a list, not as a
+ *     predicate. A README that disappears must fail; a new package's README
+ *     that appears un-swept must fail too. Every sweep below runs over the
+ *     enumerated set, so growing the set and forgetting to lint it is not a
+ *     thing that can happen quietly.
+ *  2. CONTENT. Every document goes through Sc 11's linter rather than a
+ *     fourth copy of its regexes: `publicStringOffenders` for tokens, brand
+ *     strings, real contacts and `/Users/` paths, and `lintTranscript` for
+ *     ANSI, colour-carrying-state and unknown frame names. These are public
+ *     artifacts of a public repo written from a running system, which is
+ *     exactly the shape of file that leaks an operator.
+ *  3. TRUTH. A document may only name a route the daemon actually serves.
+ *     `ROUTE_TABLE` is the arbiter, so a documented endpoint that was
+ *     renamed fails here rather than in a stranger's terminal.
+ *
+ * WHY `lintSkillDocument` IS NOT USED HERE, since its absence is the kind of
+ * thing that reads as an oversight: it flags any backticked `prefix.name`
+ * whose prefix is `draft|proactive|event|adapter` and which is not a FRAME.
+ * PROTOCOL.md's entire job includes naming the seventeen EVENTS, which are
+ * not frames, so that function would report seventeen findings for the
+ * document being correct. The equivalent no-drift check for this document
+ * lives in `packages/protocol/test/protocol-md.spec.ts` row 3, where it can
+ * ask about frames and events together.
+ */
+describe('s7-execution Scenario 12 — the public document set', () => {
+  /** The docs this repo publishes beside its code. `skills/` is Sc 11's. */
+  const DOC_RE =
+    /^(README\.md|CONTRIBUTING\.md|packages\/.*\/(README|PROTOCOL)\.md)$/;
+  const ADAPTER_DOC_RE = /^packages\/adapters\/[^/]+\/README\.md$/;
+
+  function shippedDocs(): string[] {
+    return trackedTextFiles()
+      .filter((f) => DOC_RE.test(f))
+      .sort();
+  }
+  const read = (rel: string): string =>
+    readFileSync(join(repoRoot, rel), 'utf8');
+
+  /* ── row 5 + the enumeration ───────────────────────────────────────── */
+
+  it('the shipped document set is exactly what F-79 says it is', () => {
+    expect(shippedDocs()).toEqual([
+      'CONTRIBUTING.md',
+      'README.md',
+      // The quickstart. A stranger's first three commands live here because
+      // there is nowhere else public they could live (F-79).
+      'packages/adapter-testkit/README.md',
+      'packages/adapters/echo/README.md',
+      'packages/adapters/hermes/README.md',
+      'packages/adapters/luna/README.md',
+      'packages/adapters/openclaw/README.md',
+      'packages/adapters/sol/README.md',
+      'packages/core/README.md',
+      // Generated, never hand-written. See protocol-md.spec.ts.
+      'packages/protocol/PROTOCOL.md',
+      'packages/protocol/README.md',
+    ]);
+  });
+
+  it('every adapter in the tree has a README (Sc 9 debt, Sc 12 row 5)', () => {
+    // Sc 9 flagged echo and sol as missing and deferred them here. The list
+    // is derived from the directories, so the next adapter cannot ship
+    // without one either.
+    const dirs = readdirSync(join(repoRoot, 'packages/adapters'), {
+      withFileTypes: true,
+    })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+    expect(dirs).toEqual(['echo', 'hermes', 'luna', 'openclaw', 'sol']);
+    const withReadme = shippedDocs()
+      .filter((f) => ADAPTER_DOC_RE.test(f))
+      .map((f) => f.split('/')[2] ?? '');
+    expect(withReadme).toEqual(dirs);
+  });
+
+  it('the two unreachable adapters say so in paragraph one (C-9)', () => {
+    for (const name of ['luna', 'openclaw']) {
+      const first = read(`packages/adapters/${name}/README.md`)
+        .split(/\n\s*\n/)
+        .slice(0, 3)
+        .join('\n\n');
+      expect(first, `${name} claims too much`).toContain('NOT LIVE-VERIFIED');
+    }
+  });
+
+  it("sol's README documents the seam drift an author will hit (F-95)", () => {
+    // F-95: the Sol agent on this machine speaks a slightly different dialect
+    // than the adapter expects, and `~/sol-agent` is not ours to change. An
+    // adapter author who hits this deserves to read about it here rather
+    // than rediscover it against a live socket.
+    const sol = read('packages/adapters/sol/README.md');
+    expect(sol).toContain('## Known seam drift');
+    const at = sol.indexOf('## Known seam drift');
+    const section = sol.slice(at, sol.indexOf('\n## ', at + 1));
+    expect(section).toContain('ws-desktop');
+    expect(section).toContain('token');
+  });
+
+  it('no adapter README names a machine or a home directory', () => {
+    // The strictest sweep in the set, because an adapter README is the
+    // document most likely to have been written with a terminal open.
+    const SYNTHETIC =
+      /^(127\.0\.0\.1|localhost|\[::1\]|[a-z0-9-]+\.example\.com)$/;
+    const offenders: string[] = [];
+    for (const rel of shippedDocs().filter((f) => ADAPTER_DOC_RE.test(f))) {
+      const text = read(rel);
+      for (const p of text.match(/\/Users\/[^\s`'")]+/g) ?? [])
+        offenders.push(`${rel}: ${p}`);
+      for (const p of text.match(/(^|[\s`(])~\/[^\s`'")]+/g) ?? [])
+        offenders.push(`${rel}: ${p.trim()}`);
+      for (const m of text.matchAll(/\b(?:wss?|https?):\/\/([A-Za-z0-9._-]+)/g))
+        if (!SYNTHETIC.test(m[1] ?? ''))
+          offenders.push(`${rel}: ${m[1] ?? ''}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  /* ── the content sweep ─────────────────────────────────────────────── */
+
+  it('no shipped document leaks a token, a contact, a brand or a path', () => {
+    const offenders: string[] = [];
+    for (const rel of shippedDocs())
+      for (const o of publicStringOffenders(read(rel)))
+        offenders.push(`${rel}: ${o.rule} ${o.detail}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('no shipped document carries colour, ANSI, or a frame that does not exist', () => {
+    // The policy is READ from SKILL.md rather than restated, which is the
+    // property Sc 11 built the linter around: a linter holding its own copy
+    // of the rules keeps passing after somebody edits the document.
+    const policy = parseSkillBlocks(read('skills/claude/SKILL.md'));
+    /**
+     * The project's own two domains. `wemessage.dev` is the JSON Schema
+     * `$id` authority and appears in PROTOCOL.md by requirement; the linter
+     * cannot know it is not a person's host, and adding it to the linter's
+     * SYNTHETIC_DOMAIN set would weaken the rule for transcripts, where the
+     * whole point is that an unfamiliar host is presumed to be somebody's.
+     * So the allowance is stated here, narrowly, at the call site.
+     */
+    const OURS = new Set(['wemessage.dev', 'wemessage.app']);
+    const offenders: string[] = [];
+    for (const rel of shippedDocs())
+      for (const f of lintTranscript(read(rel), policy)) {
+        if (f.rule === 'non-synthetic-contact' && OURS.has(f.detail)) continue;
+        offenders.push(`${rel}:${f.line}: ${f.rule} ${f.detail}`);
+      }
+    expect(offenders).toEqual([]);
+  });
+
+  it('every route a document names is a route the daemon serves', () => {
+    const known = new Set(ROUTE_TABLE);
+    /**
+     * The first path segment of every route this daemon serves, derived
+     * rather than listed. It is the discriminator between "a claim about our
+     * surface" and "a claim about somebody else's": the Hermes adapter's
+     * README documents `POST /v1/runs` and `GET /v1/runs/{run_id}/events`,
+     * which are the UPSTREAM agent API's routes and are correct as written.
+     * A row that failed on them would be asserting that no adapter may
+     * describe the service it adapts, and the only way back to green would
+     * be to delete true documentation.
+     *
+     * Scoping by noun keeps the teeth where they belong. `runs` is not a
+     * noun this gateway has, so those two lines fall out of the grammar; but
+     * `drafts`, `send`, `adapters`, `audit` and the rest are, so a document
+     * that wrote `POST /v1/drafts/:id/approved`, or invented
+     * `POST /v1/send/now`, or went on naming a route a later scenario
+     * deleted, still fails here. Drift is drift against OUR table, and it
+     * always lands on one of our nouns.
+     */
+    const ourNouns = new Set(
+      ROUTE_TABLE.map((r) => r.split(' ')[1]?.split('/')[2] ?? ''),
+    );
+    const offenders: string[] = [];
+    for (const rel of shippedDocs())
+      for (const m of read(rel).matchAll(
+        /\b(GET|POST|PATCH|PUT|DELETE) (\/v1\/[A-Za-z0-9/:._-]*[A-Za-z0-9])/g,
+      )) {
+        const path = m[2] ?? '';
+        if (!ourNouns.has(path.split('/')[2] ?? '')) continue;
+        const route = `${m[1] ?? ''} ${path}`;
+        if (!known.has(route)) offenders.push(`${rel}: ${route}`);
+      }
+    expect(offenders).toEqual([]);
+    // The noun set is derived from a table this suite pins at 67 rows, so it
+    // cannot quietly empty out and turn the loop above into a no-op.
+    expect(ourNouns.has('drafts') && ourNouns.has('send')).toBe(true);
+    expect(ourNouns.has('runs')).toBe(false);
+    // Not vacuous: the approve-before-send path is named somewhere public.
+    expect(
+      shippedDocs().some((f) =>
+        read(f).includes('POST /v1/drafts/:id/approve'),
+      ),
+    ).toBe(true);
+  });
+
+  /* ── row 10: the front door ────────────────────────────────────────── */
+
+  describe('row 10: the root README is a front door, not a plan', () => {
+    it('no longer advertises a surface that does not exist', () => {
+      expect(read('README.md')).not.toContain('Planned surface');
+    });
+
+    it('points at the three documents a newcomer needs', () => {
+      const readme = read('README.md');
+      for (const target of [
+        'packages/protocol/PROTOCOL.md',
+        'packages/adapter-testkit/README.md',
+        'skills/claude/SKILL.md',
+      ])
+        expect(readme, `README does not link ${target}`).toContain(target);
+    });
+
+    it("CONTRIBUTING's out-of-tree adapter section names the kit's bin", () => {
+      // Sc 5's refusal prints this exact command; Sc 6 shipped the bin; this
+      // scenario publishes the package that makes it resolvable. The three
+      // have to agree, and this is the only place a human reads them together.
+      const contributing = read('CONTRIBUTING.md');
+      expect(contributing).toContain('npx @wemessage/adapter-testkit');
+      expect(contributing).toContain('--cmd');
+    });
   });
 });

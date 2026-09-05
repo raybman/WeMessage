@@ -11,6 +11,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import type { GatewayEventPayload } from '@wemessage/protocol';
+// s7 Sc12: the refusal code for a malformed `?events=` filter is the same
+// protocol-level 4400 the adapter transport sends, and it is now spelled once.
+import { CLOSE_CODES } from '@wemessage/protocol';
 import { SETTING_KILL_SWITCH } from '@wemessage/core';
 import type {
   ChatDbReader,
@@ -334,7 +337,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // stream as working right up until it notices it received nothing.
     const parsed = parseEventFilter((req.query as { events?: unknown }).events);
     if (!parsed.ok) {
-      socket.close(4400, closeReasonFor(parsed.name));
+      socket.close(CLOSE_CODES.protocol.code, closeReasonFor(parsed.name));
       return;
     }
     const greeting = opts.greeting?.();

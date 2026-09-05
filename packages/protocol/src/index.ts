@@ -274,6 +274,58 @@ export type FrameType = keyof typeof FRAME_SPECS;
 
 export const FRAME_TYPES = Object.keys(FRAME_SPECS) as FrameType[];
 
+export interface CloseCodeSpec {
+  /** RFC 6455 private range, 4000-4999. */
+  readonly code: number;
+  /** One sentence, rendered verbatim into PROTOCOL.md's close-code table. */
+  readonly meaning: string;
+}
+
+/**
+ * Every close code a WeMessage gateway sends, and what it means (s7 Sc12).
+ *
+ * These four numbers were daemon-local constants until this scenario, which
+ * was defensible while the only consumers were the daemon and its own specs.
+ * It stopped being defensible the moment the protocol acquired a PUBLIC
+ * reference document: a stranger's adapter has to branch on the close code to
+ * tell "your token is wrong, stop retrying" from "you were idle, reconnect",
+ * and a number that only the daemon's source knows is not part of a protocol.
+ *
+ * So the table lives here, beside `FRAME_SPECS` and `EVENT_SPECS`, and
+ * `packages/daemon/src/adapters/transport.ts` derives its constants from it
+ * rather than restating them. That direction matters: the daemon may not
+ * invent a code the document does not describe, because the document is
+ * generated FROM this table and the diff row would fire.
+ *
+ * `meaning` is prose that ships. It is deliberately a full sentence and
+ * deliberately here rather than in the generator, because the generator is a
+ * renderer and this is the thing being rendered.
+ */
+export const CLOSE_CODES = {
+  protocol: {
+    code: 4400,
+    meaning:
+      'the frame did not parse, named a type the wire does not have, arrived in the wrong direction, or carried a key the type does not allow',
+  },
+  auth: {
+    code: 4401,
+    meaning:
+      'the token was absent, unknown, or belongs to an adapter that is already connected',
+  },
+  timeout: {
+    code: 4408,
+    meaning:
+      'no hello arrived before the deadline, or two consecutive liveness pings went unanswered',
+  },
+  version: {
+    code: 4426,
+    meaning:
+      'the hello announced a wire version this gateway does not speak; the expected version is in the close reason',
+  },
+} as const satisfies Record<string, CloseCodeSpec>;
+
+export type CloseCodeName = keyof typeof CLOSE_CODES;
+
 export type ParseError =
   | { kind: 'envelope' }
   | { kind: 'version'; expected: typeof WIRE_VERSION }
@@ -285,7 +337,12 @@ export type ParseResult =
   | { ok: true; frame: Frame }
   | { ok: false; error: ParseError };
 
-const ENVELOPE_KEYS = ['v', 'id', 'type', 'ts', 'payload'];
+/**
+ * The five keys every frame carries, in every direction, exactly. Exported
+ * since s7 Sc12: the public PROTOCOL.md documents the envelope and had no
+ * business restating this list in prose when the parser already owns it.
+ */
+export const ENVELOPE_KEYS: readonly string[] = ['v', 'id', 'type', 'ts', 'payload'];
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);

@@ -30,6 +30,7 @@
  */
 import type { Actor, Clock, Store } from '@wemessage/core';
 import {
+  CLOSE_CODES,
   parseAgentFrame,
   WIRE_VERSION,
   type HelloFrame,
@@ -37,11 +38,19 @@ import {
 import type { AuditSink } from '../audit-sink.js';
 import type { AgentSubmitHandler } from './submit.js';
 
-/** Close codes (RFC 6455 private range, 4000-4999). */
-const CLOSE_PROTOCOL = 4400;
-const CLOSE_AUTH = 4401;
-const CLOSE_TIMEOUT = 4408;
-const CLOSE_VERSION = 4426;
+/**
+ * Close codes (RFC 6455 private range, 4000-4999).
+ *
+ * s7 Sc12 moved the numbers themselves into `@wemessage/protocol`, because
+ * the public PROTOCOL.md is generated from them and a code the document does
+ * not describe would be a code no stranger's adapter can handle. The local
+ * names stay: they read better at the five call sites below than a property
+ * access would, and re-binding them costs nothing.
+ */
+const CLOSE_PROTOCOL = CLOSE_CODES.protocol.code;
+const CLOSE_AUTH = CLOSE_CODES.auth.code;
+const CLOSE_TIMEOUT = CLOSE_CODES.timeout.code;
+const CLOSE_VERSION = CLOSE_CODES.version.code;
 
 const DEFAULT_HELLO_DEADLINE_MS = 5_000;
 /** One missed pong is tolerated; the second consecutive miss closes. */

@@ -20,5 +20,16 @@
   },
   "devDependencies": {
     "@wemessage/fixtures": "workspace:*"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "src/schemas/**/*.json",
+    "PROTOCOL.md",
+    "README.md",
+    "LICENSE"
+  ]
 }

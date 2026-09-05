@@ -36,6 +36,55 @@
  * checkpoint whose subject is skill documents. It is a scenario of its own
  * and it should be one. Until then this file is copy three, and this
  * paragraph is the receipt.
+ *
+ * ── s7 Sc 12: the recommendation above was taken up, examined, and NOT
+ * carried out. This paragraph is the adjudication, written here so the next
+ * builder does not re-derive it from scratch.
+ *
+ * Sc 12 owns the publish set and was therefore the natural home for the
+ * promotion, so it was tried. The stop condition Sc 11 anticipated, "it
+ * costs a new dependency-cruiser rule", did NOT fire: a value import of
+ * `@wemessage/adapter-testkit` planted in `packages/adapters/luna/src/
+ * index.ts` cruises clean, because `adapters-thin-clients` already permits
+ * that edge. A different and worse problem fired instead.
+ *
+ *  1. LUNA'S PRODUCTION SOURCE imports `verificationBanner`, not just its
+ *     spec. Promoting the renderer therefore makes `ws` and
+ *     `node:child_process` reachable at runtime from a shipped Luna
+ *     adapter, because the testkit spawns processes and opens sockets for a
+ *     living. Today the testkit is a devDependency of luna and openclaw;
+ *     the promotion would make the conformance kit a runtime dependency of
+ *     two production adapters, to share a discriminated union and one pure
+ *     function.
+ *  2. THE GUARD THAT WOULD NOT NOTICE. `luna.spec.ts` row 15 asserts that
+ *     nothing in that package has ever contacted a Luna, and it does so by
+ *     reading the SOURCE TEXT of three files for `node:child_process`,
+ *     `fetch(` and a `wss://` host. It would keep passing after the
+ *     promotion while its claim quietly became false, since the reach would
+ *     arrive through an import rather than a literal. A proven property
+ *     that stays green while ceasing to be true is the most expensive kind
+ *     of regression, and it is the whole reason this was not done.
+ *  3. THE THIRD COPY CANNOT COLLAPSE ANYWAY. This file is about a DOCUMENT:
+ *     its subject key is `subject`, not `adapter`, and its banner sentence
+ *     differs. The genuinely shared surface is the type plus one pure
+ *     function, roughly thirty lines. Two of the three copies could become
+ *     re-exports; this one could not.
+ *  4. THE GUARD THAT MATTERS IS INDIFFERENT. `test/arch.spec.ts` reads the
+ *     BUILT verification values out of each adapter's `dist/index.js` and
+ *     cross-checks them against README prose, per adapter. That ledger does
+ *     not care how many times the type is spelled; it cares that no shipped
+ *     value and no shipped paragraph claims more than was proven. Three
+ *     spellings of a type are a tidiness cost. A false negative in row 15
+ *     would be a correctness cost.
+ *
+ * A cheaper mitigation exists and was rejected as scope: a `./verification`
+ * subpath export on the testkit, carrying only the type and the pure
+ * function, with no transitive reach into `ws` or `node:child_process`.
+ * That is a real option for whoever revisits this, and it is the only shape
+ * of the promotion that survives point 1. It was not taken here because
+ * this scenario is publishing that package for the very first time and
+ * adding a second public entry point to a package on the day it becomes
+ * public is a decision that deserves its own diff.
  */
 
 /** What a badge is allowed to mean. Exactly two values, and no default. */

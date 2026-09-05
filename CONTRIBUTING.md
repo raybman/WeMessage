@@ -37,6 +37,21 @@ smoke work (S3+). All CI gating happens on Linux.
 
 ## Third-party adapters live out-of-tree
 
-The wire protocol (`@wemessage/protocol`) + the adapter testkit are the contract.
-Adapters are published independently and listed in the README's
-`awesome-wemessage-adapters` section — do not fork the monorepo to add an agent.
+The wire protocol (`@wemessage/protocol`) plus the adapter testkit are the
+contract. Adapters are published independently; do not fork the monorepo to add
+an agent.
+
+The kit ships a bin, so proving conformance needs no checkout of this repo:
+
+```bash
+npx @wemessage/adapter-testkit --cmd "node my-adapter.mjs"
+```
+
+Exit 0 conformant, 1 not conformant, 2 usage. `wemessage adapters test` in the
+CLI deliberately refuses and prints that command instead: conformance is the
+adapter author's business, and a daemon subcommand that spawned third-party
+code would be a worse seam than a pointer.
+
+The full wire reference is `packages/protocol/PROTOCOL.md`, generated from the
+protocol package's own tables. Do not hand-edit it; change the table and
+regenerate.

@@ -3,6 +3,13 @@
 Hermes behind the gateway's adapter seam. Hermes drafts; a human approves;
 the daemon sends.
 
+**NOT LIVE-VERIFIED.** Both modes pass the WeMessage adapter conformance kit,
+and both were proven the only way this repo can prove anything: against fakes.
+The plugin is spawned as a real child process and the HTTP client runs against
+a loopback server, but neither has been pointed at a real Hermes install. C-9
+requires that sentence to be here rather than implied, and s7 Sc9 added the
+row in `test/arch.spec.ts` that fails if it goes missing.
+
 Two modes, because there are two directions and an operator will already have
 picked one:
 

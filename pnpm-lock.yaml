@@ -83,7 +83,15 @@ importers:
         specifier: workspace:*
         version: link:../../adapter-testkit
 
-  packages/adapters/luna: {}
+  packages/adapters/luna:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
+    devDependencies:
+      '@wemessage/adapter-testkit':
+        specifier: workspace:*
+        version: link:../../adapter-testkit
 
   packages/adapters/openclaw: {}
 

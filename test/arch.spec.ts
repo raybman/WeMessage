@@ -21,6 +21,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+// s7 Sc9: the verification ledger reads BUILT modules, so it needs a file URL.
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PORT_IMPORTER_ALLOWLIST } from '../packages/daemon/test/transport-surface.snapshot.js';
 
@@ -1551,6 +1553,10 @@ describe('arch invariants (dependency-cruiser)', () => {
         // this row is why it also grew a tsconfig.vitest.json in the same
         // commit — exactly the moment the hole would otherwise have opened.
         'packages/adapters/hermes',
+        // s7 Sc9: and the Luna package grows its first test/ directory,
+        // which is the second time this row has forced a tsconfig.vitest.json
+        // into the same commit as the tests it typechecks.
+        'packages/adapters/luna',
         'packages/adapters/sol',
         'packages/cli',
         'packages/client',
@@ -1959,6 +1965,211 @@ describe('arch invariants (dependency-cruiser)', () => {
         writeFileSync(join(repoRoot, rel), 'import requests\n');
         track(rel);
         expect(pythonImportOffenders()).toContain(`${rel}: requests`);
+      });
+    });
+  });
+
+  /**
+   * s7-execution Scenario 9 — the live-verification ledger (C-9, F-91).
+   *
+   * S9 ships an adapter for a system nobody here can reach: no Luna source in
+   * this tree, no Luna on this machine, nothing on the other end of anything.
+   * The adapter passes the conformance kit and that is the entire extent of
+   * what is known about it. C-9 says the README must say so in paragraph one.
+   *
+   * A README sentence is the right thing to SHOW a stranger and the wrong
+   * thing to RELY on: it is one edit from being false and nothing would
+   * notice. So the status is a VALUE — `LUNA_VERIFICATION` in
+   * `packages/adapters/luna/src/verification.ts` — the README paragraph is
+   * rendered from it, and the package's own spec pins the two together byte
+   * for byte.
+   *
+   * These rows are the repo-wide half, and they read the BUILT value rather
+   * than grepping for a string, because the failure mode is not "Luna's
+   * README is wrong" but "some adapter, some day, claims more than it can
+   * show". (a) enumerates every adapter README and the tier it declares in
+   * prose. (b) enumerates the tiers the shipped code actually declares. (c)
+   * is the one that matters: prose and value must agree, per adapter.
+   *
+   * Nothing in this tree is live-verified. Hermes' two modes were exercised
+   * against a scripted child and a loopback fake, Luna against a mock. Real
+   * installs are S9+ (§4 backlog). On the day one is verified, these rows are
+   * where the stronger claim gets made deliberately, in a diff, instead of
+   * quietly in a paragraph nobody re-reads.
+   */
+  describe('S7 extensions (s7-execution Scenario 9: the verification ledger)', () => {
+    const ADAPTER_README = /^packages\/adapters\/[^/]+\/README\.md$/;
+    /**
+     * Assembled rather than written. This file is read by everyone and swept
+     * by nothing, and a bare `live-verified` literal sitting in the enforcer
+     * is the first thing a future grep would misread as a claim.
+     */
+    const LIVE = 'live' + '-verified';
+    const ADAPTERS_DIR = join(repoRoot, 'packages/adapters');
+
+    /** Title plus the first two paragraphs: C-9's "first paragraph". */
+    function head(rel: string): string {
+      return readFileSync(join(repoRoot, rel), 'utf8')
+        .split(/\n\s*\n/)
+        .slice(0, 3)
+        .join('\n\n');
+    }
+
+    function adapterReadmes(): string[] {
+      return trackedTextFiles()
+        .filter((f) => ADAPTER_README.test(f))
+        .sort();
+    }
+
+    function declaredTier(rel: string): string {
+      const first = head(rel);
+      // NOT first: `NOT LIVE-VERIFIED` contains `LIVE-VERIFIED`, and reading
+      // the weaker claim out of the stronger string is precisely the bug this
+      // row would be embarrassed to have.
+      if (first.includes('NOT LIVE-VERIFIED')) return 'conformance-only';
+      if (/\bLIVE-VERIFIED\b/.test(first)) return LIVE;
+      return 'undeclared';
+    }
+
+    /** Every adapter package with something built to read. */
+    function adapterPackages(): string[] {
+      if (!existsSync(ADAPTERS_DIR)) return [];
+      return readdirSync(ADAPTERS_DIR, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .filter((n) => existsSync(join(ADAPTERS_DIR, n, 'dist/index.js')))
+        .sort();
+    }
+
+    /** The shape a verification value has, as seen from outside its package. */
+    function isVerification(
+      v: unknown,
+    ): v is { adapter: string; tier: string } {
+      if (typeof v !== 'object' || v === null) return false;
+      const o = v as Record<string, unknown>;
+      return typeof o['adapter'] === 'string' && typeof o['tier'] === 'string';
+    }
+
+    /**
+     * Every verification value an adapter package EXPORTS, read out of the
+     * built module.
+     *
+     * This is the difference between a ledger and a grep. A string search
+     * would trip over the type declaration that defines the strong tier, over
+     * the spec that tests the checker against synthetic values, and over the
+     * README paragraph that explains what would have to change — three places
+     * that mention the word and claim nothing. Reading the value asks the
+     * only question that matters: what does the shipped code SAY it is?
+     */
+    async function declaredTiers(): Promise<string[]> {
+      const out: string[] = [];
+      for (const name of adapterPackages()) {
+        const url = pathToFileURL(
+          join(ADAPTERS_DIR, name, 'dist/index.js'),
+        ).href;
+        const mod: Record<string, unknown> = await import(url);
+        for (const value of Object.values(mod))
+          if (isVerification(value)) out.push(`${name}: ${value.tier}`);
+      }
+      return out.sort();
+    }
+
+    it('(a) every adapter README declares its live-verification tier (C-9)', () => {
+      // The enumeration is asserted, not just the predicate: a README that
+      // vanishes must not make this row vacuously true, and the next adapter
+      // to grow one has to decide what it is claiming in the same commit.
+      expect(adapterReadmes().map((f) => `${f}: ${declaredTier(f)}`)).toEqual([
+        'packages/adapters/hermes/README.md: conformance-only',
+        'packages/adapters/luna/README.md: conformance-only',
+      ]);
+    });
+
+    it('(b) no adapter package ships a value claiming live verification', async () => {
+      // The packages scanned are asserted too, for the same reason: an
+      // adapter that loses its build is a hole in the ledger, not a pass.
+      expect(adapterPackages()).toEqual([
+        'echo',
+        'hermes',
+        'luna',
+        'openclaw',
+        'sol',
+      ]);
+      expect(await declaredTiers()).toEqual(['luna: conformance-only']);
+    });
+
+    it('(c) prose and value agree, per adapter', async () => {
+      const values = new Map(
+        (await declaredTiers()).map((row) => {
+          const [name = '', tier = ''] = row.split(': ');
+          return [name, tier] as const;
+        }),
+      );
+      const drift = adapterReadmes()
+        .map((f) => {
+          const name = f.split('/')[2] ?? '';
+          const value = values.get(name);
+          return value === undefined || value === declaredTier(f)
+            ? null
+            : `${name}: README says ${declaredTier(f)}, code says ${value}`;
+        })
+        .filter((d): d is string => d !== null);
+      // Drift in either direction is the same failure. Editing the README to
+      // claim more is caught here; editing the value to claim more is caught
+      // here AND in (b) AND in the package's own derived-banner row, which is
+      // three rows for one lie and deliberately so.
+      expect(drift).toEqual([]);
+    });
+
+    describe('proven teeth', () => {
+      // The probe brings its own package directory, because an adapter README
+      // lives one level below `packages/adapters` and a `dist/index.js` is
+      // what the ledger reads. Nothing here touches a real package.
+      const probeDir = 'packages/adapters/__s9probe__';
+      const probeReadme = `${probeDir}/README.md`;
+      const probeDist = `${probeDir}/dist/index.js`;
+
+      afterEach(() => {
+        try {
+          execFileSync(
+            'git',
+            ['rm', '--cached', '--quiet', '--force', '--', probeReadme],
+            { cwd: repoRoot, stdio: 'ignore' },
+          );
+        } catch {
+          // never indexed; the unlink below is the whole cleanup.
+        }
+        rmSync(join(repoRoot, probeDir), { recursive: true, force: true });
+      });
+
+      it('a README upgraded in prose trips the enumeration (a)', () => {
+        // The cheap lie: nobody changes any code, somebody changes a word.
+        mkdirSync(join(repoRoot, probeDir), { recursive: true });
+        writeFileSync(
+          join(repoRoot, probeReadme),
+          '# probe\n\n**LIVE-VERIFIED.** against a real one, honest.\n',
+        );
+        expect(adapterReadmes()).not.toContain(probeReadme);
+        execFileSync('git', ['add', '--intent-to-add', '--', probeReadme], {
+          cwd: repoRoot,
+        });
+        expect(adapterReadmes()).toContain(probeReadme);
+        expect(declaredTier(probeReadme)).toBe(LIVE);
+      });
+
+      it('a value upgraded in code trips the ledger (b)', async () => {
+        // The expensive lie, and the one this whole scenario is about: the
+        // status is upgraded without any verification behind it. It compiles,
+        // it ships, and the README even re-renders itself to match — which is
+        // exactly why the ledger reads the VALUE and not the prose.
+        mkdirSync(join(repoRoot, probeDir, 'dist'), { recursive: true });
+        writeFileSync(
+          join(repoRoot, probeDist),
+          `export const PROBE_VERIFICATION = { adapter: 'probe', tier: '${LIVE}', ` +
+            "liveEvidence: 'test/probe.spec.ts', verifiedOn: '2026-09-05', " +
+            "declaredOn: '2026-09-05' };\n",
+        );
+        expect(adapterPackages()).toContain('__s9probe__');
+        expect(await declaredTiers()).toContain(`__s9probe__: ${LIVE}`);
       });
     });
   });

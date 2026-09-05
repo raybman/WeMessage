@@ -55,10 +55,17 @@ export interface SchedulerDeps {
   store: Store;
   clock: Clock;
   /**
-   * `draft.expired` is deliberately audit-only (§1.8) and the dispatch path
-   * owns its own broadcasts, so the TTL and grace sweeps never reach for
-   * `broadcast`. The circuit sweep does: a breaker flipping is a posture
-   * change an operator's UI has to see, exactly as a kill-switch flip is.
+   * Used by all four sweeps, and in every case `append` strictly precedes
+   * `broadcast` (§1.8): the log is the record, the frame is a courtesy, and
+   * a crash between the two must lose the courtesy rather than the record.
+   *
+   * s8 Sc3 (F-107) ended this file's abstention. S4's F-39 deferred
+   * `draft.expired` to audit-only because nothing could read a frame; a GUI
+   * that watches a queue rather than polling it is that reader, so the TTL
+   * sweep now broadcasts, and the grace sweep broadcasts `draft.requeued`
+   * when core reports that outcome. The circuit and arming sweeps already
+   * did: a breaker flipping is a posture change an operator's UI has to see,
+   * exactly as a kill-switch flip is.
    */
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   /**
@@ -104,7 +111,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         onError?.(draft.id, err);
         continue;
       }
+      // §1.8, in this order and for this reason: the row is durable, THEN
+      // the frame goes out, THEN the originating agent is told. A subscriber
+      // that reacted to the frame by reading the audit log must find the row
+      // already there, and `onExpired` reaches a socket we do not control.
       sink.append({ type: 'draft.expired', draftId: draft.id }, expiry);
+      sink.broadcast({ event: 'draft.expired', draftId: draft.id });
       onExpired?.(draft.id);
     }
   };
@@ -112,7 +124,27 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const sweepGrace = async (now: string): Promise<void> => {
     for (const due of store.listGraceElapsed(now)) {
       try {
-        await dispatch(due.draftId, due.approvalId);
+        const result = await dispatch(due.draftId, due.approvalId);
+        // s8 Sc3 (F-72, F-107): `draft.requeued` is CORE-ORIGINATED. Core
+        // withdraws the approval, puts the draft back in the queue and
+        // writes both the `draft.requeued` and the `gate.denied` rows, then
+        // returns `{outcome:'requeued'}` — it cannot broadcast, because a
+        // sink is a daemon thing and core holds no adapter- or
+        // protocol-shaped dependency (INV-1). So the daemon translates the
+        // outcome into the frame HERE, narrowing the injected closure's
+        // `Promise<unknown>` exactly as `adapters/feedback.ts`'s
+        // `observeDispatch` narrows it for `send_verified`/`send_failed`.
+        // That is the tree's existing channel for a core outcome becoming a
+        // daemon-side effect, and this rides it rather than opening another.
+        //
+        // §1.8 holds for free: both rows were durable before `dispatch`
+        // resolved, so there is no window in which this frame precedes them.
+        // This is also the ONLY requeue site — `routes/send.ts` treats a
+        // `requeued` outcome as an invariant violation, because a human who
+        // pressed send is not subject to a schedule.
+        if ((result as { outcome?: unknown } | null)?.outcome === 'requeued') {
+          sink.broadcast({ event: 'draft.requeued', draftId: due.draftId });
+        }
       } catch (err) {
         // dispatchApproved throws only on an INV-2 validation failure, which
         // it has already audited. Swallow it here so the remaining due

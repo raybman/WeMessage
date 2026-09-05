@@ -344,10 +344,35 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   // #17 deliberate (s5 Scenario 7, F-44): constructed in
   // adapters/submit.ts's `onDelta`, relayed and persisted nowhere.
   'draft.delta',
+  // #24 deliberate (s8 Scenario 3): the four names #23 declared and left
+  // owed, now constructed. This entry is not a licence — it is the
+  // BOOKKEEPING for one, and the licence closes with it. Each name is
+  // written down beside the single site that builds it, because the row two
+  // files over scans `event: '<name>'` literals under packages/daemon/src
+  // and a second site for any of these would be a second story about the
+  // same fact:
+  //
+  //   draft.expired     scheduler.ts        `sweepExpired`, after the append
+  //   draft.superseded  adapters/submit.ts  `supersedeLive`, before the mint
+  //   draft.redrafted   routes/drafts.ts    the redraft route, before created
+  //   draft.requeued    scheduler.ts        `sweepGrace`, from core's outcome
+  //
+  // The last of those is the one worth pausing on. `draft.requeued` is a
+  // fact CORE discovers: `dispatchApproved` re-gates at the send moment,
+  // finds a hold that binds only autonomy, writes both its audit rows and
+  // returns `{outcome:'requeued'}`. Core holds no sink and imports no
+  // protocol (INV-1), so the frame is built on this side of the boundary
+  // from the outcome core handed back — the same shape as
+  // `adapters/feedback.ts`'s `observeDispatch`, not a new channel. The scan
+  // therefore finds the literal in the DAEMON, which is where it belongs.
+  'draft.expired',
   'draft.failed',
   'draft.recalled',
+  'draft.redrafted',
   'draft.rejected',
+  'draft.requeued',
   'draft.sent',
+  'draft.superseded',
   'gate.denied',
   'gateway.disconnected',
   'message.edited',
@@ -372,20 +397,26 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
  * `transport-surface.ratchet.spec.ts` asserts a PARTITION over the two lists:
  * disjoint, and together equal to `GATEWAY_EVENT_NAMES` name for name.
  *
- * It is meant to be empty. Sc 3 wires all four emit sites — the scheduler's
- * expiry sweep, `adapters/submit.ts`'s supersede, the redraft route and the
- * dispatcher's requeue — at which point the `event: '<name>'` source scan
- * grows EMITTED to 21 and disjointness forces this array back to `[]` in the
- * same diff. There is no state in which Sc 3 lands and the hatch survives.
+ * It is meant to be empty. Deliberate update #24, s8 Scenario 3: it IS
+ * empty. Sc 3 wired all four emit sites — the scheduler's expiry sweep,
+ * `adapters/submit.ts`'s supersede, the redraft route, and the scheduler's
+ * daemon-side translation of core's requeue outcome — so the
+ * `event: '<name>'` source scan grew EMITTED to 21 and disjointness forced
+ * this array back to `[]` in the same diff, exactly as #23 promised. The
+ * escape hatch opened for one scenario and shut behind it.
  *
- * Anything that stays here across a slice boundary is a bug report.
+ * The array stays, at zero length, rather than being deleted with its
+ * partition row. Deleting it would take the mechanism out with the debt, and
+ * the mechanism is the valuable half: it is the only assertion in this repo
+ * that can catch a name DECLARED and then quietly never emitted, which is a
+ * mistake `EMITTED ⊆ VOCABULARY` is structurally blind to. A future slice
+ * that needs the same one-scenario window has the shape waiting for it, and
+ * pays the same price — writing the debt down by hand, here, under a number.
+ *
+ * Anything that appears here and stays across a slice boundary is a bug
+ * report.
  */
-export const UNEMITTED_WS_EVENTS: readonly string[] = [
-  'draft.expired',
-  'draft.redrafted',
-  'draft.requeued',
-  'draft.superseded',
-];
+export const UNEMITTED_WS_EVENTS: readonly string[] = [];
 
 /**
  * Production files (packages/<pkg>/src) allowed to mention the SendBackend

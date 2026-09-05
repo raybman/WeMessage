@@ -47,6 +47,7 @@ import type {
   ChatGuid,
   Clock,
   Draft,
+  GateDenyReason,
   Handle,
   MessageGuid,
   Store,
@@ -86,6 +87,26 @@ export interface IssuedRequest {
   chatGuid: ChatGuid;
   inboundGuid: MessageGuid;
   ruleId: Ulid;
+  /**
+   * s8 Sc3 (F-64, F-107): the gate's clamp, carried from the decision that
+   * authorised this request to the `draft.created` frame the answer mints.
+   *
+   * It has to be carried because the two moments are separated by an agent
+   * round trip: `adapters/dispatch.ts` evaluates the gate and issues the
+   * request, then an adapter thinks, then `mint` runs — by which time the
+   * decision is long out of scope and re-evaluating would answer a different
+   * question (the counters have moved, the window may have shut).
+   *
+   * F-108 holds by construction: this registry is an in-process Map that
+   * dies with the daemon, so a clamp reason is LIVE-ONLY. Nothing persists
+   * it, no column stores it, and a restart correctly forgets why a card that
+   * is still in the queue was clamped an hour ago — because by then it may
+   * not be any more.
+   *
+   * Optional under `exactOptionalPropertyTypes`: an unclamped decision omits
+   * the key rather than carrying an explicit `undefined`.
+   */
+  clampedBy?: GateDenyReason;
 }
 
 interface Tracked extends IssuedRequest {
@@ -179,8 +200,16 @@ function agentActor(adapterId: string): Actor {
   return { kind: 'agent', adapterId };
 }
 
-/** The WS-facing projection of a draft (identical to routes/drafts.ts's). */
-function draftFrame(draft: Draft): DraftSummary {
+/**
+ * The WS-facing projection of a draft (identical to routes/drafts.ts's).
+ *
+ * `clampedBy` is a parameter rather than a field of `Draft` because it is
+ * not a property of the draft at all: it is why the GATE declined to let
+ * this particular draft speak for the operator, a fact about a decision that
+ * is true now and may not be in a minute (F-64/F-108). A `Draft` is what the
+ * store holds; this is what the screen shows.
+ */
+function draftFrame(draft: Draft, clampedBy?: GateDenyReason): DraftSummary {
   return {
     id: draft.id,
     chatGuid: draft.chatGuid,
@@ -191,6 +220,7 @@ function draftFrame(draft: Draft): DraftSummary {
     state: draft.state,
     expiresAt: draft.expiresAt,
     createdAt: draft.createdAt,
+    ...(clampedBy !== undefined ? { clampedBy } : {}),
   };
 }
 
@@ -280,10 +310,20 @@ export function createAgentSubmitHandler(
         throw err;
       }
       store.applyDraftTransition({ id: old.id, from: old.state, to, at });
+      // §1.8 at THIS site: the row, then the frame. The audit row and the
+      // frame deliberately spell the link differently — `supersededBy` in
+      // the ledger, `byDraftId` on the wire — because a ledger entry has two
+      // equal ids and no subject, while a frame is addressed at a card on a
+      // screen that is about to disappear.
       sink.append(
         { type: 'draft.superseded', draftId: old.id, supersededBy: newDraftId },
         actor,
       );
+      sink.broadcast({
+        event: 'draft.superseded',
+        draftId: old.id,
+        byDraftId: newDraftId,
+      });
     }
   };
 
@@ -321,7 +361,10 @@ export function createAgentSubmitHandler(
       { type: 'draft.created', draftId: draft.id, draft },
       agentActor(adapterId),
     );
-    sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+    sink.broadcast({
+      event: 'draft.created',
+      draft: draftFrame(draft, issued.clampedBy),
+    });
     // s6 Sc 9, §1.7: the ONE auto-approval call site in the product. It
     // runs INSIDE the mint, after the draft is durable and after its
     // creation has been announced, so the ordering a reader sees in the
@@ -493,7 +536,13 @@ export function createAgentSubmitHandler(
       { type: 'draft.created', draftId: draft.id, draft },
       agentActor(adapterId),
     );
-    sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
+    // The decision is still in scope here — a proactive proposal is minted
+    // in the same turn it is gated — so the clamp goes straight on the
+    // frame with no registry in between.
+    sink.broadcast({
+      event: 'draft.created',
+      draft: draftFrame(draft, decision.clampedBy),
+    });
   };
 
   return {

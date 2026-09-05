@@ -115,7 +115,7 @@ const approveBody = z.strictObject({
  */
 const bulkBody = z
   .strictObject({
-    action: z.enum(['approve', 'recall']),
+    action: z.enum(['approve', 'recall', 'reject']),
     ids: z.array(z.string().min(1)).min(1).optional(),
     filter: z
       .strictObject({
@@ -558,6 +558,90 @@ export function registerDraftRoutes(
     return { ok: true, draft: updated, approvalId };
   };
 
+  /**
+   * Same extraction again, for reject, and s8 Sc3 is why it exists: bulk
+   * reject has to run the single-draft code rather than a second, similar
+   * one. "Clear the queue" is the most destructive verb an operator has
+   * (fifty drafts, one keystroke, no undo — a rejected draft is terminal),
+   * so the one thing it must not do is take a different path from the
+   * button that rejects one card.
+   *
+   * INV-2 is the reason this stays a sibling of `approveOne` and never a
+   * caller of it: reject moves a draft to a TERMINAL state and writes a
+   * `reject` Approval. There is no gate call, no grace stamp, no
+   * `sendNotBefore`, and therefore nothing the scheduler will ever pick up.
+   * `dispatchApproved` remains the only path to the send port, and it
+   * validates an `approve` Approval before it will move — so no arrangement
+   * of this function's output can be made to send anything.
+   *
+   * (The port's type name is spelled out nowhere in this file on purpose:
+   * `transport-surface.ratchet.spec.ts` scans production source TEXT for it,
+   * so naming it even in a comment would put this file on the port-importer
+   * allowlist and quietly weaken the guard that says who can reach a send.)
+   */
+  const rejectOne = (
+    draft: Draft,
+    opts: { reason?: string; batchId?: Ulid } = {},
+  ): ApplyResult => {
+    const to = decide(draft, 'reject');
+    if (to === null) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: 'illegal-transition',
+          from: draft.state,
+          requested: 'reject',
+        },
+      };
+    }
+
+    // No gate on reject. Refusing to say something is always allowed —
+    // the kill switch exists to stop sends, not to trap drafts.
+    const at = clock.now();
+    const updated = store.applyDraftTransition({
+      id: draft.id,
+      from: draft.state,
+      to,
+      at,
+      // Clearing the grace stamp is what makes rejecting an approved
+      // draft actually stop the scheduler from picking it up.
+      sendNotBefore: null,
+    });
+    const approvalId = ulid();
+    store.insertApproval({
+      id: approvalId,
+      draftId: draft.id,
+      action: 'reject',
+      actor,
+      ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
+      at,
+    });
+    // §1.8, per act rather than per batch: this row is durable before this
+    // draft's frame leaves, for every draft in a batch of fifty.
+    sink.append(
+      { type: 'draft.rejected', draftId: draft.id, approvalId },
+      actor,
+    );
+    // The reason, if given, lives in the audit row's approval, not on the
+    // wire frame: GatewayEvent's draft.* shape is deliberately narrow.
+    sink.broadcast({
+      event: 'draft.rejected',
+      draftId: draft.id,
+      actor,
+      ...(opts.batchId !== undefined ? { batchId: opts.batchId } : {}),
+    });
+    // ...and it DOES ride on the feedback frame: a rejection an agent
+    // cannot see the reason for is a rejection it cannot learn from.
+    feedback({
+      draftId: draft.id,
+      kind: 'draft_rejected',
+      actor,
+      ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+    });
+    return { ok: true, draft: updated, approvalId };
+  };
+
   // ---- POST /v1/drafts/:id/approve -------------------------------------
   app.post<{ Params: { id: string } }>(
     '/v1/drafts/:id/approve',
@@ -610,6 +694,13 @@ export function registerDraftRoutes(
    *
    * The batchId is minted here and stamped on every Approval row, which is
    * what makes GET /v1/batches/:id possible without a batches table.
+   *
+   * s8 Sc3 adds `reject` as a third verb on the SAME route: no new path, no
+   * new arithmetic in the §1.6 route table, just one more word in the body
+   * enum. INV-2 is untouched by it — reject writes a `reject` Approval and
+   * parks the draft in a terminal state, and `dispatchApproved` will only
+   * move on a validated `approve` Approval, so no spelling of this request
+   * can be made to send anything.
    */
   app.post('/v1/drafts/bulk', async (req, reply) => {
     const parsed = bulkBody.safeParse(req.body);
@@ -628,11 +719,16 @@ export function registerDraftRoutes(
       for (const id of ids) targets.push({ id, draft: store.getDraft(id) });
     } else {
       const f = filter as NonNullable<typeof filter>;
-      // Bulk approve wants the pending queue; bulk recall wants what is
-      // sitting in its grace window. Selecting on the state each action can
-      // actually consume keeps `refused` meaningful instead of listing every
-      // unrelated draft in the store.
-      const state: DraftState = action === 'approve' ? 'pending' : 'approved';
+      // Bulk approve and bulk reject want the pending queue; bulk recall
+      // wants what is sitting in its grace window. Selecting on the state
+      // each action can actually consume keeps `refused` meaningful instead
+      // of listing every unrelated draft in the store.
+      //
+      // Written as "recall is the odd one out" rather than "approve is the
+      // special case", because the queue is the default subject of a bulk
+      // verb and the grace window is the exception. A third action added by
+      // negation would have silently selected 'approved' drafts.
+      const state: DraftState = action === 'recall' ? 'approved' : 'pending';
       const matched = store.listDrafts({
         state,
         ...(f.rule !== undefined ? { ruleId: f.rule } : {}),
@@ -649,10 +745,18 @@ export function registerDraftRoutes(
         refused.push({ id: target.id, error: 'not-found' });
         continue;
       }
+      // One shared batchId across all three verbs, stamped on every
+      // Approval row, which is what makes GET /v1/batches/:id work without
+      // a batches table. Non-atomic on purpose (see the route's doc): a row
+      // that refuses leaves the rows around it applied, and nothing is
+      // rolled back — the drafts that moved really did move, and pretending
+      // otherwise would mean un-rejecting a draft a human just rejected.
       const result =
         action === 'approve'
           ? approveOne(target.draft, { batchId })
-          : recallOne(target.draft, batchId);
+          : action === 'reject'
+            ? rejectOne(target.draft, { batchId })
+            : recallOne(target.draft, batchId);
       if (result.ok) applied.push(target.id);
       else refused.push({ id: target.id, error: String(result.body.error) });
     }
@@ -798,9 +902,21 @@ export function registerDraftRoutes(
         },
         actor,
       );
-      // F-39: no WS event for the redraft itself. Protocol has no such
-      // frame in S4, and a client that sees draft.created has everything it
-      // needs to render the new row.
+      // s8 Sc3 pays F-39's debt. S4 broadcast only `draft.created` because
+      // protocol had no redraft frame and a client that saw a new row could
+      // render it; what it could NOT do was connect the new row to the dead
+      // one it replaces, so a queue watching the stream showed a stranger
+      // appearing next to a corpse. `draft.redrafted` is that edge.
+      //
+      // Order matters twice here. Both audit rows are durable before either
+      // frame leaves (§1.8), and the retirement is announced BEFORE the
+      // replacement, so a subscriber never has to hold an unexplained new
+      // card waiting for the sentence that explains it.
+      sink.broadcast({
+        event: 'draft.redrafted',
+        draftId: source.id,
+        newDraftId: draft.id,
+      });
       sink.broadcast({ event: 'draft.created', draft: draftFrame(draft) });
       // s5 Scenario 8: and, if this draft came from an agent, ask it again.
       // Strictly after the S4 work above, so the body copy is durable
@@ -824,53 +940,16 @@ export function registerDraftRoutes(
       const draft = store.getDraft(req.params.id);
       if (draft === null) return reply.code(404).send({ error: 'not-found' });
 
-      const to = decide(draft, 'reject');
-      if (to === null) {
-        return reply.code(409).send({
-          error: 'illegal-transition',
-          from: draft.state,
-          requested: 'reject',
-        });
-      }
-
-      // No gate on reject. Refusing to say something is always allowed —
-      // the kill switch exists to stop sends, not to trap drafts.
-      const at = clock.now();
-      const updated = store.applyDraftTransition({
-        id: draft.id,
-        from: draft.state,
-        to,
-        at,
-        // Clearing the grace stamp is what makes rejecting an approved
-        // draft actually stop the scheduler from picking it up.
-        sendNotBefore: null,
-      });
-      const approvalId = ulid();
-      store.insertApproval({
-        id: approvalId,
-        draftId: draft.id,
-        action: 'reject',
-        actor,
-        at,
-      });
-      sink.append(
-        { type: 'draft.rejected', draftId: draft.id, approvalId },
-        actor,
-      );
-      // The reason, if given, lives in the audit row's approval, not on the
-      // wire frame: GatewayEvent's draft.* shape is deliberately narrow.
-      sink.broadcast({ event: 'draft.rejected', draftId: draft.id, actor });
-      // ...and it DOES ride on the feedback frame: a rejection an agent
-      // cannot see the reason for is a rejection it cannot learn from.
-      feedback({
-        draftId: draft.id,
-        kind: 'draft_rejected',
-        actor,
+      const result = rejectOne(draft, {
         ...(parsed.data.reason !== undefined
           ? { reason: parsed.data.reason }
           : {}),
       });
-      return reply.send({ draft: updated, approvalId });
+      if (!result.ok) return reply.code(result.status).send(result.body);
+      return reply.send({
+        draft: result.draft,
+        approvalId: result.approvalId,
+      });
     },
   );
 }

@@ -969,12 +969,15 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     expect(EMITTED_WS_EVENTS).toContain('arming.changed');
     // S6's ONE protocol addition (F-67). The vocabulary moved 17 -> 21 at
     // ratchet #23 (s8 Sc 2, F-107) when the four owed `draft.*` lifecycle
-    // names were declared; the EMITTED list deliberately did not move with
-    // it, and the four-name gap is enumerated in `UNEMITTED_WS_EVENTS` and
-    // asserted as a partition in `transport-surface.ratchet.spec.ts`. What
-    // this row still pins, unchanged, is S6's actual claim: `arming.changed`
-    // is in BOTH lists, because S6 declared and emitted it in one diff.
+    // names were declared, and the EMITTED list deliberately did not move
+    // with it; ratchet #24 (s8 Sc 3) wired the four emit sites and closed
+    // the gap, so both lists are 21 again and `UNEMITTED_WS_EVENTS` is
+    // empty. The partition rows in `transport-surface.ratchet.spec.ts` are
+    // what keep that honest. What this row still pins, unchanged, is S6's
+    // actual claim: `arming.changed` is in BOTH lists, because S6 declared
+    // and emitted it in one diff — and the two lengths agreeing again is
+    // the state that claim was written in.
     expect(WS_EVENT_VOCABULARY).toHaveLength(21);
-    expect(EMITTED_WS_EVENTS).toHaveLength(17);
+    expect(EMITTED_WS_EVENTS).toHaveLength(21);
   });
 });

@@ -279,6 +279,20 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
       chatGuid: message.chatGuid,
       inboundGuid: message.guid,
       ruleId: rule.id,
+      // s8 Sc3 (F-64, F-107): the clamp travels WITH the request, because
+      // this is the last moment it is known. The agent's answer arrives in a
+      // later turn, in `submit.ts`, where re-evaluating the gate would be
+      // asking a different question of a moved world. Conditional spread:
+      // an unclamped decision omits the key entirely.
+      //
+      // The mode above is already the clamped one (F-60), so this adds no
+      // new authority — it is the REASON for a restriction the agent was
+      // told about anyway, kept so a human can be shown why their card needs
+      // them. A clamp is not a deny (S6): the gate allowed, it just declined
+      // to let this one speak unattended, and nothing is audited as denied.
+      ...(decision.clampedBy !== undefined
+        ? { clampedBy: decision.clampedBy }
+        : {}),
     });
     return true;
   };

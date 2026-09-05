@@ -270,14 +270,17 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
     ]);
   });
 
-  it('F-39: expiry, supersede and redraft emit audit rows but no WS events', async () => {
+  it('F-39: expiry, supersede and redraft emit audit rows AND, since s8 Sc3, WS events', async () => {
     const h = await boot();
     const source = await createDraft(h, 'quiet lifecycle');
     h.clockCtl.advance(PAST_TTL_MS);
     await h.scheduler.tick();
-    await post(h, `/v1/drafts/${source.id}/redraft`);
+    expect((await post(h, `/v1/drafts/${source.id}/redraft`)).statusCode).toBe(
+      200,
+    );
 
-    // The record exists.
+    // The record exists. Untouched from S4 — this half was never the flag's
+    // interesting claim and it is still true.
     expect(auditTypes(h.store)).toEqual(
       expect.arrayContaining([
         'draft.expired',
@@ -286,47 +289,87 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
       ]),
     );
 
-    // The courtesy deliberately does not — still. This row's ORIGINAL second
-    // half asserted that `packages/protocol/src/index.ts` did not so much as
-    // contain the three strings, because in S4 the protocol carried no such
-    // event types and a broadcast would have been an untyped frame no client
-    // understood.
+    // And the courtesy now exists too. This row has been rewritten twice and
+    // the history is the point, so it is worth stating plainly.
     //
-    // s8 Scenario 2 (F-107) is the slice that retires that half, and it is
-    // retired by being INVERTED rather than deleted. The three names (plus
-    // F-72's `draft.requeued`) are now real members of the vocabulary, so the
-    // absence assertion would be asserting a falsehood; what F-39 actually
-    // claimed, and what still holds here in S4's own scenario, is that this
-    // pipeline BROADCASTS nothing. That half is untouched and still scans, so
-    // if Sc 3 wires expiry emission without revisiting this file, this row
-    // fails and says so.
-    for (const declared of [
+    // S4's ORIGINAL second half asserted that `packages/protocol/src/index.ts`
+    // did not so much as contain the three strings: the protocol carried no
+    // such event types, so a broadcast would have been an untyped frame no
+    // client understood.
+    //
+    // s8 Scenario 2 (F-107) declared the three names (plus F-72's
+    // `draft.requeued`) and retired that half by INVERTING it — the absence
+    // assertion had become a falsehood, but what F-39 actually claimed, that
+    // this PIPELINE broadcasts nothing, was still true, so the scan was
+    // narrowed to `packages/daemon/src` and left armed as a deliberate
+    // tripwire: wire the emission without revisiting this file and the row
+    // fails.
+    //
+    // s8 Scenario 3 is the slice that trips it, and this is the third and
+    // final form. The absence claim is replaced by the positive one it always
+    // implied, at both layers. Behaviourally: the very pipeline this row
+    // drives now broadcasts, in §1.8 order. Structurally: the debt list that
+    // held the three names is empty, and each name has exactly one emit site
+    // in the daemon. Neither half is weaker than what it replaced — an
+    // absence assertion is satisfied by a repo where the feature was deleted;
+    // these are not.
+    const broadcast = (event: string): Array<{ auditAtBroadcast: string[] }> =>
+      h.broadcasts.filter(
+        (b) => (b.frame as { event?: string }).event === event,
+      );
+
+    // The TTL sweep. One frame, and the audit row was already durable when it
+    // left: `auditAtBroadcast` is the log as it stood at the instant
+    // `sink.broadcast` was called, which is the only witness that survives a
+    // swap of the two statements (the finished log is identical either way).
+    expect(broadcast('draft.expired')).toHaveLength(1);
+    expect(broadcast('draft.expired')[0]?.auditAtBroadcast).toContain(
+      'draft.expired',
+    );
+    // The redraft route, same discipline, and additionally BEFORE the
+    // `draft.created` frame for the replacement: a subscriber told about the
+    // replacement first can animate one card into the other, while a
+    // subscriber told about the new card first draws a duplicate.
+    expect(broadcast('draft.redrafted')).toHaveLength(1);
+    expect(broadcast('draft.redrafted')[0]?.auditAtBroadcast).toContain(
+      'draft.redrafted',
+    );
+    const order = h.broadcasts
+      .map((b) => (b.frame as { event?: string }).event)
+      .filter((e) => e === 'draft.redrafted' || e === 'draft.created');
+    expect(order).toEqual([
+      'draft.created',
+      'draft.redrafted',
+      'draft.created',
+    ]);
+
+    // Structural, scoped to the daemon exactly as the narrowed S8 Sc2 form
+    // was, and reading the same way round the ratchet's own scan does. The
+    // protocol package legitimately contains the literals: they are the
+    // discriminants of the four union variants. Supersede is asserted here
+    // and not behaviourally, because its trigger is S5's agent re-submit and
+    // this S4 scenario has no adapter — `drafts-lifecycle-events.spec.ts`
+    // owns the behavioural row.
+    const daemonSources = productionSourceFiles().filter((abs) =>
+      abs.includes(`${sep}daemon${sep}src${sep}`),
+    );
+    for (const owed of [
       'draft.expired',
       'draft.superseded',
       'draft.redrafted',
     ]) {
-      expect(GATEWAY_EVENT_NAMES, `s8 Sc2 declares ${declared}`).toContain(
-        declared,
-      );
+      expect(GATEWAY_EVENT_NAMES, `s8 Sc2 declares ${owed}`).toContain(owed);
       expect(
         UNEMITTED_WS_EVENTS,
-        `${declared} is declared but not yet emitted`,
-      ).toContain(declared);
-    }
-    // Scoped to the daemon, which is where an emit site would live and where
-    // the ratchet's own `event: '<name>'` scan looks. The protocol package
-    // legitimately contains the literals now: they are the discriminants of
-    // the four union variants.
-    for (const abs of productionSourceFiles()) {
-      if (!abs.includes(`${sep}daemon${sep}src${sep}`)) continue;
-      const text = readFileSync(abs, 'utf8');
-      for (const banned of [
-        'draft.expired',
-        'draft.superseded',
-        'draft.redrafted',
-      ]) {
-        expect(text).not.toContain(`event: '${banned}'`);
-      }
+        `${owed} was owed by s8 Sc2 and paid by s8 Sc3`,
+      ).not.toContain(owed);
+      // Exactly one site, not merely at least one. Two places constructing
+      // the same frame is two stories about one fact, and the second one
+      // drifts.
+      const sites = daemonSources.filter((abs) =>
+        readFileSync(abs, 'utf8').includes(`event: '${owed}'`),
+      );
+      expect(sites, `${owed} must have exactly one emit site`).toHaveLength(1);
     }
   });
 });

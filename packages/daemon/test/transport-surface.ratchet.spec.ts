@@ -235,6 +235,32 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
    * and disjointness then forces UNEMITTED to empty in that same diff or this
    * row fails. There is no state in which Sc 3 lands and the escape hatch
    * survives.
+   *
+   * **s8 Scenario 3 is that landing, and deliberate update #24 is the close.**
+   * All four sites are wired, EMITTED is 21, and `UNEMITTED_WS_EVENTS` is
+   * `[]`. The window was one scenario wide, as argued, and it shut on
+   * schedule.
+   *
+   * The partition row below survives the closing, restated so that it still
+   * BITES at zero. That restatement is the whole of the work here, because
+   * the obvious way to write a partition is the way that goes quiet when one
+   * side empties: `for (const owed of UNEMITTED) expect(!emitted.has(owed))`
+   * iterates nothing over an empty array and passes on a repo where every
+   * other assertion has been deleted. So the row no longer iterates either
+   * LIST. It iterates the VOCABULARY and classifies each of the 21 names,
+   * requiring exactly one home for every one of them:
+   *
+   *   - a name in both lists is a contradiction (the old disjointness half);
+   *   - a name in NEITHER list is a name that is declared, unemitted, and
+   *     unaccounted for — which is precisely the failure the debt list was
+   *     invented to catch, and which is the half that does the work now that
+   *     the debt is zero. With UNEMITTED empty this clause reads "all 21
+   *     declared names are emitted", and it is 21 real assertions, not none.
+   *
+   * The duplicate check is the third leg. Without it the sorted-union
+   * equality could be satisfied by a list that repeats one name and omits
+   * another, and the classification above would not notice: both names would
+   * still have a home.
    */
   it('protocol vocabulary and allowed snapshot agree exactly', () => {
     expect([...GATEWAY_EVENT_NAMES]).toHaveLength(21);
@@ -242,22 +268,35 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
   });
 
   it('emitted and unemitted partition the vocabulary, with the gap named', () => {
-    // The debt, spelled out. When this is `[]` the partition degenerates back
-    // into the s7 row it replaced, which is the intended end state.
-    expect([...UNEMITTED_WS_EVENTS]).toEqual([
-      'draft.expired',
-      'draft.redrafted',
-      'draft.requeued',
-      'draft.superseded',
-    ]);
+    // The debt, spelled out — and #24's whole claim is that it is nil.
+    expect([...UNEMITTED_WS_EVENTS]).toEqual([]);
 
-    // Disjoint: no name may claim to be both emitted and owed.
     const emitted = new Set<string>(EMITTED_WS_EVENTS);
-    for (const owed of UNEMITTED_WS_EVENTS) {
-      expect(emitted.has(owed), `'${owed}' is listed as owed AND emitted`).toBe(
-        false,
-      );
-    }
+    const owed = new Set<string>(UNEMITTED_WS_EVENTS);
+
+    // No list may say the same name twice: a repeat could pay for an
+    // omission in the union check below and leave both halves looking sound.
+    expect(emitted.size, 'EMITTED_WS_EVENTS repeats a name').toBe(
+      EMITTED_WS_EVENTS.length,
+    );
+    expect(owed.size, 'UNEMITTED_WS_EVENTS repeats a name').toBe(
+      UNEMITTED_WS_EVENTS.length,
+    );
+
+    // Exactly one home per declared name. Driven off the VOCABULARY, not off
+    // either list, so the row keeps asserting 21 things when the debt is
+    // empty instead of degenerating into a loop over nothing.
+    const inBoth = [...GATEWAY_EVENT_NAMES].filter(
+      (name) => emitted.has(name) && owed.has(name),
+    );
+    expect(inBoth, 'listed as owed AND emitted').toEqual([]);
+    const homeless = [...GATEWAY_EVENT_NAMES].filter(
+      (name) => !emitted.has(name) && !owed.has(name),
+    );
+    expect(
+      homeless,
+      'declared, not emitted, and not written down as owed',
+    ).toEqual([]);
 
     // Exhaustive: together they are the vocabulary, name for name. This is
     // the half a subset check cannot do.
@@ -267,8 +306,8 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
 
     // And the arithmetic, stated so a reader of a failure sees the shape of
     // the drift rather than a 21-element diff.
-    expect(EMITTED_WS_EVENTS).toHaveLength(17);
-    expect(UNEMITTED_WS_EVENTS).toHaveLength(4);
+    expect(EMITTED_WS_EVENTS).toHaveLength(21);
+    expect(UNEMITTED_WS_EVENTS).toHaveLength(0);
   });
 
   it('SendBackend/ChatDbReader importer set equals the allowlist', () => {

@@ -1,6 +1,6 @@
 /**
- * s5-execution Scenario 11 — `wemessage watch` renderers for the two S5
- * events that are not readable as raw JSON at a terminal.
+ * s5-execution Scenario 11 (extended by s8 Sc3) — `wemessage watch`
+ * renderers for the events that are not readable as raw JSON at a terminal.
  *
  * `draft.delta` is a STREAMING preview: chunks arrive one at a time and mean
  * nothing individually, so the renderer accumulates them per request and
@@ -56,6 +56,32 @@ export function createWatchRenderer(): (
     if (event.event === 'adapter.health') {
       return {
         text: `adapter ${event.adapterId}: ${event.status}`,
+        inPlace: false,
+      };
+    }
+    // s8 Sc3 — the four things that happen to a draft with nobody pressing
+    // a key. Raw JSON is a poor answer for these: an operator watching a
+    // queue wants to read that a card timed out, not to parse a frame for
+    // it, and two of the four carry a SECOND id that is the whole point (a
+    // draft that vanished and the one that replaced it). All four are
+    // `inPlace: false` — a preview supersedes itself, a fact does not, and
+    // overwriting "expired" with "requeued" would destroy the only copy of
+    // the first one.
+    if (event.event === 'draft.expired') {
+      return { text: `draft ${event.draftId}: expired`, inPlace: false };
+    }
+    if (event.event === 'draft.requeued') {
+      return { text: `draft ${event.draftId}: requeued`, inPlace: false };
+    }
+    if (event.event === 'draft.superseded') {
+      return {
+        text: `draft ${event.draftId}: superseded by ${event.byDraftId}`,
+        inPlace: false,
+      };
+    }
+    if (event.event === 'draft.redrafted') {
+      return {
+        text: `draft ${event.draftId}: redrafted as ${event.newDraftId}`,
         inPlace: false,
       };
     }

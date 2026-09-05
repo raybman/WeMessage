@@ -489,12 +489,78 @@ export interface DraftPayload {
   idempotencyKey: string;
   body: string;
   originalBody: string;
+  /**
+   * s8 Sc3: why an agent proposed this unprompted (S5 §3.2's proactive
+   * path). Present only on a proactive draft — a rule-borne one answers an
+   * inbound message and needs no separate excuse — and OMITTED rather than
+   * `undefined` when absent, because the daemon leaves the key out of the
+   * JSON entirely when the column is NULL.
+   *
+   * It was on `Draft` since S5 and missing from this DTO until now, which
+   * meant a GUI rendering "why am I being asked this" had to reach for a
+   * cast to read a field the daemon was already sending.
+   */
+  proactiveReason?: string;
   state: DraftState;
   stateChangedAt: string;
   sendNotBefore?: string;
   expiresAt: string;
   createdAt: string;
   error?: { code: string; message: string; at: string };
+}
+
+/** Thrown by {@link parseChatGuid} for a guid it cannot name a service for. */
+export class ChatGuidParseError extends Error {
+  constructor(readonly chatGuid: string) {
+    super(`unparseable chat guid: ${JSON.stringify(chatGuid)}`);
+    this.name = 'ChatGuidParseError';
+  }
+}
+
+/** What a chat guid says about who is on the other end. */
+export interface ChatGuidParts {
+  /** The counterparty, or `''` for a group — a room has no single one. */
+  handle: string;
+  service: 'imessage' | 'sms';
+  isGroup: boolean;
+}
+
+/**
+ * s8 Sc3 — split `service;-;handle` (or `service;+;room`) the way
+ * @wemessage/core does, for a consumer that has to draw it.
+ *
+ * A local copy, deliberately, and the same "no @wemessage/core dep"
+ * convention every DTO above follows: this package ships to third parties
+ * with `@wemessage/protocol` and `ws` as its only dependencies, and importing
+ * core to reach fifteen lines of string handling would drag the store, the
+ * gate and the dispatcher along with it.
+ *
+ * It is a strict NARROWING of core's function, not a copy: identical for
+ * every guid core resolves a service for, and a throw exactly where core
+ * would have answered `service: 'unknown'`. Core cannot throw — it runs
+ * inside the dispatcher, where a malformed guid has to degrade to a refusal
+ * rather than an exception in the send path — but a caller choosing an icon
+ * is better served by a failure than by a service picked at random. The two
+ * are pinned to each other in the daemon's own tests, the one package that
+ * can import both.
+ */
+export function parseChatGuid(chatGuid: string): ChatGuidParts {
+  const ONE_ON_ONE_SEP = ';-;';
+  const prefix = chatGuid.split(';')[0]?.toLowerCase();
+  if (prefix !== 'imessage' && prefix !== 'sms') {
+    throw new ChatGuidParseError(chatGuid);
+  }
+  const service: 'imessage' | 'sms' = prefix;
+  const idx = chatGuid.indexOf(ONE_ON_ONE_SEP);
+  // No 1:1 separator means a room, which has no counterparty to name.
+  if (idx === -1) return { handle: '', service, isGroup: true };
+  // `slice`, not `split`: the FIRST separator ends the prefix and everything
+  // after it is the handle verbatim, because a handle may contain anything.
+  return {
+    handle: chatGuid.slice(idx + ONE_ON_ONE_SEP.length),
+    service,
+    isGroup: false,
+  };
 }
 
 export interface DraftFilter {
@@ -805,8 +871,14 @@ export interface WeMessageClient {
   recallDraft(id: string): Promise<DraftActionResult>;
   retryDraft(id: string): Promise<DraftActionResult>;
   redraftDraft(id: string): Promise<RedraftResult>;
+  /**
+   * s8 Sc3 widened this to three verbs. `reject` is the destructive one —
+   * a rejected draft is terminal and there is no un-reject — and it selects
+   * the PENDING queue, where `recall` selects what is sitting in its undo
+   * grace. The daemon owns that mapping; this wrapper only carries the word.
+   */
   bulkDrafts(
-    action: 'approve' | 'recall',
+    action: 'approve' | 'recall' | 'reject',
     selector: BulkSelector,
   ): Promise<BulkResult>;
   batchReport(batchId: string): Promise<BatchReport>;

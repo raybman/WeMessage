@@ -1557,6 +1557,11 @@ describe('arch invariants (dependency-cruiser)', () => {
         // which is the second time this row has forced a tsconfig.vitest.json
         // into the same commit as the tests it typechecks.
         'packages/adapters/luna',
+        // s7 Sc10: and the OpenClaw package, the third. The stub had a
+        // vitest.config.ts from S5 and nothing to run; the moment it grew a
+        // test/ directory this row demanded the tsconfig.vitest.json and the
+        // typecheck block in the same commit.
+        'packages/adapters/openclaw',
         'packages/adapters/sol',
         'packages/cli',
         'packages/client',
@@ -2081,6 +2086,10 @@ describe('arch invariants (dependency-cruiser)', () => {
       expect(adapterReadmes().map((f) => `${f}: ${declaredTier(f)}`)).toEqual([
         'packages/adapters/hermes/README.md: conformance-only',
         'packages/adapters/luna/README.md: conformance-only',
+        // s7 Sc10. The OpenClaw shim's child contract is ours and is fully
+        // exercised; what has never happened is a byte exchanged with an
+        // OpenClaw. Same tier, same sentence, different reason (F-92).
+        'packages/adapters/openclaw/README.md: conformance-only',
       ]);
     });
 
@@ -2094,7 +2103,13 @@ describe('arch invariants (dependency-cruiser)', () => {
         'openclaw',
         'sol',
       ]);
-      expect(await declaredTiers()).toEqual(['luna: conformance-only']);
+      expect(await declaredTiers()).toEqual([
+        'luna: conformance-only',
+        // s7 Sc10: the shim declares against Sc 9's type rather than
+        // inventing a second vocabulary for the same admission, which is
+        // exactly what `verification.ts`'s header said it should do.
+        'openclaw: conformance-only',
+      ]);
     });
 
     it('(c) prose and value agree, per adapter', async () => {

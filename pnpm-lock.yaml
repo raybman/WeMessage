@@ -93,7 +93,15 @@ importers:
         specifier: workspace:*
         version: link:../../adapter-testkit
 
-  packages/adapters/openclaw: {}
+  packages/adapters/openclaw:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
+    devDependencies:
+      '@wemessage/adapter-testkit':
+        specifier: workspace:*
+        version: link:../../adapter-testkit
 
   packages/adapters/sol:
     dependencies:

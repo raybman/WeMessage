@@ -113,5 +113,11 @@ export function createUnusedChatDbReader(): ChatDbReader {
     readMutatedSince: boom,
     resolveChat: boom,
     findOutboundMessage: boom,
+    // s7 Sc1: added because the port grew a fifth method in s5 Sc6
+    // (`readChatTurns`, F-46) and this double silently did not. Nothing
+    // noticed for two slices because `packages/daemon` had no
+    // `tsconfig.vitest.json`, so its tests were transpiled and never
+    // typechecked — this omission IS the argument for that file existing.
+    readChatTurns: boom,
   };
 }

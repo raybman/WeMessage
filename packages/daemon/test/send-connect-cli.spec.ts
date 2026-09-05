@@ -54,7 +54,7 @@ const CLI_BIN = fileURLToPath(
   new URL('../../cli/dist/bin.js', import.meta.url),
 );
 /** Any ANSI escape (covers color incl. green): the no-green rule, strict. */
-const ANSI_RE = /\[/;
+const ANSI_RE = /\x1b\[/;
 
 const clock: Clock = {
   now: () => new Date().toISOString(),

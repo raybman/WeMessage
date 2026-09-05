@@ -124,7 +124,15 @@ async function boot(): Promise<Ctx> {
   const fixture = createChatDb(chatDbPath);
   cleanups.push(() => fixture.close());
   const handleId = fixture.addHandle('+15550001111');
-  const chatId = fixture.addChat('iMessage;-;+15550001111', handleId);
+  // s7 Sc1: `addChat` takes ONE options object. The two positional arguments
+  // here were silently discarded (`opts?.identifier` on a string is
+  // undefined), so this chat had a random identifier and no
+  // chat_handle_join row. Nothing asserted either, which is why it survived
+  // until the tests were typechecked; written now as it was always meant.
+  const chatId = fixture.addChat({
+    identifier: '+15550001111',
+    handleIds: [handleId],
+  });
 
   const watcher = fakeWatcher();
   const daemon = await startDaemon({

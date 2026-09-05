@@ -29,6 +29,7 @@ import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuditEvent, Draft, Message } from '@wemessage/core';
 import { verifyChain } from '@wemessage/core';
+import type { GatewayEventPayload } from '@wemessage/protocol';
 import { createInboundDispatch, toGatewayEvent } from '@wemessage/daemon';
 import {
   createEchoAdapter,
@@ -177,7 +178,7 @@ function inbound(guid: string, text: string, at: string): Message {
     handle: HANDLE,
     isFromMe: false,
     isGroup: false,
-    service: 'iMessage',
+    service: 'imessage',
     kind: 'text',
     text,
     attachments: [],
@@ -276,13 +277,19 @@ describe('s5 Scenario 14: the agent demo, end to end', () => {
 
     // The client bus watcher: a REAL authenticated /v1/events socket, which
     // is what `wemessage watch` is.
-    const busFrames: Array<{ event: string }> = [];
+    // s7 Sc1: the bus carries bare `GatewayEventPayload` frames (audit-sink
+    // `broadcast` JSON-stringifies the payload itself, no envelope), so the
+    // real union is the honest type here. Typing it as `{ event: string }`
+    // forced two casts further down, one of which (`draft.delta`) was an
+    // outright lie the compiler would have rejected had these tests ever been
+    // typechecked.
+    const busFrames: GatewayEventPayload[] = [];
     const bus = new WebSocket(`${h.baseUrl}/v1/events`, {
       headers: h.headers,
     });
     openSockets.push(bus);
     bus.on('message', (d) =>
-      busFrames.push(JSON.parse(String(d)) as { event: string }),
+      busFrames.push(JSON.parse(String(d)) as GatewayEventPayload),
     );
     await new Promise<void>((resolve) => bus.on('open', () => resolve()));
 
@@ -329,9 +336,7 @@ describe('s5 Scenario 14: the agent demo, end to end', () => {
     await waitUntil(
       () =>
         busFrames.some(
-          (f) =>
-            f.event === 'adapter.health' &&
-            (f as unknown as { status?: string }).status === 'connected',
+          (f) => f.event === 'adapter.health' && f.status === 'connected',
         ),
       'adapter.health on the client bus',
     );
@@ -367,10 +372,10 @@ describe('s5 Scenario 14: the agent demo, end to end', () => {
       () => busFrames.filter((f) => f.event === 'draft.delta').length === 3,
       'three deltas on the client bus',
     );
-    const deltas = busFrames.filter((f) => f.event === 'draft.delta') as Array<{
-      seq: number;
-      textDelta: string;
-    }>;
+    const deltas = busFrames.filter(
+      (f): f is Extract<GatewayEventPayload, { event: 'draft.delta' }> =>
+        f.event === 'draft.delta',
+    );
     expect(deltas.map((d) => d.seq)).toEqual([1, 2, 3]);
     const first = drafts(h)[0] as Draft;
     expect(deltas.map((d) => d.textDelta).join('')).toBe(first.body);

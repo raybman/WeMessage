@@ -203,7 +203,15 @@ export function evaluateDoctor(snapshot: DoctorSnapshot): {
 
 export interface RunDoctorDeps {
   probes: DoctorProbes;
-  store: Store;
+  /**
+   * s7 Sc1: narrowed from the full `Store` to the two settings methods
+   * `runDoctor` actually calls — the same idiom `sink` below and
+   * `readConnectionState` further down already use. It was declared wide
+   * only by habit, and the seven doctor.spec.ts rows that had been passing
+   * a two-method fake were type errors nobody could see until this slice
+   * turned typechecking on for packages/daemon.
+   */
+  store: Pick<Store, 'getSetting' | 'setSetting'>;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   clock: Clock;
 }

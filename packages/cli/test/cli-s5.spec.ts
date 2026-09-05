@@ -31,7 +31,27 @@ import { createWatchRenderer } from '../src/watch.js';
 /** Any ANSI escape (covers color incl. green): the no-green rule (C-9). */
 const ANSI_RE = /\x1b\[/;
 
-function adapter(over: Partial<AdapterPayload> = {}): AdapterPayload {
+/**
+ * s7 Sc1: `over` widens `lastSeenAt` to admit an explicit `undefined`.
+ * Under `exactOptionalPropertyTypes` an adapter that has never been seen
+ * carries NO `lastSeenAt` key rather than the key set to `undefined`, so a
+ * caller cannot write `lastSeenAt: undefined` against
+ * `Partial<AdapterPayload>` at all — yet "never seen" is precisely the row
+ * the table has to render. The conditional spread turns the caller's
+ * `undefined` into an omitted key, which is what the daemon's NULL column
+ * actually produces on the wire.
+ */
+function adapter(
+  over: Omit<Partial<AdapterPayload>, 'lastSeenAt'> & {
+    lastSeenAt?: string | undefined;
+  } = {},
+): AdapterPayload {
+  // `in`, not a destructuring default: a default fires on `undefined`, which
+  // would silently turn "never seen" back into the default timestamp. The
+  // question is whether the caller SUPPLIED the key, which is the same
+  // question `exactOptionalPropertyTypes` makes the compiler ask.
+  const { lastSeenAt, ...rest } = over;
+  const seen = 'lastSeenAt' in over ? lastSeenAt : '2026-09-03T00:00:00.000Z';
   return {
     id: 'echo-1',
     kind: 'echo',
@@ -39,9 +59,9 @@ function adapter(over: Partial<AdapterPayload> = {}): AdapterPayload {
     enabled: true,
     hasToken: true,
     health: 'connected',
-    lastSeenAt: '2026-09-03T00:00:00.000Z',
     config: {},
-    ...over,
+    ...(seen === undefined ? {} : { lastSeenAt: seen }),
+    ...rest,
   };
 }
 

@@ -309,7 +309,13 @@ export function createInboundDispatch(
       // daemon enforces single winner by taking the head.
       const winner = evaluateRules(rules, message, { hasDraftForMessage })[0];
       if (winner === undefined) return Promise.resolve();
-      const seenKey = `${winner.id} ${message.guid}`;
+      // NUL as the separator because it is the one byte that cannot occur
+      // in either half: a ULID is Crockford base32 and a chat.db GUID is
+      // printable ASCII, so `a\u0000b` can only ever mean one pairing.
+      // Written as the ESCAPE, not the byte (s7 Sc1, F-81): a raw 0x00 in
+      // the source made `file(1)` call this module `data` and made plain
+      // `grep` skip it. Same string at runtime, readable on disk.
+      const seenKey = `${winner.id}\u0000${message.guid}`;
       if (seenMatches.has(seenKey)) return Promise.resolve();
       seenMatches.add(seenKey);
       // §1.8: the log is the record, the event is the courtesy — append

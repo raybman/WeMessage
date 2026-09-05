@@ -223,7 +223,7 @@ export function createMockGateway(opts: MockGatewayOptions): MockGateway {
           chatGuid,
           handle,
           isGroup: false,
-          service: 'iMessage',
+          service: 'imessage',
           receivedAt: clock.now(),
           // `untrusted: true` is the whole posture: whatever is in `text` is
           // data. The injection probe rides in on this exact field.

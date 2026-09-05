@@ -206,7 +206,20 @@ function seedInbound(
       service: 'imessage',
       kind: row.text === null ? 'attachment-only' : 'text',
       text: row.text,
-      attachments: row.text === null ? ['IMG_0001.heic'] : [],
+      attachments:
+        row.text === null
+          ? [
+              // s7 Sc1: `AttachmentRef` is a record, not a filename. The bare
+              // string round-tripped through the store's JSON column without
+              // complaint, so nothing caught it until the tests were typechecked.
+              {
+                path: '/tmp/att/IMG_0001.heic',
+                mimeType: 'image/heic',
+                bytes: 12_345,
+                transferName: 'IMG_0001.heic',
+              },
+            ]
+          : [],
       sentAt: at,
       receivedAt: at,
     };

@@ -201,7 +201,11 @@ describe('adapter routes (s5 Scenario 4)', () => {
   it('answers 401 on every adapter route without the daemon bearer', async () => {
     const h = await boot();
     await create(h);
-    const routes: Array<[string, string]> = [
+    // s7 Sc1: the tuple was `[string, string]`, which made `inject` resolve
+    // to its chainable overload and quietly hand back something with no
+    // `statusCode` — the assertion below was reading a property TypeScript
+    // knew was absent. Naming the four methods restores the real overload.
+    const routes: Array<['GET' | 'POST' | 'PATCH' | 'DELETE', string]> = [
       ['GET', '/v1/adapters'],
       ['GET', '/v1/adapters/echo'],
       ['POST', '/v1/adapters'],

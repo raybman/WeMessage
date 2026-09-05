@@ -457,7 +457,10 @@ describe('GET/PATCH/DELETE /v1/schedules (§1.6, F-75)', () => {
       const res = await h.server.app.inject({
         method: route.method,
         url: route.url,
-        payload: route.method === 'GET' ? undefined : {},
+        // s7 Sc1, exactOptionalPropertyTypes: `payload: undefined` is not
+        // the same thing as no payload at all, and `InjectOptions` only
+        // accepts the latter. Conditional spread, not an undefined value.
+        ...(route.method === 'GET' ? {} : { payload: {} }),
       });
       expect(res.statusCode, `${route.method} ${route.url}`).toBe(401);
     }

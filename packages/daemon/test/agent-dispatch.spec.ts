@@ -89,7 +89,7 @@ function inbound(over: Partial<Message> = {}): Message {
     handle: HANDLE,
     isFromMe: false,
     isGroup: false,
-    service: 'iMessage',
+    service: 'imessage',
     kind: 'text',
     text: DIRTY,
     attachments: [],

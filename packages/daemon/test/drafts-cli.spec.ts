@@ -248,7 +248,7 @@ describe('wemessage drafts (§3.8)', () => {
     const ctx = await boot();
     // F-32: a zero grace window means the scheduler may dispatch on the very
     // next tick, so --wait terminates without the test faking time.
-    ctx.daemon.store.setSetting(SETTING_UNDO_GRACE_SECONDS, '0', clock.now());
+    ctx.daemon.store.setSetting(SETTING_UNDO_GRACE_SECONDS, '0');
     await newDraft(ctx, 'wait one');
     await newDraft(ctx, 'wait two');
 

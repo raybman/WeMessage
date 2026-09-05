@@ -119,7 +119,7 @@ function inbound(text: string | null): SanitizedInbound {
     chatGuid: CHAT,
     handle: HANDLE,
     isGroup: false,
-    service: 'iMessage',
+    service: 'imessage',
     receivedAt: TS,
     content: { untrusted: true, text, attachments: [] },
   };

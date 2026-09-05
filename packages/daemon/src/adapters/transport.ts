@@ -28,7 +28,6 @@
  * ping, so the tests contain no real sleeps and no wall-clock flakes; the
  * daemon process wires `tick()` to an interval at composition time.
  */
-import type { WebSocket } from 'ws';
 import type { Actor, Clock, Store } from '@wemessage/core';
 import {
   parseAgentFrame,
@@ -63,9 +62,29 @@ export interface AdapterTransportDeps {
   submit?: AgentSubmitHandler;
 }
 
+/**
+ * The four members of a `ws` socket this transport actually touches.
+ *
+ * Narrower than `WebSocket` on purpose (s7 Sc1): these four ARE the contract,
+ * and a seam that states its real contract is one a test double can satisfy
+ * honestly instead of being cast through `unknown`. A real `ws.WebSocket`
+ * satisfies it structurally, so `server.ts` and every production caller are
+ * unchanged. This is a daemon-local handle, not one of the seven locked core
+ * ports (§1.5), and no method is added to anything.
+ */
+export interface AgentSocket {
+  readonly readyState: number;
+  on(
+    event: 'message' | 'close' | 'error',
+    listener: (...args: unknown[]) => void,
+  ): unknown;
+  send(raw: string): void;
+  close(code?: number, reason?: string): void;
+}
+
 export interface AdapterTransportHandle {
   /** Take ownership of a freshly upgraded socket. */
-  accept(socket: WebSocket): void;
+  accept(socket: AgentSocket): void;
   /** Hello deadlines + liveness pings. Injected clock, no timers here. */
   tick(): void;
   /** Sc 6+: the dispatch side asks whether an adapter is reachable. */
@@ -84,7 +103,7 @@ export interface AdapterTransportHandle {
 }
 
 interface Session {
-  socket: WebSocket;
+  socket: AgentSocket;
   openedAtMs: number;
   adapterId: string | null;
   missedPongs: number;

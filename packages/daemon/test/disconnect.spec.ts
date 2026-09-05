@@ -16,7 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import type { AuditEvent, Clock, FsWatcher, Store } from '@wemessage/core';
+import type {
+  Actor,
+  AuditEvent,
+  Clock,
+  FsWatcher,
+  Store,
+} from '@wemessage/core';
 import { SETTING_CONNECTION_STATE } from '@wemessage/core';
 import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import { createClient, DaemonAuthError } from '@wemessage/client';
@@ -67,7 +73,7 @@ function fakeSink(): Pick<AuditSink, 'append' | 'broadcast'> & {
   return {
     appends,
     broadcasts,
-    append: vi.fn((event: AuditEvent, actor: unknown) => {
+    append: vi.fn((event: AuditEvent, actor: Actor) => {
       appends.push({ event, actor });
       return { seq: appends.length, hash: `h${appends.length}` };
     }),
@@ -94,7 +100,7 @@ describe('disconnectDaemon — ordering (§1.3.7)', () => {
     };
     const sink = fakeSink();
     const originalAppend = sink.append;
-    sink.append = vi.fn((event: AuditEvent, actor: unknown) => {
+    sink.append = vi.fn((event: AuditEvent, actor: Actor) => {
       if (event.type === 'gateway.disconnected') order.push('event');
       return originalAppend(event, actor);
     });

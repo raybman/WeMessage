@@ -1305,6 +1305,350 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
   });
 
+  describe('S7 extensions (s7-execution Scenario 1: ecosystem-era guards)', () => {
+    // Same local file-walk shape as the S5 and S6 blocks, for the same
+    // reason: six duplicated lines beat shared mutable state threaded
+    // through six slices of guards.
+    const S7_SKIP = new Set([
+      'node_modules',
+      'dist',
+      '.git',
+      'coverage',
+      '.turbo',
+    ]);
+    function s7ListFiles(root: string): string[] {
+      const out: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (S7_SKIP.has(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else out.push(full);
+        }
+      };
+      walk(root);
+      return out;
+    }
+    const s7Rel = (abs: string): string =>
+      abs.slice(repoRoot.length + 1).replace(/\\/g, '/');
+    const s7Read = (rel: string): string =>
+      readFileSync(join(repoRoot, rel), 'utf8');
+
+    // ---------------------------------------------------------------
+    // (a) the typecheck hole. Until S7 only core, protocol and store had a
+    // `tsconfig.vitest.json`, so vitest's reassuring "Type Errors: no
+    // errors" line was true of three packages and silent about the rest.
+    // It hid real errors (F-80) including a missing port method on a test
+    // double and fixtures sending a `service` value that is not a member
+    // of the `Service` union.
+    //
+    // The row is keyed off "has a test/ directory" rather than a
+    // hand-maintained list of packages: a list is the thing someone
+    // forgets to append to on the day they add the first test to a new
+    // package, and that day is exactly when the hole reopens.
+    // `packages/adapters/{hermes,luna,openclaw}` have no test/ directory
+    // at this commit (they are `export {}` stubs), so they are not
+    // required to carry the file YET; the S7 scenarios that give them
+    // tests are forced to add it by this row, at the moment it matters.
+    const TYPECHECK_ROOTS: readonly string[] = [
+      'packages',
+      'packages/adapters',
+      'apps',
+    ];
+    function packageDirsWithTests(): string[] {
+      const out: string[] = [];
+      for (const root of TYPECHECK_ROOTS) {
+        const abs = join(repoRoot, root);
+        if (!existsSync(abs)) continue;
+        for (const entry of readdirSync(abs, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          if (S7_SKIP.has(entry.name)) continue;
+          const dir = join(abs, entry.name);
+          if (!existsSync(join(dir, 'test'))) continue;
+          if (!existsSync(join(dir, 'vitest.config.ts'))) continue;
+          out.push(s7Rel(dir));
+        }
+      }
+      // `fixtures/` is a workspace package that sits outside packages/ and
+      // has its own test/ and vitest.config.ts; enumerated by hand because
+      // its parent is the repo root and walking that would enumerate every
+      // top-level directory in the tree.
+      if (
+        existsSync(join(repoRoot, 'fixtures/test')) &&
+        existsSync(join(repoRoot, 'fixtures/vitest.config.ts'))
+      ) {
+        out.push('fixtures');
+      }
+      return [...new Set(out)].sort();
+    }
+    function typecheckConfigOffenders(): string[] {
+      return packageDirsWithTests()
+        .filter((dir) => {
+          if (!existsSync(join(repoRoot, dir, 'tsconfig.vitest.json'))) {
+            return true;
+          }
+          const config = s7Read(`${dir}/vitest.config.ts`);
+          // Cheap and literal on purpose: the three things that have to be
+          // true (typecheck on, enabled, pointed at that file) are three
+          // substrings, and a regex over a config file that tried to be
+          // clever would be the first thing here to rot.
+          return !(
+            /typecheck:\s*\{/.test(config) &&
+            /enabled:\s*true/.test(config) &&
+            /tsconfig:\s*'\.\/tsconfig\.vitest\.json'/.test(config)
+          );
+        })
+        .sort();
+    }
+
+    // ---------------------------------------------------------------
+    // (b) raw control bytes in tracked source. `dispatch.ts` carried a raw
+    // 0x00 between two ids and `send-connect-cli.spec.ts` a raw 0x1B inside
+    // an ANSI-detecting regex. Both were sound in INTENT and accidental in
+    // ENCODING (F-81). The cost is not runtime — the strings are identical
+    // either way — it is that `file(1)` calls such a source file `data`,
+    // `grep` without `-a` skips it, and some diff and review tools refuse
+    // it outright. A guard over the tree is cheaper than remembering.
+    //
+    // Tab (0x09), LF (0x0A) and CR (0x0D) are exempt: they are whitespace,
+    // not payload. 0x0B and 0x0C (VT, FF) are NOT exempt — nothing in this
+    // tree has a reason to spell a vertical tab as a raw byte. Binary
+    // fixtures (fixtures/typedstream/*.bin) are out of scope by extension:
+    // the row says "text file", and a typedstream blob is not one.
+    const TEXT_EXTENSIONS = new Set([
+      '.ts',
+      '.tsx',
+      '.js',
+      '.mjs',
+      '.cjs',
+      '.json',
+      '.md',
+      '.yml',
+      '.yaml',
+      '.sql',
+      '.py',
+      '.sh',
+      '.toml',
+      '.txt',
+    ]);
+    // Naming control characters is this guard's entire job; the class below
+    // IS the denylist, and it is written with escapes precisely so that the
+    // file enforcing the rule also obeys it.
+    const RAW_CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
+    function isTextish(rel: string): boolean {
+      const dot = rel.lastIndexOf('.');
+      return dot === -1 ? false : TEXT_EXTENSIONS.has(rel.slice(dot));
+    }
+    function rawControlByteOffenders(): string[] {
+      const roots = ['packages', 'skills', 'test', 'fixtures', 'apps'];
+      return roots
+        .filter((r) => existsSync(join(repoRoot, r)))
+        .flatMap((r) => s7ListFiles(join(repoRoot, r)))
+        .map(s7Rel)
+        .filter(isTextish)
+        .flatMap((f) => {
+          // latin1 so every byte maps to exactly one code unit: reading a
+          // file with a stray 0x00 as utf8 is lossy in the direction that
+          // would hide the thing we are looking for.
+          const lines = readFileSync(join(repoRoot, f), 'latin1').split('\n');
+          return lines
+            .map((line, i) =>
+              RAW_CONTROL_RE.test(line) ? `${f}:${String(i + 1)}` : null,
+            )
+            .filter((x): x is string => x !== null);
+        })
+        .sort();
+    }
+
+    // ---------------------------------------------------------------
+    // (c) `Service` is `'imessage' | 'sms' | 'rcs' | 'unknown'` — lowercase,
+    // four members, closed (packages/core/src/domain/types.ts). chat.db's
+    // own `service` COLUMN uses Apple's casing (`iMessage`, `SMS`, `RCS`)
+    // and `mapService` in packages/ingest is the ONE seam that folds the
+    // second vocabulary into the first. Nine files under packages/ had
+    // been writing `service: 'iMessage'` into WIRE payloads since S5 —
+    // including the testkit's own request fixture, which is production
+    // code a stranger's adapter receives (§0.3 item 2, F-98).
+    //
+    // Nothing caught it, and it is worth writing down why: `parseFrame`
+    // validates the envelope and the TOP-LEVEL payload key set, never
+    // nested values, and the mock gateway's `emit(type, payload: unknown)`
+    // is untyped BY DESIGN so it can send malformed frames for the
+    // negative rows. So the type system was not asked and the wire guards
+    // could not answer. Deepening the schemas so the wire itself refuses
+    // it is Sc 2's job; making the literal unwritable is this one's.
+    //
+    // Matched by case-fold rather than by spelling `'iMessage'`: the bug
+    // that happened is one of twelve spellings, and a guard that only
+    // knows the spelling that happened is a guard that has been beaten
+    // once already.
+    //
+    // F-98: chat GUIDs keep Apple's casing (`iMessage;-;+1555…`) because
+    // that is what chat.db stores. This row matches the `service` KEY, not
+    // the string, so a GUID is invisible to it — do not "fix" one.
+    const SERVICE_MEMBERS = new Set(['imessage', 'sms', 'rcs', 'unknown']);
+    const SERVICE_LITERAL_RE = /['"]?\bservice['"]?\s*:\s*(['"])([A-Za-z]+)\1/g;
+    // The two ingest specs that feed Apple's RAW column vocabulary to the
+    // chat.db fixture builder — which is exactly what `mapService` exists
+    // to normalise and what those rows exist to prove. They are allowed to
+    // spell Apple's casing because they are the INPUT side of the seam.
+    // (fixtures/src/chatdb-builder.ts is the other input site and lives
+    // outside this row's `packages/` scope.)
+    const APPLE_SERVICE_CASING_ALLOWLIST: readonly string[] = [
+      'packages/ingest/test/normalize-edge.spec.ts',
+      'packages/ingest/test/resolve-chat.spec.ts',
+    ];
+    function misCasedServiceOffenders(): string[] {
+      return s7ListFiles(join(repoRoot, 'packages'))
+        .map(s7Rel)
+        .filter((f) => /\.(ts|tsx|js|mjs|cjs|json)$/.test(f))
+        .filter((f) => !APPLE_SERVICE_CASING_ALLOWLIST.includes(f))
+        .flatMap((f) =>
+          [...s7Read(f).matchAll(SERVICE_LITERAL_RE)]
+            .map((m) => m[2] ?? '')
+            .filter(
+              (v) =>
+                SERVICE_MEMBERS.has(v.toLowerCase()) && !SERVICE_MEMBERS.has(v),
+            )
+            .map((v) => `${f}: ${v}`),
+        )
+        .sort();
+    }
+
+    it('(a) every package with tests is typechecked by tsc, not just transpiled', () => {
+      // The enumeration itself is asserted: a package that quietly loses
+      // its test/ directory must not be able to make this row vacuous.
+      expect(packageDirsWithTests()).toEqual([
+        'fixtures',
+        'packages/adapter-testkit',
+        'packages/adapters/echo',
+        'packages/adapters/sol',
+        'packages/cli',
+        'packages/client',
+        'packages/core',
+        'packages/daemon',
+        'packages/ingest',
+        'packages/protocol',
+        'packages/sendkit',
+        'packages/store',
+      ]);
+      expect(typecheckConfigOffenders()).toEqual([]);
+
+      // The repo-level project is not a package, so the enumeration above
+      // structurally cannot see it — and it is the one that carries THIS
+      // file. An unchecked enforcer is the single gap the guard could not
+      // report on itself, so it is asserted separately.
+      expect(existsSync(join(repoRoot, 'tsconfig.vitest.json'))).toBe(true);
+      const rootVitest = s7Read('vitest.config.ts');
+      expect(rootVitest).toMatch(/typecheck:\s*\{/);
+      expect(rootVitest).toMatch(/tsconfig:\s*'\.\/tsconfig\.vitest\.json'/);
+    });
+
+    it('(b) no tracked text file carries a raw control byte', () => {
+      expect(rawControlByteOffenders()).toEqual([]);
+    });
+
+    it('(c) no file under packages/ spells a mis-cased Service member', () => {
+      // Anchored by path, per the S6 (a) precedent: an allowlist entry
+      // that does not exist is an allowlist entry nobody can review.
+      expect(
+        APPLE_SERVICE_CASING_ALLOWLIST.filter(
+          (f) => !existsSync(join(repoRoot, f)),
+        ),
+      ).toEqual([]);
+      expect(misCasedServiceOffenders()).toEqual([]);
+    });
+
+    it('(d) the port importer allowlist is still 15 and still adapter-free (INV-2)', () => {
+      // A pin row, not a RED row (S6 (f) precedent). S7 adds an SSE route,
+      // a settings route, a spawn transport and four adapter packages, and
+      // NONE of them may acquire a reference to `SendBackend` or
+      // `ChatDbReader`. S6 (c) pins the count; this pins the SHAPE, so an
+      // adapter that reaches for a port fails on a row that says why.
+      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+      const forbiddenPrefixes = [
+        'packages/adapters/',
+        'packages/adapter-testkit/',
+        'packages/daemon/src/routes/events-sse.ts',
+        'packages/daemon/src/routes/settings.ts',
+      ];
+      expect(
+        PORT_IMPORTER_ALLOWLIST.filter((f) =>
+          forbiddenPrefixes.some((p) => f.startsWith(p)),
+        ),
+      ).toEqual([]);
+    });
+
+    describe('proven teeth', () => {
+      const controlProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s7_control_probe__.ts',
+      );
+      const serviceProbe = join(
+        repoRoot,
+        'packages/core/src/__arch_s7_service_probe__.ts',
+      );
+      const typecheckProbeDir = join(repoRoot, 'packages/__s7_teeth__');
+
+      afterEach(() => {
+        rmSync(controlProbe, { force: true });
+        rmSync(serviceProbe, { force: true });
+        rmSync(typecheckProbeDir, { recursive: true, force: true });
+      });
+
+      it('planting a raw NUL in a source file trips the control-byte sweep (b)', () => {
+        // Emitted through String.fromCharCode so this spec file stays free
+        // of the byte it bans — the guard has to hold over itself.
+        writeFileSync(
+          controlProbe,
+          `export const sep = 'a${String.fromCharCode(0)}b';\n`,
+        );
+        expect(rawControlByteOffenders()).toContain(
+          'packages/core/src/__arch_s7_control_probe__.ts:1',
+        );
+      });
+
+      it('planting a raw ESC in a source file trips the control-byte sweep (b)', () => {
+        // The second encoding accident this row exists for, and the one
+        // that was actually in the tree twice: an ANSI-matching regex
+        // typed with a literal escape instead of `\x1b`.
+        writeFileSync(
+          controlProbe,
+          `export const ansi = /${String.fromCharCode(27)}\\[/;\n`,
+        );
+        expect(rawControlByteOffenders()).toContain(
+          'packages/core/src/__arch_s7_control_probe__.ts:1',
+        );
+      });
+
+      it('planting a mis-cased Service literal trips the taxonomy sweep (c)', () => {
+        writeFileSync(
+          serviceProbe,
+          "export const chat = { service: 'iMessage' };\n",
+        );
+        expect(misCasedServiceOffenders()).toContain(
+          'packages/core/src/__arch_s7_service_probe__.ts: iMessage',
+        );
+      });
+
+      it('a package that grows a test/ dir without a vitest tsconfig trips (a)', () => {
+        // The failure mode the row is really for: not "someone deletes a
+        // tsconfig" but "someone adds the first test to a package that
+        // never had one", which is how every one of these holes opened.
+        mkdirSync(join(typecheckProbeDir, 'test'), { recursive: true });
+        writeFileSync(
+          join(typecheckProbeDir, 'vitest.config.ts'),
+          "export default { test: { name: 'probe' } };\n",
+        );
+        writeFileSync(
+          join(typecheckProbeDir, 'test', 'probe.spec.ts'),
+          'export {};\n',
+        );
+        expect(typecheckConfigOffenders()).toContain('packages/__s7_teeth__');
+      });
+    });
+  });
+
   it('does not flag violations planted outside the cruised tree (sandbox sanity)', () => {
     // Sanity check that the teeth tests above are attributable to the probe
     // file, not ambient noise: an identical import in a temp dir outside the

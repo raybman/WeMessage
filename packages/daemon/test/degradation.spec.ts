@@ -42,7 +42,12 @@ import type {
   SendBackend,
   SendOutcome,
 } from '@wemessage/core';
-import { createChatDbReader, type IngestChatDbReader } from '@wemessage/ingest';
+import {
+  createChatDbReader,
+  type FdaProbeResult,
+  type IngestChatDbReader,
+} from '@wemessage/ingest';
+import type { AutomationProbeResult } from '@wemessage/sendkit';
 import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import {
   createAuditSink,
@@ -75,8 +80,13 @@ function fakeWatcher(): FakeWatcher {
   };
 }
 
-type FdaState = 'ok' | 'eperm' | 'enoent' | 'error';
-type AutomationState = 'ok' | 'denied' | 'error';
+// s7 Sc1: these were hand-copied unions and one of them had drifted —
+// `AutomationState` carried an 'error' member that `AutomationProbeResult`
+// has never had, so this fake could simulate a doctor state the real probe
+// cannot produce. Aliased to the real result types so the next drift is a
+// build error rather than a fiction the suite believes.
+type FdaState = FdaProbeResult;
+type AutomationState = AutomationProbeResult;
 interface ControllableProbes extends DoctorProbes {
   setFda(v: FdaState): void;
   setAutomation(v: AutomationState): void;
@@ -133,6 +143,8 @@ function controllableOpenReader(): ControllableOpenReader {
         readMutatedSince: boom,
         resolveChat: boom,
         findOutboundMessage: boom,
+        // s7 Sc1: the port grew this in s5 Sc6 (F-46); the fake did not.
+        readChatTurns: boom,
         close: () => undefined,
       };
     },

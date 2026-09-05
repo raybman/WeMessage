@@ -100,7 +100,7 @@ function inbound(text: string | null): SanitizedInbound {
     chatGuid: 'iMessage;-;+15551230000',
     handle: '+15551230000',
     isGroup: false,
-    service: 'iMessage',
+    service: 'imessage',
     receivedAt: TS,
     content: { untrusted: true, text, attachments: [] },
   };

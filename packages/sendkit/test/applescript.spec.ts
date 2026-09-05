@@ -72,7 +72,7 @@ describe('AppleScriptSendBackend (Scenario 2)', () => {
 
     expect(result).toEqual({ accepted: true });
     expect(calls).toHaveLength(1);
-    const [call] = calls;
+    const call = calls[0]!;
     expect(call.cmd).toBe('osascript');
 
     const sepIndex = call.args.indexOf('--');
@@ -153,7 +153,7 @@ describe('AppleScriptSendBackend (Scenario 2)', () => {
         detail: expect.stringContaining('-600'),
       });
       expect(calls).toHaveLength(1);
-      expect(calls[0].cmd).toBe('osascript');
+      expect(calls[0]!.cmd).toBe('osascript');
     });
 
     it('any other nonzero exit maps to backend-error with a sanitized, capped stderr tail', async () => {
@@ -244,7 +244,7 @@ describe('AppleScriptSendBackend (Scenario 2)', () => {
         stderr: '',
       }));
       expect(await isMessagesRunning(running)).toBe(true);
-      expect(calls[0].args).toContain(MESSAGES_RUNNING_SCRIPT);
+      expect(calls[0]!.args).toContain(MESSAGES_RUNNING_SCRIPT);
 
       const { exec: notRunningExec } = fakeExec(() => ({
         code: 0,

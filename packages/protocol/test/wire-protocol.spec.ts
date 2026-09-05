@@ -60,7 +60,7 @@ const sanitized = {
   chatGuid: CHAT,
   handle: '+15550000001',
   isGroup: false,
-  service: 'iMessage',
+  service: 'imessage',
   receivedAt: AT,
   content: { untrusted: true, text: 'hi', attachments: [] },
 };

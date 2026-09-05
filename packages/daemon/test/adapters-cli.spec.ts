@@ -23,6 +23,7 @@
  * collects.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import {
   mkdtempSync,
   readdirSync,
@@ -50,6 +51,51 @@ const CLI_BIN = fileURLToPath(
 /** Any ANSI escape (covers color incl. green): the no-green rule, strict. */
 const ANSI_RE = /\x1b\[/;
 const HANDLE = '+15551234567';
+
+/**
+ * The daemon's greeting frame as it appears on `watch`'s stdout. Matched as a
+ * substring of the NDJSON rather than parsed, because the fact we need
+ * ("the stream is live") is present the moment those bytes are, and a parse
+ * would have to wait for a complete line to be sure.
+ */
+const GREETING_RE = /"event"\s*:\s*"connection\.state"/;
+
+/** The narrowest thing a chunk source has to be for readiness to work. */
+interface ChunkSource {
+  on(event: 'data', listener: (chunk: Buffer) => void): unknown;
+}
+
+/**
+ * Resolve when the greeting arrives; REJECT when it does not. The rejection
+ * is the load-bearing half — see the readiness rows above.
+ */
+function greetingReady(source: ChunkSource, budgetMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let seen = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          `watch produced no connection.state greeting within ${String(budgetMs)}ms; ` +
+            `stdout so far: ${JSON.stringify(seen.slice(0, 300))}`,
+        ),
+      );
+    }, budgetMs);
+    timer.unref();
+    source.on('data', (chunk) => {
+      if (settled) return;
+      // Accumulated, not per-chunk: a pipe may split the greeting across two
+      // reads and a byte stream owes us nothing about where it breaks.
+      seen += chunk.toString();
+      if (!GREETING_RE.test(seen)) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
 
 const clock: Clock = {
   now: () => new Date().toISOString(),
@@ -415,6 +461,80 @@ describe('wemessage adapters — usage refusals (exit 2, §3.8)', () => {
 });
 
 /**
+ * s7 Scenario 1 (F-82) — readiness is the greeting, not a stopwatch.
+ *
+ * `watchUntil` below used to hand its caller a `ready` promise built from
+ * `setTimeout(resolve, 300)`: a guess that the CLI had opened its WS and the
+ * daemon had accepted it. Under load on a shared machine that guess loses,
+ * the caller provokes `adapter.health` into a socket nobody is reading yet,
+ * and the row fails with "timed out" pointing at the wrong thing entirely.
+ *
+ * The daemon already emits a `connection.state` greeting on every `/v1/events`
+ * accept (daemon.ts, §3.4) FOR EXACTLY THIS REASON — "proves the stream is
+ * live" — and `watch` prints it, in both modes, because human mode renders
+ * only `draft.delta` and `adapter.health` and leaves everything else as
+ * NDJSON. So the fact we want is already on the wire; the helper just has to
+ * read it instead of guessing.
+ *
+ * These three rows are the helper's own unit tests, driven by a stub chunk
+ * source rather than a real subprocess: the point is the readiness RULE, and
+ * proving a rule with a spawned CLI would prove the CLI.
+ */
+describe('watchUntil readiness signal (s7 Sc1, F-82)', () => {
+  const greetingChunk = Buffer.from(
+    `${JSON.stringify({
+      event: 'connection.state',
+      state: { killSwitch: false, globalMode: 'draft-only' },
+    })}\n`,
+  );
+
+  it('resolves on the first connection.state line', async () => {
+    const source = new EventEmitter();
+    const ready = greetingReady(source, 5_000);
+    setTimeout(() => source.emit('data', greetingChunk), 5);
+    await expect(ready).resolves.toBeUndefined();
+  });
+
+  it('rejects when no greeting ever arrives (it does not silently resolve)', async () => {
+    // The whole point: the old helper resolved after 300 ms whether or not
+    // anything was listening. A readiness signal that cannot fail is not a
+    // readiness signal, it is a sleep with better branding.
+    const source = new EventEmitter();
+    await expect(greetingReady(source, 25)).rejects.toThrow(/greeting/);
+  });
+
+  it('is not satisfied by some other event on the same stream', async () => {
+    // Negative row (C-3): `watch` prints every event as NDJSON, so "a line
+    // arrived" is not the same fact as "the stream is live". Only the
+    // greeting is the greeting.
+    const source = new EventEmitter();
+    const ready = greetingReady(source, 25);
+    source.emit(
+      'data',
+      Buffer.from(
+        `${JSON.stringify({
+          event: 'adapter.health',
+          adapterId: 'echo-1',
+          status: 'connected',
+        })}\n`,
+      ),
+    );
+    await expect(ready).rejects.toThrow(/greeting/);
+  });
+
+  it('tolerates a greeting split across two chunks', async () => {
+    // A pipe is a byte stream, not a line stream; the 300 ms timer never had
+    // to care and the replacement does.
+    const source = new EventEmitter();
+    const ready = greetingReady(source, 5_000);
+    const half = Math.floor(greetingChunk.length / 2);
+    source.emit('data', greetingChunk.subarray(0, half));
+    source.emit('data', greetingChunk.subarray(half));
+    await expect(ready).resolves.toBeUndefined();
+  });
+});
+
+/**
  * Watch: `adapter.health` is the one S5 event a subprocess can provoke end to
  * end without hand-building a draft correlation — a real adapter socket
  * completing `hello` broadcasts it. The `draft.delta` preview accumulator is
@@ -446,9 +566,14 @@ describe('wemessage watch — adapter.health (§3.8)', () => {
       transcripts.push({ args: ['watch', ...args], stdout, stderr });
       resolveDone(stdout);
     });
-    // The WS takes a moment to open; give it one tick of grace before the
-    // caller provokes the event it is waiting for.
-    const ready = new Promise<void>((resolve) => setTimeout(resolve, 300));
+    // s7 Sc1 (F-82): readiness is the daemon's `connection.state` greeting,
+    // not `setTimeout(resolve, 300)`. The old timer was a guess about
+    // scheduler latency on a machine we do not control, and it resolved
+    // whether or not the CLI had connected at all — so a lost race showed up
+    // as a mystery timeout in the row below rather than as "watch never
+    // connected", which is what had actually happened. The budget is
+    // generous and its expiry is a FAILURE with the stdout attached.
+    const ready = greetingReady(child.stdout, 10_000);
     return { ready, done, child };
   }
 

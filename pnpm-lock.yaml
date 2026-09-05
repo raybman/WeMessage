@@ -74,6 +74,10 @@ importers:
         version: link:../../protocol
 
   packages/adapters/hermes:
+    dependencies:
+      '@wemessage/protocol':
+        specifier: workspace:*
+        version: link:../../protocol
     devDependencies:
       '@wemessage/adapter-testkit':
         specifier: workspace:*

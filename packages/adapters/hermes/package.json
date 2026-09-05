@@ -16,6 +16,9 @@
     "test": "vitest run"
   },
   "private": true,
+  "dependencies": {
+    "@wemessage/protocol": "workspace:*"
+  },
   "devDependencies": {
     "@wemessage/adapter-testkit": "workspace:*"
   }

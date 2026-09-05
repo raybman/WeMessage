@@ -111,6 +111,17 @@ export interface FixtureDaemon {
   daemon: RunningDaemon;
   /** A client aimed at the SAME port the app is given, tee included. */
   client: WeMessageClient;
+  /**
+   * A client aimed at the daemon DIRECTLY, bypassing the tee.
+   *
+   * The other terminal: an operator (or an agent) acting on the same daemon
+   * while the app is watching. Its requests never appear in the tee's log,
+   * so a row can assert what the APP asked for without its own setup
+   * showing up in the answer — and it keeps working while the tee is
+   * severed, which is what makes an outage observable rather than merely
+   * simulated.
+   */
+  directClient: WeMessageClient;
   configDir: string;
   /** The port the app is pointed at: the tee, not the daemon. */
   port: number;
@@ -150,9 +161,14 @@ export async function bootFixtureDaemon(
     baseUrl: `http://127.0.0.1:${String(requests.port)}`,
     token,
   });
+  const directClient = createClient({
+    baseUrl: `http://127.0.0.1:${String(daemon.port)}`,
+    token,
+  });
   return {
     daemon,
     client,
+    directClient,
     configDir,
     port: requests.port,
     token,

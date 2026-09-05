@@ -40,6 +40,25 @@ export interface RequestLog {
   requests(): LoggedRequest[];
   /** Every HTTP status code seen downstream, in arrival order. */
   statuses(): number[];
+  /**
+   * Cut every live connection and refuse new ones, keeping the port BOUND.
+   *
+   * s8 Sc5's outage, and the reason it is done here rather than by stopping
+   * the daemon: the daemon has to keep running and keep recording, so that
+   * what happened during the outage is a real thing the app can go and
+   * discover afterwards. Stopping it would make the gap unobservable and
+   * turn the resync row into a test of an empty list.
+   *
+   * The port stays bound so the app's reconnect attempts are ACCEPTED and
+   * then dropped, which is the shape of a daemon that restarted underneath
+   * a running client. A refused connection is the other shape; both are
+   * transients and both retry.
+   */
+  sever(): void;
+  /** Let connections through again. */
+  restore(): void;
+  /** How many connections have been accepted since boot. */
+  connections(): number;
   close(): Promise<void>;
 }
 
@@ -115,7 +134,17 @@ export async function startRequestLog(targetPort: number): Promise<RequestLog> {
   const statuses: number[] = [];
   const sockets = new Set<Socket>();
 
+  let severed = false;
+  let connections = 0;
+
   const server: Server = createServer((client) => {
+    connections += 1;
+    if (severed) {
+      // Accepted and dropped: the app sees a connection that dies, which is
+      // exactly what a daemon restarting underneath it looks like.
+      client.destroy();
+      return;
+    }
     sockets.add(client);
     const upstream = scanUpstream((r) => requests.push(r));
     const downstream = scanDownstream((s) => statuses.push(s));
@@ -153,6 +182,15 @@ export async function startRequestLog(targetPort: number): Promise<RequestLog> {
     port: address.port,
     requests: () => [...requests],
     statuses: () => [...statuses],
+    connections: () => connections,
+    sever: () => {
+      severed = true;
+      for (const s of sockets) s.destroy();
+      sockets.clear();
+    },
+    restore: () => {
+      severed = false;
+    },
     close: async () => {
       for (const s of sockets) s.destroy();
       sockets.clear();

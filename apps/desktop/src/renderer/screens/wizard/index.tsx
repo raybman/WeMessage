@@ -45,6 +45,16 @@ function copyFor(reason: Down['reason']): Copy {
           'after the app read it. Restart wemessaged, then relaunch this app.',
         pathLabel: 'The file it is read from',
       };
+    case 'stream-refused':
+      return {
+        title: 'wemessaged refused the event subscription',
+        body:
+          'The daemon is running and accepted this app’s credential, but it ' +
+          'rejected the subscription this app opened to watch the queue. ' +
+          'That is a version mismatch rather than a fault: update whichever ' +
+          'of the two is older, then relaunch.',
+        pathLabel: 'Configuration lives beside',
+      };
     case 'unreachable':
       return {
         title: 'wemessaged is not answering',

@@ -77,7 +77,13 @@ export const CHANNELS = {
   openSystemSettings: 'wm:open-system-settings',
 
   // ---- main -> renderer (webContents.send) ------------------------------
-  /** One `GatewayEventPayload` plus its stream sequence number. */
+  /**
+   * One `StreamFrame` (s8 Sc5): a sequenced `GatewayEventPayload`, or the
+   * SNAPSHOT that opens a session and closes a gap. Both ride this one
+   * channel because the ordering between them is the thing the renderer
+   * reconciles against, and two channels would leave that ordering to
+   * whichever push the event loop reached first.
+   */
   event: 'wm:event',
   /** `{state: 'connected'|'reconnecting'|'down', lastSyncAt, attempt}`. */
   stream: 'wm:stream',

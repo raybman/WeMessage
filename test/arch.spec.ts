@@ -3861,3 +3861,431 @@ describe('S8 extensions (s8-execution Scenario 4: the Electron shell)', () => {
     });
   });
 });
+
+/**
+ * s8 Sc 5 — the event-stream store's static guards.
+ *
+ * Three of Scenario 5's claims are about things that are true of the tree
+ * rather than of a run, and a running test cannot make them:
+ *
+ *  - **The reconnect ladder owns no clock.** Every wait in the policy goes
+ *    through an injected `delay`, which is why the backoff table can be
+ *    asserted exactly rather than approximately. The plan asked for this as
+ *    "an arch grep row local to the spec", which is not possible: row 14
+ *    bans the literal `setTimeout(` everywhere under `apps/desktop/test`,
+ *    so a spec that greps for it fails row 14 the moment it is written.
+ *    The row therefore lives here, and it is repo-wide rather than
+ *    file-local: the desktop app has exactly ONE timer, at the composition
+ *    root that injects it.
+ *  - **The queue's reach is three channels wide, and none of them sends.**
+ *    INV-2's compile-time half is a `Pick`, which a future edit could widen
+ *    in one character. This row reads the store's code — with comments
+ *    stripped, because the store's own prose explains the ban and a naive
+ *    grep would convict the file for documenting itself — and enumerates
+ *    every bridge member it touches.
+ *  - **`/v1/events` closes exactly one way.** `verdictFor` claims totality:
+ *    on this route a close is a filter refusal and nothing else, so every
+ *    other failure is transient and retryable. That claim is about the
+ *    DAEMON's route, so it is asserted against the daemon's source. The
+ *    other three close codes belong to the adapter transport, which the
+ *    desktop never opens.
+ */
+describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () => {
+  const SC5_SKIP = new Set([
+    'node_modules',
+    'dist',
+    '.git',
+    'coverage',
+    '.turbo',
+  ]);
+  const sc5Read = (rel: string): string =>
+    readFileSync(join(repoRoot, rel), 'utf8');
+  /** Every code file under a repo-relative root, repo-relative and sorted. */
+  function sc5Files(root: string): string[] {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (SC5_SKIP.has(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name))
+          out.push(
+            full
+              .slice(repoRoot.length + 1)
+              .split('\\')
+              .join('/'),
+          );
+      }
+    };
+    const abs = join(repoRoot, root);
+    if (existsSync(abs)) walk(abs);
+    return out.sort();
+  }
+
+  const sc5Planted: string[] = [];
+  function sc5Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc5Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc5Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/__s8_sc5_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc5_probe__',
+      'test/__s8_sc5_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  /**
+   * Comments out, code in.
+   *
+   * Every row below is about what the code DOES, and all three of these
+   * files explain in prose exactly what they refuse to do. A text grep
+   * would therefore convict the most careful file in the tree, which is the
+   * self-trip this scenario was warned about. A scanner rather than a
+   * regex, because "strip comments" and "do not strip a comment marker
+   * inside a string" is not a thing a regex does.
+   */
+  function code(text: string): string {
+    let out = '';
+    let i = 0;
+    let mode: 'code' | 'line' | 'block' | 'sq' | 'dq' | 'tick' = 'code';
+    while (i < text.length) {
+      const ch = text[i] ?? '';
+      const two = text.slice(i, i + 2);
+      if (mode === 'code') {
+        if (two === '//') {
+          mode = 'line';
+          i += 2;
+          continue;
+        }
+        if (two === '/*') {
+          mode = 'block';
+          i += 2;
+          continue;
+        }
+        if (ch === "'") mode = 'sq';
+        else if (ch === '"') mode = 'dq';
+        else if (ch === '`') mode = 'tick';
+        out += ch;
+        i += 1;
+        continue;
+      }
+      if (mode === 'line') {
+        if (ch === '\n') {
+          mode = 'code';
+          out += ch;
+        }
+        i += 1;
+        continue;
+      }
+      if (mode === 'block') {
+        if (two === '*/') mode = 'code';
+        i += two === '*/' ? 2 : 1;
+        continue;
+      }
+      if (ch === '\\') {
+        out += text.slice(i, i + 2);
+        i += 2;
+        continue;
+      }
+      if (
+        (mode === 'sq' && ch === "'") ||
+        (mode === 'dq' && ch === '"') ||
+        (mode === 'tick' && ch === '`')
+      )
+        mode = 'code';
+      out += ch;
+      i += 1;
+    }
+    return out;
+  }
+
+  it('the comment stripper keeps strings and drops prose', () => {
+    // The stripper is the load-bearing part of two rows below, so it is
+    // tested directly rather than inferred from their greens.
+    expect(code('const a = 1; // setTimeout(x)\n').trim()).toBe('const a = 1;');
+    expect(code('/* setTimeout( */ const b = 2;').trim()).toBe('const b = 2;');
+    expect(code("const c = '// not a comment';").trim()).toBe(
+      "const c = '// not a comment';",
+    );
+  });
+
+  /* ── the reconnect ladder owns no clock ────────────────────────────── */
+
+  describe('the desktop app has exactly one timer, and it is injected', () => {
+    /**
+     * The composition root, and the only file allowed to name a real timer.
+     *
+     * `gateway.ts` is where main assembles the stream out of a transport, a
+     * clock and an RNG; the `delay` it passes in is the one place a promise
+     * is allowed to know how long a millisecond is. Every other file takes
+     * the wait as a parameter, which is why `event-stream.spec.ts` can
+     * assert the ladder is 500/1000/2000/4000/8000 with ±20% jitter and
+     * finish in no time at all.
+     */
+    const TIMER_SITE = 'apps/desktop/src/main/gateway.ts';
+    const TIMERS = /\b(setTimeout|setInterval)\(/g;
+
+    function timerOffenders(rels: readonly string[]): string[] {
+      const out: string[] = [];
+      for (const rel of rels) {
+        for (const m of code(sc5Read(rel)).matchAll(TIMERS))
+          out.push(`${rel}: ${m[1] ?? ''}(`);
+      }
+      return [...new Set(out)].sort();
+    }
+
+    it('no file under apps/desktop/src schedules its own wait, except the composition root', () => {
+      const files = sc5Files('apps/desktop/src');
+      expect(files.length).toBeGreaterThan(0);
+      expect(files).toContain('apps/desktop/src/main/event-stream.ts');
+      expect(timerOffenders(files.filter((f) => f !== TIMER_SITE))).toEqual([]);
+    });
+
+    it('the composition root injects a delay, and the policy consumes it', () => {
+      // Non-vacuity: the ban means something only because a real timer
+      // exists somewhere, and it is here, wired into the stream as data.
+      expect(timerOffenders([TIMER_SITE])).toEqual([
+        `${TIMER_SITE}: setTimeout(`,
+      ]);
+      const policy = code(sc5Read('apps/desktop/src/main/event-stream.ts'));
+      expect(policy).toContain('deps.delay(');
+      expect(policy).toContain('deps.random()');
+    });
+
+    it('PLANTED: a backoff that schedules itself is caught', () => {
+      const rel = sc5Plant(
+        'apps/desktop/src/__s8_sc5_probe__/backoff.ts',
+        [
+          'export const wait = (ms: number): Promise<void> =>',
+          '  new Promise<void>((resolve) => {',
+          '    setTimeout(resolve, ms);',
+          '  });',
+          '',
+        ].join('\n'),
+      );
+      expect(timerOffenders(sc5Files('apps/desktop/src'))).toContain(
+        `${rel}: setTimeout(`,
+      );
+    });
+
+    it('LEGITIMATE NEAR-MISS: awaiting an injected delay, and saying so, is not a timer', () => {
+      const rel = sc5Plant(
+        'apps/desktop/src/__s8_sc5_probe__/injected.ts',
+        [
+          '/** Waits through the injected clock, never through setTimeout(). */',
+          'export const wait = (deps: { delay(ms: number): Promise<void> }) =>',
+          '  deps.delay(500); // not setTimeout(resolve, 500)',
+          '',
+        ].join('\n'),
+      );
+      expect(
+        timerOffenders(sc5Files('apps/desktop/src')).filter((o) =>
+          o.startsWith(rel),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  /* ── the queue's reach is three channels, and none of them sends ───── */
+
+  describe('the optimistic store cannot reach a send (INV-2 in the renderer)', () => {
+    const STORE_ROOT = 'apps/desktop/src/renderer/store';
+    const WIRING = `${STORE_ROOT}/index.ts`;
+    /** The bridge members the queue is allowed to touch, sorted. */
+    const ALLOWED = ['approve', 'bulk', 'drafts', 'on'];
+
+    /** Every `bridge.<member>` the store's CODE names, sorted and unique. */
+    function bridgeReach(rels: readonly string[]): string[] {
+      const out: string[] = [];
+      for (const rel of rels)
+        for (const m of code(sc5Read(rel)).matchAll(
+          /\bbridge\s*\.\s*([A-Za-z_$][\w$]*)/g,
+        ))
+          out.push(m[1] ?? '');
+      return [...new Set(out)].sort();
+    }
+
+    /** Anything send-shaped the store's CODE names, as `file: token`. */
+    function sendOffenders(rels: readonly string[]): string[] {
+      const out: string[] = [];
+      for (const rel of rels)
+        for (const m of code(sc5Read(rel)).matchAll(/[A-Za-z_$][\w$]*/g))
+          if (/send/i.test(m[0])) out.push(`${rel}: ${m[0]}`);
+      return [...new Set(out)].sort();
+    }
+
+    it('the store reaches exactly three request channels and one subscription', () => {
+      const files = sc5Files(STORE_ROOT);
+      expect(files).toContain(WIRING);
+      expect(bridgeReach(files)).toEqual(ALLOWED);
+      // The runtime list and the type-level `Pick` are the same three names,
+      // so widening one without the other is a diff somebody has to write on
+      // purpose.
+      const declared = /STORE_CHANNELS = \[([^\]]*)\]/.exec(sc5Read(WIRING));
+      expect(declared).not.toBeNull();
+      expect(
+        [...(declared?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]),
+      ).toEqual(['approve', 'bulk', 'drafts']);
+      expect(sc5Read(WIRING)).toContain("'approve' | 'bulk' | 'drafts' | 'on'");
+    });
+
+    it('nothing in the store names a send, though the channel exists', () => {
+      // Non-vacuous twice over: there IS a send-capable channel on the
+      // bridge, and the store's prose talks about it constantly. The ban is
+      // on the code.
+      expect(sc5Read('apps/desktop/src/main/ipc-channels.ts')).toContain(
+        "sendTest: 'wm:wizard.send-test'",
+      );
+      expect(/send/i.test(sc5Read(WIRING))).toBe(true);
+      expect(sendOffenders(sc5Files(STORE_ROOT))).toEqual([]);
+    });
+
+    it('PLANTED: a store file that reaches for the send-test channel is caught', () => {
+      const rel = sc5Plant(
+        `${STORE_ROOT}/__s8_sc5_probe__/wire.ts`,
+        [
+          'export const go = (bridge: { sendTest: () => Promise<unknown> }) =>',
+          '  bridge.sendTest();',
+          '',
+        ].join('\n'),
+      );
+      const files = sc5Files(STORE_ROOT);
+      expect(bridgeReach(files)).toContain('sendTest');
+      expect(sendOffenders(files)).toContain(`${rel}: sendTest`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a comment about the send ban, over an approve, is clean', () => {
+      const rel = sc5Plant(
+        `${STORE_ROOT}/__s8_sc5_probe__/documented.ts`,
+        [
+          '/**',
+          ' * An optimistic approve is a display fact. The daemon decides',
+          ' * whether anything is sent; sendTest is not reachable from here.',
+          ' */',
+          'export const go = (bridge: { approve: (id: string) => Promise<unknown> }) =>',
+          "  bridge.approve('draft-1'); // never a send",
+          '',
+        ].join('\n'),
+      );
+      const files = sc5Files(STORE_ROOT);
+      expect(sendOffenders(files).filter((o) => o.startsWith(rel))).toEqual([]);
+      expect(bridgeReach(files)).toEqual(ALLOWED);
+    });
+  });
+
+  /* ── /v1/events closes exactly one way ─────────────────────────────── */
+
+  describe('the events route has one close code, which is what makes verdictFor total', () => {
+    const SERVER = 'packages/daemon/src/server.ts';
+    const POLICY = 'apps/desktop/src/main/event-stream.ts';
+    /** The one file allowed to name the other three close codes. */
+    const TRANSPORT = 'packages/daemon/src/adapters/transport.ts';
+
+    /**
+     * The close codes named inside the `/v1/events` handler.
+     *
+     * A slice, not a parse: from the route registration to the line that
+     * closes it, which in this file is the first `});` at handler indent.
+     */
+    function closeCodesInEventsRoute(text: string): string[] {
+      const body = code(text);
+      const start = body.indexOf("app.get('/v1/events',");
+      if (start < 0) return ['<route not found>'];
+      const end = body.indexOf('\n  });', start);
+      const slice = body.slice(start, end < 0 ? body.length : end);
+      return [
+        ...new Set(
+          [...slice.matchAll(/CLOSE_CODES\.([A-Za-z_$][\w$]*)/g)].map(
+            (m) => m[1] ?? '',
+          ),
+        ),
+      ].sort();
+    }
+
+    it('the websocket route refuses with the protocol code and nothing else', () => {
+      expect(closeCodesInEventsRoute(sc5Read(SERVER))).toEqual(['protocol']);
+    });
+
+    it('the other three close codes belong to the adapter transport the desktop never opens', () => {
+      const offenders = [...sc5Files('packages'), ...sc5Files('apps')]
+        .filter((f) => /^(packages|apps)\/[^/]+\/src\//.test(f))
+        .filter((f) => f !== TRANSPORT)
+        .filter((f) => f !== 'packages/protocol/src/index.ts')
+        .filter((f) =>
+          /CLOSE_CODES\.(auth|timeout|version)\b/.test(code(sc5Read(f))),
+        );
+      expect(offenders).toEqual([]);
+      // Non-vacuity: the transport really does send all three.
+      const transport = code(sc5Read(TRANSPORT));
+      for (const name of ['auth', 'timeout', 'version'])
+        expect(transport).toContain(`CLOSE_CODES.${name}.code`);
+    });
+
+    it('the desktop maps that one close, plus the upgrade refusal, and retries everything else', () => {
+      // `verdictFor` is total by construction — two terminal branches and a
+      // retry — and the two branches are exactly the two refusals this
+      // route can produce: 401 at the upgrade, 4400 after it.
+      const policy = code(sc5Read(POLICY));
+      expect(policy).toContain('DaemonAuthError');
+      expect(policy).toContain('DaemonEventFilterError');
+      expect(policy).toContain("reason: 'token-rejected'");
+      expect(policy).toContain("reason: 'stream-refused'");
+      expect(policy).toContain('return { retry: true }');
+    });
+
+    it('PLANTED: a second close code on the events route is caught', () => {
+      const rel = sc5Plant(
+        'test/__s8_sc5_probe__/events-route.ts',
+        [
+          'declare const app: {',
+          '  get(p: string, o: object, h: (s: Sock, r: object) => void): void;',
+          '};',
+          'declare const CLOSE_CODES: Record<string, { code: number }>;',
+          'interface Sock {',
+          '  close(code: number): void;',
+          '}',
+          "app.get('/v1/events', { websocket: true }, (socket) => {",
+          '  socket.close(CLOSE_CODES.auth.code);',
+          '  socket.close(CLOSE_CODES.protocol.code);',
+          '});',
+          '',
+        ].join('\n'),
+      );
+      expect(closeCodesInEventsRoute(sc5Read(rel))).toEqual([
+        'auth',
+        'protocol',
+      ]);
+    });
+
+    it('LEGITIMATE NEAR-MISS: two refusal paths with the same code are still one code', () => {
+      const rel = sc5Plant(
+        'test/__s8_sc5_probe__/two-refusals.ts',
+        [
+          'declare const app: {',
+          '  get(p: string, o: object, h: (s: Sock, r: object) => void): void;',
+          '};',
+          'declare const CLOSE_CODES: Record<string, { code: number }>;',
+          'declare const bad: boolean;',
+          'interface Sock {',
+          '  close(code: number): void;',
+          '}',
+          "app.get('/v1/events', { websocket: true }, (socket) => {",
+          '  // A rotated token is refused at the upgrade, never here, so',
+          '  // CLOSE_CODES.auth.code is not this handler to send.',
+          '  if (bad) socket.close(CLOSE_CODES.protocol.code);',
+          '  else socket.close(CLOSE_CODES.protocol.code);',
+          '});',
+          '',
+        ].join('\n'),
+      );
+      expect(closeCodesInEventsRoute(sc5Read(rel))).toEqual(['protocol']);
+    });
+  });
+});

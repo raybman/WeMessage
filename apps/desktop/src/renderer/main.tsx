@@ -23,6 +23,7 @@ import './app.css';
 import { StateStrip } from './components/StateStrip.js';
 import { DEFAULT_SCREEN } from './router.js';
 import WizardScreen from './screens/wizard/index.js';
+import { bindStore, type StoreBinding } from './store/index.js';
 import { applyTheme, asTheme } from './theme/theme.js';
 import type { StreamPayload } from '../main/gateway.js';
 
@@ -68,6 +69,53 @@ function Shell({ stream: current }: { stream: StreamPayload }): VNode {
   );
 }
 
+/**
+ * The queue, bound to the bridge.
+ *
+ * Sc5 gives the renderer a model; Sc6 gives it a screen. Until then the
+ * store is mounted, reconciling, and observable — as `<html>` attributes for
+ * the e2e's readiness waits, and as one handle for the rows that need to ask
+ * a question no attribute should encode. Mounting it now rather than with
+ * the queue view is deliberate: the reconnect and resync behaviour is what
+ * this scenario is about, and it has to be provable before anything renders
+ * on top of it.
+ */
+const binding: StoreBinding = bindStore(window.wm, {
+  now: () => new Date().toISOString(),
+});
+
+/**
+ * The queue handle the e2e drives.
+ *
+ * Not on `window.wm`: that object's key set is asserted against the channel
+ * registry, and neither a debugging affordance nor a test hook has any
+ * business widening the bridge. What is exposed here is the binding, whose
+ * whole reachable surface is the three channels in `STORE_CHANNELS` — so a
+ * renderer holding this handle can approve a draft and can no more send a
+ * message than the keymap Sc6 will put on top of it.
+ */
+declare global {
+  interface Window {
+    __wmQueue: StoreBinding;
+  }
+}
+window.__wmQueue = binding;
+
+binding.store.subscribe(() => {
+  paintStore();
+});
+
+function paintStore(): void {
+  const html = document.documentElement;
+  const store = binding.store;
+  html.dataset['storeRows'] = String(store.rows().length);
+  html.dataset['storeMissed'] = String(store.missed());
+  html.dataset['storeStale'] = store.needsSnapshot() ? 'yes' : 'no';
+  const at = store.syncedAt();
+  if (at === undefined) delete html.dataset['storeSyncedAt'];
+  else html.dataset['storeSyncedAt'] = at;
+}
+
 function paint(): void {
   const html = document.documentElement;
   html.dataset['conn'] = stream.state;
@@ -94,3 +142,4 @@ window.wm.on('theme', (payload: unknown) => {
 });
 
 paint();
+paintStore();

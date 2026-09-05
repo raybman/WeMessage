@@ -120,5 +120,10 @@ export const DOWN_REASONS = [
   'no-token',
   'token-rejected',
   'unreachable',
+  // s8 Sc5: the daemon is up, answering, and REFUSED the event subscription
+  // itself. Distinct from `unreachable` because it is not a transient and
+  // will not fix itself: retrying a filter the daemon rejects is a loop, and
+  // the operator is the only one who can end it.
+  'stream-refused',
 ] as const;
 export type DownReason = (typeof DOWN_REASONS)[number];

@@ -26,7 +26,8 @@
 import { ipcMain, shell } from 'electron';
 import {
   createClient,
-  DaemonAuthError,
+  DaemonConflictError,
+  DaemonGateDeniedError,
   type BulkSelector,
   type ContactMode,
   type DisconnectInput,
@@ -38,6 +39,12 @@ import {
   type WeMessageClient,
 } from '@wemessage/client';
 import type { Bootstrap } from './auth.js';
+import {
+  createEventStream,
+  createResync,
+  type EventStream,
+  type StreamStatus,
+} from './event-stream.js';
 import { CHANNELS, REQUEST_KEYS, type RequestKey } from './ipc-channels.js';
 import {
   isSystemSettingsPane,
@@ -117,8 +124,18 @@ export interface GatewayOptions {
 export function createGateway(options: GatewayOptions): Gateway {
   const { bootstrap } = options;
   let client: WeMessageClient | null = null;
-  let subscription: { close(): void } | null = null;
+  let events: EventStream | null = null;
   let stopped = false;
+  /**
+   * Whether this process has ever had a working subscription.
+   *
+   * Before the first one, a failed attempt is a SETUP problem and the
+   * operator is owed the card that says what is wrong. After it, the same
+   * failure is an interruption and the operator is owed the strip that says
+   * we are getting it back. Same event, different sentence, and the
+   * difference is entirely about what the operator can usefully do next.
+   */
+  let everConnected = false;
   let stream: StreamPayload = {
     state: 'down',
     reason: 'no-token',
@@ -150,6 +167,37 @@ export function createGateway(options: GatewayOptions): Gateway {
     return client;
   }
 
+  /**
+   * A draft action's two EXPECTED refusals, as data rather than as a throw.
+   *
+   * 409 ("somebody else moved it") and 403 ("the gate said no") are not
+   * faults, they are answers, and they are the two things an optimistic
+   * renderer has to be able to tell apart in order to put a card back where
+   * it belongs. An `Error` crossing IPC arrives as a string with a mangled
+   * message, so a renderer forced to parse it would be reconstructing the
+   * daemon's vocabulary from prose. Anything else still throws: a rejected
+   * promise on the bridge is what "we do not know" should look like.
+   */
+  async function withRefusals(work: Promise<unknown>): Promise<unknown> {
+    try {
+      return await work;
+    } catch (error) {
+      if (error instanceof DaemonConflictError)
+        return {
+          refused: 'conflict',
+          ...(error.detail.from === undefined
+            ? {}
+            : { from: error.detail.from }),
+          ...(error.detail.requested === undefined
+            ? {}
+            : { requested: error.detail.requested }),
+        };
+      if (error instanceof DaemonGateDeniedError)
+        return { refused: 'denied', reason: error.reason };
+      throw error;
+    }
+  }
+
   /* ── the handler table ─────────────────────────────────────────────── */
 
   const handlers: Record<RequestKey, Handler> = {
@@ -157,11 +205,13 @@ export function createGateway(options: GatewayOptions): Gateway {
     doctor: () => requireClient().doctor(),
     drafts: (a) => requireClient().listDrafts(maybeRecord(a, 0)),
     draft: (a) => requireClient().getDraft(str(a, 0)),
-    approve: (a) => requireClient().approveDraft(str(a, 0), maybeRecord(a, 1)),
-    reject: (a) => requireClient().rejectDraft(str(a, 0), maybeRecord(a, 1)),
-    recall: (a) => requireClient().recallDraft(str(a, 0)),
-    retry: (a) => requireClient().retryDraft(str(a, 0)),
-    redraft: (a) => requireClient().redraftDraft(str(a, 0)),
+    approve: (a) =>
+      withRefusals(requireClient().approveDraft(str(a, 0), maybeRecord(a, 1))),
+    reject: (a) =>
+      withRefusals(requireClient().rejectDraft(str(a, 0), maybeRecord(a, 1))),
+    recall: (a) => withRefusals(requireClient().recallDraft(str(a, 0))),
+    retry: (a) => withRefusals(requireClient().retryDraft(str(a, 0))),
+    redraft: (a) => withRefusals(requireClient().redraftDraft(str(a, 0))),
     bulk: (a) =>
       requireClient().bulkDrafts(
         str(a, 0) as 'approve' | 'recall' | 'reject',
@@ -275,6 +325,47 @@ export function createGateway(options: GatewayOptions): Gateway {
       );
   }
 
+  /**
+   * Turn the stream's verdict into the sentence the operator reads.
+   *
+   * The stream reports about the CONNECTION; this decides what that means
+   * for a person looking at a window. The one piece of judgement is the
+   * first-attempt case: a transient failure before we have ever been
+   * connected is almost always "the daemon is not running", which is a
+   * setup card and not a spinner, and a spinner would be the app declining
+   * to say the one useful thing it knows.
+   */
+  async function onStatus(
+    next: StreamStatus,
+    live: WeMessageClient,
+  ): Promise<void> {
+    if (next.state === 'down') {
+      down(next.reason);
+      return;
+    }
+    if (next.state === 'reconnecting') {
+      if (everConnected) push({ state: 'reconnecting', attempt: next.attempt });
+      else down('unreachable');
+      return;
+    }
+    everConnected = true;
+    // The arming badge is a FETCH, never an assumption: §1.7 arming can
+    // expire on a timer nobody pressed, so a reconnect that carried the old
+    // badge forward would be showing a permission that has since lapsed.
+    try {
+      const status = await live.status();
+      push({
+        state: 'connected',
+        armed: status.armed === null ? null : { reason: status.armed.reason },
+      });
+    } catch {
+      // The socket is open and the status route is not answering. Say
+      // connected, claim no arming: the stream is the better witness to the
+      // connection, and the badge is the thing we genuinely do not know.
+      push({ state: 'connected', armed: null });
+    }
+  }
+
   async function connect(): Promise<void> {
     if (stopped) return;
     // No credential means no request. An app that probes anyway teaches its
@@ -288,27 +379,35 @@ export function createGateway(options: GatewayOptions): Gateway {
       baseUrl: bootstrap.baseUrl,
       token: bootstrap.token,
     });
-    try {
-      subscription = await live.events((event) => {
-        pushToWindows(CHANNELS.event, event);
-      });
-    } catch (error) {
-      // A rejected credential is TERMINAL. Retrying it would be a loop that
-      // fills the daemon's audit log with failures the operator cannot fix
-      // from inside the app, which is why the card asks them to look at the
-      // token file instead.
-      down(error instanceof DaemonAuthError ? 'token-rejected' : 'unreachable');
-      return;
-    }
+    // The client is usable the moment it exists: constructing it performs no
+    // request, and a renderer whose refetch is refused with
+    // `daemon-unavailable` while a socket is reconnecting would be told the
+    // wrong thing about a daemon that is merely a second away.
     client = live;
-    // §1.8 order: the connection is a fact before it is a claim. Status is
-    // read only after the stream is open, so a rejected token produces
-    // exactly one request on the wire and the e2e can count it.
-    const status = await live.status();
-    push({
-      state: 'connected',
-      armed: status.armed === null ? null : { reason: status.armed.reason },
+    events = createEventStream({
+      connect: (onEvent) => live.events(onEvent),
+      resync: createResync(live),
+      // §1.8: the frame is appended to the renderer's own record before
+      // anything is claimed about it. `emit` is the sink; `status` is the
+      // claim; the stream calls them in that order and never the reverse.
+      emit: (frame) => {
+        pushToWindows(CHANNELS.event, frame);
+      },
+      status: (next) => {
+        void onStatus(next, live);
+      },
+      // The one real timer in the reconnect path, and the reason the policy
+      // itself is injectable: the ladder is unit-tested with a fake clock,
+      // so nothing in the suite has to wait eight seconds to find out that
+      // eight seconds is what it would have waited.
+      delay: (ms) =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, ms);
+        }),
+      random: Math.random,
+      now: () => new Date().toISOString(),
     });
+    await events.start();
   }
 
   return {
@@ -322,8 +421,8 @@ export function createGateway(options: GatewayOptions): Gateway {
     },
     async stop(): Promise<void> {
       stopped = true;
-      subscription?.close();
-      subscription = null;
+      events?.close();
+      events = null;
       client = null;
       for (const key of REQUEST_KEYS) ipcMain.removeHandler(CHANNELS[key]);
       await Promise.resolve();

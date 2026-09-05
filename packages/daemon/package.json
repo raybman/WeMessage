@@ -28,6 +28,9 @@
   },
   "devDependencies": {
     "@wemessage/adapter-echo": "workspace:*",
+    "@wemessage/adapter-hermes": "workspace:*",
+    "@wemessage/adapter-luna": "workspace:*",
+    "@wemessage/adapter-openclaw": "workspace:*",
     "@wemessage/client": "workspace:*",
     "@wemessage/fixtures": "workspace:*",
     "ws": "^8.0.0",

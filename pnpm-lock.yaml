@@ -176,6 +176,15 @@ importers:
       '@wemessage/adapter-echo':
         specifier: workspace:*
         version: link:../adapters/echo
+      '@wemessage/adapter-hermes':
+        specifier: workspace:*
+        version: link:../adapters/hermes
+      '@wemessage/adapter-luna':
+        specifier: workspace:*
+        version: link:../adapters/luna
+      '@wemessage/adapter-openclaw':
+        specifier: workspace:*
+        version: link:../adapters/openclaw
       '@wemessage/client':
         specifier: workspace:*
         version: link:../client

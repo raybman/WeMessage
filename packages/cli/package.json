@@ -22,5 +22,8 @@
     "@wemessage/client": "workspace:*",
     "@wemessage/protocol": "workspace:*",
     "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@wemessage/adapter-testkit": "workspace:*"
   }
 }

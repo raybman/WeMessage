@@ -48,6 +48,7 @@
  * processes here are `node` running `examples/stdio-child.mjs`.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { parseSkillBlocks } from '../../../cli/test/helpers/transcript-lint.js';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -1066,18 +1067,21 @@ describe('s7 Sc10: the verification tier is a value, and the README prints it', 
 describe('s7 Sc10: the OpenClaw skill (skill-first, linted by Sc 11)', () => {
   const BLOCKS = ['allowed', 'approval', 'never'] as const;
 
-  function block(name: (typeof BLOCKS)[number]): string[] {
-    const skill = readFileSync(SKILL_PATH, 'utf8');
-    const marker = `<!-- wemessage:${name} -->`;
-    const at = skill.indexOf(marker);
-    if (at === -1) return [];
-    const fenceOpen = skill.indexOf('```', at);
-    const fenceClose = skill.indexOf('```', fenceOpen + 3);
-    return skill
-      .slice(fenceOpen + 3, fenceClose)
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l !== '' && !l.startsWith('#'));
+  /**
+   * REWIRED BY s7 Sc 11. This used to be a local parser for the §1.7 block
+   * format. Sc 11 needs the same parse in three more places, so the
+   * implementation moved to `packages/cli/test/helpers/transcript-lint.ts`
+   * and this delegates to it. Two parsers for one file format is one parser
+   * too many, and these rows are exactly the rows that would stop noticing
+   * if the two drifted.
+   *
+   * The import is test-to-test. `adapters-thin-clients` fences
+   * `^packages/adapters/[^/]+/src`, so an adapter's PRODUCTION source still
+   * cannot reach a sibling package; a spec reading a shared parser is not
+   * that coupling and never was.
+   */
+  function block(name: (typeof BLOCKS)[number]): readonly string[] {
+    return parseSkillBlocks(readFileSync(SKILL_PATH, 'utf8'))[name];
   }
 
   it('row 6a: the file exists and carries the three labelled blocks from §1.7', () => {
@@ -1131,16 +1135,29 @@ describe('s7 Sc10: the OpenClaw skill (skill-first, linted by Sc 11)', () => {
       expect(never, pattern).toContain(pattern);
   });
 
-  it('row 6f: TRIPWIRE — skills/claude/SKILL.md is Sc 11`s, and does not exist yet', () => {
-    // The plan's row 6 also requires this file's allowed verbs to be a
-    // SUBSET of `skills/claude/SKILL.md`'s. That file is Scenario 11's GREEN
-    // and is not in the tree, so the subset check cannot be written here
-    // without inventing the thing it would check against.
+  it('row 6f: every verb this skill allows, the flagship skill allows too', () => {
+    // WAS A TRIPWIRE. Until s7 Sc 11 this row asserted that
+    // `skills/claude/SKILL.md` did not exist, deliberately, so that creating
+    // it would fail this file and force the real assertion into the same
+    // commit. Sc 11 created it, this row fired, and this is the assertion it
+    // was holding a place for.
     //
-    // Rather than skip it, this row FAILS the day claude's SKILL.md lands,
-    // which forces Sc 11 to wire the real subset assertion in the same
-    // commit that makes it possible. Deleting this row instead of wiring the
-    // check is a deliberate act with a reviewer's name on it.
-    expect(existsSync(join(REPO_ROOT, 'skills/claude/SKILL.md'))).toBe(false);
+    // The direction is the one that matters. OpenClaw is a smaller surface
+    // than Claude, so it may permit LESS and must never permit more: a verb
+    // reachable from this host and not from the flagship is a capability
+    // nobody wrote a policy for. `never` runs the other way — every refusal
+    // the flagship makes, this host makes too — and is checked in Sc 11,
+    // where both documents are already in scope.
+    const claudePath = join(REPO_ROOT, 'skills/claude/SKILL.md');
+    expect(existsSync(claudePath)).toBe(true);
+    const claude = parseSkillBlocks(readFileSync(claudePath, 'utf8'));
+    // Guard the guard: a subset check against an empty superset passes
+    // vacuously, and an unparsed document is exactly how that happens.
+    expect(claude.allowed.length).toBeGreaterThan(8);
+    expect(block('allowed').length).toBeGreaterThan(0);
+    for (const verb of block('allowed'))
+      expect(claude.allowed, verb).toContain(verb);
+    for (const verb of block('approval'))
+      expect(claude.approval, verb).toContain(verb);
   });
 });

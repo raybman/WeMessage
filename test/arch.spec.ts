@@ -25,6 +25,10 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PORT_IMPORTER_ALLOWLIST } from '../packages/daemon/test/transport-surface.snapshot.js';
+// s7 Sc11: the public-repo predicates now have ONE home, shared with the
+// transcript linter. Precedent for a root spec importing a package's test
+// helper is the line above, which has done exactly this since s5.
+import { publicStringOffenders } from '../packages/cli/test/helpers/transcript-lint.js';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
@@ -56,22 +60,53 @@ function trackedTextFiles(): string[] {
 }
 
 /**
- * Brand strings and non-fictional phone numbers in anything git tracks.
+ * Every top-level directory git tracks anything in.
+ *
+ * Added by s7 Sc11 so that the tree-wide sweeps stop keying off hand-written
+ * root lists. `skills/` is the cautionary tale: Sc 10 created it and had to
+ * REMEMBER to add it to the control-byte sweep's `roots`, and nothing would
+ * have failed if it had not. A guard that has to be told about a directory
+ * is a guard with a hole the size of the next directory somebody adds, and
+ * Sc 1 settled that guards key off structure.
+ */
+function topLevelTrackedDirs(): string[] {
+  const dirs = new Set<string>();
+  for (const f of execFileSync('git', ['ls-files'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  }).split('\n')) {
+    const slash = f.indexOf('/');
+    if (slash > 0) dirs.add(f.slice(0, slash));
+  }
+  return [...dirs].sort();
+}
+
+/**
+ * Everything in anything git tracks that a PUBLIC repository must not carry.
  *
  * Hoisted to module scope by s7 Sc7 so that the row asserting it is clean
  * (S3 (d)) and the teeth proving it BITES on the file types Sc7 introduces
  * can be the same code. A sweep and its teeth that share no implementation
  * are two guards, and only one of them is the one that runs on CI.
+ *
+ * WIDENED AND MOVED BY s7 Sc11. The predicates now live in
+ * `packages/cli/test/helpers/transcript-lint.ts`, because Sc 11 needs the
+ * identical question asked of a live CLI transcript and of every file under
+ * `skills/`, and a second copy of "what must a public repo never say" is
+ * the copy that goes stale. This function keeps the FILE WALK — which is
+ * the half Sc 7's teeth actually exercise — and the offender strings are
+ * byte-for-byte what they were, so those teeth did not have to change.
+ *
+ * Two arms are new: an adapter token (asked of Sc 6's `redactTokens`, not
+ * restated) and an absolute home-directory path. Every tracked file passed
+ * both at the commit that added them, so neither is grandfathered.
  */
 function publicRepoOffenders(): string[] {
-  const bannedBrand = /flowstay|flowverse|flowindustries|vivaepic/i;
-  const phoneRe = /\+1\d{10}/g;
   const offenders: string[] = [];
   for (const f of trackedTextFiles()) {
     const content = readFileSync(join(repoRoot, f), 'utf8');
-    if (bannedBrand.test(content)) offenders.push(`${f}: brand string`);
-    for (const n of content.match(phoneRe) ?? [])
-      if (!n.startsWith('+1555')) offenders.push(`${f}: ${n}`);
+    for (const o of publicStringOffenders(content))
+      offenders.push(`${f}: ${o.detail}`);
   }
   return offenders.sort();
 }
@@ -1467,7 +1502,13 @@ describe('arch invariants (dependency-cruiser)', () => {
       return dot === -1 ? false : TEXT_EXTENSIONS.has(rel.slice(dot));
     }
     function rawControlByteOffenders(): string[] {
-      const roots = ['packages', 'skills', 'test', 'fixtures', 'apps'];
+      // DERIVED SINCE s7 Sc11. This was
+      // `['packages', 'skills', 'test', 'fixtures', 'apps']`, a hand-list
+      // that was accurate the day it was written and that quietly omitted
+      // `.github` and `site`. `skills/` is only in it because Sc 10
+      // remembered; the next top-level directory would not be. See
+      // `topLevelTrackedDirs`.
+      const roots = topLevelTrackedDirs();
       return roots
         .filter((r) => existsSync(join(repoRoot, r)))
         .flatMap((r) => s7ListFiles(join(repoRoot, r)))
@@ -2185,6 +2226,195 @@ describe('arch invariants (dependency-cruiser)', () => {
         );
         expect(adapterPackages()).toContain('__s9probe__');
         expect(await declaredTiers()).toContain(`__s9probe__: ${LIVE}`);
+      });
+    });
+  });
+
+  describe('S7 extensions (s7-execution Scenario 11: skills/ is not a blind spot)', () => {
+    // A directory no guard sees is a hole. `skills/` arrived in Sc 10 as a
+    // brand-new TOP-LEVEL directory, which is the one shape of change that
+    // slips past guards written as root lists: every existing sweep either
+    // enumerated `packages apps fixtures` or spelled its roots by hand. Sc 11
+    // adds two documents to that directory and a generated transcript, so the
+    // question "which guards actually reach it" has to be answered once, out
+    // loud, with rows rather than with confidence.
+    const tracked = (dir: string): string[] =>
+      execFileSync('git', ['ls-files', '--', dir], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0);
+
+    it('(a) the top-level directories are enumerated, so a new one forces a decision', () => {
+      // Pinned deliberately. The next top-level directory somebody adds
+      // fails this row, and the failure is the prompt to answer the same
+      // six questions this scenario had to answer for `skills/`.
+      expect(topLevelTrackedDirs()).toEqual([
+        '.github',
+        'apps',
+        'fixtures',
+        'packages',
+        'site',
+        'skills',
+        'test',
+      ]);
+    });
+
+    it('(b) every tree-wide sweep reaches every file under skills/', () => {
+      const files = tracked('skills');
+      // The enumeration, not just the predicate: a skill document that stops
+      // being tracked must not make this row vacuously true.
+      expect(files).toEqual([
+        'skills/claude/DRYRUN.md',
+        'skills/claude/README.md',
+        'skills/claude/SKILL.md',
+        'skills/hermes/README.md',
+        'skills/hermes/SKILL.md',
+        'skills/openclaw/README.md',
+        'skills/openclaw/SKILL.md',
+      ]);
+      const swept = new Set(trackedTextFiles());
+      expect(files.filter((f) => !swept.has(f))).toEqual([]);
+      // And the control-byte sweep, which since this scenario derives its
+      // roots from the same structure rather than from a hand-list.
+      expect(topLevelTrackedDirs()).toContain('skills');
+      expect(publicRepoOffenders()).toEqual([]);
+    });
+
+    it('(c) prettier and eslint are not configured to skip skills/', () => {
+      // Read as CONFIGURATION, then proven as BEHAVIOUR in the teeth below.
+      // Both halves are needed: an ignore entry is the cheap way to lose a
+      // directory, and an empty directory passes any check vacuously.
+      const ignored = readFileSync(join(repoRoot, '.prettierignore'), 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith('#'));
+      expect(ignored.filter((l) => l.startsWith('skills'))).toEqual([]);
+      const eslintConfig = readFileSync(
+        join(repoRoot, 'eslint.config.js'),
+        'utf8',
+      );
+      const ignores = /ignores:\s*\[([^\]]*)\]/.exec(eslintConfig)?.[1] ?? '';
+      expect(ignores).not.toContain('skills');
+    });
+
+    it('(d) skills/ carries no compiled code, which is why dep:check and tsc need not reach it', () => {
+      // `pnpm dep:check` cruises `packages apps fixtures` and `tsc -b` walks
+      // the project references; neither sees `skills/`, and that is CORRECT
+      // only for as long as the directory holds nothing but documents. It
+      // does: Sc 10's runnable example child lives in
+      // `packages/adapter-testkit/examples/`, inside the cruised tree, and
+      // was deliberately not put here.
+      const code = tracked('skills').filter((f) => !f.endsWith('.md'));
+      // The day this fails, `skills/` needs a tsconfig, a project reference
+      // and a place in the cruise, and this row is where that is decided.
+      expect(code).toEqual([]);
+      const cruised = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+      expect(cruised).toContain('depcruise packages apps fixtures');
+    });
+
+    describe('proven teeth', () => {
+      const probeDir = 'skills/__s11probe__';
+      const untrack = (rel: string): void => {
+        try {
+          execFileSync(
+            'git',
+            ['rm', '--cached', '--quiet', '--force', '--', rel],
+            { cwd: repoRoot, stdio: 'ignore' },
+          );
+        } catch {
+          // never indexed; the unlink below is the whole cleanup.
+        }
+      };
+      const probes: string[] = [];
+      const plant = (name: string, body: string): string => {
+        const rel = `${probeDir}/${name}`;
+        mkdirSync(join(repoRoot, probeDir), { recursive: true });
+        writeFileSync(join(repoRoot, rel), body);
+        probes.push(rel);
+        return rel;
+      };
+
+      afterEach(() => {
+        for (const rel of probes.splice(0)) untrack(rel);
+        rmSync(join(repoRoot, probeDir), { recursive: true, force: true });
+      });
+
+      it('a brand string in a skills/ document trips the public sweep (b)', () => {
+        // Assembled at runtime for the same reason Sc 7's probe is: a probe
+        // that only works because its enforcer is exempt is not a probe.
+        const rel = plant('probe.md', `# ${'flow'}${'stay'} notes\n`);
+        expect(trackedTextFiles()).not.toContain(rel);
+        execFileSync('git', ['add', '--intent-to-add', '--', rel], {
+          cwd: repoRoot,
+        });
+        expect(trackedTextFiles()).toContain(rel);
+        expect(publicRepoOffenders()).toContain(`${rel}: brand string`);
+      });
+
+      it('a legitimate near-miss in the same directory does not trip it (b)', () => {
+        // The counterfactual that keeps the row above honest: a skill
+        // document is allowed to talk about workflows and handles, so long
+        // as the handle is the +1555 fiction and the words are ours.
+        const rel = plant(
+          'clean.md',
+          '# probe\n\nRun `wemessage drafts list --to +15551230000`.\n',
+        );
+        execFileSync('git', ['add', '--intent-to-add', '--', rel], {
+          cwd: repoRoot,
+        });
+        expect(trackedTextFiles()).toContain(rel);
+        expect(publicRepoOffenders()).toEqual([]);
+      });
+
+      it('prettier reaches skills/', () => {
+        // Formatted wrong on purpose, in a way `prettier --check` reports and
+        // a human review of a markdown file plausibly would not.
+        plant('unformatted.md', '- a\n    - b\n\n\n\n# heading\n');
+        let failed = false;
+        try {
+          execFileSync(
+            join(repoRoot, 'node_modules/.bin/prettier'),
+            ['--check', probeDir],
+            { cwd: repoRoot, stdio: 'pipe' },
+          );
+        } catch {
+          failed = true;
+        }
+        expect(failed).toBe(true);
+      });
+
+      it('eslint reaches skills/', () => {
+        // The hole that would matter most: a `.ts` file under a directory
+        // the linter was never pointed at. `recommended` applies tree-wide;
+        // only the TYPE-AWARE block is scoped to package sources, so this
+        // needs no tsconfig and would be caught the moment it appeared.
+        const rel = plant(
+          'probe.ts',
+          'export const probe = (x: any): unknown => x;\n',
+        );
+        // eslint exits 1 when it finds an error, so the report arrives on
+        // the thrown error's stdout. Reading only the happy path here would
+        // make the row pass on an empty report, which is the bug it exists
+        // to catch.
+        let out = '';
+        try {
+          out = execFileSync(
+            join(repoRoot, 'node_modules/.bin/eslint'),
+            ['--format', 'json', '--no-error-on-unmatched-pattern', rel],
+            { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
+          );
+        } catch (err) {
+          out = String((err as { stdout?: string }).stdout ?? '');
+        }
+        const results = JSON.parse(out) as {
+          messages: { ruleId: string | null }[];
+        }[];
+        const rules = results.flatMap((r) =>
+          r.messages.map((m) => m.ruleId ?? ''),
+        );
+        expect(rules).toContain('@typescript-eslint/no-explicit-any');
       });
     });
   });

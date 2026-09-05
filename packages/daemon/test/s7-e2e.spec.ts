@@ -164,6 +164,7 @@ import {
   EMITTED_WS_EVENTS,
   PORT_IMPORTER_ALLOWLIST,
   ROUTE_TABLE,
+  UNEMITTED_WS_EVENTS,
   WS_EVENT_VOCABULARY,
 } from './transport-surface.snapshot.js';
 
@@ -1636,10 +1637,17 @@ describe('s7 Scenario 13: the fifth surface needs an interpreter', () => {
 
 describe('s7 Scenario 13: the surface did not move', () => {
   it('row 8: the wire has nine frames, none of them sends, and the backend has exactly one call site', () => {
-    // The surface pins, unchanged since ratchet #22.
+    // The surface pins. Routes and importers unchanged since ratchet #22;
+    // the vocabulary moved 17 -> 21 at ratchet #23 (s8 Sc 2) and the emitted
+    // set deliberately did NOT, because Sc 2 declares the four owed
+    // `draft.*` lifecycle names and Sc 3 wires the emit sites. The gap is
+    // enumerated in `UNEMITTED_WS_EVENTS` and partitioned in
+    // `transport-surface.ratchet.spec.ts`; this row only records the
+    // arithmetic so an S7 reader sees where the numbers went.
     expect(ROUTE_TABLE).toHaveLength(67);
-    expect(WS_EVENT_VOCABULARY).toHaveLength(17);
+    expect(WS_EVENT_VOCABULARY).toHaveLength(21);
     expect(EMITTED_WS_EVENTS).toHaveLength(17);
+    expect(UNEMITTED_WS_EVENTS).toHaveLength(4);
     expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
     expect(Object.keys(FRAME_SPECS)).toHaveLength(9);
     expect(Object.keys(FRAME_SPECS)).not.toContain('send');

@@ -275,10 +275,32 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   // constructs it immediately (adapters/submit.ts), so there is no window in
   // which the vocabulary is wider than what we emit.
   'draft.delta',
+  // #23 deliberate (s8 Scenario 2, F-107): the four `draft.*` lifecycle
+  // names, 17 -> 21. This is comment #17's own promise being kept — S4's F-39
+  // deferred draft.expired/superseded/redrafted, S5 Sc 7 re-deferred them
+  // "to S8", and S6's F-72 minted draft.requeued as an audit row with no wire
+  // twin. The reader that makes them owed now exists: a GUI watches the queue
+  // instead of polling it, and a queue whose cards can vanish (expiry),
+  // be replaced (supersede), be rewritten (redraft) or come back (requeue)
+  // with no frame for any of it is a screen that lies between refreshes.
+  //
+  // UNLIKE #15, #17 and #20, these four join this list ALONE. Sc 2 is a
+  // protocol-only scenario: the daemon's emit sites move in Sc 3, so for one
+  // scenario the vocabulary is wider than what we emit. That window has been
+  // pre-authorised — the ratchet spec's own comment says a slice that wants a
+  // name declared before it is emitted must "relax this half of the row
+  // deliberately, in this file, with an argument" — and the price of taking
+  // it is that the gap is ENUMERATED, in `UNEMITTED_WS_EVENTS` below, and
+  // asserted as a partition rather than softened to a subset check. Sc 3
+  // empties that list in the same diff that grows EMITTED to 21.
+  'draft.expired',
   'draft.failed',
   'draft.recalled',
+  'draft.redrafted',
   'draft.rejected',
+  'draft.requeued',
   'draft.sent',
+  'draft.superseded',
   'gate.denied',
   'gateway.disconnected',
   'message.edited',
@@ -335,6 +357,34 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   // #12 deliberate (s4 Scenario 9): kill-switch flips broadcast on the
   // pre-existing toggle.changed frame — no protocol addition (F-3).
   'toggle.changed',
+];
+
+/**
+ * Names that are DECLARED in the vocabulary above and emitted by nothing.
+ * Deliberate update #23, s8 Scenario 2 (F-107).
+ *
+ * This list exists so that "declared" cannot quietly come to mean
+ * "forgotten". The subset row (`EMITTED ⊆ VOCABULARY`) can only catch a name
+ * the daemon emits without declaring; it is structurally blind to the
+ * opposite mistake, and the opposite mistake is exactly what a protocol-only
+ * scenario creates. So the debt is written down by hand, here, where a
+ * surface change has to be argued rather than observed, and
+ * `transport-surface.ratchet.spec.ts` asserts a PARTITION over the two lists:
+ * disjoint, and together equal to `GATEWAY_EVENT_NAMES` name for name.
+ *
+ * It is meant to be empty. Sc 3 wires all four emit sites — the scheduler's
+ * expiry sweep, `adapters/submit.ts`'s supersede, the redraft route and the
+ * dispatcher's requeue — at which point the `event: '<name>'` source scan
+ * grows EMITTED to 21 and disjointness forces this array back to `[]` in the
+ * same diff. There is no state in which Sc 3 lands and the hatch survives.
+ *
+ * Anything that stays here across a slice boundary is a bug report.
+ */
+export const UNEMITTED_WS_EVENTS: readonly string[] = [
+  'draft.expired',
+  'draft.redrafted',
+  'draft.requeued',
+  'draft.superseded',
 ];
 
 /**

@@ -97,12 +97,20 @@ const EVENT_NOTES: Record<string, string> = {
   'draft.approved': 'A person approved a draft. Dispatch follows.',
   'draft.created': 'A draft entered the pending queue.',
   'draft.delta': 'Streaming text for a draft still being composed.',
+  'draft.expired':
+    'A pending draft ran out its window and left the queue. Nobody acted on it and nothing was sent.',
   'draft.failed': 'Dispatch was attempted and did not succeed.',
   'draft.recalled':
     'An approved draft was pulled back inside its grace window.',
+  'draft.redrafted':
+    'A draft was rewritten. `draftId` is the draft that was replaced; `newDraftId` is the one now in the queue.',
   'draft.rejected': 'A person rejected a draft. Nothing was sent.',
+  'draft.requeued':
+    'An approved draft went back to pending because policy refused the send. The reason arrives on the `gate.denied` event that accompanies it, not on this one.',
   'draft.sent':
     'A draft reached the recipient, with the guid of the message that carried it.',
+  'draft.superseded':
+    'A newer draft took this one\u2019s place for the same conversation. `byDraftId` is the draft that replaced it.',
   'gate.denied': 'Policy refused something before it could become a draft.',
   'gateway.disconnected': 'The gateway is going away, with a reason.',
   'message.edited': 'An inbound message was edited at the source.',

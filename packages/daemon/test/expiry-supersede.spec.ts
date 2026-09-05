@@ -22,7 +22,7 @@
  * in the audit payload).
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -30,6 +30,8 @@ import {
   systemActor,
   type AuditEvent,
 } from '@wemessage/core';
+import { GATEWAY_EVENT_NAMES } from '@wemessage/protocol';
+import { UNEMITTED_WS_EVENTS } from './transport-surface.snapshot.js';
 import {
   auditEvents,
   auditTypes,
@@ -284,9 +286,39 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
       ]),
     );
 
-    // The courtesy deliberately does not. Protocol carries no such event
-    // types, so a broadcast would be an untyped frame no client understands.
+    // The courtesy deliberately does not — still. This row's ORIGINAL second
+    // half asserted that `packages/protocol/src/index.ts` did not so much as
+    // contain the three strings, because in S4 the protocol carried no such
+    // event types and a broadcast would have been an untyped frame no client
+    // understood.
+    //
+    // s8 Scenario 2 (F-107) is the slice that retires that half, and it is
+    // retired by being INVERTED rather than deleted. The three names (plus
+    // F-72's `draft.requeued`) are now real members of the vocabulary, so the
+    // absence assertion would be asserting a falsehood; what F-39 actually
+    // claimed, and what still holds here in S4's own scenario, is that this
+    // pipeline BROADCASTS nothing. That half is untouched and still scans, so
+    // if Sc 3 wires expiry emission without revisiting this file, this row
+    // fails and says so.
+    for (const declared of [
+      'draft.expired',
+      'draft.superseded',
+      'draft.redrafted',
+    ]) {
+      expect(GATEWAY_EVENT_NAMES, `s8 Sc2 declares ${declared}`).toContain(
+        declared,
+      );
+      expect(
+        UNEMITTED_WS_EVENTS,
+        `${declared} is declared but not yet emitted`,
+      ).toContain(declared);
+    }
+    // Scoped to the daemon, which is where an emit site would live and where
+    // the ratchet's own `event: '<name>'` scan looks. The protocol package
+    // legitimately contains the literals now: they are the discriminants of
+    // the four union variants.
     for (const abs of productionSourceFiles()) {
+      if (!abs.includes(`${sep}daemon${sep}src${sep}`)) continue;
       const text = readFileSync(abs, 'utf8');
       for (const banned of [
         'draft.expired',
@@ -295,17 +327,6 @@ describe('s4 Scenario 8: expiry, supersede, redraft, retryAsSms', () => {
       ]) {
         expect(text).not.toContain(`event: '${banned}'`);
       }
-    }
-    const vocabulary = readFileSync(
-      join(REPO_ROOT, 'packages/protocol/src/index.ts'),
-      'utf8',
-    );
-    for (const banned of [
-      'draft.expired',
-      'draft.superseded',
-      'draft.redrafted',
-    ]) {
-      expect(vocabulary).not.toContain(banned);
     }
   });
 });

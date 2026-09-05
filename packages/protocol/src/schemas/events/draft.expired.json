@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.expired.json",
+  "title": "draft.expired event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "draftId"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.expired"
+    },
+    "draftId": {
+      "type": "string"
+    }
+  }
+}

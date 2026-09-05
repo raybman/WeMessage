@@ -52,6 +52,30 @@ export type GatewayEventPayload =
       draftId: Ulid; actor: Actor; batchId?: Ulid }
   | { event: 'draft.sent';       draftId: Ulid; sentMessageGuid: MessageGuid }
   | { event: 'draft.failed';     draftId: Ulid; error: DraftError }
+  // s8 Scenario 2 (F-107): the four `draft.*` lifecycle facts a queue can
+  // reach WITHOUT a human touching it. Everything above this comment is
+  // either an arrival or the consequence of somebody pressing a key; a card
+  // that expired on a timer, was replaced by a newer draft, was redrafted, or
+  // went back in the queue when the gate said no has no actor and no
+  // keystroke, and until now no frame either. S4's F-39 deferred the first
+  // three because nothing could read them and S6's F-72 minted the fourth as
+  // an audit row only. A GUI that watches a queue rather than polling it is
+  // the reader that makes them owed, so S8 mints them.
+  //
+  // `draftId` is the subject in all four, matching every other `draft.*`
+  // frame, so a subscriber's reconciliation never needs a per-event key. The
+  // AUDIT rows for the same facts spell the links differently
+  // (`supersededBy`, `fromDraftId`/`toDraftId`) because a ledger entry has
+  // two equal ids and no subject; a frame is addressed at a card on screen.
+  //
+  // `draft.requeued` deliberately carries no reason. The requeue path writes
+  // BOTH a `draft.requeued` and a `gate.denied` audit row and already
+  // broadcasts the `gate.denied` frame carrying the `GateDenyReason`; putting
+  // the word on this frame too would make one event render as two denials.
+  | { event: 'draft.expired';    draftId: Ulid }
+  | { event: 'draft.superseded'; draftId: Ulid; byDraftId: Ulid }
+  | { event: 'draft.redrafted';  draftId: Ulid; newDraftId: Ulid }
+  | { event: 'draft.requeued';   draftId: Ulid }
   | { event: 'gate.denied';      reason: GateDenyReason; chatGuid: ChatGuid;
       ruleId?: Ulid; draftId?: Ulid }
   | { event: 'toggle.changed';   key: string; value: unknown; actor: Actor }
@@ -80,6 +104,28 @@ export interface DraftSummary {
   id: Ulid; chatGuid: ChatGuid; handle: Handle; displayName?: string;
   ruleId: Ulid | null; adapterId: string; body: string; state: DraftState;
   proactiveReason?: string; expiresAt: IsoUtc; createdAt: IsoUtc;
+  /**
+   * s8 Scenario 2 (F-107, additive): F-64's clamp channel, reaching the wire.
+   *
+   * A CLAMP is not a deny. S6's organising principle is that denies bind
+   * everyone while clamps bind only autonomy: when the §1.7 order finds a
+   * hold that would have blocked an autonomous send, the gate still allows —
+   * it just downgrades the mode to one that needs a human — and the draft is
+   * NEVER audited as `gate.denied`. Present means "this card is waiting on
+   * you because of X"; omitted means the gate had no objection at all.
+   *
+   * It is the same `GateDenyReason` union `GateDecision`'s allow arm carries,
+   * imported rather than restated. One cause is one word wherever it appears
+   * (C-6): a parallel "clamp reason" vocabulary would be twelve strings that
+   * agree until the day they do not, and the audit trail and the screen would
+   * then disagree about why the operator is being asked.
+   *
+   * Optional under `exactOptionalPropertyTypes`, so an unclamped draft OMITS
+   * the key. Never `null`, never an explicit `undefined`: this field travels
+   * as JSON, where `undefined` disappears, and a `null` would be a third
+   * state that means the same thing as absence.
+   */
+  clampedBy?: GateDenyReason;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -260,7 +306,7 @@ export const FRAME_SPECS = {
   // meant a new event variant had TWO places to remember, one of them a list
   // whose members are individually meaningless. It is now DERIVED from
   // `EVENT_SPECS`, sorted, so the frame guard, the per-event schemas and the
-  // `GatewayEventPayload` type widen together or not at all. Same 22 keys as
+  // `GatewayEventPayload` type widen together or not at all. Same 24 keys as
   // the literal it replaces, asserted in test/event-specs.spec.ts.
   event: {
     required: ['event'],

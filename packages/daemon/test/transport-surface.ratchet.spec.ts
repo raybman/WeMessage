@@ -48,6 +48,7 @@ import {
   EMITTED_WS_EVENTS,
   PORT_IMPORTER_ALLOWLIST,
   ROUTE_TABLE,
+  UNEMITTED_WS_EVENTS,
   WS_EVENT_VOCABULARY,
 } from './transport-surface.snapshot.js';
 
@@ -198,17 +199,76 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
    * human-reviewed copy that a surface change has to be argued into. Pinning
    * them deepEqual means neither can move alone.
    *
-   * The emitted list is pinned to the same value rather than merely being a
-   * subset of it. Today all three stand at 17 and the daemon constructs every
-   * name it allows. A future slice that legitimately wants a name in the
-   * vocabulary BEFORE the code that emits it (as `rule.matched` briefly was
-   * in S2) has to relax this half of the row deliberately, in this file, with
-   * an argument — which is exactly the workflow this file exists to force.
+   * The emitted list was pinned to the same value rather than merely being a
+   * subset of it, and this comment said: "A future slice that legitimately
+   * wants a name in the vocabulary BEFORE the code that emits it (as
+   * `rule.matched` briefly was in S2) has to relax this half of the row
+   * deliberately, in this file, with an argument."
+   *
+   * **s8 Scenario 2 is that slice, and this is that argument.**
+   *
+   * S8 mints the four `draft.*` lifecycle names that F-39 deferred in S4, S5
+   * Scenario 7 re-deferred, and comment #17 below assigned to S8 by name.
+   * They are declared in `@wemessage/protocol` one scenario before the daemon
+   * constructs them, because a wire-format change and a behaviour change do
+   * not belong in one commit — that separation is the whole reason this file
+   * exists. So for exactly one scenario the vocabulary is wider than what the
+   * daemon emits.
+   *
+   * The wrong way to absorb that is to weaken this row to a subset check.
+   * `EMITTED ⊆ VOCABULARY` already holds above and always will; it can never
+   * catch a name that was declared and then quietly forgotten, which is the
+   * precise failure this gap creates. Nor can it be hidden by counting: a
+   * length pair drifts silently the moment two mistakes cancel.
+   *
+   * So the gap is ENUMERATED instead. `UNEMITTED_WS_EVENTS` names the debt,
+   * and the row below asserts a PARTITION: emitted and unemitted are
+   * disjoint, and together they are exactly the protocol vocabulary. Both
+   * halves of the invariant survive — a name cannot be emitted without being
+   * declared (it would be in neither list), and a name cannot be declared and
+   * silently never emitted (it would have to be written into the unemitted
+   * list, by hand, in this reviewed file, under a numbered ratchet comment).
+   *
+   * It is also self-closing, which is what makes it a debt rather than a
+   * loophole. The `event: '<name>'` scan two rows above is structural: when
+   * Sc 3 wires the four emit sites, EMITTED must grow to 21 in the same diff,
+   * and disjointness then forces UNEMITTED to empty in that same diff or this
+   * row fails. There is no state in which Sc 3 lands and the escape hatch
+   * survives.
    */
-  it('protocol vocabulary, allowed snapshot and emitted snapshot all agree', () => {
-    expect([...GATEWAY_EVENT_NAMES]).toHaveLength(17);
+  it('protocol vocabulary and allowed snapshot agree exactly', () => {
+    expect([...GATEWAY_EVENT_NAMES]).toHaveLength(21);
     expect([...WS_EVENT_VOCABULARY]).toEqual([...GATEWAY_EVENT_NAMES]);
-    expect([...EMITTED_WS_EVENTS]).toEqual([...GATEWAY_EVENT_NAMES]);
+  });
+
+  it('emitted and unemitted partition the vocabulary, with the gap named', () => {
+    // The debt, spelled out. When this is `[]` the partition degenerates back
+    // into the s7 row it replaced, which is the intended end state.
+    expect([...UNEMITTED_WS_EVENTS]).toEqual([
+      'draft.expired',
+      'draft.redrafted',
+      'draft.requeued',
+      'draft.superseded',
+    ]);
+
+    // Disjoint: no name may claim to be both emitted and owed.
+    const emitted = new Set<string>(EMITTED_WS_EVENTS);
+    for (const owed of UNEMITTED_WS_EVENTS) {
+      expect(emitted.has(owed), `'${owed}' is listed as owed AND emitted`).toBe(
+        false,
+      );
+    }
+
+    // Exhaustive: together they are the vocabulary, name for name. This is
+    // the half a subset check cannot do.
+    expect([...EMITTED_WS_EVENTS, ...UNEMITTED_WS_EVENTS].sort()).toEqual([
+      ...GATEWAY_EVENT_NAMES,
+    ]);
+
+    // And the arithmetic, stated so a reader of a failure sees the shape of
+    // the drift rather than a 21-element diff.
+    expect(EMITTED_WS_EVENTS).toHaveLength(17);
+    expect(UNEMITTED_WS_EVENTS).toHaveLength(4);
   });
 
   it('SendBackend/ChatDbReader importer set equals the allowlist', () => {

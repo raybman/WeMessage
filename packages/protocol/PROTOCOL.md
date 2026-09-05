@@ -145,7 +145,7 @@ One member of the event vocabulary below, delivered to any adapter that asked fo
 
 ```text
 required event
-optional actor, adapterId, armed, batchId, chatGuid, correlation, draft, draftId, error, guid, key, message, newText, reason, ruleId, sentMessageGuid, seq, state, status, textDelta, until, value
+optional actor, adapterId, armed, batchId, byDraftId, chatGuid, correlation, draft, draftId, error, guid, key, message, newDraftId, newText, reason, ruleId, sentMessageGuid, seq, state, status, textDelta, until, value
 schema   https://wemessage.dev/schemas/v1/event.json
 ```
 
@@ -163,7 +163,7 @@ schema   https://wemessage.dev/schemas/v1/ping.json
 
 ## Events
 
-The `event` frame carries one of 17 named events. The name is the `event` key of the payload; the rest of the payload is listed per event below. An adapter subscribes to what it wants and ignores the rest.
+The `event` frame carries one of 21 named events. The name is the `event` key of the payload; the rest of the payload is listed per event below. An adapter subscribes to what it wants and ignores the rest.
 
 ### `adapter.health`
 
@@ -225,6 +225,16 @@ optional (none)
 schema   https://wemessage.dev/schemas/v1/events/draft.delta.json
 ```
 
+### `draft.expired`
+
+A pending draft ran out its window and left the queue. Nobody acted on it and nothing was sent.
+
+```text
+required draftId
+optional (none)
+schema   https://wemessage.dev/schemas/v1/events/draft.expired.json
+```
+
 ### `draft.failed`
 
 Dispatch was attempted and did not succeed.
@@ -245,6 +255,16 @@ optional batchId
 schema   https://wemessage.dev/schemas/v1/events/draft.recalled.json
 ```
 
+### `draft.redrafted`
+
+A draft was rewritten. `draftId` is the draft that was replaced; `newDraftId` is the one now in the queue.
+
+```text
+required draftId, newDraftId
+optional (none)
+schema   https://wemessage.dev/schemas/v1/events/draft.redrafted.json
+```
+
 ### `draft.rejected`
 
 A person rejected a draft. Nothing was sent.
@@ -255,6 +275,16 @@ optional batchId
 schema   https://wemessage.dev/schemas/v1/events/draft.rejected.json
 ```
 
+### `draft.requeued`
+
+An approved draft went back to pending because policy refused the send. The reason arrives on the `gate.denied` event that accompanies it, not on this one.
+
+```text
+required draftId
+optional (none)
+schema   https://wemessage.dev/schemas/v1/events/draft.requeued.json
+```
+
 ### `draft.sent`
 
 A draft reached the recipient, with the guid of the message that carried it.
@@ -263,6 +293,16 @@ A draft reached the recipient, with the guid of the message that carried it.
 required draftId, sentMessageGuid
 optional (none)
 schema   https://wemessage.dev/schemas/v1/events/draft.sent.json
+```
+
+### `draft.superseded`
+
+A newer draft took this one’s place for the same conversation. `byDraftId` is the draft that replaced it.
+
+```text
+required draftId, byDraftId
+optional (none)
+schema   https://wemessage.dev/schemas/v1/events/draft.superseded.json
 ```
 
 ### `gate.denied`

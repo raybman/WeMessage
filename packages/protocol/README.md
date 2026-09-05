@@ -1,7 +1,7 @@
 # @wemessage/protocol
 
 The wire an adapter speaks to a WeMessage gateway: nine frame types, a
-seventeen-name event vocabulary, four close codes, and a JSON Schema for every
+twenty-one-name event vocabulary, four close codes, and a JSON Schema for every
 one of them. Zero runtime dependencies, by rule and by test.
 
 The reference is [PROTOCOL.md](./PROTOCOL.md), in this package. It is
@@ -10,7 +10,7 @@ what the gateway does rather than what somebody remembered it doing.
 
 ```text
 FRAME_SPECS           the nine frames: required keys, optional keys, direction
-GATEWAY_EVENT_NAMES   the seventeen event names, sorted
+GATEWAY_EVENT_NAMES   the twenty-one event names, sorted
 EVENT_SPECS           the payload keys each event contributes
 CLOSE_CODES           the four codes a gateway closes with, and what they mean
 ENVELOPE_KEYS         the five keys every frame carries, exactly

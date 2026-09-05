@@ -11,7 +11,26 @@
       "const": "draft.created"
     },
     "draft": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "clampedBy": {
+          "type": "string",
+          "enum": [
+            "kill-switch",
+            "disconnected",
+            "read-only",
+            "contact-denied",
+            "group-auto-forbidden",
+            "outside-window",
+            "rate-limited",
+            "circuit-open",
+            "loop-detected",
+            "unapproved",
+            "adapter-disabled",
+            "sms-auto-forbidden"
+          ]
+        }
+      }
     }
   }
 }

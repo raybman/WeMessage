@@ -15,10 +15,14 @@
         "draft.approved",
         "draft.created",
         "draft.delta",
+        "draft.expired",
         "draft.failed",
         "draft.recalled",
+        "draft.redrafted",
         "draft.rejected",
+        "draft.requeued",
         "draft.sent",
+        "draft.superseded",
         "gate.denied",
         "gateway.disconnected",
         "message.edited",
@@ -45,6 +49,12 @@
       "type": "object"
     },
     "draftId": {
+      "type": "string"
+    },
+    "byDraftId": {
+      "type": "string"
+    },
+    "newDraftId": {
       "type": "string"
     },
     "actor": {

@@ -26,7 +26,7 @@ Three documents are the whole public contract. Everything else is
 implementation.
 
 - **The wire.** [`packages/protocol/PROTOCOL.md`](packages/protocol/PROTOCOL.md)
-  is what an adapter speaks: nine frame types, seventeen events, four close
+  is what an adapter speaks: nine frame types, twenty-one events, four close
   codes. It is generated from the tables the gateway parses with and diffed on
   every test run, so it cannot drift from the code. Start with the section
   titled "What the protocol cannot do".

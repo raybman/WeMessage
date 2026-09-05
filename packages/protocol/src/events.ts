@@ -44,10 +44,17 @@ export const GATEWAY_EVENT_NAMES = [
   'draft.approved',
   'draft.created',
   'draft.delta',
+  // s8 Scenario 2 (F-107): the four owed `draft.*` lifecycle names, in sorted
+  // position rather than appended, because the daemon's snapshot is sorted
+  // and pinned deepEqual to this array.
+  'draft.expired',
   'draft.failed',
   'draft.recalled',
+  'draft.redrafted',
   'draft.rejected',
+  'draft.requeued',
   'draft.sent',
+  'draft.superseded',
   'gate.denied',
   'gateway.disconnected',
   'message.edited',
@@ -132,7 +139,7 @@ type EventSpecTable = {
  * cannot see.
  *
  * `event` is deliberately absent from every row: it is the discriminant, it
- * lives in `FRAME_SPECS.event.required`, and listing it seventeen times would
+ * lives in `FRAME_SPECS.event.required`, and listing it twenty-one times would
  * push it into the derived `optional` union where it does not belong.
  */
 export const EVENT_SPECS = {
@@ -145,10 +152,17 @@ export const EVENT_SPECS = {
     required: ['correlation', 'seq', 'textDelta'],
     optional: [],
   },
+  // s8 Scenario 2 (F-107). `draftId` first in every one of the four: it is
+  // the subject the frame is addressed at, and the link key (where there is
+  // one) is the second required member, never the first.
+  'draft.expired': { required: ['draftId'], optional: [] },
   'draft.failed': { required: ['draftId', 'error'], optional: [] },
   'draft.recalled': { required: ['draftId', 'actor'], optional: ['batchId'] },
+  'draft.redrafted': { required: ['draftId', 'newDraftId'], optional: [] },
   'draft.rejected': { required: ['draftId', 'actor'], optional: ['batchId'] },
+  'draft.requeued': { required: ['draftId'], optional: [] },
   'draft.sent': { required: ['draftId', 'sentMessageGuid'], optional: [] },
+  'draft.superseded': { required: ['draftId', 'byDraftId'], optional: [] },
   'gate.denied': {
     required: ['reason', 'chatGuid'],
     optional: ['ruleId', 'draftId'],

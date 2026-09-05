@@ -39,6 +39,7 @@ import {
   type ConnState,
   type OptimisticStore,
   type QueueAction,
+  type Started,
 } from './optimistic.js';
 
 /**
@@ -57,6 +58,8 @@ export const STORE_CHANNELS = [
   'bulk',
   'contacts',
   'drafts',
+  'recall',
+  'reject',
   'rules',
 ] as const;
 
@@ -70,12 +73,31 @@ export const STORE_CHANNELS = [
  */
 export type StoreBridge = Pick<
   WmBridge,
-  'approve' | 'bulk' | 'contacts' | 'drafts' | 'on' | 'rules'
+  | 'approve'
+  | 'bulk'
+  | 'contacts'
+  | 'drafts'
+  | 'on'
+  | 'recall'
+  | 'reject'
+  | 'rules'
 >;
 
 export interface StoreBinding {
   readonly store: OptimisticStore;
-  approve(id: string): Promise<void>;
+  /**
+   * Approve, optionally with the body the operator retyped.
+   *
+   * One method and not two, because `bridge.approve(` is pinned to a single
+   * call site by an arch row and a second entry point would need a second
+   * one. The edited body is an OPTION on the same verb for the same reason
+   * the daemon models it that way: an edited approval is an approval, and
+   * the `Approval` row is what carries the difference.
+   */
+  approve(id: string, editedBody?: string): Promise<void>;
+  reject(id: string): Promise<void>;
+  /** Recall an approved draft while the daemon's grace window is open. */
+  recall(id: string): Promise<void>;
   bulk(ids: readonly string[], action: QueueAction): Promise<void>;
   /**
    * Fetch the two name catalogues, once.
@@ -147,15 +169,31 @@ function asConnState(payload: unknown): ConnState | null {
 
 /** The three answers a draft action can come back with, as DATA. */
 interface Refusals {
-  conflict?: { from: string };
+  conflict?: { from: string; code?: string };
   denied?: { reason: string; retryAfter?: string };
 }
+
+/**
+ * The 409 codes that are NOT somebody else moving the draft.
+ *
+ * A conflict answers two questions at once — where the draft is now, and
+ * which rule refused the transition — and only one of those is "changed
+ * elsewhere". `grace-elapsed` means the undo window closed while the card
+ * sat exactly where the operator left it, so reporting it as a change would
+ * be an accusation the daemon never made.
+ */
+const NOT_A_MOVE = new Set(['grace-elapsed']);
 
 function refusalOf(answer: unknown): Refusals | null {
   const a = asRecord(answer);
   if (a === null) return null;
   if (a['refused'] === 'conflict' && typeof a['from'] === 'string')
-    return { conflict: { from: a['from'] } };
+    return {
+      conflict: {
+        from: a['from'],
+        ...(typeof a['code'] === 'string' ? { code: a['code'] } : {}),
+      },
+    };
   if (a['refused'] === 'denied' && typeof a['reason'] === 'string')
     return {
       denied: {
@@ -317,6 +355,54 @@ export function bindStore(
     }
   }
 
+  /**
+   * One keystroke, one request, and one place that decides what came back.
+   *
+   * Written once and shared by all three write verbs rather than copied
+   * three times. The three differ only in which hypothesis the store wrote
+   * and which channel carries it; everything after the await — the two
+   * refusals, the honest 409, the failure, the acknowledgement — is the same
+   * decision, and three copies of it is three places for one of them to
+   * drift into reporting a refusal as a success.
+   *
+   * The hypothesis was already written by the caller, BEFORE this is
+   * entered, so the card moves in the same frame as the key that moved it.
+   * Everything below is server truth replacing a guess.
+   */
+  async function settle(
+    id: string,
+    started: Started,
+    request: () => Promise<unknown>,
+  ): Promise<void> {
+    if (!started.ok) {
+      if (started.refused === 'unknown-draft') refetch();
+      return;
+    }
+    try {
+      const answer = await track(request());
+      const refusal = refusalOf(answer);
+      if (refusal?.conflict !== undefined) {
+        const { code, from } = refusal.conflict;
+        // The daemon distinguished these; so does the card. A window that
+        // collapsed them would tell the operator their draft was changed
+        // elsewhere when in fact nothing changed and the clock ran out.
+        if (code !== undefined && NOT_A_MOVE.has(code))
+          store.refused(id, { reason: code });
+        else store.conflict(id, { from: from as DraftPayload['state'] });
+        return;
+      }
+      if (refusal?.denied !== undefined) {
+        store.denied(id, refusal.denied);
+        return;
+      }
+      const draft = asRecord(asRecord(answer)?.['draft']);
+      if (draft !== null)
+        store.ack(id, { draft: draft as unknown as DraftPayload });
+    } catch (error) {
+      store.failed(id, { reason: reasonOf(error) });
+    }
+  }
+
   const offEvent = bridge.on('event', onFrame);
   const offStream = bridge.on('stream', onStream);
 
@@ -330,31 +416,24 @@ export function bindStore(
      * same frame as the key that moved it. Everything after the await is
      * server truth replacing a guess: an answer, a refusal, or a failure.
      */
-    async approve(id) {
-      const started = store.approve(id);
-      if (!started.ok) {
-        if (started.refused === 'unknown-draft') refetch();
-        return;
-      }
-      try {
-        const answer = await track(bridge.approve(id));
-        const refusal = refusalOf(answer);
-        if (refusal?.conflict !== undefined) {
-          store.conflict(id, {
-            from: refusal.conflict.from as DraftPayload['state'],
-          });
-          return;
-        }
-        if (refusal?.denied !== undefined) {
-          store.denied(id, refusal.denied);
-          return;
-        }
-        const draft = asRecord(asRecord(answer)?.['draft']);
-        if (draft !== null)
-          store.ack(id, { draft: draft as unknown as DraftPayload });
-      } catch (error) {
-        store.failed(id, { reason: reasonOf(error) });
-      }
+    async approve(id, editedBody) {
+      // `bridge.approve(` appears ONCE in this repo, which is the arch row
+      // Sc7 landed and the reason the optional body is spread into the
+      // argument list rather than branching into a second call. Under
+      // `exactOptionalPropertyTypes` an omitted key and an `undefined` one
+      // are different things, and the daemon's `strictObject` refuses the
+      // second, so the option is built by presence.
+      const args: readonly unknown[] =
+        editedBody === undefined ? [id] : [id, { editedBody }];
+      await settle(id, store.approve(id), () => bridge.approve(...args));
+    },
+
+    async reject(id) {
+      await settle(id, store.reject(id), () => bridge.reject(id));
+    },
+
+    async recall(id) {
+      await settle(id, store.recall(id), () => bridge.recall(id));
     },
 
     /**

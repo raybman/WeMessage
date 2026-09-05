@@ -310,6 +310,16 @@ export function createGateway(options: GatewayOptions): Gateway {
       if (error instanceof DaemonConflictError)
         return {
           refused: 'conflict',
+          // s8 Sc8: the daemon's own CODE, forwarded.
+          //
+          // `POST /recall` answers 409 for two different reasons —
+          // `illegal-transition` (the draft is not approved any more) and
+          // `grace-elapsed` (nobody moved it; the undo window closed) — and
+          // dropping the code here left the renderer with `from: 'approved'`
+          // for both, which it could only render as "moved elsewhere". That
+          // told the operator somebody else had touched their draft, which
+          // was false, and sent them looking for a second terminal.
+          code: error.detail.error,
           ...(error.detail.from === undefined
             ? {}
             : { from: error.detail.from }),

@@ -94,6 +94,27 @@ let activeId: string | null = null;
 let expandedId: string | null = null;
 /** Sc9 fills this in; the listbox already declares itself multi-selectable. */
 const selected = new Set<string>();
+/**
+ * The body being edited, or `null` when the editor is closed, and the draft
+ * it belongs to.
+ *
+ * Two variables rather than one object because they answer two questions the
+ * app asks at different moments: the screen needs the TEXT to render, and the
+ * commit stroke needs the ID to approve — and an id read out of the cursor at
+ * commit time would approve whatever the list had moved to underneath a slow
+ * typist.
+ */
+let editing: string | null = null;
+let editingId: string | null = null;
+/**
+ * The draft `Z` takes back, remembered rather than searched for.
+ *
+ * The alternative is to look for the newest approved card, which is wrong the
+ * instant the daemon sends one: undo would silently retarget to a different
+ * draft than the one the operator just acted on. This names the exact card,
+ * and `recall` refuses on the wire if its window has closed.
+ */
+let lastApprovedId: string | null = null;
 /** So the catalogue is fetched when a link exists, and once per link. */
 let catalogueFor: 'none' | 'connected' = 'none';
 
@@ -176,7 +197,11 @@ function derive(): QueueView {
 /**
  * What assistive technology is told, and the whole of it.
  *
- * The SIZE of the queue and nothing else. The listbox announces its own
+ * The size of the queue's REMAINING WORK and nothing else. Not the number
+ * of cards: a card that has been approved is on screen and is no longer
+ * something the operator owes a decision on, and a count that included it
+ * would tell a person who has just cleared the queue that twenty drafts are
+ * still waiting for them. The listbox announces its own
  * active option through `aria-activedescendant`, so a live region that also
  * described the cursor would make every `j` speak twice and make the
  * twenty-in-a-minute run unlistenable. What it cannot announce is a change
@@ -185,8 +210,17 @@ function derive(): QueueView {
  * only changes when the number does, so the region is silent between them.
  */
 function announcementFor(view: QueueView): string {
-  if (view.cards.length === 0) return 'NO DRAFTS WAITING';
-  return `${String(view.cards.length)} DRAFTS WAITING`;
+  const size =
+    view.cards.length === 0
+      ? 'NO DRAFTS WAITING'
+      : `${String(view.pending)} DRAFTS WAITING`;
+  // The one thing the operator cannot see: a card that left. Prefixed rather
+  // than announced separately so the region holds ONE sentence — two regions
+  // race, and a screen reader reading them in schedule order would tell a
+  // fast operator the count before the outcome that changed it.
+  const outcome = binding.store.outcome();
+  if (outcome === undefined) return size;
+  return `${outcome === 'sent' ? 'DRAFT SENT' : 'DRAFT FAILED'} · ${size}`;
 }
 
 /**
@@ -200,9 +234,57 @@ function announcementFor(view: QueueView): string {
 function onVerb(verb: QueueVerb): void {
   const view = derive();
   const current = view.cards[view.activeIndex];
+  if (verb === 'cancel-edit') {
+    editing = null;
+    editingId = null;
+    schedulePaint();
+    return;
+  }
+  if (verb === 'approve-edited') {
+    // The id captured when the editor OPENED, and the text as it stands. A
+    // commit that read the cursor here would approve whatever arrived while
+    // the operator was typing.
+    const id = editingId;
+    const body = editing;
+    editing = null;
+    editingId = null;
+    if (id !== null && body !== null) {
+      lastApprovedId = id;
+      void binding.approve(id, body);
+      advancePast(view, id);
+    }
+    schedulePaint();
+    return;
+  }
+  if (verb === 'undo') {
+    const id = lastApprovedId;
+    if (id === null) return;
+    void binding.recall(id);
+    // Back to the card that was taken back. The operator's next keystroke is
+    // about THAT draft — an undo that left the cursor two rows down would
+    // make the following `a` approve a stranger.
+    activeId = id;
+    schedulePaint();
+    return;
+  }
   if (current === undefined) return;
   if (verb === 'approve') {
+    lastApprovedId = current.draftId;
     void binding.approve(current.draftId);
+    advancePast(view, current.draftId);
+    schedulePaint();
+    return;
+  }
+  if (verb === 'reject') {
+    void binding.reject(current.draftId);
+    advancePast(view, current.draftId);
+    schedulePaint();
+    return;
+  }
+  if (verb === 'edit') {
+    editing = current.body;
+    editingId = current.draftId;
+    schedulePaint();
     return;
   }
   if (verb === 'expand') {
@@ -214,6 +296,39 @@ function onVerb(verb: QueueVerb): void {
   if (next === undefined) return;
   if (next.draftId !== current.draftId) expandedId = null;
   activeId = next.draftId;
+  schedulePaint();
+}
+
+/**
+ * The cursor step an ACTION makes, which the keymap deliberately does not.
+ *
+ * `moveTo` is a pure function of the verb and the list, and it returns the
+ * same index for every action verb; the step belongs here because it is a
+ * fact about this queue rather than about the keys. Acted-on cards STAY on
+ * screen — approved, rejected and recalled all keep rendering — so the
+ * cursor has to move past them explicitly or twenty `a` presses would all
+ * land on the same card. The last card clamps: there is nowhere to go, and
+ * jumping backwards would put an already-decided card under the next
+ * keystroke.
+ */
+function advancePast(view: QueueView, id: string): void {
+  const at = view.cards.findIndex((card) => card.draftId === id);
+  if (at === -1) return;
+  const next = view.cards[Math.min(at + 1, view.cards.length - 1)];
+  if (next === undefined) return;
+  if (next.draftId !== id) expandedId = null;
+  activeId = next.draftId;
+}
+
+/**
+ * Every keystroke inside the editor, straight into the module's state.
+ *
+ * Uncontrolled would be less code and would lose the text on any paint the
+ * store causes underneath the operator — an arriving draft re-renders this
+ * tree, and a textarea that is not told its value would be re-mounted empty.
+ */
+function onEdit(next: string): void {
+  editing = next;
   schedulePaint();
 }
 
@@ -254,6 +369,8 @@ function Shell({
           arming={armingGlance(current.armed)}
           watching={binding.store.catalogue().watching}
           announcement={announcementFor(view)}
+          editing={editing}
+          onEdit={onEdit}
           onVerb={onVerb}
         />
       )}
@@ -298,8 +415,22 @@ function paint(): void {
   // the card it landed on makes the next `j` move from there.
   activeId = view.cards[view.activeIndex]?.draftId ?? null;
   paintStore();
+  const wasEditing = painted;
+  painted = editing;
   render(<Shell stream={stream} view={view} />, root);
+  // Focus handed BACK, in the same paint the editor unmounted in. Preact has
+  // already removed the textarea by the time this runs, and a removed element
+  // takes the focus to `<body>` with it — where the listbox's key handler is
+  // not, so the next `a` would vanish with no visible cause. This is the one
+  // imperative focus move in the app and it exists because the alternative
+  // silently breaks the keyboard.
+  if (wasEditing !== null && editing === null) {
+    document.getElementById('queue-list')?.focus();
+  }
 }
+
+/** What the LAST paint rendered, so the unmount above can be detected. */
+let painted: string | null = null;
 
 /**
  * One paint per microtask, however many facts changed.

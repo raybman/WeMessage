@@ -520,3 +520,96 @@ body {
   letter-spacing: 0.06em;
   color: var(--ink-dim);
 }
+
+/*
+ * The undo ring, drawn by the compositor rather than by a timer.
+ *
+ * §1.7 asked for a 250 ms display interval. This app has none: an arch row
+ * bans `setInterval(` and `setTimeout(` under the renderer, and the reason is
+ * stronger than the convenience — a repainting countdown is a render every
+ * quarter second for every approved card, during exactly the twenty-in-a-
+ * minute run this scenario measures. A keyframe animation is the same fact
+ * expressed once. Each card supplies its own `animation-duration` from the
+ * two instants THE DAEMON stamped, and a negative `animation-delay` equal to
+ * the elapsed part, so a ring that started before this paint resumes where it
+ * actually is instead of restarting at full.
+ *
+ * `forwards` plus a final `visibility: hidden` retires the ring exactly when
+ * the window closes, so nothing sits on screen at zero seconds offering an
+ * undo the daemon would refuse.
+ */
+@keyframes card-ring-drain {
+  from {
+    opacity: 1;
+    visibility: visible;
+  }
+  99.9% {
+    opacity: 1;
+    visibility: visible;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+.card-ring {
+  padding: 1px 6px;
+  border: 1px solid var(--tint);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--tint);
+  animation-name: card-ring-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+}
+
+/*
+ * The ring is a decoration; the DEADLINE is in the option's own label, which
+ * is what assistive technology reads. Nothing here is the sole carrier of
+ * anything: the card still says APPROVED in capitals and in `data-state`.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .card-ring {
+    animation: none;
+  }
+}
+
+/*
+ * The editor, beside the list and never inside it.
+ *
+ * An option cannot contain a focusable child without becoming a second focus
+ * owner and an ARIA violation, so this is a sibling panel that exists only
+ * while a draft is being edited. While it is closed the document has exactly
+ * one tab stop; while it is open it has exactly two, which is the smallest
+ * number that lets a person type.
+ */
+#queue-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--stroke-strong);
+  background: var(--layer-1);
+}
+
+.editor-legend {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.editor-text {
+  min-height: 96px;
+  padding: 8px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: none;
+}

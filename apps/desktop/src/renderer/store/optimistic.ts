@@ -59,7 +59,19 @@ export type Chip =
       readonly reason: string;
       readonly retryAfter?: string;
     }
-  | { readonly kind: 'error'; readonly reason: string };
+  | { readonly kind: 'error'; readonly reason: string }
+  /**
+   * The daemon said no, in its own words, about a rule of its own.
+   *
+   * Distinct from `changed-elsewhere` because they are different facts and
+   * one of them was being reported as the other. `POST /recall` answers 409
+   * for TWO reasons: `illegal-transition` (the draft is not approved any
+   * more — somebody or something moved it) and `grace-elapsed` (nobody moved
+   * anything; the undo window closed). Folding the second into the first
+   * tells an operator their draft was changed elsewhere, which is false, and
+   * sends them looking for a second terminal that does not exist.
+   */
+  | { readonly kind: 'refused'; readonly reason: string };
 
 export interface Row {
   /** The last payload a FETCH produced. Never written by an event. */
@@ -265,12 +277,28 @@ export interface OptimisticStore {
   ): void;
   event(payload: GatewayEventPayload): void;
 
+  /**
+   * The newest terminal outcome this window WATCHED happen, or `undefined`.
+   *
+   * For the live region, and for nothing else. A send is the one thing on
+   * this screen that happens without the operator doing anything, and the
+   * list's own `aria-activedescendant` cannot announce it because the cursor
+   * did not move. Recorded rather than derived, because "the card is now
+   * sent" is a state and "a draft has just been sent" is an event, and only
+   * the second one is worth interrupting somebody to say.
+   */
+  outcome(): 'sent' | 'failed' | undefined;
+
   approve(id: string): Started;
+  reject(id: string): Started;
+  recall(id: string): Started;
   bulk(ids: readonly string[], action: QueueAction): BulkStarted;
   ack(id: string, answer: { draft: DraftPayload }): void;
   applyBulk(result: BulkResult): void;
   conflict(id: string, answer: { from: DraftState }): void;
   denied(id: string, answer: { reason: string; retryAfter?: string }): void;
+  /** A 409 whose code names a rule rather than a state change. */
+  refused(id: string, answer: { reason: string }): void;
   failed(id: string, answer: { reason: string }): void;
 }
 
@@ -292,6 +320,7 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
   let stale = false;
   let gap = 0;
   let syncedAt: string | undefined;
+  let lastOutcome: 'sent' | 'failed' | undefined;
   let batches = 0;
   let turns = new Map<string, Conversation>();
   let clamps = new Map<string, string>();
@@ -395,6 +424,30 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
   };
 
   /** End a hypothesis and leave the card exactly as the daemon has it. */
+  /**
+   * Repaint iff the attempt changed something an operator can see.
+   *
+   * A refusal is USUALLY not a change. Two are. `unknown-draft` learned the
+   * map is stale and the wiring has to be told so it can go and fix it;
+   * `wrong-state` wrote a chip, and a chip nobody repaints is a keystroke
+   * that vanished — which on this screen reads as the app having done the
+   * thing silently.
+   *
+   * Shared by all three verbs rather than written out three times: an
+   * `approve` that repainted on a refusal and a `reject` that did not would
+   * be the same key behaving differently for no reason the operator could
+   * ever discover.
+   */
+  const began = (outcome: Started): Started => {
+    if (
+      outcome.ok ||
+      outcome.refused === 'unknown-draft' ||
+      outcome.refused === 'wrong-state'
+    )
+      notify();
+    return outcome;
+  };
+
   const rollback = (id: string, chip: Chip): void => {
     const row = map.get(id);
     if (!row) return;
@@ -517,18 +570,27 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
           return;
         }
         case 'draft.sent':
-          if (observe(payload.draftId, 'sent')) notify();
+          // Recorded even when the state did not move (a card this window
+          // already believed was sent), because the live region is about the
+          // EVENT: an operator who was told nothing when the send landed
+          // has no way to know the queue is finished with it.
+          if (observe(payload.draftId, 'sent') || lastOutcome !== 'sent') {
+            lastOutcome = 'sent';
+            notify();
+          }
           return;
         case 'draft.failed': {
           // The dispatcher's own word, kept because the row's `server.error`
           // is the last FETCH's answer and an event may not overwrite it.
+          const spoke = lastOutcome !== 'failed';
+          lastOutcome = 'failed';
           const moved = observe(payload.draftId, 'failed');
           const known = failures.get(payload.draftId) === payload.error.code;
           if (!known) {
             failures = new Map(failures);
             failures.set(payload.draftId, payload.error.code);
           }
-          if (moved || !known) notify();
+          if (moved || !known || spoke) notify();
           return;
         }
         case 'draft.expired':
@@ -625,21 +687,11 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
       }
     },
 
-    approve(id) {
-      const outcome = start(id, 'approve');
-      // A refusal is USUALLY not a change. Two are. `unknown-draft` learned
-      // the map is stale and the wiring has to be told so it can go and fix
-      // it; `wrong-state` wrote a chip, and a chip nobody repaints is a
-      // keystroke that vanished — which on this screen reads as the app
-      // having done the thing silently.
-      if (
-        outcome.ok ||
-        outcome.refused === 'unknown-draft' ||
-        outcome.refused === 'wrong-state'
-      )
-        notify();
-      return outcome;
-    },
+    outcome: () => lastOutcome,
+
+    approve: (id) => began(start(id, 'approve')),
+    reject: (id) => began(start(id, 'reject')),
+    recall: (id) => began(start(id, 'recall')),
 
     bulk(ids, action) {
       if (stream !== 'connected') return { ok: false, refused: 'offline' };
@@ -689,6 +741,10 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
       });
       setChip(id, { kind: 'changed-elsewhere', state: answer.from });
       notify();
+    },
+
+    refused(id, answer) {
+      rollback(id, { kind: 'refused', reason: answer.reason });
     },
 
     denied(id, answer) {

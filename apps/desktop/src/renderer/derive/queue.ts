@@ -55,6 +55,24 @@ export interface CardModel {
   readonly hint: string | null;
   readonly isGroup: boolean;
   readonly label: string;
+  /** The undo window, while there is one to draw. */
+  readonly ring: CardRing | null;
+}
+
+/**
+ * A running undo window, in the two forms the screen needs.
+ *
+ * Milliseconds for the CSS animation (a duration and a negative delay, which
+ * is how a ring that started before this paint resumes at the right place
+ * with no timer), and whole seconds for the sentence a screen reader is
+ * given. Both are computed ONCE, here, so the number in the label and the
+ * sweep on the screen cannot disagree.
+ */
+export interface CardRing {
+  readonly totalMs: number;
+  readonly elapsedMs: number;
+  readonly totalSeconds: number;
+  readonly remainingSeconds: number;
 }
 
 /** Everything a card needs that is not the draft itself. */
@@ -98,7 +116,49 @@ function chipBadge(chip: Chip): string {
         : `DENIED: ${chip.reason.toUpperCase()} · RETRY AFTER ${chip.retryAfter}`;
     case 'error':
       return `ERROR: ${chip.reason.toUpperCase()}`;
+    // The daemon's own code, uppercased and unrenamed. `GRACE-ELAPSED` is
+    // what the route said, what the CLI prints and what a support thread
+    // would quote; a friendlier synonym here would strand the operator
+    // between two vocabularies for one refusal.
+    case 'refused':
+      return `REFUSED: ${chip.reason.toUpperCase()}`;
   }
+}
+
+/**
+ * The undo window, as the two instants the daemon supplied.
+ *
+ * `stateChangedAt` is when the approval was recorded and `sendNotBefore` is
+ * when the grace sweep may dispatch it, so the difference between them IS
+ * the window — measured by the clock that will decide, not by the setting
+ * that configured it. Reading `send.undoGraceSeconds` instead would draw a
+ * ten-second ring over an approval made when the setting was five, and
+ * would keep being wrong for every draft approved before the change.
+ *
+ * `null` for every state but `approved`, and for an approved draft whose
+ * `sendNotBefore` we have not been told yet: the optimistic hypothesis has
+ * no instants on it, so no ring is drawn until the answer lands. That is
+ * the honest reading — a ring is a promise about a deadline, and we do not
+ * have the deadline until the daemon gives it to us.
+ */
+export function ringOf(
+  draft: DraftPayload,
+  state: DraftState,
+  now: string,
+): CardRing | null {
+  if (state !== 'approved') return null;
+  const ends = Date.parse(draft.sendNotBefore ?? '');
+  const began = Date.parse(draft.stateChangedAt);
+  if (!Number.isFinite(ends) || !Number.isFinite(began)) return null;
+  const total = ends - began;
+  if (total <= 0) return null;
+  const elapsed = Math.max(0, Math.min(total, Date.parse(now) - began));
+  return {
+    totalMs: total,
+    elapsedMs: elapsed,
+    totalSeconds: Math.round(total / 1000),
+    remainingSeconds: Math.ceil((total - elapsed) / 1000),
+  };
 }
 
 /**
@@ -210,6 +270,8 @@ export function cardOf(draft: DraftPayload, context: CardContext): CardModel {
   const ruleName =
     draft.ruleId === null ? null : context.catalogue.rules.get(draft.ruleId);
 
+  const ring = ringOf(draft, context.state, context.now);
+
   return {
     draftId: draft.id,
     domId: domIdFor(draft.id),
@@ -240,7 +302,20 @@ export function cardOf(draft: DraftPayload, context: CardContext): CardModel {
     isGroup: parts.isGroup,
     // Words, not glyphs. This is what a screen reader announces, and `○` is
     // pronounced differently by every voice that pronounces it at all.
-    label: `${STATE_WORD[context.state]} · ${who} · ${draft.body}`,
+    //
+    // The undo clause is APPENDED rather than announced separately, and it
+    // is announced once. There is no timer to count down with (and there
+    // must not be), so a region that spoke the remaining seconds would
+    // either be stuck on the first number it said or would need a tick this
+    // app refuses to own. Saying it once, in the option's own label, is
+    // what a listbox is for: the operator hears the deadline at the moment
+    // the cursor is on the card that has one.
+    label:
+      ring === null
+        ? `${STATE_WORD[context.state]} · ${who} · ${draft.body}`
+        : `${STATE_WORD[context.state]} · ${who} · ${draft.body}` +
+          ` · UNDO SEND, ${String(ring.remainingSeconds)} SECONDS REMAINING`,
+    ring,
   };
 }
 

@@ -46,7 +46,10 @@ import {
   createChatDb,
   type ChatDbFixture,
 } from '../../../../fixtures/dist/index.js';
-import { createLoopbackSendBackend } from '../../../../packages/daemon/test/helpers/loopback-backend.js';
+import {
+  createLoopbackSendBackend,
+  type LoopbackSendBackend,
+} from '../../../../packages/daemon/test/helpers/loopback-backend.js';
 import { startRequestLog, type RequestLog } from './request-log.js';
 
 /** The compiled main entry `_electron.launch` is pointed at. */
@@ -131,6 +134,22 @@ export interface FixtureDaemon {
   probes: DoctorProbes;
   fixture: ChatDbFixture;
   requests: RequestLog;
+  /**
+   * The send PORT, exposed so a row can count what crossed it.
+   *
+   * s8 Sc8 needs this and no earlier scenario did, because this is the first
+   * scenario whose claim is about SPEED: the pressure that produces an
+   * optimistic local send, or a batch around the approval record, is the
+   * pressure to make approving fast. Counting approve POSTs proves the GUI
+   * asked correctly; counting `send()` proves nothing answered it early.
+   *
+   * It is also what makes the INV-2 rows non-vacuous. A backend that is
+   * never called is indistinguishable from a backend that is not wired, so
+   * the checkpoint asserts zero DURING triage and then ticks the daemon and
+   * asserts one call per approval, with the approved body — the sanctioned
+   * path working is what gives the zero its meaning.
+   */
+  loopback: LoopbackSendBackend;
   stop(): Promise<void>;
 }
 
@@ -144,13 +163,14 @@ export async function bootFixtureDaemon(
   const configDir = join(dir, 'config');
   const clock = createTestClock(options.clockAt);
   const probes: DoctorProbes = { ...DEFAULT_PROBES, ...options.probes };
+  const loopback = createLoopbackSendBackend(fixture, clock);
   const daemon = await startDaemon({
     configDir,
     chatDbPath,
     clock,
     watcher: fakeWatcher(),
     doctorProbes: probes,
-    backend: createLoopbackSendBackend(fixture, clock),
+    backend: loopback,
     backendName: 'loopback',
   });
   const token = daemon.server.token;
@@ -176,6 +196,7 @@ export async function bootFixtureDaemon(
     probes,
     fixture,
     requests,
+    loopback,
     stop: async () => {
       await requests.close();
       await daemon.stop();

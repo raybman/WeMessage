@@ -33,12 +33,18 @@
 import type { VNode } from 'preact';
 import { Listbox, type ListboxOption } from '../../components/Listbox.js';
 import type { CardModel } from '../../derive/queue.js';
-import { legendFor, verbOf, type QueueVerb } from '../../keys/index.js';
+import {
+  legendFor,
+  verbOf,
+  type KeyMode,
+  type QueueVerb,
+} from '../../keys/index.js';
 import type {
   ConnState,
   Conversation as Thread,
   Turn,
 } from '../../store/optimistic.js';
+import { Editor } from '../../components/Editor.js';
 import { Card } from './Card.js';
 import { Conversation } from './Conversation.js';
 import { DisconnectedOverlay } from './DisconnectedOverlay.js';
@@ -113,6 +119,16 @@ export interface QueueScreenProps {
   readonly watching: readonly string[];
   /** What assistive technology is told last happened. May be empty. */
   readonly announcement: string;
+  /**
+   * The body being edited, or `null` when nobody is editing.
+   *
+   * `null` and not `''`: an empty string is a body somebody has deleted
+   * every character of, which is a real state the editor has to be able to
+   * be in, and conflating it with "no editor" would close the box under the
+   * operator the moment they selected all and pressed delete.
+   */
+  readonly editing: string | null;
+  readonly onEdit: (next: string) => void;
   readonly onVerb: (verb: QueueVerb) => void;
 }
 
@@ -154,6 +170,18 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
   // disconnected says so and refuses.
   const inert = props.link !== 'connected';
 
+  /**
+   * Which keyboard the operator is at, derived and never stored.
+   *
+   * The same value that produces `inert`, so a link the screen has dimmed
+   * and a link the keymap refuses can never be two different opinions. The
+   * editor wins over the link: a person mid-sentence when the socket drops
+   * keeps their sentence, and the commit stroke is refused downstream by the
+   * store's own `offline` check rather than by yanking the box away.
+   */
+  const mode: KeyMode =
+    props.editing !== null ? 'editing' : inert ? 'offline' : 'list';
+
   const options: ListboxOption[] = mounted.map((card) => {
     const expanded = props.expandedId === card.draftId;
     return {
@@ -186,13 +214,16 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
   });
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    const verb = verbOf({
-      key: event.key,
-      metaKey: event.metaKey,
-      ctrlKey: event.ctrlKey,
-      altKey: event.altKey,
-      shiftKey: event.shiftKey,
-    });
+    const verb = verbOf(
+      {
+        key: event.key,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+      },
+      { mode },
+    );
     if (verb === null) return;
     // Only for keys we claimed. A handler that preventDefault'd everything
     // would eat the browser's own find, and refusing a keystroke we did not
@@ -284,6 +315,20 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
             />
           )}
         </div>
+        {/*
+          The editor, beside the list rather than inside it. An option with
+          a focusable child is an ARIA violation and a second focus owner;
+          this keeps the listbox's single tab stop intact while it is
+          closed, and adds exactly one while it is open.
+        */}
+        {props.editing === null || active === undefined ? null : (
+          <Editor
+            value={props.editing}
+            label={`Edit draft to ${active.who} before approving`}
+            onInput={props.onEdit}
+            onKeyDown={onKeyDown}
+          />
+        )}
         {active === undefined ? null : (
           <Conversation
             draftId={active.draftId}

@@ -4116,12 +4116,27 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
      * a card that renders a rule NAME and a display NAME needs the two
      * catalogues those names live in, and `rules`/`contacts` were already
      * declared request channels, so nothing new was opened at the IPC
-     * boundary to get them. Both additions are READS. The guarantee this
-     * row exists for is unchanged and is asserted separately below: no
-     * identifier under the store may match /send/i, so the store still
-     * cannot reach the one channel that could dispatch.
+     * boundary to get them. Both additions are READS.
+     *
+     * s8 Sc8 widens it again, to eight, for `reject` and `recall` — the two
+     * writes a keyboard triage needs and the ONLY two it needs. Both were
+     * already channels in the registry; no IPC surface was opened for the
+     * keymap. `recall` in particular is the opposite of a send: it is the
+     * request that stops one. The guarantee this row exists for is unchanged
+     * and is asserted separately below: no identifier under the store may
+     * match /send/i, so the store still cannot reach the one channel that
+     * could dispatch.
      */
-    const ALLOWED = ['approve', 'bulk', 'contacts', 'drafts', 'on', 'rules'];
+    const ALLOWED = [
+      'approve',
+      'bulk',
+      'contacts',
+      'drafts',
+      'on',
+      'recall',
+      'reject',
+      'rules',
+    ];
 
     /** Every `bridge.<member>` the store's CODE names, sorted and unique. */
     function bridgeReach(rels: readonly string[]): string[] {
@@ -4143,7 +4158,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       return [...new Set(out)].sort();
     }
 
-    it('the store reaches exactly five request channels and one subscription', () => {
+    it('the store reaches exactly seven request channels and one subscription', () => {
       const files = archFiles(STORE_ROOT);
       expect(files).toContain(WIRING);
       expect(bridgeReach(files)).toEqual(ALLOWED);
@@ -4154,10 +4169,22 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       expect(declared).not.toBeNull();
       expect(
         [...(declared?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]),
-      ).toEqual(['approve', 'bulk', 'contacts', 'drafts', 'rules']);
-      expect(archRead(WIRING)).toContain(
-        "'approve' | 'bulk' | 'contacts' | 'drafts' | 'on' | 'rules'",
-      );
+      ).toEqual([
+        'approve',
+        'bulk',
+        'contacts',
+        'drafts',
+        'recall',
+        'reject',
+        'rules',
+      ]);
+      // Written across lines in the source, so the type is matched by its
+      // members rather than by one spelling of the union's whitespace.
+      const pick = /Pick<\s*WmBridge,([\s\S]*?)>/.exec(archRead(WIRING));
+      expect(pick).not.toBeNull();
+      expect(
+        [...(pick?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort(),
+      ).toEqual(ALLOWED);
     });
 
     it('nothing in the store names a send, though the channel exists', () => {
@@ -4761,6 +4788,168 @@ describe('S8 extensions (s8-execution Scenario 7: the queue’s edge states)', (
         ].join('\n'),
       );
       expect(regionSites('alert')).toEqual([rel]);
+    });
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 8: keyboard triage)', () => {
+  const sc8Planted: string[] = [];
+  function sc8Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc8Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc8Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/queue/__s8_sc8_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc8_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const EDITOR = `${RENDERER}/components/Editor.tsx`;
+  const RING = `${RENDERER}/screens/queue/UndoRing.tsx`;
+  const WIRING = `${RENDERER}/store/index.ts`;
+
+  /**
+   * Row 1 — the editable control has exactly one home.
+   *
+   * The same shape as Sc6's rule for `role="listbox"`, and for the same
+   * reason. Sc7 pinned the document to ONE tab stop, on the listbox, and a
+   * textarea is a second one: every place that can mint one is a place that
+   * can leave the operator's focus somewhere the keymap does not reach. One
+   * file means the mount, the focus and the hand-back are one decision.
+   *
+   * `codeOf` and not the raw text, because half this codebase's comments are
+   * about the control this row is restricting and a guard that its own
+   * documentation trips is a guard somebody deletes.
+   */
+  function editorSites(): string[] {
+    return archFiles(RENDERER).filter((rel) =>
+      /<textarea\b/.test(codeOf(archRead(rel))),
+    );
+  }
+
+  describe('row 1: one editable control, in one file', () => {
+    it('mints a textarea in exactly one place, and it is the editor', () => {
+      expect(editorSites()).toEqual([EDITOR]);
+      // Non-vacuous: the file really does contain one, so this row is
+      // asserting a location rather than an absence.
+      expect(codeOf(archRead(EDITOR))).toContain('<textarea');
+    });
+
+    it('PLANTED: a card that grows its own textarea is caught', () => {
+      const rel = sc8Plant(
+        `${RENDERER}/screens/queue/__s8_sc8_probe__/Inline.tsx`,
+        [
+          'export function Inline(props: { body: string }): unknown {',
+          '  return <textarea value={props.body} />;',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(editorSites()).toContain(rel);
+    });
+
+    it('LEGITIMATE NEAR-MISS: prose about the control, over a card, is clean', () => {
+      const rel = sc8Plant(
+        `${RENDERER}/screens/queue/__s8_sc8_probe__/Documented.tsx`,
+        [
+          '/**',
+          ' * Editing happens elsewhere. A <textarea> inside an option would',
+          ' * give the listbox a second focus owner, so this renders text.',
+          ' */',
+          'export function Documented(props: { body: string }): unknown {',
+          '  return <p class="card-body">{props.body}</p>; // not a <textarea>',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(editorSites()).not.toContain(rel);
+      expect(editorSites()).toEqual([EDITOR]);
+    });
+  });
+
+  /**
+   * Row 2 — one call site per write verb, still.
+   *
+   * Sc7 pinned `bridge.approve(`. Scenario 8 adds two more verbs that move a
+   * draft, and the reason the first one was pinned applies to all three: a
+   * second call site is a second place a retry, a double-press or an
+   * "optimistic" shortcut can turn one keystroke into two writes. The
+   * checkpoint counts approvals at the wire; this counts them in the source.
+   */
+  describe('row 2: every write verb has exactly one call site', () => {
+    for (const verb of ['approve', 'reject', 'recall'] as const) {
+      const one = new RegExp(`\\bbridge\\s*\\.\\s*${verb}\\s*\\(`);
+      const all = new RegExp(`\\bbridge\\s*\\.\\s*${verb}\\s*\\(`, 'g');
+      it(`calls bridge.${verb} from one file, once`, () => {
+        const callers = archFiles(RENDERER).filter((rel) =>
+          one.test(codeOf(archRead(rel))),
+        );
+        expect(callers).toEqual([WIRING]);
+        expect(codeOf(archRead(WIRING)).match(all)).toHaveLength(1);
+      });
+    }
+
+    it('PLANTED: a second caller anywhere in the renderer is caught', () => {
+      const rel = sc8Plant(
+        `${RENDERER}/screens/queue/__s8_sc8_probe__/Shortcut.tsx`,
+        [
+          'export const go = (bridge: { reject: (id: string) => unknown }) =>',
+          "  bridge.reject('draft-1');",
+          '',
+        ].join('\n'),
+      );
+      const callers = archFiles(RENDERER).filter((f) =>
+        /\bbridge\s*\.\s*reject\s*\(/.test(codeOf(archRead(f))),
+      );
+      expect(callers).toContain(rel);
+      expect(callers).not.toEqual([WIRING]);
+    });
+  });
+
+  /**
+   * Row 3 — the ring is drawn from the daemon's instants, not the setting.
+   *
+   * §1.7's rule, made mechanical. `send.undoGraceSeconds` is what the daemon
+   * used to COMPUTE `sendNotBefore`; it is not what the operator is looking
+   * at. A ring drawn from the setting would keep sweeping for ten seconds
+   * after an operator changed the setting to five, and would be wrong about
+   * every approval made before the change. The two instants the daemon
+   * supplied are the only honest source, and they arrive on the draft.
+   *
+   * The no-timer rows elsewhere already ban the interval §1.7 assumed; this
+   * says what replaced it, so that the replacement cannot quietly become a
+   * poll on the next hand that reads the plan instead of the code.
+   */
+  describe('row 3: the undo ring has no clock of its own', () => {
+    /** Where the two instants become a duration. */
+    const DERIVE = `${RENDERER}/derive/queue.ts`;
+
+    it('derives its total from the two instants and animates in CSS', () => {
+      // The derivation names both instants and does the arithmetic once.
+      const derived = codeOf(archRead(DERIVE));
+      expect(derived).toContain('sendNotBefore');
+      expect(derived).toContain('stateChangedAt');
+      // The component only spends what it was handed, as CSS: an
+      // `animation-duration` and the negative `animation-delay` that makes a
+      // ring which started before this paint resume where it really is.
+      const body = codeOf(archRead(RING));
+      expect(body).toContain('animationDuration');
+      expect(body).toContain('animationDelay');
+      // The setting's NAME may appear in the prose above the code — it is
+      // the thing the comments are warning about — but in NO renderer code.
+      for (const rel of archFiles(RENDERER))
+        expect([
+          rel,
+          codeOf(archRead(rel)).includes('undoGraceSeconds'),
+        ]).toEqual([rel, false]);
     });
   });
 });

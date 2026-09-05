@@ -63,6 +63,14 @@ interface Fake {
   /** Answer the next `approve` call with this value, or reject with it. */
   nextApprove(value: unknown, reject?: boolean): void;
   /**
+   * Answer the next `reject`/`recall` call with this value, or throw it.
+   *
+   * One setter for both because the two verbs share `settle` in the wiring;
+   * a test that needs them to answer DIFFERENTLY is a test that has found a
+   * reason for them not to share, which is worth writing explicitly.
+   */
+  nextWrite(value: unknown, reject?: boolean): void;
+  /**
    * Answer the two catalogue channels with these rows, or make them throw.
    *
    * `unknown` rather than a DTO: these two answers cross the bridge untyped
@@ -85,6 +93,8 @@ function fakeBridge(): Fake {
   let drafts: readonly DraftPayload[] = [];
   let approveAnswer: unknown = { draft: draft('d1'), approvalId: 'a1' };
   let approveRejects = false;
+  let writeAnswer: unknown = { draft: draft('d1') };
+  let writeRejects = false;
   let rules: unknown = [];
   let contacts: unknown = [];
   let rulesThrow = false;
@@ -106,6 +116,10 @@ function fakeBridge(): Fake {
       approveAnswer = value;
       approveRejects = reject;
     },
+    nextWrite: (value, reject = false) => {
+      writeAnswer = value;
+      writeRejects = reject;
+    },
     nextCatalogue: (next) => {
       if (next.rules !== undefined) rules = next.rules;
       if (next.contacts !== undefined) contacts = next.contacts;
@@ -126,6 +140,18 @@ function fakeBridge(): Fake {
         return approveRejects
           ? Promise.reject(new Error(String(approveAnswer)))
           : Promise.resolve(approveAnswer);
+      },
+      reject: (...args: readonly unknown[]): Promise<unknown> => {
+        calls.push({ channel: 'reject', args });
+        return writeRejects
+          ? Promise.reject(new Error(String(writeAnswer)))
+          : Promise.resolve(writeAnswer);
+      },
+      recall: (...args: readonly unknown[]): Promise<unknown> => {
+        calls.push({ channel: 'recall', args });
+        return writeRejects
+          ? Promise.reject(new Error(String(writeAnswer)))
+          : Promise.resolve(writeAnswer);
       },
       rules: (...args: readonly unknown[]): Promise<unknown> => {
         calls.push({ channel: 'rules', args });
@@ -165,17 +191,23 @@ function connected(fake: Fake): void {
 
 /* ── the closed channel list ─────────────────────────────────────────── */
 
-describe('s8 Sc5 wiring: the store reaches five channels and no others', () => {
+describe('s8 Sc5 wiring: the store reaches seven channels and no others', () => {
   it('the allowlist names nothing that could send', () => {
     // s8 Sc6 grew this from three to five: a card that renders a rule NAME
     // and a display NAME needs the two catalogues those names live in. Both
     // additions are reads, and the guarantee this row exists for is
-    // unchanged — none of the five is the channel that could dispatch.
+    // unchanged — none of them is the channel that could dispatch.
+    //
+    // s8 Sc8 grew it to seven, for the two remaining triage verbs. `recall`
+    // is worth a second look and passes it: it is the request that STOPS a
+    // send, and the daemon refuses it once the grace window has closed.
     expect([...STORE_CHANNELS]).toEqual([
       'approve',
       'bulk',
       'contacts',
       'drafts',
+      'recall',
+      'reject',
       'rules',
     ]);
     for (const channel of STORE_CHANNELS)

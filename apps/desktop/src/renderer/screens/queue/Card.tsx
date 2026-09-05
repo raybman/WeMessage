@@ -22,6 +22,7 @@
  */
 import type { VNode } from 'preact';
 import { clampBody, type CardModel } from '../../derive/queue.js';
+import { UndoRing } from './UndoRing.js';
 import type { Turn } from '../../store/optimistic.js';
 
 export interface CardProps {
@@ -65,6 +66,11 @@ export function Card(props: CardProps): VNode {
         <span class="card-time" data-created={card.createdAt}>
           {card.timeLabel}
         </span>
+        {/* Only while the daemon says there is a window. The ring is drawn
+            from the two instants it supplied, so an optimistic approval has
+            none until the answer lands — which is honest: until then this
+            window does not know the deadline it would be drawing. */}
+        {card.ring === null ? null : <UndoRing ring={card.ring} />}
       </div>
       {/* Clamped by ARITHMETIC, not by a CSS line clamp: a clamp that hid
           lines the DOM still held would make "what does this card show"

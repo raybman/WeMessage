@@ -28,7 +28,42 @@ export type QueueVerb =
   | 'page-down'
   | 'page-up'
   | 'approve'
-  | 'expand';
+  | 'expand'
+  | 'reject'
+  | 'edit'
+  | 'undo'
+  | 'approve-edited'
+  | 'cancel-edit';
+
+/**
+ * Which keyboard the operator is at.
+ *
+ * Not a flag on the stroke: the SAME physical key means different things in
+ * these three worlds, and the only way a keymap can be a pure function of
+ * its inputs is to be told which world it is in.
+ *
+ *  - `list`     the queue has focus. Single unmodified letters.
+ *  - `editing`  the editor has focus. Two strokes are ours; every other key
+ *               is a character somebody is typing, including `a`.
+ *  - `offline`  the stream is not connected. Reading is always safe, so
+ *               navigation and context still work; every verb that would
+ *               WRITE is refused here rather than at the call site, so that
+ *               the operator's key does nothing instead of drawing a
+ *               hypothesis the store is about to roll back (Sc7).
+ */
+export type KeyMode = 'list' | 'editing' | 'offline';
+
+/**
+ * Everything the keymap is allowed to know beyond the stroke itself.
+ *
+ * An OBJECT with one field rather than a bare `KeyMode`, deliberately:
+ * Scenario 9's `⇧A` needs to know whether anything is selected, and a field
+ * added here changes no call site, where a second positional argument would
+ * change every one of them and every row that tests them.
+ */
+export interface KeyContext {
+  readonly mode: KeyMode;
+}
 
 /**
  * How far a page moves.
@@ -53,17 +88,9 @@ export interface KeyStroke {
   readonly shiftKey: boolean;
 }
 
-/**
- * The verb for a keystroke, or `null` if the queue does not want it.
- *
- * `shiftKey` is NOT a disqualifier: `G` is shift-`g` on every layout, and
- * refusing it would make the last-card key unreachable. The other three
- * modifiers are, because every one of them belongs to the system or to the
- * window and none of them belongs to a list.
- */
-export function verbOf(stroke: KeyStroke): QueueVerb | null {
-  if (stroke.metaKey || stroke.ctrlKey || stroke.altKey) return null;
-  switch (stroke.key) {
+/** The navigation verbs, which are exactly what `offline` still allows. */
+function navigationOf(key: string): QueueVerb | null {
+  switch (key) {
     case 'j':
     case 'ArrowDown':
       return 'next';
@@ -84,8 +111,6 @@ export function verbOf(stroke: KeyStroke): QueueVerb | null {
       return 'page-down';
     case 'PageUp':
       return 'page-up';
-    case 'a':
-      return 'approve';
     // Playwright presses `Space`; a browser delivers `' '`. Both spellings
     // are here because the suite drives this app the way a person does and
     // the difference is a detail of the driver, not of the product.
@@ -94,6 +119,75 @@ export function verbOf(stroke: KeyStroke): QueueVerb | null {
       return 'expand';
     default:
       return null;
+  }
+}
+
+/**
+ * The two strokes the EDITOR does not get to keep.
+ *
+ * Both are modified, and that is the whole design. A bare Return has to
+ * insert a newline, because the thing being edited is a message body and a
+ * message body has paragraphs in it; so the commit is ⌘↩, with ⌃↩ as the
+ * same stroke for a keyboard that has no Command key. Escape is the one
+ * unmodified exception, because Escape means "out of here" everywhere on
+ * this platform and an editor that swallowed it would be a trap.
+ */
+function editingOf(stroke: KeyStroke): QueueVerb | null {
+  if (stroke.key === 'Escape' && !stroke.metaKey && !stroke.ctrlKey)
+    return 'cancel-edit';
+  if (stroke.key === 'Enter' && (stroke.metaKey || stroke.ctrlKey))
+    return 'approve-edited';
+  return null;
+}
+
+/**
+ * The verb for a keystroke in a context, or `null` if the queue does not
+ * want it.
+ *
+ * `null` is the load-bearing half. A key this function claims is a key the
+ * screen calls `preventDefault` on, so every wrong `yes` here is a keystroke
+ * the operator's browser, menu bar or textarea never sees.
+ *
+ * The kill switch is the deliberate deviation from the plan, and it is a
+ * `null` in all three contexts. ⌘⇧K has to work when this window is not
+ * focused and when the queue is not even on screen, which makes it a
+ * `globalShortcut` in the MAIN process (Sc16). Claiming it here would bind
+ * it twice and make it work once — in exactly the case where the operator
+ * needed it least — while `preventDefault`ing the one keystroke whose entire
+ * value is that it always works.
+ *
+ * `shiftKey` is NOT a disqualifier in `list`: `G` is shift-`g` on every
+ * layout, and refusing it would make the last-card key unreachable. The
+ * other three modifiers are, because every one of them belongs to the
+ * system or to the window and none of them belongs to a list.
+ */
+export function verbOf(
+  stroke: KeyStroke,
+  context: KeyContext,
+): QueueVerb | null {
+  if (context.mode === 'editing') return editingOf(stroke);
+  if (stroke.metaKey || stroke.ctrlKey || stroke.altKey) return null;
+  if (context.mode === 'offline') return navigationOf(stroke.key);
+  switch (stroke.key) {
+    case 'a':
+      return 'approve';
+    case 'r':
+      return 'reject';
+    case 'e':
+      return 'edit';
+    // `z` and not ⌘Z. The system undo is a text-editing verb that belongs to
+    // whatever has focus, and this one recalls a message from a send window:
+    // binding it to the platform's undo would make ⌘Z mean two different
+    // irreversible things depending on where the caret happened to be.
+    case 'z':
+      return 'undo';
+    default:
+      // `A` and `R` are shifted letters, so they arrive as different keys
+      // and are simply not bound. That is how "⇧A with an empty selection
+      // does nothing" holds with no selection in the context at all —
+      // Scenario 9 gives them a meaning, and until it does they are unknown
+      // keys like any other.
+      return navigationOf(stroke.key);
   }
 }
 
@@ -125,11 +219,22 @@ export function moveTo(verb: QueueVerb, index: number, length: number): number {
       return clamp(index + PAGE);
     case 'page-up':
       return clamp(index - PAGE);
-    // `approve` and `expand` are not navigation and leave the cursor where
-    // it is. Listed rather than defaulted so that a verb added to the union
-    // in Sc8 fails to compile here until somebody decides whether it moves.
+    // None of these is navigation, and none of them moves the cursor BY
+    // ITSELF. Listed rather than defaulted so that a verb added to the union
+    // fails to compile here until somebody decides whether it moves.
+    //
+    // The screen advances the cursor after an action lands, which is a
+    // different decision made in a different place for a reason: `moveTo` is
+    // arithmetic over a list, and "where should the operator be looking now"
+    // depends on what the daemon just said. Conflating the two would move
+    // the cursor on a keystroke the store went on to refuse.
     case 'approve':
     case 'expand':
+    case 'reject':
+    case 'edit':
+    case 'undo':
+    case 'approve-edited':
+    case 'cancel-edit':
       return clamp(index);
   }
 }
@@ -146,5 +251,5 @@ export function moveTo(verb: QueueVerb, index: number, length: number): number {
  */
 export function legendFor(options: { readonly group: boolean }): string {
   const approve = options.group ? 'A approve (drafts only in v1)' : 'A approve';
-  return `${approve} · SPACE context · J/K move`;
+  return `${approve} · R reject · E edit · SPACE context · J/K move`;
 }

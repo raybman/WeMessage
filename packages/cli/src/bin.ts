@@ -26,8 +26,10 @@ import {
   rotateTokenFile,
   DaemonAuthError,
   DaemonConflictError,
+  DaemonEventFilterError,
   DaemonGateDeniedError,
   DaemonRequestError,
+  DaemonSettingsError,
   DaemonUnreachableError,
   type AuditRowPayload,
   type AuditVerifyResult,
@@ -51,6 +53,7 @@ import {
   type RespondMode,
   type SchedulePatch,
   type ScheduleWindowPayload,
+  type SettingsPayload,
 } from '@wemessage/client';
 import {
   renderAdapter,
@@ -76,7 +79,13 @@ import {
 } from './arming.js';
 import { probeChatDbReadable } from './probe.js';
 import { confirmPurge } from './purge.js';
-import { createWatchRenderer } from './watch.js';
+import {
+  parseSettingLiteral,
+  renderSettingsSet,
+  renderSettingsTable,
+  settingsRefusal,
+} from './settings.js';
+import { createWatchRenderer, parseEventsFlag } from './watch.js';
 
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
@@ -141,6 +150,22 @@ function exitFor(error: unknown): never {
                 : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
       EXIT_FAILED,
     );
+  }
+  if (error instanceof DaemonEventFilterError) {
+    // s7 Sc5. A close frame before `open` is what an unreachable daemon looks
+    // like too, and the ONLY thing separating them is the 4400 code the WS
+    // route spends saying "your --events list named something I do not have."
+    // Exit 2, not 3: nothing is wrong with the daemon, the request could not
+    // have been served as typed. The daemon's own words, verbatim.
+    fail(error.reason, EXIT_USAGE);
+  }
+  if (error instanceof DaemonSettingsError) {
+    // s7 Sc5. Checked BEFORE DaemonRequestError, which it extends: the five
+    // reasons `PATCH /v1/settings` distinguishes are the entire actionable
+    // content of that 400, and the generic branch below would print
+    // "daemon request failed (HTTP 400)" over the top of all of them.
+    const { message, code } = settingsRefusal(error.detail);
+    fail(message, code);
   }
   if (error instanceof DaemonUnreachableError) {
     fail(error.message, EXIT_UNREACHABLE);
@@ -288,8 +313,12 @@ program
   .command('watch')
   .description('live event stream (WS under the hood, §3.8)')
   .option('--json', 'NDJSON: one JSON object per event')
+  .option(
+    '--events <list>',
+    'comma-separated event names; the daemon filters, not this CLI (s7)',
+  )
   .option('-T, --token <token>', 'bearer token override')
-  .action(async (opts: { json?: boolean; token?: string }) => {
+  .action(async (opts: { json?: boolean; events?: string; token?: string }) => {
     // s5 Sc11: `--json` is still NDJSON, every event, unchanged (§3.8
     // "--json … NDJSON for streams"). Human mode renders the two S5 events
     // that are unreadable as raw JSON at a terminal — a streaming preview
@@ -297,24 +326,42 @@ program
     // which is what it has always been.
     const render = createWatchRenderer();
     try {
-      await clientOrExit(opts.token).events((event) => {
-        const line = opts.json === true ? null : render(event);
-        if (line === null) {
-          console.log(JSON.stringify(event));
-          return;
-        }
-        if (line.inPlace && process.stdout.isTTY === true) {
-          // One line, overwritten, at a terminal only: a pipe or a log file
-          // gets whole lines, because \r in a captured log is noise. A
-          // carriage return and nothing else — no erase-line escape, because
-          // C-9 is "no ANSI", not "no color" (a preview only ever grows, so
-          // there is nothing left behind to erase).
-          process.stdout.write(`\r${line.text}`);
-          return;
-        }
-        console.log(line.text);
-      });
-      // stream stays open until Ctrl-C / kill
+      // s7 Sc5: the filter is applied SERVER-side (`?events=`), which is the
+      // whole point of Sc 3 — an event the operator did not ask for never
+      // crosses the socket, rather than crossing it and being dropped here.
+      // The names travel verbatim; an unknown one closes 4400 and lands in
+      // `exitFor` as a DaemonEventFilterError.
+      const subscription = await clientOrExit(opts.token).events(
+        (event) => {
+          const line = opts.json === true ? null : render(event);
+          if (line === null) {
+            console.log(JSON.stringify(event));
+            return;
+          }
+          if (line.inPlace && process.stdout.isTTY === true) {
+            // One line, overwritten, at a terminal only: a pipe or a log file
+            // gets whole lines, because \r in a captured log is noise. A
+            // carriage return and nothing else — no erase-line escape, because
+            // C-9 is "no ANSI", not "no color" (a preview only ever grows, so
+            // there is nothing left behind to erase).
+            process.stdout.write(`\r${line.text}`);
+            return;
+          }
+          console.log(line.text);
+        },
+        // exactOptionalPropertyTypes: an omitted `--events` means the KEY is
+        // absent, not present-and-undefined, which is what makes the client
+        // open `/v1/events` with no query string at all.
+        opts.events !== undefined
+          ? { events: parseEventsFlag(opts.events) }
+          : {},
+      );
+      // The stream stays open until Ctrl-C / kill — or until the daemon ends
+      // it. A refused `--events` list is the one ending that is not an
+      // ordinary end of stream: it rejects here and exits 2 rather than
+      // letting the process fall off the end at 0, which is what "not a
+      // stack" has to mean if it is to mean anything.
+      await subscription.closed;
     } catch (error) {
       exitFor(error);
     }
@@ -1582,12 +1629,18 @@ adapters
     //    exists would mean the CLI spawning adapter processes, which F-55
     //    refuses on a localhost daemon.
     //
-    // Until then the kit is run where it lives, and the message says so rather
-    // than leaving the operator to guess.
+    // s7 Sc5 revises the COPY, not the posture. F-86: the kit has its own
+    // invocation now, so the refusal hands over that command line instead of
+    // a `pnpm --filter` nobody outside this workspace can run. What it still
+    // will not do is run it — a CLI that spawns an arbitrary command is a
+    // generic escape hatch wearing a verb's name (F-55), and the operator is
+    // better served by a line they can read before they run it.
     fail(
-      'adapters test is not available yet: the conformance testkit ships ' +
-        'workspace-internal in S5 (run `pnpm --filter @wemessage/adapter-testkit ' +
-        'test`); the CLI runner lands with its packaging in S7 (F-52)',
+      'adapters test does not run the kit from here: this CLI imports client ' +
+        'and protocol only (cli-desktop-thin-clients), and spawning an adapter ' +
+        'process on its behalf is what F-55 refuses. The kit runs itself — ' +
+        'run: npx @wemessage/adapter-testkit --cmd "<your adapter>" ' +
+        '(F-52 for its packaging, F-86 for why this stays a pointer)',
       EXIT_USAGE,
     );
   });
@@ -1994,6 +2047,76 @@ program
         console.log(
           opts.json === true ? JSON.stringify(report) : renderResume(report),
         );
+      } catch (error) {
+        exitFor(error);
+      }
+    },
+  );
+
+// ---- s7 Scenario 5: settings get / set (§1.6, Sc 4's two routes) ------
+
+const settings = program
+  .command('settings')
+  .description("read and write the daemon settings (s7 Sc 4's closed list)");
+
+settings
+  .command('get')
+  .description('every setting with its default, bounds and owning route')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(async (opts: { json?: boolean; token?: string }) => {
+    try {
+      // The WHOLE list, read-only keys included. A settings screen that
+      // showed only what it could write would be lying about the
+      // configuration — and the four read-only keys are precisely the ones
+      // carrying arming state, which is the state an operator most needs to
+      // see and least may edit here.
+      const payload = await clientOrExit(opts.token).settings();
+      console.log(
+        opts.json === true
+          ? JSON.stringify(payload)
+          : renderSettingsTable(payload),
+      );
+    } catch (error) {
+      exitFor(error);
+    }
+  });
+
+settings
+  .command('set <key> <value>')
+  .description('write one setting; the daemon owns every refusal')
+  .option('--json', 'stable machine-readable output')
+  .option('-T, --token <token>', 'bearer token override')
+  .action(
+    async (
+      key: string,
+      value: string,
+      opts: { json?: boolean; token?: string },
+    ) => {
+      try {
+        // No client-side validation of the key or the value, deliberately.
+        // The closed list, the types, the floors and the ceilings all live in
+        // one place (packages/daemon/src/settings/schema.ts) and a copy here
+        // would drift the first time a key was added — silently, in the
+        // direction of refusing writes the daemon would have accepted. The
+        // literal parse is the ONE thing the CLI must do, because a shell
+        // hands it a string and JSON needs a type.
+        const result = await clientOrExit(opts.token).setSettings({
+          [key]: parseSettingLiteral(value),
+        });
+        if (opts.json === true) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+        // The route answers with the whole list; the operator asked about one
+        // key, so narrow to it rather than printing fifteen rows they did not
+        // request.
+        const entry = result.settings[key];
+        if (entry === undefined) {
+          fail(`daemon accepted "${key}" but did not return it`, EXIT_FAILED);
+        }
+        const shown: SettingsPayload = { [key]: entry };
+        console.log(renderSettingsSet(shown, result.changed));
       } catch (error) {
         exitFor(error);
       }

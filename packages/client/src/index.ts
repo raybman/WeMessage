@@ -21,12 +21,42 @@ export const TOKEN_FILENAME = 'daemon.token';
 /** wm_ prefix per the WeMessage rename map (R11). */
 export const TOKEN_PREFIX = 'wm_';
 
+/**
+ * The close code Sc 3's WS route spends on a filter it could not parse. In
+ * the 4000-4999 private range, so it can never collide with a protocol code
+ * the `ws` library or an intermediary might send on its own.
+ */
+const WS_CLOSE_BAD_FILTER = 4400;
+
 /** Daemon could not be reached at all (maps to CLI exit 3, §3.8). */
 export class DaemonUnreachableError extends Error {
   constructor(baseUrl: string, cause?: unknown) {
     super(`daemon unreachable at ${baseUrl}`);
     this.name = 'DaemonUnreachableError';
     this.cause = cause;
+  }
+}
+
+/**
+ * s7 Sc5 — the `?events=` list named an event the daemon does not have.
+ *
+ * A separate class from `DaemonUnreachableError` because it is a separate
+ * fact, and the two land the operator in completely different places. The WS
+ * route cannot answer `400`: by the time it can read the query string the
+ * upgrade has already succeeded, so its only channel is a close frame, and a
+ * close frame before `open` is exactly what an unreachable daemon looks like
+ * too. Left undistinguished, a typo in `--events` would be reported as
+ * "daemon unreachable" and send someone to `launchctl` to debug their own
+ * spelling. The daemon spends a close CODE (4400) and a reason string saying
+ * which name it did not know; this carries both the rest of the way.
+ */
+export class DaemonEventFilterError extends Error {
+  constructor(
+    /** The daemon's own words, e.g. `unknown-event: draft.typo`. */
+    readonly reason: string,
+  ) {
+    super(reason);
+    this.name = 'DaemonEventFilterError';
   }
 }
 
@@ -229,6 +259,37 @@ export interface ClientOptions {
 
 export interface EventSubscription {
   close(): void;
+  /**
+   * s7 Sc5 — settles when the stream ENDS. Resolves on an ordinary close;
+   * rejects with `DaemonEventFilterError` when the daemon refused the
+   * `?events=` filter.
+   *
+   * This exists because the refusal cannot arrive any earlier. The WS route
+   * only sees the query string after the upgrade has already succeeded, so
+   * the socket is OPEN — `events()` has already resolved — by the time the
+   * daemon can say the filter names an event it does not have. Without a
+   * second place to put that fact, a caller would watch the stream end and
+   * exit 0, reporting a typo in `--events` as a normal end of stream.
+   *
+   * A rejection handler is attached internally, so a caller that ignores
+   * this property never produces an unhandled rejection.
+   */
+  closed: Promise<void>;
+}
+
+/** s7 Sc5 — server-side subscription filter (Sc 3's `?events=`). */
+export interface EventSubscribeOptions {
+  /**
+   * The events to receive. Names travel VERBATIM: this client validates
+   * nothing, because the vocabulary lives in the daemon and a second copy
+   * here would be a list that goes stale silently. An unknown name comes
+   * back as `DaemonEventFilterError`, which is the daemon saying so.
+   *
+   * An EMPTY array is `?events=` on the wire, not an omitted filter. The
+   * daemon refuses it. Reading `[]` as "everything" here would hand an
+   * operator a subscription to every event they explicitly did not ask for.
+   */
+  events?: readonly string[];
 }
 
 /**
@@ -542,6 +603,110 @@ export class DaemonConflictError extends DaemonRequestError {
 }
 
 /**
+ * s7 Sc5 settings DTOs — client-local redeclarations of
+ * `packages/daemon/src/settings/schema.ts`, same "no @wemessage/core dep"
+ * convention as every DTO above.
+ */
+export type SettingType = 'int' | 'bool' | 'iso' | 'enum';
+export type SettingValue = number | boolean | string | null;
+
+/**
+ * One row of `GET /v1/settings`.
+ *
+ * The three optional fields are the reason this route exists in the shape it
+ * does. `floor`/`ceiling` are what the daemon will refuse outside of, and
+ * `use` is the route that owns a key this one cannot write — information a
+ * client would otherwise have to hardcode a copy of, and a copy of a floor is
+ * a floor that drifts. They are OPTIONAL, not nullable: under
+ * `exactOptionalPropertyTypes` an int entry has no `use` KEY at all, and a
+ * renderer must ask `'use' in entry`, not `entry.use !== null`.
+ */
+export interface SettingEntry {
+  value: SettingValue;
+  default: SettingValue;
+  /** -1 means "never written": the value shown is the default. */
+  version: number;
+  type: SettingType;
+  readOnly: boolean;
+  floor?: number;
+  ceiling?: number;
+  /** Present iff `readOnly`: the route that owns this key. */
+  use?: string;
+}
+
+export type SettingsPayload = Record<string, SettingEntry>;
+
+/** What a caller may put in a patch. `null` is not writable on any key. */
+export type SettingPatchValue = number | boolean | string;
+
+export interface SettingsPatchResult {
+  settings: SettingsPayload;
+  /** Only the keys whose value actually moved; a no-op patch returns []. */
+  changed: string[];
+}
+
+/**
+ * `PATCH /v1/settings`'s five refusals, kept as a union rather than flattened
+ * to `{error: string}`. Each variant carries the ONE datum that makes it
+ * actionable — the floor, the ceiling, the expected type, the owning route —
+ * and a client that dropped those would leave every consumer re-deriving
+ * them from a schema it does not have.
+ */
+export type SettingsRefusal =
+  | { error: 'unknown-key'; key: string }
+  | { error: 'read-only-key'; key: string; use: string }
+  | { error: 'wrong-type'; key: string; expected: 'int' | 'bool' }
+  | { error: 'below-floor'; key: string; floor: number }
+  | { error: 'above-ceiling'; key: string; ceiling: number };
+
+const SETTINGS_REFUSALS: readonly SettingsRefusal['error'][] = [
+  'unknown-key',
+  'read-only-key',
+  'wrong-type',
+  'below-floor',
+  'above-ceiling',
+];
+
+/**
+ * A typed `PATCH /v1/settings` refusal. Extends `DaemonRequestError` so any
+ * caller that only knows about the generic 400 keeps working, and adds
+ * `detail` so callers that care can say "the floor is 1" instead of "HTTP
+ * 400". Deliberately NOT raised for `invalid-settings`, which says the body
+ * was not a settings patch at all and names no key: inventing one would send
+ * an operator hunting for a key they never sent.
+ */
+export class DaemonSettingsError extends DaemonRequestError {
+  constructor(readonly detail: SettingsRefusal) {
+    super(400, JSON.stringify(detail));
+    this.name = 'DaemonSettingsError';
+  }
+}
+
+/**
+ * Promote a generic 400 to `DaemonSettingsError` when — and only when — the
+ * body is one of the five named refusals. Anything else (`invalid-settings`,
+ * a 401, an unreachable daemon) is returned untouched, so this narrows the
+ * error type without ever swallowing or renaming one.
+ */
+function asSettingsRefusal(err: unknown): unknown {
+  if (!(err instanceof DaemonRequestError) || err.statusCode !== 400) {
+    return err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.body);
+  } catch {
+    return err;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return err;
+  const candidate = parsed as { error?: unknown; key?: unknown };
+  if (typeof candidate.key !== 'string') return err;
+  const named = SETTINGS_REFUSALS.find((name) => name === candidate.error);
+  if (named === undefined) return err;
+  return new DaemonSettingsError(parsed as SettingsRefusal);
+}
+
+/**
  * s5 adapter-registry DTOs (Scenario 11) — client-local, same "no
  * @wemessage/core dep" convention as every DTO above; mirrors
  * `AdapterRecord` in packages/core/src/domain/types.ts.
@@ -597,9 +762,13 @@ export interface AdapterCredential {
 export interface WeMessageClient {
   health(): Promise<{ status: string }>;
   status(): Promise<StatusPayload>;
-  /** Resolves once the WS is open; rejects on auth/unreachable. */
+  /**
+   * Resolves once the WS is open; rejects on auth/unreachable, and — since
+   * s7 Sc5 — on a filter the daemon refused (`DaemonEventFilterError`).
+   */
   events(
     onEvent: (event: GatewayEventPayload) => void,
+    opts?: EventSubscribeOptions,
   ): Promise<EventSubscription>;
 
   // §1.6 routes 1-7 (S2 Scenario 11)
@@ -693,6 +862,20 @@ export interface WeMessageClient {
   updateAdapter(id: string, patch: AdapterPatch): Promise<AdapterPayload>;
   deleteAdapter(id: string): Promise<{ deleted: string }>;
   rotateAdapterToken(id: string): Promise<AdapterCredential>;
+
+  /**
+   * s7 Sc5 — the settings surface (Sc 4's two routes), and nothing more.
+   *
+   * `settings()` returns the WHOLE closed list including the read-only keys,
+   * because a settings screen that showed only what it could write would be
+   * lying about the configuration. `setSettings()` sends the patch verbatim
+   * and is all-or-nothing at the daemon: a body that fails on its second key
+   * leaves the first exactly as it was.
+   */
+  settings(): Promise<SettingsPayload>;
+  setSettings(
+    patch: Record<string, SettingPatchValue>,
+  ): Promise<SettingsPatchResult>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -950,16 +1133,45 @@ export function createClient(options: ClientOptions): WeMessageClient {
     rotateAdapterToken: (id) =>
       post(`${adapterPath(id)}/token`) as Promise<AdapterCredential>,
 
-    events(onEvent) {
-      const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events`;
+    settings: async () =>
+      ((await get('/v1/settings')) as { settings: SettingsPayload }).settings,
+
+    setSettings: async (body) => {
+      try {
+        return (await patch('/v1/settings', body)) as SettingsPatchResult;
+      } catch (err) {
+        throw asSettingsRefusal(err);
+      }
+    },
+
+    events(onEvent, opts) {
+      // The filter is a QUERY STRING; the bearer is a HEADER (F-84). The
+      // daemon refuses query auth outright and does not echo it back, and a
+      // token in a URL is a token in shell history, `ps` output and every
+      // proxy log on the way — for a token that is minted once and never
+      // re-displayed.
+      const query =
+        opts?.events === undefined
+          ? ''
+          : `?events=${opts.events.map(encodeURIComponent).join(',')}`;
+      const wsUrl = `${options.baseUrl.replace(/^http/, 'ws')}/v1/events${query}`;
       return new Promise<EventSubscription>((resolve, reject) => {
         const ws = new WebSocket(wsUrl, {
           headers: { authorization: `Bearer ${options.token}` },
         });
         let settled = false;
+        let onEnd: () => void = () => {};
+        let onRefused: (err: Error) => void = () => {};
+        const closed = new Promise<void>((resolveClosed, rejectClosed) => {
+          onEnd = resolveClosed;
+          onRefused = rejectClosed;
+        });
+        // Marks `closed` handled so an indifferent caller never trips an
+        // unhandled-rejection warning; the caller's own await still sees it.
+        void closed.catch(() => undefined);
         ws.on('open', () => {
           settled = true;
-          resolve({ close: () => ws.close() });
+          resolve({ close: () => ws.close(), closed });
         });
         ws.on('message', (data) => {
           const text = Array.isArray(data)
@@ -979,11 +1191,24 @@ export function createClient(options: ClientOptions): WeMessageClient {
             );
           }
         });
-        ws.on('close', () => {
-          if (!settled) {
-            settled = true;
-            reject(new DaemonUnreachableError(options.baseUrl));
+        ws.on('close', (code: number, reason: Buffer) => {
+          // 4400 is Sc 3's "your filter named an event I do not have". It is
+          // the only way that route can refuse, and it arrives on whichever
+          // side of `open` the handshake happens to land — so it is mapped in
+          // both places, to the SAME error, rather than being reported as an
+          // unreachable daemon on one path and a clean end of stream on the
+          // other.
+          const refusal =
+            code === WS_CLOSE_BAD_FILTER
+              ? new DaemonEventFilterError(reason.toString('utf8'))
+              : null;
+          if (settled) {
+            if (refusal === null) onEnd();
+            else onRefused(refusal);
+            return;
           }
+          settled = true;
+          reject(refusal ?? new DaemonUnreachableError(options.baseUrl));
         });
       });
     },

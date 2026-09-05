@@ -62,3 +62,22 @@ export function createWatchRenderer(): (
     return null;
   };
 }
+
+/**
+ * s7 Sc5 — `--events draft.created,draft.sent`.
+ *
+ * A split, and NOTHING else: no trimming, no de-duplication, no check that
+ * the names exist. The vocabulary is the daemon's (`GATEWAY_EVENT_NAMES`),
+ * and a second copy here would go stale the first time it grew and would
+ * answer a typo with a different sentence than the daemon does. So the list
+ * travels verbatim, the daemon refuses what it does not recognise, and the
+ * operator reads the refusal in the same words the server logged.
+ *
+ * `''` therefore parses to `['']`, which reaches the wire as `?events=` and
+ * is refused. That is deliberate: an empty filter read HERE as "everything"
+ * would hand an operator a subscription to every event they did not ask for,
+ * which is the loudest possible quiet bug.
+ */
+export function parseEventsFlag(raw: string): string[] {
+  return raw.split(',');
+}

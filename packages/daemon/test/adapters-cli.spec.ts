@@ -406,21 +406,32 @@ describe('wemessage adapters — token-rotate (F-42)', () => {
 });
 
 describe('wemessage adapters — usage refusals (exit 2, §3.8)', () => {
-  // s5 Scenario 13 REVISED this row deliberately. The conformance kit now
-  // exists and is green on echo and sol, but it is workspace-internal (F-52)
-  // and `cli-desktop-thin-clients` forbids packages/cli/src from importing it
-  // or the adapters it drives. The verb therefore still refuses — and the
-  // assertion moves from "the kit does not exist" to "the kit is not reachable
-  // from here yet, and here is where it is", which is the true statement.
-  it('test refuses honestly and points at where the kit does run (F-52)', async () => {
+  // s5 Scenario 13 revised this row once; s7 Scenario 5 revises it again,
+  // and the revision is deliberate both times.
+  //
+  // S5 could only say "the kit is not reachable from here, and here is where
+  // it is." F-86 ratifies the stronger statement: the kit has its own
+  // invocation, so the refusal prints THAT rather than an internal pnpm
+  // filter nobody outside this workspace can run. What does NOT change is the
+  // refusal itself. `cli-desktop-thin-clients` forbids packages/cli/src from
+  // importing the kit, and F-55 forbids the obvious workaround — a CLI that
+  // spawns an arbitrary command is a generic escape hatch wearing a verb's
+  // name. So the verb keeps refusing, at exit 2, and hands the operator a
+  // command line instead of running one on their behalf.
+  it("test refuses honestly and prints the kit's own invocation (F-52/F-55, F-86)", async () => {
     const ctx = await boot();
     await addAdapter(ctx, 'echo-1');
     const res = await runCli(['adapters', 'test', 'echo-1'], envFor(ctx));
     // An honest refusal beats a verb that silently does nothing.
     expect(res.code).toBe(2);
-    expect(res.stderr).toContain('workspace-internal');
-    expect(res.stderr).toContain('@wemessage/adapter-testkit');
-    expect(res.stderr).toContain('S7');
+    // The kit's own invocation, verbatim and copy-pasteable.
+    expect(res.stderr).toContain(
+      'run: npx @wemessage/adapter-testkit --cmd "<your adapter>"',
+    );
+    // And the reason it is a pointer rather than a runner, still cited.
+    expect(res.stderr).toContain('F-52');
+    expect(res.stderr).toContain('F-55');
+    expect(res.stderr).toContain('F-86');
     expect(res.stdout).toBe('');
   }, 20_000);
 

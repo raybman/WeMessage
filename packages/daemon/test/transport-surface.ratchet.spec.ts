@@ -11,17 +11,23 @@
  *  2. WS event literals    — scan of `event: '<value>'` in packages/daemon/src,
  *     compared exactly to EMITTED_WS_EVENTS and required to be a subset of
  *     WS_EVENT_VOCABULARY (the §1.6 allowed set);
- *  3. port importers       — scan of packages/[any]/src for SendBackend /
- *     ChatDbReader mentions, compared exactly to PORT_IMPORTER_ALLOWLIST
- *     (INV-2: send capability cannot leak into new call sites silently).
+ *  3. port importers       — scan of every production src/ tree for
+ *     SendBackend / ChatDbReader mentions, compared exactly to
+ *     PORT_IMPORTER_ALLOWLIST (INV-2: send capability cannot leak into new
+ *     call sites silently). s8 Sc1 moved the walk itself into
+ *     `helpers/production-sources.ts` and widened its roots to `apps/*` as
+ *     well as `packages/*`, so that the Electron main process — which holds
+ *     the token and the one `createClient()` — is inside the scan rather
+ *     than structurally invisible to it (F-103). `test/arch.spec.ts` runs
+ *     the same walk against a planted offender, which is why it is a shared
+ *     module and not a local function.
  *
  * Deliberate-update workflow: a surface change lands ONLY together with a
  * reviewed diff to transport-surface.snapshot.ts (see its header).
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import {
@@ -33,6 +39,10 @@ import {
   createUnusedChatDbReader,
   createUnusedSendBackend,
 } from './helpers/loopback-backend.js';
+import {
+  portImporters,
+  productionSourceFiles,
+} from './helpers/production-sources.js';
 import { GATEWAY_EVENT_NAMES } from '@wemessage/protocol';
 import {
   EMITTED_WS_EVENTS,
@@ -63,8 +73,6 @@ const unusedProbes: DoctorProbes = {
   },
 };
 
-const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
-
 const dirs: string[] = [];
 const servers: DaemonServer[] = [];
 const stores: SqliteStore[] = [];
@@ -80,27 +88,6 @@ afterEach(async () => {
   for (const s of stores.splice(0)) s.close();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
-
-/** All .ts production files under packages/<pkg>/src (never dist, never test). */
-function productionSourceFiles(): string[] {
-  const files: string[] = [];
-  const packagesDir = join(REPO_ROOT, 'packages');
-  for (const pkg of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!pkg.isDirectory()) continue;
-    const srcDir = join(packagesDir, pkg.name, 'src');
-    let entries;
-    try {
-      entries = readdirSync(srcDir, { recursive: true, withFileTypes: true });
-    } catch {
-      continue; // package without src/
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
-      files.push(join(entry.parentPath, entry.name));
-    }
-  }
-  return files.sort();
-}
 
 describe('transport-surface ratchet (INV-3, F-17)', () => {
   it('live fastify route table equals the snapshot exactly', async () => {
@@ -225,16 +212,9 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
   });
 
   it('SendBackend/ChatDbReader importer set equals the allowlist', () => {
-    const mentions: string[] = [];
-    for (const file of productionSourceFiles()) {
-      const text = readFileSync(file, 'utf8');
-      // Substring on purpose (no \b): derived identifiers such as
-      // createChatDbReader / ChatDbReaderOptions / IngestChatDbReader are
-      // capability usage too, and JS word boundaries would miss them.
-      if (/SendBackend|ChatDbReader/.test(text)) {
-        mentions.push(relative(REPO_ROOT, file).split(sep).join('/'));
-      }
-    }
-    expect(mentions.sort()).toEqual([...PORT_IMPORTER_ALLOWLIST]);
+    // The predicate lives in helpers/production-sources.ts since s8 Sc1, so
+    // that the arch suite can prove this row bites by planting an offender
+    // under apps/desktop/src and running THIS scan rather than a copy of it.
+    expect(portImporters()).toEqual([...PORT_IMPORTER_ALLOWLIST]);
   });
 });

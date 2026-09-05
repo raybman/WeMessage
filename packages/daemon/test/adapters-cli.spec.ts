@@ -7,7 +7,7 @@
  * LOCATION DEVIATION (precedent: rules-audit-cli.spec.ts S2 Sc11,
  * send-connect-cli.spec.ts S3 Sc10, drafts-cli.spec.ts S4 Sc11): the slice
  * names a packages/cli test, but `nobody-imports-daemon` and
- * `cli-desktop-thin-clients` in .dependency-cruiser.cjs forbid packages/cli
+ * `cli-thin-client` in .dependency-cruiser.cjs forbid packages/cli
  * from importing @wemessage/daemon, and these rows need a REAL daemon
  * minting real tokens. The pure-function rows (table shape, the shown-once
  * block, the `draft.delta` preview accumulator) live where they belong, in
@@ -413,7 +413,7 @@ describe('wemessage adapters — usage refusals (exit 2, §3.8)', () => {
   // it is." F-86 ratifies the stronger statement: the kit has its own
   // invocation, so the refusal prints THAT rather than an internal pnpm
   // filter nobody outside this workspace can run. What does NOT change is the
-  // refusal itself. `cli-desktop-thin-clients` forbids packages/cli/src from
+  // refusal itself. `cli-thin-client` forbids packages/cli/src from
   // importing the kit, and F-55 forbids the obvious workaround — a CLI that
   // spawns an arbitrary command is a generic escape hatch wearing a verb's
   // name. So the verb keeps refusing, at exit 2, and hands the operator a

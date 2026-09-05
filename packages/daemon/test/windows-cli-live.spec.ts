@@ -7,7 +7,7 @@
  * LOCATION DEVIATION (precedent: rules-audit-cli.spec.ts S2 Sc11,
  * send-connect-cli.spec.ts S3 Sc10, drafts-cli.spec.ts S4 Sc11,
  * adapters-cli.spec.ts S5 Sc11): the slice names a packages/cli test, but
- * `nobody-imports-daemon` and `cli-desktop-thin-clients` in
+ * `nobody-imports-daemon` and `cli-thin-client` in
  * .dependency-cruiser.cjs forbid packages/cli from importing
  * @wemessage/daemon, and these rows need a REAL daemon with a REAL store to
  * count HTTP requests and audit rows. The pure-function rows (table shape,

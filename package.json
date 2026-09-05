@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "lint": "eslint . && prettier --check .",
     "dep:check": "depcruise packages apps fixtures --config .dependency-cruiser.cjs",
-    "licenses:check": "license-checker-rseidelsohn --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0' && license-checker-rseidelsohn --start packages/adapter-testkit --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0'"
+    "licenses:check": "license-checker-rseidelsohn --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0' && license-checker-rseidelsohn --start packages/adapter-testkit --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0' && license-checker-rseidelsohn --start apps/desktop --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0'"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -30,6 +30,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
+      "electron",
       "esbuild"
     ]
   }

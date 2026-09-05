@@ -62,24 +62,61 @@ module.exports = {
       to: { path: '^packages/(?!core/|$1/)' },
     },
 
-    // §3.1: cli and apps/desktop import client+protocol only. Self-imports
-    // within packages/cli/src (e.g. bin.ts -> ./probe.js, ./purge.js — S3
-    // Scenario 10) are not a cross-package dependency and must stay legal;
-    // the `cli/` exclusion mirrors ingest-sendkit-store-core-only's `$1/`
-    // self-exclusion above. apps/desktop needs no equivalent clause: its own
-    // files never match `^packages/`, so this rule never fires on them.
+    // §3.1: the CLI is a thin client. Self-imports within packages/cli/src
+    // (e.g. bin.ts -> ./probe.js, ./purge.js — S3 Scenario 10) are not a
+    // cross-package dependency and must stay legal; the `cli` exclusion
+    // mirrors ingest-sendkit-store-core-only's `$1/` self-exclusion above.
     {
       severity: 'error',
-      name: 'cli-desktop-thin-clients',
-      from: { path: '^(packages/cli|apps/desktop)/src' },
+      name: 'cli-thin-client',
+      from: { path: '^packages/cli/src' },
       to: { path: '^packages/(?!client|protocol|cli)' },
     },
 
-    // §3.1: nobody imports daemon
+    // §3.1: the desktop app is a thin client too, and it is now its OWN rule
+    // (s8 Sc1, F-103). Until S8 both lived in one rule, `cli-desktop-thin-
+    // clients`, whose `to` had to exclude `cli` so that the CLI's internal
+    // file layout stayed legal — and that exclusion applied to apps/desktop
+    // as well, which silently permitted `apps/desktop/src -> packages/cli`
+    // for six slices. Nothing exploited it because apps/desktop had two
+    // lines in it; S8 is the slice that fills the directory, and a hole is
+    // only theoretical until somebody needs a status table.
+    //
+    // Two `to` shapes, mirroring adapters-thin-clients: pnpm isolation means
+    // an undeclared `@wemessage/cli` import does not RESOLVE from
+    // apps/desktop, so a resolved-path rule alone would miss the sloppiest
+    // possible reach — an import that is a violation twice over. The bare
+    // specifier catches it before the package.json does.
+    {
+      severity: 'error',
+      name: 'desktop-thin-client',
+      from: { path: '^apps/desktop/src' },
+      to: {
+        path: [
+          '^packages/(?!client|protocol)',
+          '^@wemessage/(?!client$|protocol$)',
+        ],
+      },
+    },
+
+    // §3.1: nobody imports daemon.
+    //
+    // s8 Sc1 carves out `apps/desktop/test/` and nothing else. The desktop
+    // e2e harness boots a REAL daemon in-process against a temp store
+    // (F-102) — the house has no other place to do that, and a fake daemon
+    // would make the checkpoint scenarios assert against a fiction. The
+    // exception is deliberately narrow (test/, not the package), and it is
+    // paired with `desktop-thin-client` above, which asserts positively that
+    // the SHIPPED app reaches neither the daemon nor anything else. A rule
+    // with one reviewed exception plus a positive assertion is stronger than
+    // the rule it replaces, which had no exception because nothing had tried.
     {
       severity: 'error',
       name: 'nobody-imports-daemon',
-      from: { path: '^(packages/(?!daemon)|apps|fixtures)' },
+      from: {
+        path: '^(packages/(?!daemon)|apps|fixtures)',
+        pathNot: '^apps/desktop/test/',
+      },
       to: { path: '^packages/daemon' },
     },
 
@@ -118,7 +155,7 @@ module.exports = {
     // (s7 Scenario 2: index.ts -> events.ts, a value import of the derived
     // EVENT_PAYLOAD_KEYS) is not a dependency the package ships, it is the
     // package's own file layout. The `protocol/` exclusion mirrors
-    // ingest-sendkit-store-core-only's `$1/` and cli-desktop-thin-clients'
+    // ingest-sendkit-store-core-only's `$1/` and cli-thin-client'
     // `cli` self-exclusions above; without it every intra-package split in
     // protocol would read as a §3.3 violation and the rule would push the
     // vocabulary back into one unsplittable file.

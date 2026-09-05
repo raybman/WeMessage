@@ -8,7 +8,7 @@
  * answering real HTTP (exit codes, the shown-once token, the no-green sweep
  * over live transcripts) live in packages/daemon/test/adapters-cli.spec.ts,
  * because `.dependency-cruiser.cjs`'s `nobody-imports-daemon` /
- * `cli-desktop-thin-clients` rules forbid packages/cli from importing the
+ * `cli-thin-client` rules forbid packages/cli from importing the
  * daemon.
  *
  * The load-bearing row here is "list never prints token material". The

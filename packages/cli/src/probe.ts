@@ -2,7 +2,7 @@
  * Local FDA probe for `wemessage doctor`'s macOS-26 divergence check
  * (s3-execution Scenario 10, §1.3.1 "GUI-vs-daemon context check, CLI
  * edition"). Deliberately duplicated from @wemessage/ingest's
- * `probeChatDbReadable` rather than imported: `cli-desktop-thin-clients`
+ * `probeChatDbReadable` rather than imported: `cli-thin-client`
  * (.dependency-cruiser.cjs, §3.1/§2.5) restricts `packages/cli/src` to
  * importing only @wemessage/client + @wemessage/protocol, and the point of
  * this probe is running in the CLI's OWN process context — comparing "can

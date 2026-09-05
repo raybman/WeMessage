@@ -4,7 +4,7 @@
  *
  * LOCATION DEVIATION (precedent: rules-audit-cli.spec.ts S2 Sc11,
  * send-connect-cli.spec.ts S3 Sc10): the slice names a packages/cli test, but
- * `nobody-imports-daemon` and `cli-desktop-thin-clients` in
+ * `nobody-imports-daemon` and `cli-thin-client` in
  * .dependency-cruiser.cjs forbid packages/cli from importing @wemessage/daemon,
  * and these rows need a REAL daemon to answer real HTTP. So the spec lives
  * beside its two predecessors.

@@ -6,7 +6,7 @@
  *
  * Split for the same reason every CLI slice since S2 has split (precedent:
  * purge.spec.ts / cli-s5.spec.ts): `.dependency-cruiser.cjs`'s
- * `nobody-imports-daemon` and `cli-desktop-thin-clients` rules forbid
+ * `nobody-imports-daemon` and `cli-thin-client` rules forbid
  * packages/cli from importing @wemessage/daemon, and `src/bin.ts` runs
  * `program.parseAsync(process.argv)` as a module side effect the instant it
  * is imported. So the rows that are pure functions of a payload live here,

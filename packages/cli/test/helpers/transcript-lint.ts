@@ -237,17 +237,330 @@ export function publicStringOffenders(text: string): PublicOffender[] {
 }
 
 // ---------------------------------------------------------------------------
+// colour literals (s8 Sc1, F-104)
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE tokenizer for "is there a colour written down here", and one predicate
+ * for "is that colour green".
+ *
+ * These live here rather than in the desktop app's test tree for the reason
+ * s7 twice acted on: `publicStringOffenders` moved here in Sc 11 because a
+ * second copy of "what must a public repo never say" is the copy that goes
+ * stale, and Sc 12 reused `lintTranscript` on the shipped documents for the
+ * same reason. S8 needs the identical question asked in three places — a
+ * transcript line, every file under `apps/desktop/src`, and `tokens.css` —
+ * and a fourth copy of a hue predicate is exactly the shape of duplication
+ * that ends with three of them disagreeing about `#3C5`.
+ *
+ * What is deliberately NOT shared is the POLICY. `lintTranscript` refuses
+ * every colour but the product blue, because a terminal transcript is
+ * monochrome by construction. The desktop lint permits every colour that is
+ * not green, in one file. Same tokens, different verdicts, one parser.
+ */
+export type ColourForm = 'hex' | 'functional' | 'named';
+
+export interface ColourLiteral {
+  readonly text: string;
+  /** 0-indexed offset into the text that was scanned. */
+  readonly index: number;
+  readonly form: ColourForm;
+}
+
+export interface ColourScanOptions {
+  /**
+   * Also match the three- and four-digit hex forms. Off by default: a
+   * markdown anchor (`#abc`) and an issue reference (`#123`) are three hex
+   * digits and are not colours, so only a scan that already knows it is
+   * looking at stylesheet-shaped text should turn this on.
+   */
+  readonly shortHex?: boolean;
+  /**
+   * Also match a CSS named colour sitting in a colour-valued position
+   * (`fill="lime"`, `color: white`). Off by default for the same reason:
+   * the CSS Color 4 list is 148 ordinary English words and most of a
+   * README would light up.
+   */
+  readonly namedInContext?: boolean;
+}
+
+/** Longest-first so `#0A84FF` is one six-digit hex, never a three plus junk. */
+const HEX_LONG_RE = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6})\b/g;
+const HEX_ANY_RE =
+  /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b/g;
+/**
+ * A functional colour notation with a plausible body. The digit/percent
+ * requirement is not decoration: without it `the color(s) below` in a README
+ * is a colour literal, and a guard that cries wolf on prose is a guard
+ * somebody turns off.
+ */
+const FUNCTIONAL_COLOUR_RE =
+  /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(\s*[^()]*[\d%][^()]*\)/gi;
+/**
+ * The property names whose value is a colour. An SVG presentation attribute
+ * (`fill="lime"`) and a CSS declaration (`color: white`) are both covered by
+ * allowing `=` or `:` as the separator.
+ */
+const COLOUR_CONTEXT_RE =
+  /\b(?:fill|stroke|stop-color|flood-color|lighting-color|color|background|background-color|border(?:-(?:top|right|bottom|left))?-color|outline-color|text-decoration-color|caret-color|accent-color|column-rule-color|box-shadow|text-shadow)\s*[:=]\s*["']?([A-Za-z]+)\b/gi;
+
+/**
+ * The CSS Color 4 named colours. Data, not logic: the point of the list is
+ * that it is complete, because the one somebody reaches for is always the
+ * one a hand-picked subset omitted.
+ *
+ * `transparent`, `currentcolor`, `none`, `inherit`, `initial`, `unset`,
+ * `revert` and `var` are deliberately absent — none of them names a hue, and
+ * three of them are how a correct file spells "take the colour from a token".
+ */
+const CSS_NAMED_COLOURS = new Set(
+  (
+    'aliceblue antiquewhite aqua aquamarine azure beige bisque black ' +
+    'blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse ' +
+    'chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan ' +
+    'darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta ' +
+    'darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen ' +
+    'darkslateblue darkslategray darkslategrey darkturquoise darkviolet ' +
+    'deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite ' +
+    'forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green ' +
+    'greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender ' +
+    'lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan ' +
+    'lightgoldenrodyellow lightgray lightgreen lightgrey lightpink ' +
+    'lightsalmon lightseagreen lightskyblue lightslategray lightslategrey ' +
+    'lightsteelblue lightyellow lime limegreen linen magenta maroon ' +
+    'mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen ' +
+    'mediumslateblue mediumspringgreen mediumturquoise mediumvioletred ' +
+    'midnightblue mintcream mistyrose moccasin navajowhite navy oldlace ' +
+    'olive olivedrab orange orangered orchid palegoldenrod palegreen ' +
+    'paleturquoise palevioletred papayawhip peachpuff peru pink plum ' +
+    'powderblue purple rebeccapurple red rosybrown royalblue saddlebrown ' +
+    'salmon sandybrown seagreen seashell sienna silver skyblue slateblue ' +
+    'slategray slategrey snow springgreen steelblue tan teal thistle tomato ' +
+    'turquoise violet wheat white whitesmoke yellow yellowgreen'
+  ).split(' '),
+);
+
+/** Every colour literal in `text`, in source order. */
+export function colourLiterals(
+  text: string,
+  options: ColourScanOptions = {},
+): ColourLiteral[] {
+  const out: ColourLiteral[] = [];
+  const hexRe = options.shortHex === true ? HEX_ANY_RE : HEX_LONG_RE;
+  for (const m of text.matchAll(hexRe))
+    out.push({ text: m[0], index: m.index, form: 'hex' });
+  for (const m of text.matchAll(FUNCTIONAL_COLOUR_RE))
+    out.push({ text: m[0], index: m.index, form: 'functional' });
+  if (options.namedInContext === true) {
+    for (const m of text.matchAll(COLOUR_CONTEXT_RE)) {
+      const word = (m[1] ?? '').toLowerCase();
+      if (!CSS_NAMED_COLOURS.has(word)) continue;
+      out.push({ text: m[1] ?? '', index: m.index, form: 'named' });
+    }
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+export interface Rgb {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+function hueSat(rgb: Rgb): { hue: number; sat: number } {
+  const r = rgb.r / 255;
+  const g = rgb.g / 255;
+  const b = rgb.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return { hue: 0, sat: 0 };
+  const l = (max + min) / 2;
+  const sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let hue: number;
+  if (max === r) hue = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+  else if (max === g) hue = ((b - r) / d + 2) * 60;
+  else hue = ((r - g) / d + 4) * 60;
+  return { hue, sat };
+}
+
+/**
+ * A colour literal as sRGB, or `null` when the literal is a form this parser
+ * does not resolve.
+ *
+ * Named colours return `null` ON PURPOSE. Resolving them would mean carrying
+ * 148 triples, and the desktop lint does not need them: a named colour is
+ * refused by FORM there (colour lives in `tokens.css` and `tokens.css` is
+ * written in hex and `rgba()`), so a hue verdict on `lime` would never be
+ * asked for. Modern spaces (`oklch`, `lab`) are also `null`: nothing in the
+ * tree uses one, and a wrong conversion that reports "not green" is worse
+ * than an honest "cannot parse" the caller can treat as an offender.
+ */
+export function parseColour(literal: string): Rgb | null {
+  const text = literal.trim();
+  const hex = /^#([0-9a-fA-F]{3,8})$/.exec(text);
+  if (hex !== null) {
+    const digits = hex[1] ?? '';
+    const expand = (s: string): string => s + s;
+    if (digits.length === 3 || digits.length === 4) {
+      const [a, b, c] = [digits[0] ?? '0', digits[1] ?? '0', digits[2] ?? '0'];
+      return {
+        r: parseInt(expand(a), 16),
+        g: parseInt(expand(b), 16),
+        b: parseInt(expand(c), 16),
+      };
+    }
+    if (digits.length === 6 || digits.length === 8) {
+      return {
+        r: parseInt(digits.slice(0, 2), 16),
+        g: parseInt(digits.slice(2, 4), 16),
+        b: parseInt(digits.slice(4, 6), 16),
+      };
+    }
+    return null;
+  }
+  const fn = /^([a-z]+)\(([^()]*)\)$/i.exec(text);
+  if (fn === null) return null;
+  const name = (fn[1] ?? '').toLowerCase();
+  const parts = (fn[2] ?? '')
+    .split(/[\s,/]+/)
+    .map((p) => p.trim())
+    .filter((p) => p !== '');
+  const num = (p: string | undefined, scale: number): number => {
+    const raw = p ?? '';
+    if (raw.endsWith('%')) return (Number(raw.slice(0, -1)) / 100) * scale;
+    return Number(raw);
+  };
+  if (name === 'rgb' || name === 'rgba') {
+    const r = num(parts[0], 255);
+    const g = num(parts[1], 255);
+    const b = num(parts[2], 255);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+    return { r, g, b };
+  }
+  if (name === 'hsl' || name === 'hsla') {
+    const h = ((num(parts[0], 360) % 360) + 360) % 360;
+    const s = num(parts[1], 100) / 100;
+    const l = num(parts[2], 100) / 100;
+    if ([h, s, l].some((v) => Number.isNaN(v))) return null;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    const seg = Math.floor(h / 60) % 6;
+    const table: [number, number, number][] = [
+      [c, x, 0],
+      [x, c, 0],
+      [0, c, x],
+      [0, x, c],
+      [x, 0, c],
+      [c, 0, x],
+    ];
+    const [r1, g1, b1] = table[seg] ?? [0, 0, 0];
+    return {
+      r: Math.round((r1 + m) * 255),
+      g: Math.round((g1 + m) * 255),
+      b: Math.round((b1 + m) * 255),
+    };
+  }
+  return null;
+}
+
+/** The three hexes ui-design-integration §2 bans by name. Lower case. */
+export const BANNED_GREEN_HEXES: readonly string[] = [
+  '#34c759',
+  '#248a3d',
+  '#30d158',
+];
+
+/** The message F-104 requires the by-name arm to fail with. */
+export const GREEN_BAN_MESSAGE = 'green is banned (ui-design-integration §2)';
+
+/**
+ * Is this colour literal green? F-104's predicate, verbatim.
+ *
+ * Three arms, and the order is the order of decreasing confidence:
+ *
+ *  1. one of the three hexes the UI doc bans BY NAME, so the failure message
+ *     is the sentence the doc wrote rather than a hue reading;
+ *  2. dominant-G: `g > max(r, b) + 16`, which is what "reads as green"
+ *     reduces to for a saturated colour and which no blue, red or amber in
+ *     the token sheet comes near;
+ *  3. hue in [75°, 165°] at more than 10% saturation, which catches the
+ *     desaturated and the dark greens that arm 2 misses.
+ *
+ * Arm 3 has a SHARP EDGE worth knowing about before somebody trips it: HSL
+ * saturation is a bad measure near white, where a two-count channel
+ * difference reads as 11%. `#F5F7F5` is therefore "green" to this function
+ * and `#F5F5F7` is not. That is the plan's predicate as written and it is
+ * kept as written: an almost-imperceptibly green off-white is still a
+ * decision somebody made, and the fix is to pick the neutral, not to widen
+ * the guard.
+ *
+ * Returns `null` for a literal it cannot parse, which callers treat as an
+ * offender in its own right rather than as a pass.
+ */
+export function greenVerdict(
+  literal: string,
+): { green: boolean; why: string } | null {
+  const lower = literal.trim().toLowerCase();
+  if (BANNED_GREEN_HEXES.includes(lower))
+    return { green: true, why: `${GREEN_BAN_MESSAGE}: ${lower}` };
+  // `#34C759FF` and `#34c759` are the same decision wearing an alpha.
+  if (
+    /^#[0-9a-f]{8}$/.test(lower) &&
+    BANNED_GREEN_HEXES.includes(lower.slice(0, 7))
+  )
+    return { green: true, why: `${GREEN_BAN_MESSAGE}: ${lower}` };
+  const rgb = parseColour(literal);
+  if (rgb === null) return null;
+  if (rgb.g > Math.max(rgb.r, rgb.b) + 16)
+    return {
+      green: true,
+      why: `dominant-G (g ${String(rgb.g)} > max(r ${String(rgb.r)}, b ${String(rgb.b)}) + 16)`,
+    };
+  const { hue, sat } = hueSat(rgb);
+  if (hue >= 75 && hue <= 165 && sat > 0.1)
+    return {
+      green: true,
+      why: `hue ${hue.toFixed(1)}deg at ${(sat * 100).toFixed(1)}% saturation is in [75, 165]`,
+    };
+  return { green: false, why: '' };
+}
+
+// ---------------------------------------------------------------------------
 // transcript rules
 // ---------------------------------------------------------------------------
 
 /** Any ANSI CSI introducer. The no-colour rule, strict (C-9). */
 const ANSI_RE = /\x1b\[/;
+
+/**
+ * Every line of `text` that carries an ANSI CSI introducer.
+ *
+ * Extracted by s8 Sc1 so that the desktop suite can run THE ansi sweep
+ * rather than a fourth regex that means to say the same thing. `apps/desktop`
+ * has no transcripts today; the row that consumes this exists so that the
+ * first builder to paste a coloured log line into a desktop spec trips a
+ * guard instead of establishing a precedent. Same escape, same rule name,
+ * same detail string as `lintTranscript`, because it IS `lintTranscript`'s.
+ */
+export function ansiOffenders(text: string): Finding[] {
+  const out: Finding[] = [];
+  text.split('\n').forEach((line, index) => {
+    if (ANSI_RE.test(line))
+      out.push({
+        rule: 'ansi-escape',
+        line: index + 1,
+        detail: 'ANSI CSI introducer',
+      });
+  });
+  return out;
+}
 /**
  * A hue used as a value. `#0A84FF` is the product's one colour and is
  * allowed anywhere; every other hex triplet and every bare colour word in a
  * value position is state carried by hue, which the house pattern forbids.
  */
-const HEX_COLOUR_RE = /#[0-9a-fA-F]{6}\b/g;
 const PRODUCT_BLUE = '#0a84ff';
 const COLOUR_WORD_RE = /\b(green|red|amber|yellow|orange)\b/gi;
 /** A host that is neither loopback nor a reserved example domain. */
@@ -330,9 +643,19 @@ export function lintTranscript(
     for (const o of publicStringOffenders(line)) add(o.rule, o.detail);
 
     // --- colour ----------------------------------------------------------
-    if (ANSI_RE.test(line)) add('ansi-escape', 'ANSI CSI introducer');
-    for (const hex of line.match(HEX_COLOUR_RE) ?? [])
-      if (hex.toLowerCase() !== PRODUCT_BLUE) add('colour-carries-state', hex);
+    // s8 Sc1: the hex arm is now `colourLiterals` (below), which is the same
+    // tokenizer the desktop app's static no-green lint uses. Two POLICIES
+    // over one tokenizer: a transcript is monochrome so anything that is not
+    // the product blue is a finding, while `tokens.css` is allowed every
+    // colour that is not green. The default option set keeps this call's
+    // behaviour byte-for-byte what it was — six- and eight-digit hex only,
+    // no three-digit form (a markdown `#abc` anchor or a `#123` issue
+    // reference is not a colour) and no bare named colours (`red` is already
+    // COLOUR_WORD_RE's, and the CSS named list is full of English words).
+    for (const o of ansiOffenders(line)) add(o.rule, o.detail);
+    for (const lit of colourLiterals(line))
+      if (lit.text.toLowerCase() !== PRODUCT_BLUE)
+        add('colour-carries-state', lit.text);
     for (const word of line.match(COLOUR_WORD_RE) ?? [])
       add('colour-carries-state', word);
 

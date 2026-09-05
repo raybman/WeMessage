@@ -4,7 +4,7 @@
  * rules-audit-cli.spec.ts, S2 Scenario 11): the spec names
  * packages/cli/test/cli-s3.spec.ts, but an in-test daemon there is
  * structurally impossible — `nobody-imports-daemon` (.dependency-cruiser.cjs,
- * INV-1/§3.1) exempts only packages/daemon/src, and `cli-desktop-thin-clients`
+ * INV-1/§3.1) exempts only packages/daemon/src, and `cli-thin-client`
  * forbids packages/cli/src (and, by the repo's own convention, its test
  * harness) from depending on @wemessage/daemon at all. Booting a REAL daemon
  * in-process to spawn the compiled CLI against is exactly the shape

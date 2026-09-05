@@ -8,6 +8,11 @@ export default defineConfig({
     projects: [
       'packages/*/vitest.config.ts',
       'packages/adapters/*/vitest.config.ts',
+      // s8 Sc1: `apps/desktop` grows its first tests. The glob is `apps/*`
+      // rather than the one path, for the same reason the enumerations in
+      // test/arch.spec.ts key off structure: the next app must not be able
+      // to be invisible to `pnpm test` by omission.
+      'apps/*/vitest.config.ts',
       'fixtures/vitest.config.ts',
       {
         test: {

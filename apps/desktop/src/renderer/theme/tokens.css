@@ -1,0 +1,76 @@
+/*
+ * The one file in this application that may name a colour.
+ *
+ * §3.10 put state in the GLYPH — ● armed, ○ held, ◐ draft-only, ⊘ killed,
+ * ◌ disconnected — precisely so that hue never has to carry it. That
+ * decision is reversed one careless literal at a time, so the rule is
+ * locality rather than taste: colour lives here, everything else reads a
+ * `var()`, and "is there any green in this app" has a one-file answer.
+ * `apps/desktop/test/tokens.spec.ts` enforces both halves, and Sc 17's
+ * computed-style sweep is the layer that survives `'#' + '34C759'`.
+ *
+ * The product has ONE saturated colour: `--tint`, #0a84ff. Red and amber
+ * exist for danger and warning, which are not states a glyph can carry.
+ * Green is banned outright (ui-design-integration §2): three hexes by name
+ * (they are listed in `BANNED_GREEN_HEXES`, not here — this file is swept
+ * and a comment is not an exemption) and any hue between 75° and 165° at
+ * more than 10% saturation by predicate.
+ *
+ * Reduced transparency swaps every layer to an opaque neutral and drops
+ * `backdrop-filter`; main removes the window vibrancy in the same moment, so
+ * opaque layers never sit on a translucent window (Sc 4).
+ */
+
+:root {
+  /* ---- tint ------------------------------------------------------------ */
+  --tint: #0a84ff;
+  --tint-pressed: #0064d2;
+  --tint-soft: rgba(10, 132, 255, 0.14);
+  --tint-2: #4aa9ff;
+  /* Light mode's alternative, kept here rather than inline so that the
+     contrast row in Sc 17 has one place to choose between them. */
+  --tint-light: #007aff;
+
+  /* ---- semantic, non-state -------------------------------------------- */
+  --danger: #ff453a;
+  --warn: #ff9f0a;
+
+  /* ---- neutrals and layers -------------------------------------------- */
+  --ink: #f5f5f7;
+  --ink-dim: #8e8e93;
+  --layer-0: #1c1c1e;
+  --layer-1: rgba(44, 44, 46, 0.72);
+  --layer-2: rgba(58, 58, 60, 0.64);
+  --stroke: rgba(255, 255, 255, 0.12);
+  --stroke-strong: rgba(255, 255, 255, 0.24);
+
+  /* ---- motion ---------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ink: #1c1c1e;
+    --ink-dim: #6c6c70;
+    --layer-0: #f5f5f7;
+    --layer-1: rgba(255, 255, 255, 0.78);
+    --layer-2: rgba(255, 255, 255, 0.62);
+    --stroke: rgba(0, 0, 0, 0.12);
+    --stroke-strong: rgba(0, 0, 0, 0.24);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --layer-1: #1c1c1e;
+    --layer-2: #2c2c2e;
+  }
+}

@@ -23,7 +23,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 // s7 Sc9: the verification ledger reads BUILT modules, so it needs a file URL.
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+// s8 Sc1 row 11: "which lint rules apply to this file" is a question only
+// ESLint can answer without a second implementation of flat-config
+// resolution — and answering it with a glob library would need a dependency
+// the plan does not ratify.
+import { ESLint } from 'eslint';
 import {
   PORT_IMPORTER_ALLOWLIST,
   // s7 Sc12: a public document may only name a route that exists. The
@@ -38,10 +43,23 @@ import {
 // fourth copy of the rules: the shipped documents are swept by the same
 // implementation that sweeps a live transcript and a committed DRYRUN.md.
 import {
+  // s8 Sc1 row 6: the ANSI sweep, extracted from `lintTranscript` rather
+  // than restated, so the S6 transcripts and the desktop suite share one
+  // definition of "coloured output".
+  ansiOffenders,
   lintTranscript,
   parseSkillBlocks,
   publicStringOffenders,
 } from '../packages/cli/test/helpers/transcript-lint.js';
+// s8 Sc1 row 12: the capability scan the transport-surface ratchet runs. The
+// arch row plants an offender under `apps/desktop/src` and asserts that THIS
+// function sees it, which is the only honest way to claim the ratchet row
+// would have failed.
+import {
+  PRODUCTION_SOURCE_ROOTS,
+  portImporters,
+  productionSourceFiles,
+} from '../packages/daemon/test/helpers/production-sources.js';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
@@ -1505,6 +1523,12 @@ describe('arch invariants (dependency-cruiser)', () => {
       '.sh',
       '.toml',
       '.txt',
+      // s8 Sc1: the token sheet is the app's only colour literal file and it
+      // is a stylesheet. Adding the extension here rather than leaving it out
+      // is the same decision Sc7 made for `.py` and `.yaml`: the sweep should
+      // read what the repo actually publishes, not what it published when the
+      // list was written.
+      '.css',
     ]);
     // Naming control characters is this guard's entire job; the class below
     // IS the denylist, and it is written with escapes precisely so that the
@@ -1600,6 +1624,13 @@ describe('arch invariants (dependency-cruiser)', () => {
       // The enumeration itself is asserted: a package that quietly loses
       // its test/ directory must not be able to make this row vacuous.
       expect(packageDirsWithTests()).toEqual([
+        // s8 Sc1: `apps/desktop` grows its first test/ directory, and this
+        // row is why it grew a tsconfig.vitest.json in the same commit —
+        // the fourth time this guard has forced the config into the commit
+        // that made it matter. It is also the first non-`packages/` entry
+        // the enumeration has ever produced, which is the whole reason
+        // TYPECHECK_ROOTS included `apps` before there was anything in it.
+        'apps/desktop',
         'fixtures',
         'packages/adapter-testkit',
         'packages/adapters/echo',
@@ -2691,6 +2722,907 @@ describe('s7-execution Scenario 12 — the public document set', () => {
       const contributing = read('CONTRIBUTING.md');
       expect(contributing).toContain('npx @wemessage/adapter-testkit');
       expect(contributing).toContain('--cmd');
+    });
+  });
+});
+
+/**
+ * s8-execution Scenario 1 — arch guards for the GUI era.
+ *
+ * S8 adds a second process family to a repo that has been one daemon, one
+ * CLI and a family of thin adapters for seven slices. An Electron app is the
+ * first place in this tree where a renderer, a bundler, a JSX dialect and a
+ * design system all arrive at once, and every one of them is a way for the
+ * invariants to erode quietly:
+ *
+ *  - INV-2 lives or dies at the IPC boundary. A renderer that can name a
+ *    `wm:send` channel has a path to the send backend that no `Approval` row
+ *    gates, so the channel list is CLOSED and its closure is a test.
+ *  - The thin-client arrow was written as one rule covering `packages/cli`
+ *    and `apps/desktop` together, and the `cli` self-exclusion it needed for
+ *    the CLI's own file layout silently licensed `apps/desktop/src` to import
+ *    `packages/cli` for six slices. Splitting it is the row that closes a
+ *    hole that was always open and never exercised (F-103).
+ *  - §3.10 put state in the GLYPH so that colour never carries it. That is a
+ *    decision one careless `#34C759` at a time reverses, so the app has one
+ *    file that may name a colour and a lint that says so (F-104).
+ *
+ * Every row below is written BEFORE the thing it guards. That is only worth
+ * doing if each one is shown to fire, so each has a planted offender and a
+ * legitimate near-miss that must stay silent. Probes are written, cruised or
+ * swept, and removed in `afterEach`; where the sweep is over tracked files
+ * the probe is `git add --intent-to-add`ed so the enumeration half runs too.
+ */
+describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
+  const S8_SKIP = new Set([
+    'node_modules',
+    'dist',
+    '.git',
+    'coverage',
+    '.turbo',
+  ]);
+  function s8ListFiles(root: string): string[] {
+    const out: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (S8_SKIP.has(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.isFile()) out.push(full);
+      }
+    };
+    if (existsSync(root)) walk(root);
+    return out.sort();
+  }
+  const s8Rel = (abs: string): string =>
+    abs
+      .slice(repoRoot.length + 1)
+      .split('\\')
+      .join('/');
+  const s8Read = (rel: string): string =>
+    readFileSync(join(repoRoot, rel), 'utf8');
+  /** Every file under `apps/desktop/src`, repo-relative. */
+  const desktopSrcFiles = (): string[] =>
+    s8ListFiles(join(repoRoot, 'apps/desktop/src')).map(s8Rel);
+  /** Every file under `apps/desktop/test`, repo-relative. */
+  const desktopTestFiles = (): string[] =>
+    s8ListFiles(join(repoRoot, 'apps/desktop/test')).map(s8Rel);
+
+  /**
+   * Plant files, remove them, and keep the removal honest.
+   *
+   * `intentToAdd` exists because half of these sweeps enumerate through
+   * `git ls-files`: a probe that git cannot see would exercise the predicate
+   * and skip the enumeration, which is precisely the half that rots.
+   */
+  const planted: string[] = [];
+  function plant(rel: string, body: string, intentToAdd = false): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    planted.push(rel);
+    if (intentToAdd)
+      execFileSync('git', ['add', '--intent-to-add', rel], { cwd: repoRoot });
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of planted.splice(0)) {
+      try {
+        execFileSync('git', ['rm', '--cached', '--quiet', '--force', rel], {
+          cwd: repoRoot,
+          stdio: 'ignore',
+        });
+      } catch {
+        // not intent-to-added; nothing to un-stage
+      }
+      rmSync(join(repoRoot, rel), { force: true });
+    }
+    for (const dir of ['apps/desktop/src/__s8_probe__'])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  /* ── rows 1, 2, 8: the import graph, proven in one cruise ──────────── */
+
+  /**
+   * Six probes, one `depcruise`.
+   *
+   * Each of these rows wants the same thing — plant an offender, cruise,
+   * read the rule name — and the obvious shape is one cruise per row. That
+   * shape cost this file five extra subprocess spawns of roughly a second
+   * each, which under a full `pnpm test` is enough to push OTHER rows in
+   * this file past their timeout. The known "arch.spec dependency-cruiser
+   * timeout" flake is exactly this, and adding to it would have been a
+   * guard that makes the suite less trustworthy in order to be trustworthy.
+   *
+   * Planting all six at once is also a STRONGER assertion than six separate
+   * runs: the offenders and the near-misses coexist in the same graph, so a
+   * rule that only fires when nothing else does, or a near-miss that is
+   * silent only because it was cruised alone, is caught here.
+   */
+  describe('rows 1, 2 and 8: the import graph', () => {
+    /** repo-relative path -> file body. Order is irrelevant; names are not. */
+    const PROBES: ReadonlyArray<readonly [string, string]> = [
+      // row 1 offender: the back door the merged rule left open for six
+      // slices. Bare specifier, because that is the sloppiest form and the
+      // one a path-only rule would miss.
+      [
+        'apps/desktop/src/__s8_probe__/back-door.ts',
+        "import '@wemessage/cli';\nexport {};\n",
+      ],
+      // row 1 near-miss: the two packages the app IS allowed to reach.
+      [
+        'apps/desktop/src/__s8_probe__/allowed.ts',
+        [
+          "import '@wemessage/client';",
+          "import type { GatewayEvent } from '@wemessage/protocol';",
+          'export type E = GatewayEvent;',
+          '',
+        ].join('\n'),
+      ],
+      // row 2 offender: relative, so resolution cannot silently fail and
+      // turn a violation into a shrug (the S1 core->store precedent).
+      [
+        'apps/desktop/src/__s8_probe__/too-deep.ts',
+        "import '../../../../packages/daemon/src/index.js';\nexport {};\n",
+      ],
+      // row 2 near-miss: the SAME import, one directory over, which is the
+      // whole content of the carve-out.
+      [
+        'apps/desktop/test/__s8_probe__harness.ts',
+        "import '../../../packages/daemon/src/index.js';\nexport {};\n",
+      ],
+      // row 8 offender.
+      [
+        'packages/client/src/__s8_probe__electron.ts',
+        "import { app } from 'electron';\nexport const name = app.getName();\n",
+      ],
+      // row 8 near-miss: electron is the point of this app, and nowhere else.
+      [
+        'apps/desktop/src/__s8_probe__/shell.ts',
+        "import { app } from 'electron';\nexport const name = (): string => app.getName();\n",
+      ],
+    ];
+
+    let violations: CruiseSummary['summary']['violations'] = [];
+    /** Probes that were genuinely on disk at the moment the cruise ran. */
+    let presentAtCruise: string[] = [];
+    beforeAll(() => {
+      // Written directly rather than through `plant`, because the enclosing
+      // `afterEach` tears `plant`'s files down after EVERY test and these
+      // six have to survive the whole block. Cleanup is `afterAll`'s.
+      for (const [rel, body] of PROBES) {
+        const abs = join(repoRoot, rel);
+        mkdirSync(join(abs, '..'), { recursive: true });
+        writeFileSync(abs, body);
+      }
+      presentAtCruise = PROBES.map(([rel]) => rel).filter((rel) =>
+        existsSync(join(repoRoot, rel)),
+      );
+      violations = cruise(['packages', 'apps']).summary.violations;
+    });
+    afterAll(() => {
+      for (const [rel] of PROBES) rmSync(join(repoRoot, rel), { force: true });
+      rmSync(join(repoRoot, 'apps/desktop/src/__s8_probe__'), {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    /** Which files a given rule flagged in the one cruise above. */
+    const flaggedBy = (rule: string): string[] =>
+      violations.filter((v) => v.rule.name === rule).map((v) => v.from);
+
+    it('row 1: the merged rule is gone and both halves exist by name', () => {
+      const config = s8Read('.dependency-cruiser.cjs');
+      // Rule NAMES are binding (s1-execution §1.6); a rename is a surface
+      // change and this is where it is argued.
+      expect(config).toContain("name: 'cli-thin-client'");
+      expect(config).toContain("name: 'desktop-thin-client'");
+      // The merged rule, spelled from fragments so that renaming it back by
+      // find-and-replace cannot also rewrite the assertion that forbids it.
+      expect(config).not.toContain(`cli-desktop-${'thin'}-clients`);
+    });
+
+    it('row 1: the desktop half carries the bare-specifier shape too', () => {
+      // pnpm isolation means `apps/desktop` cannot RESOLVE `@wemessage/cli`
+      // unless it declares it, so a path-only rule would miss the sloppiest
+      // possible reach — an undeclared import that is a violation twice
+      // over. `adapters-thin-clients` learned this in S5; the desktop half
+      // inherits the two-shape `to` rather than rediscovering it.
+      expect(s8Read('.dependency-cruiser.cjs')).toContain(
+        "'^@wemessage/(?!client$|protocol$)'",
+      );
+    });
+
+    it('row 1 PLANTED: a @wemessage/cli import under apps/desktop/src violates', () => {
+      expect(
+        flaggedBy('desktop-thin-client'),
+        `violations seen: ${JSON.stringify(violations)}`,
+      ).toContain('apps/desktop/src/__s8_probe__/back-door.ts');
+    });
+
+    it('row 1 NEAR-MISS: client and protocol are exactly what the app may reach', () => {
+      expect(
+        violations.filter(
+          (v) => v.from === 'apps/desktop/src/__s8_probe__/allowed.ts',
+        ),
+      ).toEqual([]);
+    });
+
+    it('row 2: the carve-out is on the from side and scoped to test/', () => {
+      expect(s8Read('.dependency-cruiser.cjs')).toContain(
+        "pathNot: '^apps/desktop/test/'",
+      );
+    });
+
+    it('row 2 PLANTED: a daemon import under apps/desktop/src still violates', () => {
+      expect(flaggedBy('nobody-imports-daemon')).toContain(
+        'apps/desktop/src/__s8_probe__/too-deep.ts',
+      );
+    });
+
+    it('row 2 NEAR-MISS: the same import under apps/desktop/test does not', () => {
+      // F-102: the e2e harness boots a REAL daemon in-process, and the house
+      // has nowhere else to do that. A narrow, deliberate, test-only
+      // exception paired with a positive assertion on src is a stronger
+      // arrangement than the rule this replaces, which had no exception and
+      // no assertion because nothing had tried.
+      expect(flaggedBy('nobody-imports-daemon')).not.toContain(
+        'apps/desktop/test/__s8_probe__harness.ts',
+      );
+    });
+
+    it('row 8 PLANTED: an electron import in packages/client/src violates', () => {
+      expect(flaggedBy('no-electron-outside-desktop')).toContain(
+        'packages/client/src/__s8_probe__electron.ts',
+      );
+    });
+
+    it('row 8 NEAR-MISS: the same import inside apps/desktop/src is fine', () => {
+      expect(flaggedBy('no-electron-outside-desktop')).not.toContain(
+        'apps/desktop/src/__s8_probe__/shell.ts',
+      );
+    });
+
+    it('the cruise is not vacuous: it saw the probes and it saw the tree', () => {
+      // Six probes, three of which must be flagged and three of which must
+      // not. Asserting the count keeps "no violations" from being read as
+      // "the cruise found nothing to look at".
+      expect(violations.length).toBeGreaterThanOrEqual(3);
+      expect(presentAtCruise).toEqual(PROBES.map(([rel]) => rel));
+    });
+  });
+
+  /* ── row 3: the app knows no URL ───────────────────────────────────── */
+
+  describe('row 3: the renderer and main hold no transport of their own', () => {
+    /**
+     * The app speaks to the daemon through `@wemessage/client` and through
+     * nothing else. Every string below is a way to build a second transport
+     * by hand, and the first one that appears is the moment the token, the
+     * base URL and the retry policy start having two owners.
+     */
+    const FORBIDDEN: ReadonlyArray<readonly [string, RegExp]> = [
+      ['fetch(', /\bfetch\(/],
+      ['new WebSocket(', /\bnew WebSocket\(/],
+      ["from 'ws'", /from ['"]ws['"]/],
+      ['http://127.0.0.1', /https?:\/\/127\.0\.0\.1/],
+      ['/v1/ literal', /['"`]\/v1\//],
+      ['Authorization', /Authorization/],
+    ];
+    function transportOffenders(): string[] {
+      const out: string[] = [];
+      for (const rel of desktopSrcFiles()) {
+        if (!/\.(ts|tsx|js|mjs|cjs)$/.test(rel)) continue;
+        const text = s8Read(rel);
+        for (const [label, re] of FORBIDDEN)
+          if (re.test(text)) out.push(`${rel}: ${label}`);
+      }
+      return out.sort();
+    }
+
+    it('no file under apps/desktop/src builds its own transport', () => {
+      // Non-vacuity first: an empty src/ would make every row here pass.
+      expect(desktopSrcFiles().length).toBeGreaterThan(0);
+      expect(transportOffenders()).toEqual([]);
+    });
+
+    it('PLANTED: a hand-rolled fetch and a hard-coded loopback URL are both caught', () => {
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/transport.ts',
+        [
+          'export async function drafts(token: string): Promise<unknown> {',
+          "  const r = await fetch('http://127.0.0.1:8787' + '/v1/drafts', {",
+          "    headers: { Authorization: 'Bearer ' + token },",
+          '  });',
+          '  return r.json();',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      const offenders = transportOffenders();
+      expect(offenders).toContain(`${rel}: fetch(`);
+      expect(offenders).toContain(`${rel}: http://127.0.0.1`);
+      expect(offenders).toContain(`${rel}: /v1/ literal`);
+      expect(offenders).toContain(`${rel}: Authorization`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: naming the client and its types is not a transport', () => {
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/gateway-ish.ts',
+        [
+          "import { createClient } from '@wemessage/client';",
+          'export const make = (baseUrl: string, token: string) =>',
+          '  createClient({ baseUrl, token });',
+          '',
+        ].join('\n'),
+      );
+      expect(transportOffenders().filter((o) => o.startsWith(rel))).toEqual([]);
+    });
+  });
+
+  /* ── row 6: the S6 CLI ANSI precedent, re-run over the desktop suite ── */
+
+  describe('row 6: no desktop spec logs a coloured line', () => {
+    function ansiOffendersUnderDesktopTest(): string[] {
+      const out: string[] = [];
+      for (const rel of desktopTestFiles()) {
+        if (/\.(png|ico|jpg|jpeg|gif|webp|pdf|zip)$/.test(rel)) continue;
+        for (const f of ansiOffenders(s8Read(rel)))
+          out.push(`${rel}:${f.line}: ${f.detail}`);
+      }
+      return out.sort();
+    }
+
+    it('the desktop test tree is ANSI-free', () => {
+      // The sweep is `ansiOffenders`, extracted from `lintTranscript` in this
+      // scenario. Not a fourth regex that means the same thing: the S6
+      // transcripts, the S7 skill documents and this tree are all swept by
+      // one implementation, so "coloured output" has one definition.
+      expect(desktopTestFiles().length).toBeGreaterThan(0);
+      expect(ansiOffendersUnderDesktopTest()).toEqual([]);
+    });
+
+    it('PLANTED: a spec that logs an SGR sequence trips it', () => {
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__ansi.ts',
+        // A REAL escape byte, built at runtime. A probe spelling `\\u001b`
+        // would be a probe made of the characters backslash-u-zero-zero-one-b,
+        // which is exactly the thing the rule permits — and the near-miss
+        // below proves that distinction is deliberate rather than lucky.
+        `export const banner = '${String.fromCharCode(27)}[32mOK';\n`,
+      );
+      expect(ansiOffendersUnderDesktopTest().join('\n')).toContain(rel);
+    });
+
+    it('LEGITIMATE NEAR-MISS: the glyph vocabulary is not colour', () => {
+      // §3.10's whole point: ● ○ ◐ ⊘ ◌ carry state, so a spec that asserts
+      // them is asserting the thing that replaced colour, not smuggling it.
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__glyphs.ts',
+        "export const GLYPHS = ['\\u25CF', '\\u25CB', '\\u25D0', '\\u2298', '\\u25CC'];\n",
+      );
+      expect(
+        ansiOffendersUnderDesktopTest().filter((o) => o.startsWith(rel)),
+      ).toEqual([]);
+    });
+  });
+
+  /* ── row 7: there is no send channel ───────────────────────────────── */
+
+  describe('row 7: the IPC surface has no path to send (INV-2 at the GUI boundary)', () => {
+    const CHANNELS_FILE = 'apps/desktop/src/main/ipc-channels.ts';
+    /** Every `'wm:…'` value the channel table declares. */
+    function channelValues(): string[] {
+      return [...s8Read(CHANNELS_FILE).matchAll(/'(wm:[^']+)'/g)]
+        .map((m) => m[1] as string)
+        .sort();
+    }
+
+    it('the channel table is closed, non-trivial, and names nothing sendable', () => {
+      const values = channelValues();
+      // Non-vacuity: a file with two channels in it would pass the /send/i
+      // assertion for the wrong reason. The §1.7 table is 40 rows and the
+      // floor is set below it so a legitimate edit does not fight the guard,
+      // but far above "somebody deleted the constants".
+      expect(values.length).toBeGreaterThanOrEqual(30);
+      expect(new Set(values).size).toBe(values.length);
+      expect(values.filter((v) => /send/i.test(v))).toEqual([
+        'wm:wizard.send-test',
+      ]);
+      // The key, not just the value: `send: 'wm:dispatch'` would pass the
+      // line above and be exactly the thing this row exists to stop.
+      expect(s8Read(CHANNELS_FILE)).not.toMatch(/^\s*send\s*:/m);
+    });
+
+    it('the only route to the send backend stays dispatchApproved, not the GUI', () => {
+      // Inherited, not duplicated. s7 Sc13 proved there is exactly ONE
+      // `SendBackend.send` call site in the tree and the ratchet's importer
+      // allowlist is the standing assertion about who may even NAME the
+      // capability. The desktop-specific claim is the narrow one: no file in
+      // this app is on that list.
+      expect(
+        PORT_IMPORTER_ALLOWLIST.filter((f) => f.startsWith('apps/')),
+      ).toEqual([]);
+      expect(PORT_IMPORTER_ALLOWLIST.length).toBeGreaterThan(0);
+    });
+
+    it('client.send( appears in at most one file, and that file owns sendTest', () => {
+      const callers = desktopSrcFiles()
+        .filter((rel) => /\.(ts|tsx)$/.test(rel))
+        .filter((rel) => /\bclient\.send\(/.test(s8Read(rel)));
+      // Sc 1 ships constants only, so the honest assertion today is a subset
+      // one: whoever adds the call has to add it in `gateway.ts`, in the
+      // handler registered for `CHANNELS.sendTest`, and Sc 4 tightens this
+      // to an equality once the file exists.
+      expect(
+        callers.filter((f) => f !== 'apps/desktop/src/main/gateway.ts'),
+      ).toEqual([]);
+      for (const rel of callers)
+        expect(s8Read(rel)).toContain('CHANNELS.sendTest');
+    });
+
+    it('PLANTED: a send call outside gateway.ts is caught', () => {
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/quick-send.ts',
+        [
+          'export async function shortcut(client: { send: (a: unknown) => Promise<void> }) {',
+          "  await client.send({ to: '+15550000000', body: 'hi' });",
+          '}',
+          '',
+        ].join('\n'),
+      );
+      const callers = desktopSrcFiles()
+        .filter((f) => /\.(ts|tsx)$/.test(f))
+        .filter((f) => /\bclient\.send\(/.test(s8Read(f)));
+      expect(callers).toContain(rel);
+      expect(
+        callers.filter((f) => f !== 'apps/desktop/src/main/gateway.ts'),
+      ).not.toEqual([]);
+    });
+  });
+
+  /* ── row 9: the wireframe set is a closed spec ─────────────────────── */
+
+  describe('row 9: the screen registry is closed (F-113)', () => {
+    const ROUTER = 'apps/desktop/src/renderer/router.ts';
+    function constArray(name: string): string[] {
+      const m = new RegExp(
+        `export const ${name}\\s*=\\s*\\[([^\\]]*)\\]`,
+        'm',
+      ).exec(s8Read(ROUTER));
+      if (m === null) return [];
+      return [...(m[1] as string).matchAll(/'([^']+)'/g)].map(
+        (x) => x[1] as string,
+      );
+    }
+
+    it('SCREENS and WIZARD_STEPS are byte-for-byte the §1.7 arrays', () => {
+      expect(constArray('SCREENS')).toEqual([
+        'queue',
+        'rules',
+        'schedule',
+        'people',
+        'audit',
+        'settings',
+      ]);
+      expect(constArray('WIZARD_STEPS')).toEqual([
+        'welcome',
+        'full-disk',
+        'automation',
+        'optional',
+        'send-test',
+      ]);
+    });
+
+    it('the screens/ directory set is exactly the registry plus wizard', () => {
+      // Scope explosion in a GUI slice is not a risk to be monitored, it is
+      // a rule to be mechanised. A seventeenth screen fails here, and the
+      // failure is the prompt to argue it into the plan first.
+      const dir = join(repoRoot, 'apps/desktop/src/renderer/screens');
+      const dirs = readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort();
+      expect(dirs).toEqual([
+        'audit',
+        'people',
+        'queue',
+        'rules',
+        'schedule',
+        'settings',
+        'wizard',
+      ]);
+      // And every screen in the registry has a directory: the two lists are
+      // pinned to each other, not merely each pinned to a literal.
+      for (const screen of constArray('SCREENS'))
+        expect(dirs, `${screen} has no screens/ directory`).toContain(screen);
+    });
+
+    it('PLANTED: an eighth screen directory fails the row', () => {
+      mkdirSync(join(repoRoot, 'apps/desktop/src/renderer/screens/insights'), {
+        recursive: true,
+      });
+      plant(
+        'apps/desktop/src/renderer/screens/insights/index.tsx',
+        'export default function InsightsScreen(): null {\n  return null;\n}\n',
+      );
+      const dirs = readdirSync(
+        join(repoRoot, 'apps/desktop/src/renderer/screens'),
+        { withFileTypes: true },
+      )
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+      expect(dirs).toContain('insights');
+      rmSync(join(repoRoot, 'apps/desktop/src/renderer/screens/insights'), {
+        recursive: true,
+        force: true,
+      });
+    });
+  });
+
+  /* ── row 10: the dependency list is closed ─────────────────────────── */
+
+  describe('row 10: the §1.2 dependency list, pinned so an addition is a diff', () => {
+    interface DesktopPkg {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    }
+    const pkg = (): DesktopPkg =>
+      JSON.parse(s8Read('apps/desktop/package.json')) as DesktopPkg;
+
+    it('dependencies and devDependencies are exactly §1.2', () => {
+      // `preact` is a dependency and not a devDependency on purpose: it ships
+      // inside the renderer bundle. Everything else is build- or test-time.
+      expect(Object.keys(pkg().dependencies ?? {}).sort()).toEqual(['preact']);
+      expect(Object.keys(pkg().devDependencies ?? {}).sort()).toEqual([
+        '@preact/preset-vite',
+        'axe-core',
+        'electron',
+        'pixelmatch',
+        'playwright-core',
+        'pngjs',
+        'vite',
+      ]);
+    });
+
+    it('the list is not decorative: every entry is actually installed', () => {
+      // The failure this catches is a package.json that names a dependency
+      // the lockfile does not carry — a list that reads correctly and buys
+      // nothing. Enumeration asserted, then each member checked.
+      const p = pkg();
+      const names = [
+        ...Object.keys(p.dependencies ?? {}),
+        ...Object.keys(p.devDependencies ?? {}),
+      ];
+      expect(names.length).toBe(8);
+      expect(
+        names.filter(
+          (n) =>
+            !existsSync(
+              join(repoRoot, 'apps/desktop/node_modules', n, 'package.json'),
+            ),
+        ),
+      ).toEqual([]);
+    });
+
+    it('electron is in pnpm.onlyBuiltDependencies, or its binary never downloads', () => {
+      // pnpm 10 blocks postinstall scripts by default; electron's postinstall
+      // IS the binary download, so without this line the app has no shell and
+      // the e2e harness has nothing to launch (F-99).
+      const root = JSON.parse(s8Read('package.json')) as {
+        pnpm?: { onlyBuiltDependencies?: string[] };
+      };
+      expect(root.pnpm?.onlyBuiltDependencies ?? []).toContain('electron');
+    });
+
+    it('licenses:check walks the desktop subtree, not only the root', () => {
+      // s7 Sc12 found that pnpm's lack of hoisting means license-checker sees
+      // only what is reachable from the --start root it is given. A new
+      // publish-graph root therefore needs its own pass, or seven new
+      // packages are licence-checked by nobody.
+      const scripts = (
+        JSON.parse(s8Read('package.json')) as {
+          scripts: Record<string, string>;
+        }
+      ).scripts;
+      expect(scripts['licenses:check']).toContain('--start apps/desktop');
+    });
+  });
+
+  /* ── row 11: lint reaches the new code ─────────────────────────────── */
+
+  describe('row 11: eslint type-aware coverage reaches apps/desktop TSX', () => {
+    /**
+     * A rule's numeric severity in a resolved flat config.
+     *
+     * ESLint normalises `'off' | 'warn' | 'error'` to `0 | 1 | 2` when it
+     * calculates a config, so comparing against the STRING the config file
+     * spells passes vacuously — `undefined !== 'off'` is true for a rule
+     * that is not configured at all, which is exactly the near-miss this row
+     * needs to distinguish from a rule that is deliberately disabled.
+     */
+    function severityOf(
+      config: { rules?: Record<string, unknown> },
+      rule: string,
+    ): number | undefined {
+      const entry = config.rules?.[rule];
+      if (entry === undefined) return undefined;
+      const value = Array.isArray(entry) ? entry[0] : entry;
+      if (typeof value === 'number') return value;
+      return { off: 0, warn: 1, error: 2 }[String(value)];
+    }
+
+    it('a .tsx under apps/desktop/src gets the type-aware rules', async () => {
+      // Asked of ESLint itself rather than of a glob library: the question is
+      // "what config applies to this file", and ESLint is the only thing that
+      // can answer it without a second implementation of flat-config
+      // resolution (and without a new dependency the plan did not ratify).
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/Screen.tsx',
+        'export default function Probe(): null {\n  return null;\n}\n',
+      );
+      const eslint = new ESLint({ cwd: repoRoot });
+      expect(await eslint.isPathIgnored(rel)).toBe(false);
+      const config = await eslint.calculateConfigForFile(rel);
+      const rules = config.rules ?? {};
+      // These three are type-aware and cannot run without a project service,
+      // so their presence proves the parser is configured, not merely that
+      // some block matched.
+      expect(rules['@typescript-eslint/no-floating-promises']).toBeDefined();
+      expect(rules['@typescript-eslint/consistent-type-imports']).toBeDefined();
+      expect(rules['@typescript-eslint/no-explicit-any']).toBeDefined();
+    });
+
+    it('the desktop keeps its no-restricted-imports override', async () => {
+      // `electron` is banned by that rule everywhere else in the tree. The
+      // app is the one place it is the point, and dependency-cruiser's
+      // no-electron-outside-desktop is what fences it (row 8), so the eslint
+      // override is not a hole — it is the same boundary drawn once.
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/Main.tsx',
+        "import { app } from 'electron';\nexport const n = (): string => app.getName();\n",
+      );
+      const config = await new ESLint({ cwd: repoRoot }).calculateConfigForFile(
+        rel,
+      );
+      expect(severityOf(config, 'no-restricted-imports')).toBe(0);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a package .ts is unaffected by the widening', async () => {
+      const config = await new ESLint({ cwd: repoRoot }).calculateConfigForFile(
+        'packages/core/src/index.ts',
+      );
+      expect(
+        config.rules?.['@typescript-eslint/no-floating-promises'],
+      ).toBeDefined();
+      expect(severityOf(config, 'no-restricted-imports')).toBe(2);
+    });
+  });
+
+  /* ── row 12: the capability scan reaches the app ───────────────────── */
+
+  describe('row 12: the port-importer ratchet scans apps/*/src', () => {
+    it('apps is one of the production-source roots', () => {
+      expect([...PRODUCTION_SOURCE_ROOTS]).toContain('apps');
+      expect([...PRODUCTION_SOURCE_ROOTS]).toContain('packages');
+    });
+
+    it('the scan actually reaches desktop files', () => {
+      const scanned = productionSourceFiles().map(s8Rel);
+      expect(scanned).toContain('apps/desktop/src/index.ts');
+    });
+
+    it('PLANTED: naming SendBackend under apps/desktop/src breaks the allowlist row', () => {
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/capability.ts',
+        [
+          "import type { SendBackend } from '@wemessage/core';",
+          'export type Backend = SendBackend;',
+          '',
+        ].join('\n'),
+      );
+      // Run the RATCHET's own predicate, not a copy of it: the claim is that
+      // the ratchet row would fail, and only the ratchet's function can make
+      // that claim true.
+      const importers = portImporters();
+      expect(importers).toContain(rel);
+      expect(importers).not.toEqual([...PORT_IMPORTER_ALLOWLIST]);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a desktop file naming the client is not a capability', () => {
+      const rel = plant(
+        'apps/desktop/src/__s8_probe__/no-capability.ts',
+        [
+          "import type { GatewayClient } from '@wemessage/client';",
+          'export type C = GatewayClient;',
+          '',
+        ].join('\n'),
+      );
+      expect(portImporters()).not.toContain(rel);
+      expect(portImporters()).toEqual([...PORT_IMPORTER_ALLOWLIST]);
+    });
+  });
+
+  /* ── row 13: the public sweep, plus the raster enumeration ─────────── */
+
+  describe('row 13: the repo is still publishable, and ships no raster', () => {
+    const tracked = (pattern: string): string[] =>
+      execFileSync('git', ['ls-files', '--', pattern], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0)
+        .sort();
+    /** The two reference rasters Sc 17 will commit, and nothing else. */
+    const SNAPSHOT_PNGS: readonly string[] = [
+      'apps/desktop/test/__snapshots__/rt-dark.png',
+      'apps/desktop/test/__snapshots__/rt-light.png',
+    ];
+
+    it('no brand string, no operator handle, no absolute home path', () => {
+      expect(publicRepoOffenders()).toEqual([]);
+    });
+
+    it('every tracked PNG is a reduced-transparency reference snapshot', () => {
+      // Subset until Sc 17 commits them; equality from Sc 17. Written this
+      // way on purpose: the row is real NOW (a stray screenshot fails it)
+      // rather than being a comment promising a future assertion.
+      const pngs = tracked('*.png');
+      expect(pngs.filter((p) => !SNAPSHOT_PNGS.includes(p))).toEqual([]);
+    });
+
+    it('PLANTED: a screenshot committed anywhere else fails the row', () => {
+      // `--intent-to-add` so the ENUMERATION half runs: a probe git cannot
+      // see would exercise the filter and skip the `git ls-files` call that
+      // is the actual mechanism.
+      const rel = plant(
+        'apps/desktop/assets/__s8_probe__shot.png',
+        'not really a png\n',
+        true,
+      );
+      const pngs = tracked('*.png');
+      expect(pngs).toContain(rel);
+      expect(pngs.filter((p) => !SNAPSHOT_PNGS.includes(p))).toEqual([rel]);
+    });
+
+    it('LEGITIMATE NEAR-MISS: a monochrome template SVG is not a raster', () => {
+      // Sc 16's tray glyphs are SVG precisely so macOS can tint them; the
+      // rule is about rasters, and an SVG the system recolours is the
+      // opposite of a baked-in colour.
+      const rel = plant(
+        'apps/desktop/assets/__s8_probe__trayTemplate.svg',
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"></svg>\n',
+        true,
+      );
+      expect(tracked('*.png')).not.toContain(rel);
+      expect(
+        tracked('*.png').filter((p) => !SNAPSHOT_PNGS.includes(p)),
+      ).toEqual([]);
+    });
+  });
+
+  /* ── row 14: readiness, not sleeping ───────────────────────────────── */
+
+  describe('row 14: the desktop suite waits on state, never on the clock', () => {
+    const SLEEPS: ReadonlyArray<readonly [string, RegExp]> = [
+      ['setTimeout(', /\bsetTimeout\(/],
+      ['waitForTimeout(', /\bwaitForTimeout\(/],
+    ];
+    function sleepOffenders(): string[] {
+      const out: string[] = [];
+      for (const rel of desktopTestFiles()) {
+        if (!/\.(ts|tsx|js|mjs|cjs)$/.test(rel)) continue;
+        const text = s8Read(rel);
+        for (const [label, re] of SLEEPS)
+          if (re.test(text)) out.push(`${rel}: ${label}`);
+      }
+      return out.sort();
+    }
+
+    it('nothing under apps/desktop/test sleeps', () => {
+      expect(desktopTestFiles().length).toBeGreaterThan(0);
+      expect(sleepOffenders()).toEqual([]);
+    });
+
+    it('PLANTED: a timed wait is caught', () => {
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__sleep.ts',
+        'export const settle = () =>\n  new Promise((r) => setTimeout(r, 250));\n',
+      );
+      expect(sleepOffenders()).toContain(`${rel}: setTimeout(`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: waiting on the readiness attribute is the sanctioned wait', () => {
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__ready.ts',
+        [
+          'export const ready = (page: { waitForSelector: (s: string) => Promise<void> }) =>',
+          '  page.waitForSelector(\'html[data-conn="connected"]\');',
+          '',
+        ].join('\n'),
+      );
+      expect(sleepOffenders().filter((o) => o.startsWith(rel))).toEqual([]);
+    });
+  });
+
+  /* ── row 15: a11y findings are not suppressed ──────────────────────── */
+
+  describe('row 15: axe is not allowed to be told to look away', () => {
+    const SUPPRESSIONS: ReadonlyArray<readonly [string, RegExp]> = [
+      ['disableRules', /disableRules/],
+      ['.exclude(', /\.exclude\(/],
+    ];
+    function suppressionOffenders(): string[] {
+      const out: string[] = [];
+      for (const rel of desktopTestFiles()) {
+        if (!/\.(ts|tsx|js|mjs|cjs|json)$/.test(rel)) continue;
+        const text = s8Read(rel);
+        for (const [label, re] of SUPPRESSIONS)
+          if (re.test(text)) out.push(`${rel}: ${label}`);
+      }
+      return out.sort();
+    }
+
+    interface Suppression {
+      rule?: string;
+      reason?: string;
+    }
+    /** The allowlist's own schema, applied to whatever the file holds. */
+    function allowlistOffenders(entries: readonly Suppression[]): string[] {
+      return entries
+        .filter((e) => (e.reason ?? '').length < 40)
+        .map((e) => `${e.rule ?? '<unnamed>'}: reason too short`);
+    }
+
+    it('no desktop spec disables an axe rule or excludes a subtree', () => {
+      expect(suppressionOffenders()).toEqual([]);
+    });
+
+    it('the allowlist parses, is an array, and every entry carries a real reason', () => {
+      const entries = JSON.parse(
+        s8Read('apps/desktop/test/a11y-allowlist.json'),
+      ) as Suppression[];
+      expect(Array.isArray(entries)).toBe(true);
+      expect(allowlistOffenders(entries)).toEqual([]);
+      // Empty at Sc 1, so the loop above is vacuous — and a vacuous
+      // validator is the exact failure mode this scenario keeps naming. The
+      // predicate is therefore exercised directly on a synthetic entry.
+      expect(
+        allowlistOffenders([{ rule: 'color-contrast', reason: 'later' }]),
+      ).toEqual(['color-contrast: reason too short']);
+      expect(
+        allowlistOffenders([
+          {
+            rule: 'color-contrast',
+            reason:
+              'forty characters is roughly one sentence of actual justification',
+          },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('PLANTED: a spec that narrows axe is caught', () => {
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__axe.ts',
+        [
+          'export const run = (axe: { disableRules: (r: string[]) => void }) =>',
+          "  axe.disableRules(['color-contrast']);",
+          '',
+        ].join('\n'),
+      );
+      expect(suppressionOffenders()).toContain(`${rel}: disableRules`);
+    });
+
+    it('LEGITIMATE NEAR-MISS: scoping axe to the app root is not a suppression', () => {
+      const rel = plant(
+        'apps/desktop/test/__s8_probe__axe-include.ts',
+        "export const SCOPE = { include: [['#app']] };\n",
+      );
+      expect(suppressionOffenders().filter((o) => o.startsWith(rel))).toEqual(
+        [],
+      );
     });
   });
 });

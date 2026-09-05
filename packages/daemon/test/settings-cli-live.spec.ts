@@ -7,7 +7,7 @@
  * send-connect-cli.spec.ts S3 Sc10, drafts-cli.spec.ts S4 Sc11,
  * adapters-cli.spec.ts S5 Sc11, windows-cli-live.spec.ts S6 Sc12): the
  * scenario names a packages/cli test, but `nobody-imports-daemon` and
- * `cli-desktop-thin-clients` forbid packages/cli from importing
+ * `cli-thin-client` forbid packages/cli from importing
  * @wemessage/daemon, and these rows need a REAL daemon with a REAL store —
  * the exit codes, the daemon's own refusal words arriving on stderr, and a
  * subscription filter that has to survive a socket. The pure-function rows

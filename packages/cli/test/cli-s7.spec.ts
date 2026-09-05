@@ -6,7 +6,7 @@
  * LOCATION DEVIATION, the same one every CLI slice since S2 has taken
  * (precedent: purge.spec.ts, cli-s5.spec.ts, windows-cli.spec.ts):
  * `.dependency-cruiser.cjs`'s `nobody-imports-daemon` and
- * `cli-desktop-thin-clients` forbid packages/cli from importing
+ * `cli-thin-client` forbid packages/cli from importing
  * @wemessage/daemon, and `src/bin.ts` runs `program.parseAsync(process.argv)`
  * as a module side effect the instant it is imported. So the rows that are
  * pure functions of a payload live here, and the rows that need a REAL
@@ -431,7 +431,7 @@ describe('row 7 — the no-green sweep over packages/cli/src', () => {
   });
 });
 
-describe('row 8 — thin clients (cli-desktop-thin-clients, attributed here)', () => {
+describe('row 8 — thin clients (cli-thin-client, attributed here)', () => {
   it('packages/cli/src imports nothing from the adapter testkit', () => {
     for (const file of srcFiles()) {
       const code = readFileSync(file, 'utf8');

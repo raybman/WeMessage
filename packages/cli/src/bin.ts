@@ -1619,7 +1619,7 @@ adapters
     // it on echo and sol, but it does NOT reach this verb, for one structural
     // reason and one scope reason:
     //
-    //  - `cli-desktop-thin-clients` (.dependency-cruiser.cjs) allows
+    //  - `cli-thin-client` (.dependency-cruiser.cjs) allows
     //    packages/cli/src to import client and protocol and nothing else. The
     //    CLI cannot import the kit, or the adapters the kit runs, without
     //    widening that rule — and the CLI's narrow reach is the point of it.
@@ -1637,7 +1637,7 @@ adapters
     // better served by a line they can read before they run it.
     fail(
       'adapters test does not run the kit from here: this CLI imports client ' +
-        'and protocol only (cli-desktop-thin-clients), and spawning an adapter ' +
+        'and protocol only (cli-thin-client), and spawning an adapter ' +
         'process on its behalf is what F-55 refuses. The kit runs itself — ' +
         'run: npx @wemessage/adapter-testkit --cmd "<your adapter>" ' +
         '(F-52 for its packaging, F-86 for why this stays a pointer)',

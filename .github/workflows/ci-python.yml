@@ -1,0 +1,60 @@
+name: ci-python
+
+# s7 Sc7 (F-88): the Python lane, and its own workflow rather than a step in
+# ci-linux.
+#
+# Two reasons, both about signal. A Python interpreter, a wheel download and a
+# hash check are a different failure surface from a pnpm build, and mixing
+# them means a flaky wheel mirror reads as "TypeScript is broken" on the
+# checks list. And this job is the ONLY place the Python conformance rows
+# actually execute: the vitest rows skip when no interpreter in the supported
+# range is available, so on a contributor's machine they may be green without
+# having run. `CI: 'true'` below flips that — under CI a skip is a failure,
+# because a green tick that verified nothing is worse than a red one.
+#
+# Blocking, not advisory. Nothing here is marked as tolerating failure, on
+# purpose: a lane allowed to go red quietly is a lane nobody reads. If this
+# job ever has to stop blocking, that is a commit that cites the flake and
+# opens a flag, not a one-word key nobody notices. The conformance spec
+# asserts the absence, so this comment cannot describe the file's opposite.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  python-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Pinned to 3.12, inside the >=3.11,<3.14 range plugin/pyproject.toml
+      # declares and Hermes itself pins. Not "3.x": the interpreter the rows
+      # below run on has to be the one they claim to have run on.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # --require-hashes turns the pins in requirements.txt into a refusal.
+      # Without it a compromised index could serve a different artifact under
+      # the same version and pip would install it without comment. It also
+      # makes the file's one-line rule enforceable: every requirement must
+      # carry a hash or the whole install fails.
+      - run: python -m pip install --require-hashes -r packages/adapters/hermes/plugin/requirements.txt
+      - run: python -c "import websockets, sys; print(sys.version); print(websockets.version.version)"
+      - run: pnpm install --frozen-lockfile
+      # The conformance rows import the testkit from dist/, so the build is
+      # not optional here even though this job runs no TypeScript of its own.
+      - run: pnpm build
+      - run: pnpm vitest run --project adapter-hermes
+        env:
+          CI: 'true'
+          # The interpreter setup-python just installed, named explicitly.
+          # Leaving resolution to the ladder would let this job silently fall
+          # through to a different interpreter than the one it pinned.
+          WEMESSAGE_PYTHON: python

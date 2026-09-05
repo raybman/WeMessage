@@ -15,5 +15,8 @@
     "build": "tsc -b",
     "test": "vitest run"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@wemessage/adapter-testkit": "workspace:*"
+  }
 }

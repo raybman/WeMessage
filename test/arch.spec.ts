@@ -28,6 +28,53 @@ const repoRoot = resolve(import.meta.dirname, '..');
 const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
 
 /**
+ * Every tracked file the public-repo sweeps are allowed to read, as text.
+ *
+ * WIDENED BY s7 Sc7. Until this commit the sweep filtered to
+ * `/\.(ts|tsx|js|mjs|cjs)$/` plus `.json`, which meant markdown, yaml, html,
+ * sql and shell were tracked, published and NEVER SWEPT. That was survivable
+ * only for as long as the repo was all TypeScript, and Sc7 ends that: it adds
+ * `.py` and `.yaml` under `packages/adapters/hermes/plugin/`, which is
+ * exactly the unswept set. Closing the hole is cheaper than remembering that
+ * the guard has a blind spot, so the allowlist of extensions is gone: the
+ * sweep now reads everything git tracks except the handful of extensions that
+ * are not text at all. Every file in the tree passes at the commit that
+ * widened it, so nothing was grandfathered in.
+ *
+ * `test/arch.spec.ts` excludes itself: this file IS the denylist source and
+ * has to spell the banned words out in order to grep for them.
+ */
+function trackedTextFiles(): string[] {
+  const notText = /\.(bin|blob|db|png|ico|svg|jpg|jpeg|gif|pdf|zip|woff2?)$/;
+  return execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
+    .split('\n')
+    .filter((f) => f.length > 0)
+    .filter((f) => !notText.test(f))
+    .filter((f) => f !== 'test/arch.spec.ts');
+}
+
+/**
+ * Brand strings and non-fictional phone numbers in anything git tracks.
+ *
+ * Hoisted to module scope by s7 Sc7 so that the row asserting it is clean
+ * (S3 (d)) and the teeth proving it BITES on the file types Sc7 introduces
+ * can be the same code. A sweep and its teeth that share no implementation
+ * are two guards, and only one of them is the one that runs on CI.
+ */
+function publicRepoOffenders(): string[] {
+  const bannedBrand = /flowstay|flowverse|flowindustries|vivaepic/i;
+  const phoneRe = /\+1\d{10}/g;
+  const offenders: string[] = [];
+  for (const f of trackedTextFiles()) {
+    const content = readFileSync(join(repoRoot, f), 'utf8');
+    if (bannedBrand.test(content)) offenders.push(`${f}: brand string`);
+    for (const n of content.match(phoneRe) ?? [])
+      if (!n.startsWith('+1555')) offenders.push(`${f}: ${n}`);
+  }
+  return offenders.sort();
+}
+
+/**
  * Production files permitted to MINT `reason: 'auto-respond'` — the actor a
  * machine wears when it approves a draft on the operator's behalf.
  *
@@ -348,29 +395,7 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
 
     it('(d) public-repo sweep: no brand strings, no +1 numbers outside the +1555 fiction block', () => {
-      const bannedBrand = /flowstay|flowverse|flowindustries|vivaepic/i;
-      const phoneRe = /\+1\d{10}/g;
-      const tracked = execFileSync('git', ['ls-files'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      })
-        .split('\n')
-        .filter((f) => f.length > 0)
-        .filter((f) => codeIsh.test(f) || f.endsWith('.json'))
-        .filter((f) => !binaryIsh.test(f))
-        // this file IS the denylist source (has to spell the banned words
-        // out to grep for them) — self-referential, not a real fixture.
-        .filter((f) => f !== 'test/arch.spec.ts');
-
-      const offenders: string[] = [];
-      for (const f of tracked) {
-        const content = readFileSync(join(repoRoot, f), 'utf8');
-        if (bannedBrand.test(content)) offenders.push(`${f}: brand string`);
-        for (const n of content.match(phoneRe) ?? []) {
-          if (!n.startsWith('+1555')) offenders.push(`${f}: ${n}`);
-        }
-      }
-      expect(offenders).toEqual([]);
+      expect(publicRepoOffenders()).toEqual([]);
     });
 
     describe('proven teeth', () => {
@@ -1522,6 +1547,10 @@ describe('arch invariants (dependency-cruiser)', () => {
         'fixtures',
         'packages/adapter-testkit',
         'packages/adapters/echo',
+        // s7 Sc7: the Hermes package grows its first test/ directory, and
+        // this row is why it also grew a tsconfig.vitest.json in the same
+        // commit — exactly the moment the hole would otherwise have opened.
+        'packages/adapters/hermes',
         'packages/adapters/sol',
         'packages/cli',
         'packages/client',
@@ -1645,6 +1674,291 @@ describe('arch invariants (dependency-cruiser)', () => {
           'export {};\n',
         );
         expect(typecheckConfigOffenders()).toContain('packages/__s7_teeth__');
+      });
+    });
+  });
+
+  /**
+   * s7-execution Scenario 7 — the guards a second LANGUAGE needs.
+   *
+   * Everything above this block is a guard over TypeScript, and every one of
+   * them is blind to the files Sc 7 adds. Two holes open the moment a `.py`
+   * lands in `packages/`, and both are closed here rather than left for the
+   * scenario that trips over them:
+   *
+   * (e) `pnpm licenses:check` walks `node_modules`. It cannot see a Python
+   *     dependency graph, so a `pip install` of something AGPL would be
+   *     invisible to the license gate that exists precisely to catch that.
+   *     The answer is not a second license tool, it is a dependency list
+   *     small enough to read: ONE package, pinned, hashed, BSD-3-Clause
+   *     (F-88). This row asserts the list has not grown, in any
+   *     `requirements.txt` anywhere in the tree, and that no `.py` file
+   *     imports something outside it.
+   * (f) the public-repo sweep was extension-scoped and `.py`/`.yaml` were
+   *     not in the scope. Widened at its definition (`trackedTextFiles`);
+   *     the teeth below prove the widening actually bites on the two
+   *     extensions this scenario introduces, rather than merely appearing
+   *     in a regex.
+   */
+  describe('S7 extensions (s7-execution Scenario 7: the second language)', () => {
+    /** Every tracked `requirements.txt`, wherever it is. */
+    function requirementsFiles(): string[] {
+      return trackedTextFiles()
+        .filter((f) => /(^|\/)requirements(-[\w.]+)?\.txt$/.test(f))
+        .sort();
+    }
+
+    /**
+     * Every requirement line in the tree, file-qualified. Comments and blanks
+     * dropped; nothing else is, because "nothing else" is the assertion.
+     */
+    function pythonRequirementLines(): string[] {
+      return requirementsFiles().flatMap((f) =>
+        readFileSync(join(repoRoot, f), 'utf8')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l !== '' && !l.startsWith('#'))
+          .map((l) => `${f}: ${l.split(/\s+/)[0] ?? ''}`),
+      );
+    }
+
+    /** Third-party imports in tracked Python, minus the one allowed package. */
+    const PY_STDLIB = new Set([
+      '__future__',
+      'abc',
+      'argparse',
+      'asyncio',
+      'base64',
+      'collections',
+      'contextlib',
+      'dataclasses',
+      'datetime',
+      'enum',
+      'functools',
+      'hashlib',
+      'inspect',
+      'itertools',
+      'json',
+      'logging',
+      'os',
+      'pathlib',
+      'random',
+      're',
+      'signal',
+      'ssl',
+      'sys',
+      'time',
+      'traceback',
+      'types',
+      'typing',
+      'unittest',
+      'urllib',
+      'uuid',
+    ]);
+    /** Modules that ship inside the plugin directory itself. */
+    const PY_LOCAL = new Set(['adapter', 'wemessage_wire']);
+    /**
+     * The one package this repository actually installs. BSD-3-Clause, no
+     * dependencies of its own, pinned and hashed in requirements.txt.
+     */
+    const PY_ALLOWED_THIRD_PARTY = new Set(['websockets']);
+    /**
+     * Provided by the HOST, never installed by us. `hermes_cli` is Hermes
+     * itself: the plugin is loaded into a Hermes process that already has it,
+     * this repo never puts it in a requirements file, and every import of it
+     * is inside a `try/except ImportError` so the module still loads without
+     * it. It is on this list rather than the one above because the license
+     * question a requirements file answers does not arise for a symbol we
+     * never fetch.
+     */
+    const PY_HOST_PROVIDED = new Set(['hermes_cli']);
+
+    function pythonImportOffenders(): string[] {
+      return trackedTextFiles()
+        .filter((f) => f.endsWith('.py'))
+        .flatMap((f) => {
+          const source = readFileSync(join(repoRoot, f), 'utf8');
+          return [
+            ...source.matchAll(/^\s*(?:from|import)\s+([A-Za-z_][\w.]*)/gm),
+          ]
+            .map((m) => (m[1] ?? '').split('.')[0] ?? '')
+            .filter(
+              (mod) =>
+                !PY_STDLIB.has(mod) &&
+                !PY_LOCAL.has(mod) &&
+                !PY_HOST_PROVIDED.has(mod) &&
+                !PY_ALLOWED_THIRD_PARTY.has(mod),
+            )
+            .map((mod) => `${f}: ${mod}`);
+        })
+        .sort();
+    }
+
+    it('(e) the Python dependency graph is one hashed BSD-3 package, tree-wide', () => {
+      // The enumeration first: a requirements.txt that stops being tracked
+      // must not be able to make the list below trivially satisfied.
+      expect(requirementsFiles()).toEqual([
+        'packages/adapters/hermes/plugin/requirements.txt',
+      ]);
+      // ONE requirement, in the whole repository. This is the entire Python
+      // license story: `websockets` is BSD-3-Clause, it is pinned by exact
+      // version, its artifacts are pinned by SHA-256, and there is no
+      // transitive graph behind it to audit. A second line here is not a
+      // style violation, it is a license review, and it fails a row that
+      // says so rather than slipping past a checker that cannot see it.
+      expect(pythonRequirementLines()).toEqual([
+        'packages/adapters/hermes/plugin/requirements.txt: websockets==15.0.1',
+      ]);
+      // Pinned AND hashed: a version pin still trusts whatever the index
+      // serves under that name, and `--require-hashes` in CI is worthless if
+      // the file it reads carries no hashes.
+      const requirements = readFileSync(
+        join(repoRoot, 'packages/adapters/hermes/plugin/requirements.txt'),
+        'utf8',
+      );
+      expect(
+        (requirements.match(/--hash=sha256:[0-9a-f]{64}/g) ?? []).length,
+      ).toBeGreaterThan(0);
+      // And the code obeys the list. An `import requests` that nobody added
+      // to requirements.txt still runs on a developer machine that happens to
+      // have it, and still ships a dependency nothing audited.
+      expect(pythonImportOffenders()).toEqual([]);
+    });
+
+    it('(f) the public-repo sweep reaches the file types this scenario adds', () => {
+      // The widening is asserted by ENUMERATION, not by reading the regex:
+      // the files exist, they are tracked, and the sweep lists them.
+      const swept = new Set(trackedTextFiles());
+      const introduced = [
+        'packages/adapters/hermes/plugin/adapter.py',
+        'packages/adapters/hermes/plugin/wemessage_wire.py',
+        'packages/adapters/hermes/plugin/plugin.yaml',
+        'packages/adapters/hermes/plugin/requirements.txt',
+        'packages/adapters/hermes/plugin/pyproject.toml',
+      ];
+      expect(introduced.filter((f) => !existsSync(join(repoRoot, f)))).toEqual(
+        [],
+      );
+      expect(introduced.filter((f) => !swept.has(f))).toEqual([]);
+      expect(publicRepoOffenders()).toEqual([]);
+    });
+
+    describe('proven teeth', () => {
+      // `git ls-files` is the enumeration, so a probe has to be in the index
+      // to be visible to it. `--intent-to-add` puts the PATH in the index
+      // without its content, which is exactly enough, and `git rm --cached`
+      // takes it back out. Anything less would prove the offender logic and
+      // leave the enumeration — the half that was actually broken —
+      // unproven.
+      const probes = [
+        'packages/adapters/hermes/plugin/__s7c_probe__.py',
+        'packages/adapters/hermes/plugin/__s7c_probe__.yaml',
+      ];
+      const track = (rel: string): void => {
+        execFileSync('git', ['add', '--intent-to-add', '--', rel], {
+          cwd: repoRoot,
+        });
+      };
+      const untrack = (rel: string): void => {
+        try {
+          execFileSync(
+            'git',
+            ['rm', '--cached', '--quiet', '--force', '--', rel],
+            {
+              cwd: repoRoot,
+              stdio: 'ignore',
+            },
+          );
+        } catch {
+          // never indexed; the unlink below is the whole cleanup.
+        }
+      };
+
+      afterEach(() => {
+        for (const rel of probes) {
+          untrack(rel);
+          rmSync(join(repoRoot, rel), { force: true });
+        }
+      });
+
+      it('a brand string in a .py file trips the public sweep (f)', () => {
+        const rel = probes[0] ?? '';
+        // Assembled at runtime: this spec is already the one file the sweep
+        // skips, but a teeth probe that only works because its enforcer is
+        // exempt is not a probe.
+        writeFileSync(
+          join(repoRoot, rel),
+          `BRAND = "flow" + "stay"  # ${'flow'}${'stay'}\n`,
+        );
+        expect(trackedTextFiles()).not.toContain(rel);
+        track(rel);
+        expect(trackedTextFiles()).toContain(rel);
+        expect(publicRepoOffenders()).toContain(`${rel}: brand string`);
+      });
+
+      it('a real +1 number in a .yaml file trips the public sweep (f)', () => {
+        const rel = probes[1] ?? '';
+        writeFileSync(join(repoRoot, rel), 'handle: "+12065550123"\n');
+        track(rel);
+        expect(trackedTextFiles()).toContain(rel);
+        expect(publicRepoOffenders()).toContain(`${rel}: +12065550123`);
+      });
+
+      it('a second Python requirement trips the license guard (e)', () => {
+        // The mutation F-88 exists to catch, in the shape it would actually
+        // arrive: someone needs one more library, adds one more line, and no
+        // license tool in this repo can see it.
+        const rel = 'packages/adapters/hermes/plugin/__s7c_probe__.txt';
+        const abs = join(repoRoot, rel);
+        try {
+          writeFileSync(abs, 'somepkg==1.0.0\n');
+          execFileSync('git', ['add', '--intent-to-add', '--', rel], {
+            cwd: repoRoot,
+          });
+          expect(requirementsFiles()).not.toContain(rel);
+          // The name is what the enumeration keys on, so the probe has to
+          // wear the real name to be seen. Renamed in place, then swept.
+          const named =
+            'packages/adapters/hermes/plugin/nested/requirements.txt';
+          mkdirSync(join(repoRoot, 'packages/adapters/hermes/plugin/nested'), {
+            recursive: true,
+          });
+          writeFileSync(join(repoRoot, named), 'somepkg==1.0.0\n');
+          execFileSync('git', ['add', '--intent-to-add', '--', named], {
+            cwd: repoRoot,
+          });
+          expect(requirementsFiles()).toContain(named);
+          expect(pythonRequirementLines()).toContain(
+            `${named}: somepkg==1.0.0`,
+          );
+        } finally {
+          for (const p of [
+            rel,
+            'packages/adapters/hermes/plugin/nested/requirements.txt',
+          ]) {
+            try {
+              execFileSync(
+                'git',
+                ['rm', '--cached', '--quiet', '--force', '--', p],
+                { cwd: repoRoot, stdio: 'ignore' },
+              );
+            } catch {
+              // not indexed
+            }
+          }
+          rmSync(abs, { force: true });
+          rmSync(join(repoRoot, 'packages/adapters/hermes/plugin/nested'), {
+            recursive: true,
+            force: true,
+          });
+        }
+      });
+
+      it('an unlisted Python import trips the license guard (e)', () => {
+        const rel = probes[0] ?? '';
+        writeFileSync(join(repoRoot, rel), 'import requests\n');
+        track(rel);
+        expect(pythonImportOffenders()).toContain(`${rel}: requests`);
       });
     });
   });

@@ -73,7 +73,11 @@ importers:
         specifier: workspace:*
         version: link:../../protocol
 
-  packages/adapters/hermes: {}
+  packages/adapters/hermes:
+    devDependencies:
+      '@wemessage/adapter-testkit':
+        specifier: workspace:*
+        version: link:../../adapter-testkit
 
   packages/adapters/luna: {}
 

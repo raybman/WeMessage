@@ -1,0 +1,20 @@
+# The entire Python dependency graph of this plugin.
+#
+# ONE package, and that is a license control, not a minimalism aesthetic.
+# `pnpm licenses:check` walks node_modules and structurally cannot see a
+# Python dependency tree, so the guard for this side of the repo is that the
+# tree is small enough for a human to have read: `websockets` is
+# BSD-3-Clause, it has no dependencies of its own, and an arch row
+# (test/arch.spec.ts, S7 Sc7 (e)) fails the build if a second line ever
+# appears here. Adding one is a license review, not an edit.
+#
+# Pinned by version AND by artifact hash. A version pin still trusts whatever
+# the index happens to serve under that name; `pip install --require-hashes`
+# in .github/workflows/ci-python.yml refuses anything whose SHA-256 is not
+# below. The version matches the pin Hermes itself carries, so a plugin
+# installed into a Hermes environment never forces a resolver decision.
+#
+# The hashes are the sdist, the pure-Python wheel, and the CPython 3.12
+# wheels for the two platforms this is built and tested on (macOS arm64 and
+# x86_64, Linux x86_64 and aarch64). One logical requirement, one line.
+websockets==15.0.1 --hash=sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee --hash=sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f --hash=sha256:0701bc3cfcb9164d04a14b149fd74be7347a530ad3bbf15ab2c678a2cd3dd9a2 --hash=sha256:592f1a9fe869c778694f0aa806ba0374e97648ab57936f092fd9d87f8bc03665 --hash=sha256:64dee438fed052b52e4f98f76c5790513235efaa1ef7f3f2192c392cd7c91b65 --hash=sha256:e8b56bdcdb4505c8078cb6c7157d9811a85790f2f2b3632c7d1462ab5783d215

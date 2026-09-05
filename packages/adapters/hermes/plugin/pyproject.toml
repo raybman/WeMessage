@@ -1,0 +1,22 @@
+# Metadata for the Hermes plugin, not a build of it.
+#
+# Hermes loads a plugin by directory: it reads `plugin.yaml`, imports
+# `adapter.py` and calls `register(ctx)`. Nothing here is packaged or
+# published, so this file exists for the two facts a reader and a resolver
+# both need: what the plugin is, and which interpreters it is allowed to run
+# on.
+#
+# `requires-python` is copied from Hermes' own pin rather than chosen. A
+# plugin that claimed a wider range than its host would be claiming something
+# it cannot be tested on; CI pins 3.12 inside this range and the conformance
+# spec refuses any interpreter outside it.
+[project]
+name = "wemessage-hermes-plugin"
+version = "0.1.0"
+description = "wemessage agent-protocol platform adapter for Hermes"
+requires-python = ">=3.11,<3.14"
+license = { text = "Apache-2.0" }
+dependencies = ["websockets==15.0.1"]
+
+[tool.wemessage]
+wire = 1

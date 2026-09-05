@@ -1,0 +1,35 @@
+# Hermes plugin manifest for the wemessage agent adapter.
+#
+# Written in the JSON-compatible subset of YAML deliberately: scalars, and a
+# list of flat maps. No anchors, no block scalars, no multi-document, nothing
+# that only a full YAML engine understands. A manifest a human hand-edits
+# should not have corners, and the conformance spec can then parse it with
+# fifteen lines instead of a new dependency.
+kind: platform
+name: wemessage
+label: wemessage
+description: Draft replies for iMessage conversations, approved by a human before they send.
+version: 0.1.0
+entry: adapter.py
+
+# The complete configuration surface. Three variables, and Hermes prompts for
+# exactly these. `password: true` is on the token and only the token: it is
+# what makes Hermes redact the value in its own setup transcript, and marking
+# the wrong field would either leak a credential or hide a URL somebody needs
+# to read back.
+requires_env:
+  - name: WEMESSAGE_GATEWAY_URL
+    description: The agent websocket endpoint, ending in /v1/agent.
+    prompt: wemessage gateway URL
+    url: true
+    password: false
+  - name: WEMESSAGE_ADAPTER_TOKEN
+    description: The adapter token minted by the daemon. Shown once, never again.
+    prompt: wemessage adapter token
+    url: false
+    password: true
+  - name: WEMESSAGE_ADAPTER_ID
+    description: The adapter id this plugin echoes back in its hello frame.
+    prompt: wemessage adapter id
+    url: false
+    password: false

@@ -25,3 +25,11 @@ coverage/
 fixtures/typedstream/staging/
 # local runtime artifacts if a dev runs the daemon from the repo
 .wemessage-dev/
+
+# s7 Sc7: Python bytecode. The plugin is run as a child process by the
+# conformance rows, so an interpreter WILL write these next to the source;
+# they are build output, they are binary, and they must not reach a public
+# repository.
+__pycache__/
+*.py[cod]
+.venv/

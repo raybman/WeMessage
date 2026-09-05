@@ -53,7 +53,13 @@ importers:
       '@wemessage/protocol':
         specifier: workspace:*
         version: link:../protocol
+      ws:
+        specifier: ^8.0.0
+        version: 8.21.3
     devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
       '@wemessage/adapter-echo':
         specifier: workspace:*
         version: link:../adapters/echo

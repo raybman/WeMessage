@@ -11,15 +11,21 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "adapter-testkit": "./bin/wemessage-adapter-testkit.mjs",
+    "wemessage-adapter-testkit": "./bin/wemessage-adapter-testkit.mjs"
+  },
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
   },
   "private": true,
   "dependencies": {
-    "@wemessage/protocol": "workspace:*"
+    "@wemessage/protocol": "workspace:*",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.0",
     "@wemessage/adapter-echo": "workspace:*",
     "@wemessage/adapter-sol": "workspace:*"
   }

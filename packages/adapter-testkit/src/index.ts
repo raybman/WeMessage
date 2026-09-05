@@ -8,12 +8,16 @@
  * cannot send an iMessage because nothing in this package can, which is the
  * same reason an adapter cannot (INV-2).
  *
- * **Workspace-internal in S5 (F-52).** The public `npx` packaging, the
- * `--transport ws --cmd "..."` subprocess runner and the `wemessage adapters
- * test` wiring that would drive it are S7. This slice ships the kit and
- * dogfoods it on the two first-party adapters, echo and sol, which is what
- * makes the kit a claim about our own code before it is a demand on anyone
- * else's.
+ * **s7 Sc6 added a second transport.** `runConformanceSpawned` runs the same
+ * six checks against a CHILD PROCESS over a real `ws` listener, which is how
+ * the Python plugin, the Hermes adapter, Luna and the OpenClaw shim are all
+ * verified without any of them being importable JavaScript. The checks are
+ * shared verbatim between the two paths on purpose: a spawned `CONFORMANT`
+ * badge has to mean exactly what an in-process one means.
+ *
+ * Still no send path. The kit cannot send an iMessage because nothing in this
+ * package can, and a spawned adapter that reaches for one is refused with the
+ * daemon's own label (`adapter.no-send-frame`, C-6) rather than accepted.
  */
 export {
   createMockGateway,
@@ -25,8 +29,11 @@ export {
 } from './mock-gateway.js';
 export {
   CHECKS,
+  CHECK_NAMES,
+  DEFAULT_CHECK_ENV,
   INJECTION_PROBE,
   probeFeatures,
+  type CheckEnv,
   type CheckResult,
 } from './checks.js';
 export {
@@ -35,7 +42,25 @@ export {
   formatTap,
   CONFORMANCE_VERSION,
   type ConformanceReport,
+  type SpawnBudgets,
+  type SpawnDiagnostics,
 } from './report.js';
+export { runConformance, type ConformanceOptions } from './runner.js';
+export {
+  DEFAULT_SPAWN_BUDGETS,
+  SPAWN_ENV_KEYS,
+  TOKEN_REDACTION,
+  buildChildEnv,
+  classifyRefusal,
+  killAllChildren,
+  liveChildren,
+  mintAdapterToken,
+  parseCommand,
+  redactTokens,
+  runConformanceSpawned,
+  type ChildEnvOptions,
+  type SpawnedRunOptions,
+} from './spawn.js';
 export type {
   AdapterHandle,
   AdapterStartContext,
@@ -44,27 +69,3 @@ export type {
   TestkitSocketFactory,
   TestkitSocketHandlers,
 } from './types.js';
-
-import { CHECKS, probeFeatures } from './checks.js';
-import { CONFORMANCE_VERSION, type ConformanceReport } from './report.js';
-import type { AdapterUnderTest } from './types.js';
-
-/**
- * Run the whole suite. Checks run in order and none of them throws: the
- * report is the output, and stopping at the first failure would tell an
- * adapter author one thing when they need six.
- */
-export async function runConformance(
-  subject: AdapterUnderTest,
-): Promise<ConformanceReport> {
-  const checks = [];
-  for (const check of CHECKS) checks.push(await check(subject));
-
-  return {
-    adapter: subject.name,
-    version: CONFORMANCE_VERSION,
-    conformant: checks.every((c) => c.ok),
-    features: await probeFeatures(subject),
-    checks,
-  };
-}

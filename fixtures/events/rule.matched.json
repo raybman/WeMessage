@@ -1,0 +1,6 @@
+{
+  "event": "rule.matched",
+  "guid": "guid-inbound-0001",
+  "ruleId": "01CCCCCCCCCCCCCCCCCCCCCCCC",
+  "adapterId": "echo"
+}

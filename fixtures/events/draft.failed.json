@@ -1,0 +1,9 @@
+{
+  "event": "draft.failed",
+  "draftId": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+  "error": {
+    "code": "messages-not-running",
+    "message": "Messages is not running",
+    "at": "2026-01-01T12:00:00.000Z"
+  }
+}

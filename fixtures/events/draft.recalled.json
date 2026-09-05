@@ -1,0 +1,9 @@
+{
+  "event": "draft.recalled",
+  "draftId": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+  "actor": {
+    "kind": "human",
+    "via": "cli"
+  },
+  "batchId": "01EEEEEEEEEEEEEEEEEEEEEEEE"
+}

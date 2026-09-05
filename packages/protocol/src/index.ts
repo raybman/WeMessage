@@ -19,6 +19,12 @@ import type {
   Service,
   Ulid,
 } from '@wemessage/core';
+// s7 Scenario 2 (F-83): the §3.4 vocabulary as runtime data. The import is a
+// VALUE import and is the only one in this file — `events.ts` reaches back
+// for `GatewayEventPayload` type-only, so the emitted JavaScript has no cycle.
+import { EVENT_PAYLOAD_KEYS } from './events.js';
+
+export * from './events.js';
 
 /** Inbound content is DATA, never instructions (§2.4.5). (§3.3) */
 export interface SanitizedInbound {
@@ -248,37 +254,17 @@ export const FRAME_SPECS = {
   // keys. Rather than opening the frame to arbitrary properties, the optional
   // list is the union of every key any variant can contribute: still a closed
   // set, and it changes only when the vocabulary does.
+  //
+  // s7 Scenario 2 (F-83): that union used to be a hand-maintained literal
+  // here, appended to by hand in s5 Scenario 7 and s6 Scenario 11 — which
+  // meant a new event variant had TWO places to remember, one of them a list
+  // whose members are individually meaningless. It is now DERIVED from
+  // `EVENT_SPECS`, sorted, so the frame guard, the per-event schemas and the
+  // `GatewayEventPayload` type widen together or not at all. Same 22 keys as
+  // the literal it replaces, asserted in test/event-specs.spec.ts.
   event: {
     required: ['event'],
-    optional: [
-      'message',
-      'guid',
-      'newText',
-      'ruleId',
-      'adapterId',
-      'draft',
-      'draftId',
-      'actor',
-      'batchId',
-      'sentMessageGuid',
-      'error',
-      'reason',
-      'chatGuid',
-      'key',
-      'value',
-      'status',
-      'state',
-      // s5 Scenario 7 (F-44): the `draft.delta` vocabulary variant's keys.
-      'correlation',
-      'seq',
-      'textDelta',
-      // s6 Scenario 11 (F-67): the `arming.changed` variant's own two keys.
-      // Its `reason` is the pre-existing entry four lines up — the same word
-      // the `gate.denied` and `gateway.disconnected` variants already use,
-      // which is what keeps this a closed set rather than a growing one.
-      'armed',
-      'until',
-    ],
+    optional: EVENT_PAYLOAD_KEYS,
     direction: 'gateway->agent',
   },
   ping: { required: [], optional: [], direction: 'gateway->agent' },

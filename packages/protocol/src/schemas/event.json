@@ -7,7 +7,26 @@
   "required": ["event"],
   "properties": {
     "event": {
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "adapter.health",
+        "arming.changed",
+        "connection.state",
+        "draft.approved",
+        "draft.created",
+        "draft.delta",
+        "draft.failed",
+        "draft.recalled",
+        "draft.rejected",
+        "draft.sent",
+        "gate.denied",
+        "gateway.disconnected",
+        "message.edited",
+        "message.received",
+        "message.unsent",
+        "rule.matched",
+        "toggle.changed"
+      ]
     },
     "message": {
       "type": "object"

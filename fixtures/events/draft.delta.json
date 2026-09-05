@@ -1,0 +1,10 @@
+{
+  "event": "draft.delta",
+  "correlation": {
+    "requestId": "01BBBBBBBBBBBBBBBBBBBBBBBB",
+    "chatGuid": "iMessage;-;+15550000001",
+    "inboundGuid": "guid-inbound-0001"
+  },
+  "seq": 1,
+  "textDelta": "on my "
+}

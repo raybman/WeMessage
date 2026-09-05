@@ -1,0 +1,5 @@
+{
+  "event": "message.edited",
+  "guid": "guid-inbound-0001",
+  "newText": "make it 7pm instead"
+}

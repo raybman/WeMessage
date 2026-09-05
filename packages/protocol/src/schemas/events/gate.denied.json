@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/gate.denied.json",
+  "title": "gate.denied event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "reason", "chatGuid"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "gate.denied"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "chatGuid": {
+      "type": "string"
+    },
+    "ruleId": {
+      "type": "string"
+    },
+    "draftId": {
+      "type": "string"
+    }
+  }
+}

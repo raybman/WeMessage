@@ -1,0 +1,8 @@
+{
+  "event": "draft.rejected",
+  "draftId": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+  "actor": {
+    "kind": "system",
+    "reason": "kill-switch"
+  }
+}

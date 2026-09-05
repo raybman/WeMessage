@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/message.edited.json",
+  "title": "message.edited event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "guid", "newText"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "message.edited"
+    },
+    "guid": {
+      "type": "string"
+    },
+    "newText": {}
+  }
+}

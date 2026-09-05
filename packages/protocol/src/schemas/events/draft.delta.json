@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.delta.json",
+  "title": "draft.delta event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "correlation", "seq", "textDelta"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.delta"
+    },
+    "correlation": {
+      "type": "object"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "textDelta": {
+      "type": "string"
+    }
+  }
+}

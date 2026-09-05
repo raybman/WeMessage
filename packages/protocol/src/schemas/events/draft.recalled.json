@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.recalled.json",
+  "title": "draft.recalled event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "draftId", "actor"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.recalled"
+    },
+    "draftId": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "object"
+    },
+    "batchId": {
+      "type": "string"
+    }
+  }
+}

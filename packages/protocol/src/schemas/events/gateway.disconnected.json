@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/gateway.disconnected.json",
+  "title": "gateway.disconnected event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "reason"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "gateway.disconnected"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

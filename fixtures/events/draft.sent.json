@@ -1,0 +1,5 @@
+{
+  "event": "draft.sent",
+  "draftId": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+  "sentMessageGuid": "guid-outbound-0001"
+}

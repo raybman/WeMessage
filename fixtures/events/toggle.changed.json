@@ -1,0 +1,9 @@
+{
+  "event": "toggle.changed",
+  "key": "send.killSwitch",
+  "value": true,
+  "actor": {
+    "kind": "human",
+    "via": "cli"
+  }
+}

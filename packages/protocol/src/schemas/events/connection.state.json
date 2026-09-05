@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/connection.state.json",
+  "title": "connection.state event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "state"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "connection.state"
+    },
+    "state": {
+      "type": "string"
+    }
+  }
+}

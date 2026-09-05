@@ -1,0 +1,16 @@
+{
+  "event": "message.received",
+  "message": {
+    "guid": "guid-inbound-0001",
+    "chatGuid": "iMessage;-;+15550000001",
+    "handle": "+15550000001",
+    "isGroup": false,
+    "service": "imessage",
+    "receivedAt": "2026-01-01T12:00:00.000Z",
+    "content": {
+      "untrusted": true,
+      "text": "are you still coming?",
+      "attachments": []
+    }
+  }
+}

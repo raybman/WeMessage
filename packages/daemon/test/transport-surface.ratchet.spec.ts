@@ -33,6 +33,7 @@ import {
   createUnusedChatDbReader,
   createUnusedSendBackend,
 } from './helpers/loopback-backend.js';
+import { GATEWAY_EVENT_NAMES } from '@wemessage/protocol';
 import {
   EMITTED_WS_EVENTS,
   PORT_IMPORTER_ALLOWLIST,
@@ -195,6 +196,32 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
         true,
       );
     }
+  });
+
+  /**
+   * s7 Scenario 2 (F-83). Three lists have described the same vocabulary from
+   * three places, and until now only two of them were pinned to each other:
+   * the snapshot's allowed set, the snapshot's emitted set, and — new here —
+   * `GATEWAY_EVENT_NAMES` in `@wemessage/protocol`, which is the first copy a
+   * consumer outside this repo can actually import.
+   *
+   * The protocol list is the machine truth (its rows are tied to the
+   * `GatewayEventPayload` type by compile-time assertions in `events.ts`, so
+   * a variant cannot be added without a row); the snapshot stays the
+   * human-reviewed copy that a surface change has to be argued into. Pinning
+   * them deepEqual means neither can move alone.
+   *
+   * The emitted list is pinned to the same value rather than merely being a
+   * subset of it. Today all three stand at 17 and the daemon constructs every
+   * name it allows. A future slice that legitimately wants a name in the
+   * vocabulary BEFORE the code that emits it (as `rule.matched` briefly was
+   * in S2) has to relax this half of the row deliberately, in this file, with
+   * an argument — which is exactly the workflow this file exists to force.
+   */
+  it('protocol vocabulary, allowed snapshot and emitted snapshot all agree', () => {
+    expect([...GATEWAY_EVENT_NAMES]).toHaveLength(17);
+    expect([...WS_EVENT_VOCABULARY]).toEqual([...GATEWAY_EVENT_NAMES]);
+    expect([...EMITTED_WS_EVENTS]).toEqual([...GATEWAY_EVENT_NAMES]);
   });
 
   it('SendBackend/ChatDbReader importer set equals the allowlist', () => {

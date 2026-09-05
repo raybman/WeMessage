@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.sent.json",
+  "title": "draft.sent event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "draftId", "sentMessageGuid"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.sent"
+    },
+    "draftId": {
+      "type": "string"
+    },
+    "sentMessageGuid": {
+      "type": "string"
+    }
+  }
+}

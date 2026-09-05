@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/adapter.health.json",
+  "title": "adapter.health event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "adapterId", "status"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "adapter.health"
+    },
+    "adapterId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  }
+}

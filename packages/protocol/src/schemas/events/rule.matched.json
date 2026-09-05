@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/rule.matched.json",
+  "title": "rule.matched event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "guid", "ruleId", "adapterId"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "rule.matched"
+    },
+    "guid": {
+      "type": "string"
+    },
+    "ruleId": {
+      "type": "string"
+    },
+    "adapterId": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "event": "gate.denied",
+  "reason": "kill-switch",
+  "chatGuid": "iMessage;-;+15550000001",
+  "draftId": "01AAAAAAAAAAAAAAAAAAAAAAAA"
+}

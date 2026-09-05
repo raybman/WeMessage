@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/arming.changed.json",
+  "title": "arming.changed event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "armed", "until", "reason"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "arming.changed"
+    },
+    "armed": {
+      "type": "boolean"
+    },
+    "until": {},
+    "reason": {
+      "type": "string"
+    }
+  }
+}

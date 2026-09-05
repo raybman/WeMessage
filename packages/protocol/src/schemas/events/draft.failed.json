@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.failed.json",
+  "title": "draft.failed event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "draftId", "error"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.failed"
+    },
+    "draftId": {
+      "type": "string"
+    },
+    "error": {
+      "type": "object"
+    }
+  }
+}

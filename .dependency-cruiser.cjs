@@ -112,13 +112,22 @@ module.exports = {
       to: { path: '^apps' },
     },
 
-    // §3.3: protocol has zero runtime deps; core reachable via import type only
+    // §3.3: protocol has zero runtime deps; core reachable via import type only.
+    // "Zero runtime deps" means zero EXTERNAL runtime deps: a module inside
+    // packages/protocol/src importing a sibling module in the same package
+    // (s7 Scenario 2: index.ts -> events.ts, a value import of the derived
+    // EVENT_PAYLOAD_KEYS) is not a dependency the package ships, it is the
+    // package's own file layout. The `protocol/` exclusion mirrors
+    // ingest-sendkit-store-core-only's `$1/` and cli-desktop-thin-clients'
+    // `cli` self-exclusions above; without it every intra-package split in
+    // protocol would read as a §3.3 violation and the rule would push the
+    // vocabulary back into one unsplittable file.
     {
       severity: 'error',
       name: 'protocol-zero-runtime-deps',
       from: { path: '^packages/protocol/src' },
       to: {
-        path: '^(node_modules|packages/(?!core))',
+        path: '^(node_modules|packages/(?!core/|protocol/))',
         dependencyTypesNot: ['type-only'],
       },
     },

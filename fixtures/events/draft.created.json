@@ -1,0 +1,14 @@
+{
+  "event": "draft.created",
+  "draft": {
+    "id": "01AAAAAAAAAAAAAAAAAAAAAAAA",
+    "chatGuid": "iMessage;-;+15550000001",
+    "handle": "+15550000001",
+    "ruleId": "01CCCCCCCCCCCCCCCCCCCCCCCC",
+    "adapterId": "echo",
+    "body": "on my way, about ten minutes out",
+    "state": "pending",
+    "expiresAt": "2026-01-01T12:30:00.000Z",
+    "createdAt": "2026-01-01T12:00:00.000Z"
+  }
+}

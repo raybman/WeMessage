@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/draft.approved.json",
+  "title": "draft.approved event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "draftId", "actor"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "draft.approved"
+    },
+    "draftId": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "object"
+    },
+    "batchId": {
+      "type": "string"
+    }
+  }
+}

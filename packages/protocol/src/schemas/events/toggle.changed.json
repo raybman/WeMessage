@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/toggle.changed.json",
+  "title": "toggle.changed event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "key", "value", "actor"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "toggle.changed"
+    },
+    "key": {
+      "type": "string"
+    },
+    "value": {},
+    "actor": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "event": "arming.changed",
+  "armed": true,
+  "until": null,
+  "reason": "armed"
+}

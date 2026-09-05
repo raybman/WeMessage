@@ -47,6 +47,7 @@ import {
 } from './event-stream.js';
 import { CHANNELS, REQUEST_KEYS, type RequestKey } from './ipc-channels.js';
 import {
+  isDemoMode,
   isSystemSettingsPane,
   SYSTEM_SETTINGS_PANES,
   type DownReason,
@@ -61,10 +62,63 @@ import { pushToWindows } from './window.js';
  * arming information that happens to be absent" different types, and the
  * state strip must never have to guess which one it received.
  */
+type Link =
+  | { readonly state: 'connected' }
+  | { readonly state: 'reconnecting'; readonly attempt: number }
+  | {
+      readonly state: 'down';
+      readonly reason: DownReason;
+      readonly tokenPath: string;
+    };
+
+/**
+ * One adapter's identity and liveness, for the strip's dots.
+ *
+ * `health` is a string rather than the client's `AdapterHealth` because this
+ * value is narrowed out of `StatusPayload.adapters`, which the DTO types as
+ * `unknown[]`. Widening it back to the union here would be a cast asserting
+ * something the type system has not been shown, and the renderer maps an
+ * unrecognised word to the "we do not know" glyph anyway.
+ */
+export interface AdapterDot {
+  readonly id: string;
+  readonly health: string;
+}
+
+/**
+ * The three facts that are true of the app regardless of the link.
+ *
+ * `armed` moved out of the `connected` arm in s8 Sc6 and it was a mistake to
+ * have it there: the OUTBOUND axis ("may this daemon speak") and the LINK
+ * axis ("can we hear it") are independent, and the strip has to say both.
+ * A `read-only` daemon on a perfectly healthy socket is the case that proves
+ * it — the old shape could only render that as `connected`, which is true
+ * about the link and a lie about the product.
+ *
+ * `until` rides with the reason because §1.3.6's horizon belongs to the
+ * ArmingState as a whole, not to the winning hold: a renderer handed a
+ * reason and no horizon would have to invent one to say "until when".
+ */
+interface StreamCommon {
+  readonly demo: boolean;
+  readonly armed: {
+    readonly reason: string;
+    readonly until: string | null;
+  } | null;
+  readonly adapters: readonly AdapterDot[];
+}
+
 export type StreamPayload =
-  | { state: 'connected'; armed: { reason: string } | null }
-  | { state: 'reconnecting'; attempt: number }
-  | { state: 'down'; reason: DownReason; tokenPath: string };
+  | ({ readonly state: 'connected' } & StreamCommon)
+  | ({
+      readonly state: 'reconnecting';
+      readonly attempt: number;
+    } & StreamCommon)
+  | ({
+      readonly state: 'down';
+      readonly reason: DownReason;
+      readonly tokenPath: string;
+    } & StreamCommon);
 
 export interface Gateway {
   /** Connect, register the handlers, and push the first stream state. */
@@ -136,11 +190,31 @@ export function createGateway(options: GatewayOptions): Gateway {
    * difference is entirely about what the operator can usefully do next.
    */
   let everConnected = false;
-  let stream: StreamPayload = {
+  /**
+   * The two axes, kept apart.
+   *
+   * `link` is what the event stream reports; `armed` and `adapters` are what
+   * the daemon reports about ITSELF. They move independently and on different
+   * events, so they are stored independently and composed at push time. A
+   * single mutable payload would make "reconnecting" quietly erase the arming
+   * word, and the operator would watch the reason for the silence disappear
+   * at the exact moment they most wanted it.
+   */
+  let link: Link = {
     state: 'down',
     reason: 'no-token',
     tokenPath: bootstrap.tokenPath,
   };
+  let armed: StreamPayload['armed'] = null;
+  let adapters: readonly AdapterDot[] = [];
+  /**
+   * Read once, at construction, from the process that owns the environment.
+   * The renderer never sees `process`, and a demo badge that could be turned
+   * on from inside a Chromium process would be a badge that could be turned
+   * OFF from inside one.
+   */
+  const demo = isDemoMode(process.env);
+  let stream: StreamPayload = { ...link, demo, armed, adapters };
 
   /**
    * The wizard's send-test target, armed by the wizard and by nothing else.
@@ -157,9 +231,60 @@ export function createGateway(options: GatewayOptions): Gateway {
     push({ state: 'down', reason, tokenPath: bootstrap.tokenPath });
   };
 
-  function push(next: StreamPayload): void {
-    stream = next;
-    pushToWindows(CHANNELS.stream, next);
+  function push(next: Link): void {
+    link = next;
+    stream = { ...next, demo, armed, adapters };
+    pushToWindows(CHANNELS.stream, stream);
+  }
+
+  /**
+   * One adapter row, narrowed out of `StatusPayload.adapters['unknown']`.
+   *
+   * A row that is not an object, or has no string `id`, contributes nothing:
+   * a dot with no identity is a dot the operator cannot act on, and inventing
+   * an index for it would put a fake adapter on the strip.
+   */
+  function asDot(value: unknown): AdapterDot | null {
+    if (typeof value !== 'object' || value === null) return null;
+    const row = value as Record<string, unknown>;
+    if (typeof row['id'] !== 'string') return null;
+    return {
+      id: row['id'],
+      health: typeof row['health'] === 'string' ? row['health'] : 'unknown',
+    };
+  }
+
+  /**
+   * Re-read the daemon's own posture and re-push the CURRENT link state.
+   *
+   * A FETCH rather than a fold of the event that prompted it. `arming.changed`
+   * carries `from` and `to`, and `toggle.changed` carries one key's value:
+   * either could be folded into a local copy of the arming state, and both
+   * folds would be reconstructing a §1.3.6 precedence order that lives in the
+   * daemon. The daemon is one loopback request away and is the only thing
+   * entitled to answer "what is the posture now".
+   *
+   * Event-driven, and deliberately not polled: the app owns exactly one
+   * timer (the reconnect ladder's backoff) and a strip that refreshed on an
+   * interval would be the second, for a fact that already has an event.
+   */
+  async function refreshStatus(live: WeMessageClient): Promise<void> {
+    try {
+      const status = await live.status();
+      armed =
+        status.armed === null
+          ? null
+          : { reason: status.armed.reason, until: status.armed.until };
+      adapters = status.adapters
+        .map((row) => asDot(row))
+        .filter((dot): dot is AdapterDot => dot !== null);
+    } catch {
+      // Leave the last known posture in place. A status route that is not
+      // answering is not evidence that the hold has lifted, and clearing the
+      // arming word on a failed fetch would say it had.
+      return;
+    }
+    push(link);
   }
 
   function requireClient(): WeMessageClient {
@@ -352,18 +477,14 @@ export function createGateway(options: GatewayOptions): Gateway {
     // The arming badge is a FETCH, never an assumption: §1.7 arming can
     // expire on a timer nobody pressed, so a reconnect that carried the old
     // badge forward would be showing a permission that has since lapsed.
-    try {
-      const status = await live.status();
-      push({
-        state: 'connected',
-        armed: status.armed === null ? null : { reason: status.armed.reason },
-      });
-    } catch {
-      // The socket is open and the status route is not answering. Say
-      // connected, claim no arming: the stream is the better witness to the
-      // connection, and the badge is the thing we genuinely do not know.
-      push({ state: 'connected', armed: null });
-    }
+    // `refreshStatus` pushes when it succeeds; the push below is what happens
+    // when it does not — say connected, because the stream is the better
+    // witness to the connection, and leave the posture as the last thing the
+    // daemon actually said about itself.
+    link = { state: 'connected' };
+    await refreshStatus(live);
+    if (link.state === 'connected' && stream.state !== 'connected')
+      push({ state: 'connected' });
   }
 
   async function connect(): Promise<void> {
@@ -392,6 +513,22 @@ export function createGateway(options: GatewayOptions): Gateway {
       // claim; the stream calls them in that order and never the reverse.
       emit: (frame) => {
         pushToWindows(CHANNELS.event, frame);
+        // §1.8 order, at this boundary too: the frame reaches the renderer's
+        // own record BEFORE anything is claimed on the back of it. Three
+        // events change the daemon's posture and nothing else does — the
+        // kill switch and the circuit arrive as `toggle.changed`, every hold
+        // and release as `arming.changed`, and a dot's liveness as
+        // `adapter.health`. `connection.state` is deliberately NOT here: it
+        // is answered by the arming sweep that follows it, and refreshing on
+        // both would put a second status request on the wire for one fact.
+        if (frame.kind !== 'event') return;
+        const name = frame.event.event;
+        if (
+          name === 'toggle.changed' ||
+          name === 'arming.changed' ||
+          name === 'adapter.health'
+        )
+          void refreshStatus(live);
       },
       status: (next) => {
         void onStatus(next, live);

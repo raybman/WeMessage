@@ -1446,17 +1446,24 @@ describe('s7 Scenario 13: one daemon, four adapters, three subscribers', () => {
     /* ---- L. what the narrative observed ------------------------------ */
     await watch.end();
     /**
-     * The exact vocabulary this story put on the bus — pinned rather than
-     * bounded, because "at most seventeen" would pass for a daemon that
-     * broadcast nothing at all.
+     * The exact vocabulary this story put on the bus.
      *
-     * `draft.sent` is subscribed to by the filtered stream above and is
-     * deliberately NOT in this list. On the scheduler path the send is
-     * recorded in the AUDIT log (`draft.sent`, asserted below alongside the
-     * ledger) and the only bus broadcast of that name comes from the human
-     * `POST /v1/send` route. That is a pre-S7 shape, unchanged by this
-     * slice; the filter admitting a name it never sees is exactly what a
-     * subscriber asking for future events should get.
+     * `draft.sent` IS in this list as of s8 Sc6, and it is the one entry
+     * that has moved since S7 wrote the row. Until then the scheduler — the
+     * only path by which an approved draft is actually dispatched — recorded
+     * the send in the AUDIT log and broadcast nothing, so the sole bus
+     * broadcast of that name came from the human `POST /v1/send` route and
+     * this list documented the gap rather than a decision. Scenario 6's GUI
+     * is what made the gap intolerable: a card went `approved` and then sat
+     * there forever, because the frame that would have moved it did not
+     * exist. `sweepGrace` now broadcasts all three dispatch outcomes, and
+     * this run takes the `sent` one five times over. The set is deduped, so
+     * five sends are one name; `draft.failed` and `draft.requeued` are still
+     * absent because this story has neither a refusal nor a withdrawal in
+     * it.
+     *
+     * Pinned rather than bounded, still: "at most eighteen" would pass for a
+     * daemon that broadcast nothing at all.
      */
     const seen = [...new Set(names())].sort();
     expect(seen).toEqual([
@@ -1465,6 +1472,7 @@ describe('s7 Scenario 13: one daemon, four adapters, three subscribers', () => {
       'draft.approved',
       'draft.created',
       'draft.delta',
+      'draft.sent',
       'message.received',
       'rule.matched',
       'toggle.changed',

@@ -127,3 +127,29 @@ export const DOWN_REASONS = [
   'stream-refused',
 ] as const;
 export type DownReason = (typeof DOWN_REASONS)[number];
+
+/**
+ * The environment variable that puts SEEDED data on screen, and the badge
+ * that says so.
+ *
+ * This is an honesty affordance, not a feature flag. A screenshot of a demo
+ * queue that does not announce itself is indistinguishable from a screenshot
+ * of a real one, and the difference matters the first time either is put in
+ * front of somebody deciding whether to trust the product. So the flag is
+ * read in exactly ONE file — this one — and `test/arch.spec.ts` asserts that
+ * repo-wide: a value read in three places is a value that will eventually be
+ * tested as `!== undefined` in one of them and as `=== '1'` in the others,
+ * and the disagreement will be silent and will favour the unbadged answer.
+ *
+ * Present-and-non-empty rather than `=== '1'`: an operator who exports it as
+ * `true`, `yes` or `on` has unambiguously asked for demo mode, and a badge
+ * shown when it was not wanted costs nothing next to one withheld when it
+ * was.
+ */
+export const DEMO_FLAG = 'WEMESSAGE_DEMO';
+
+/** Whether `env` asks for demo mode. The only reader of {@link DEMO_FLAG}. */
+export function isDemoMode(env: Record<string, string | undefined>): boolean {
+  const raw = env[DEMO_FLAG];
+  return raw !== undefined && raw !== '';
+}

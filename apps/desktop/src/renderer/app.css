@@ -86,3 +86,287 @@ body {
   font-family: ui-monospace, monospace;
   word-break: break-all;
 }
+
+/* ── the queue (s8 Sc6) ─────────────────────────────────────────────────
+ *
+ * Two columns: the listbox, and the conversation the active draft would
+ * land in. The list is the scroller, so the pane stays put while the cursor
+ * runs down twenty cards — a pane that scrolled with the list would move the
+ * one thing the operator is reading in order to decide.
+ *
+ * There is no transition and no animation anywhere below. Motion on a list
+ * that repaints on every keystroke is motion the twenty-in-a-minute
+ * checkpoint pays for on all twenty, and every way of sequencing one needs a
+ * timer this app does not have.
+ */
+
+#queue {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+#queue-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+#queue-count {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+#demo-badge {
+  padding: 1px 7px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The live region is for assistive technology, not for the screen: the count
+ * beside it already says the same thing to anybody who can see it, and two
+ * copies of one sentence is one too many. Clipped rather than
+ * `display: none`, which would stop it being announced at all.
+ */
+#queue-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+#queue-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+#queue-scroll {
+  flex: 1 1 60%;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* The spacers stand in for the rows the window did not mount, so the
+   scrollbar describes the whole queue rather than the slice of it on
+   screen. Their HEIGHT is arithmetic the screen does, from a nominal row
+   rather than a measured one: measuring would want a resize observer and a
+   debounce, and the debounce would want a timer this app does not have. */
+#queue-spacer-top,
+#queue-spacer-bottom {
+  flex: none;
+}
+
+#queue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#queue-list:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 3px;
+}
+
+#queue-list [role='option'] {
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: var(--layer-2);
+  padding: 8px 10px;
+}
+
+/*
+ * The cursor is a BAR and a border, never a fill. Two carriers again: the
+ * left edge is a shape a greyscale screenshot still shows, and `data-active`
+ * carries the same fact to the e2e and to anything reading the DOM.
+ */
+#queue-list [role='option'][data-active='true'] {
+  border-color: var(--tint);
+  box-shadow: inset 3px 0 0 0 var(--tint);
+}
+
+#queue-list [role='option'][aria-selected='true'] {
+  border-color: var(--ink);
+}
+
+.card-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.card-who {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.card-time {
+  margin-left: auto;
+}
+
+/*
+ * The glyph's palette, and the whole of it.
+ *
+ * Every rule below resolves to one of the five tokens row 8 allows, and the
+ * glyph is never the only thing that changed: `.card-word` says the same
+ * state in capitals beside it and `data-state` says it in the DOM. Colour is
+ * the third carrier here, which is the only place it is allowed to be.
+ */
+.card-glyph {
+  color: var(--ink);
+}
+
+[data-state='pending'] .card-glyph,
+[data-state='expired'] .card-glyph,
+[data-state='superseded'] .card-glyph,
+[data-state='rejected'] .card-glyph,
+[data-state='recalled'] .card-glyph {
+  color: var(--ink-dim);
+}
+
+[data-state='approved'] .card-glyph,
+[data-state='sending'] .card-glyph,
+[data-state='sent'] .card-glyph {
+  color: var(--tint);
+}
+
+[data-state='failed'] .card-glyph {
+  color: var(--danger);
+}
+
+.card-word {
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+
+/*
+ * MONOSPACE for the draft body and for every turn, and nothing else on the
+ * screen. What is in these is the operator's own words about to go out under
+ * their name; a proportional face closes up the difference between `l` and
+ * `1` and between two spaces and one, which is exactly the class of typo
+ * this screen exists to catch before it is sent.
+ */
+.card-body,
+.turn,
+#pane-pinned {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.card-body {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.card-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.card-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.card-why,
+.card-hint,
+.card-keys {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.card-keys {
+  letter-spacing: 0.06em;
+}
+
+.card-context {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--stroke-strong);
+}
+
+#queue-pane {
+  flex: 1 1 40%;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: var(--layer-0);
+}
+
+/*
+ * Side is a carrier. Theirs left, ours right — the one convention every
+ * messaging client on this platform shares, and one that says who wrote a
+ * line without asking anybody to tell two tints apart.
+ */
+#pane-window .turn {
+  margin: 0 0 6px;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+/*
+ * The draft, pinned under the thread: the line the operator is about to put
+ * their name to, in the place a reply would appear.
+ *
+ * A TINTED bubble rather than a filled one, and that is a contrast decision
+ * rather than a taste one. A `--tint` fill needs text on top of it, and the
+ * best pairings available against the product blue are about 3.6:1 (white)
+ * and about 4.7:1 (the light scheme's ink): one fails WCAG AA outright and
+ * the other is a value that flips with the colour scheme. So a filled bubble
+ * would be either an axe `color-contrast` violation in Sc 17 or a new token
+ * deciding per scheme what §2.2's closed sheet already decides. `--tint-soft`
+ * is the same blue at 14% and leaves `--ink` on its own layer at full
+ * contrast, which is how the bubble keeps its identity and its legibility at
+ * once. (No hex appears in this sentence on purpose: the locality guard
+ * scans comments too, and it caught the first draft of it.)
+ *
+ * Two carriers, neither of them the fill: the SIDE (right, against the
+ * thread's left) and the BORDER. The pinned line is also the only element in
+ * the pane that is not a `.turn`, which is what says it has not happened
+ * yet — to the DOM as well as to the eye.
+ */
+#pane-pinned {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--tint);
+  background: var(--tint-soft);
+  color: var(--ink);
+  text-align: right;
+  white-space: pre-wrap;
+}
+
+/* The card's inline context is the same two-sided reading, in miniature. */
+.card-context .turn {
+  margin: 0 0 4px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--ink-dim);
+}

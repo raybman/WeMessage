@@ -556,6 +556,92 @@ describe('s8 Sc3 row 4: a hold taken during the grace broadcasts draft.requeued'
 });
 
 // ---------------------------------------------------------------------------
+// s8 Sc6 — the OTHER two grace outcomes leave too
+// ---------------------------------------------------------------------------
+
+describe('s8 Sc6: the grace sweep broadcasts sent and failed, not only requeued', () => {
+  /**
+   * Row 4 above proved the one outcome Sc3 was about. The other two left no
+   * frame at all, and the grace sweep is the ONLY path by which an approved
+   * draft is actually dispatched: `routes/send.ts` broadcasts `draft.sent`
+   * and `draft.failed` but that is the send-TEST route, and core's own
+   * `fail()` writes an audit row and holds no sink (INV-1, and it stays that
+   * way). So a GUI watching the stream saw a card go `approved` and then
+   * nothing, forever, whether the send succeeded or the dispatcher refused
+   * it. Scenario 6's e2e is what caught it — a group draft the daemon had
+   * recorded as `failed` sat on screen as `approved` until a refetch.
+   *
+   * Both frames are built DAEMON-side out of the outcome core already
+   * returned, which is the shape row 4 established and the same one
+   * `adapters/feedback.ts` uses. No ratchet: both names are already in
+   * `WS_EVENT_VOCABULARY` and already emitted from the send route, and
+   * `EMITTED_WS_EVENTS` is a deduped set of the literals rather than a count
+   * of the sites that write them.
+   */
+  it('a send that succeeds broadcasts draft.sent {draftId, sentMessageGuid}, after its audit row (§1.8)', async () => {
+    const h = await boot();
+    const draft = await createDraft(h, 'goes out fine');
+    expect((await post(h, `/v1/drafts/${draft.id}/approve`)).statusCode).toBe(
+      200,
+    );
+    h.clockCtl.advance(PAST_GRACE_MS);
+    await h.scheduler.tick();
+
+    const stored = h.store.getDraft(draft.id);
+    expect(stored?.state).toBe('sent');
+    const frames = framesOf(h, 'draft.sent');
+    expect(frames).toHaveLength(1);
+    // The guid the VERIFY poll found, not one the daemon invented: a frame
+    // carrying a different guid than the row would send every client looking
+    // for a message that does not exist.
+    expect(frames[0]?.frame).toEqual({
+      event: 'draft.sent',
+      draftId: draft.id,
+      sentMessageGuid: stored?.sentMessageGuid,
+    });
+    expect(frames[0]?.auditAtBroadcast).toContain('draft.sent');
+    // A send is not a requeue and not a failure, and no frame may say it was.
+    expect(framesOf(h, 'draft.requeued')).toEqual([]);
+    expect(framesOf(h, 'draft.failed')).toEqual([]);
+  });
+
+  it('a refused dispatch broadcasts draft.failed carrying the dispatcher’s own error, after its audit row (§1.8)', async () => {
+    const h = await boot();
+    // A room. v1 ships no group-send path, so the dispatcher parks the draft
+    // `failed` with its own code — which is the honest way to reach this
+    // branch without stubbing the backend into lying about a send.
+    const draft = await createDraft(h, 'to the room', {
+      chatGuid: 'iMessage;+;chat5550003333',
+    });
+    expect((await post(h, `/v1/drafts/${draft.id}/approve`)).statusCode).toBe(
+      200,
+    );
+    h.clockCtl.advance(PAST_GRACE_MS);
+    await h.scheduler.tick();
+
+    const stored = h.store.getDraft(draft.id);
+    expect(stored?.state).toBe('failed');
+    const frames = framesOf(h, 'draft.failed');
+    expect(frames).toHaveLength(1);
+    // The dispatcher's error, whole and unedited. A daemon that minted its
+    // own summary here would be a second vocabulary for the same fact, and
+    // the card renders this code verbatim.
+    expect(frames[0]?.frame).toEqual({
+      event: 'draft.failed',
+      draftId: draft.id,
+      error: stored?.error,
+    });
+    expect((frames[0]?.frame['error'] as { code: string }).code).toBe(
+      'group-send-disabled',
+    );
+    expect(frames[0]?.auditAtBroadcast).toContain('draft.failed');
+    expect(h.backend.callCount()).toBe(0);
+    expect(framesOf(h, 'draft.sent')).toEqual([]);
+    expect(framesOf(h, 'draft.requeued')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // RED row 7 — clampedBy reaches the live frame (F-64, F-108)
 // ---------------------------------------------------------------------------
 

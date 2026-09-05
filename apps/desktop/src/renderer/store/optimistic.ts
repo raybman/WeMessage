@@ -69,6 +69,80 @@ export interface Row {
   readonly pending?: Pending;
 }
 
+/**
+ * One inbound message this app watched arrive, kept for context.
+ *
+ * OBSERVED, never fetched, and the distinction is structural rather than a
+ * preference: `GET /v1/drafts/:id` answers with the draft and its approvals
+ * and carries no conversation, and S8 adds no route (F-107). What the queue
+ * can honestly show beside a draft is what the daemon broadcast while this
+ * window was listening. A window opened five minutes ago has five minutes of
+ * context and says so by having less of it, which is the truthful failure
+ * mode; the alternative is a screen that implies it has the whole thread.
+ *
+ * Only inbound: `message.received` is the only turn event, so every row here
+ * is from THEM. Ours is the draft, which is pinned separately and aligned
+ * against these.
+ */
+export interface Turn {
+  readonly guid: string;
+  readonly text: string;
+  readonly at: string;
+}
+
+/**
+ * What this app has watched happen in one conversation.
+ *
+ * `total` counts everything observed; `recent` holds the tail. They differ
+ * because a screen renders a window and a long-lived session must not grow a
+ * list without a ceiling — but the COUNT is what the operator is told, so it
+ * is kept exactly rather than reported as the length of a truncated array.
+ */
+export interface Conversation {
+  readonly total: number;
+  readonly recent: readonly Turn[];
+}
+
+const NO_CONVERSATION: Conversation = { total: 0, recent: [] };
+
+/**
+ * How many turns per conversation stay in memory.
+ *
+ * The right pane renders a window of forty and a card expands to three, so
+ * two hundred is five windows of scrollback and a hard bound on a Map that
+ * would otherwise grow for as long as the app is open. It is deliberately
+ * not the render window: a ceiling equal to what is on screen is a ceiling
+ * that turns into a bug the first time the window grows.
+ */
+const TURN_CEILING = 200;
+
+/**
+ * The names behind the ids a draft carries.
+ *
+ * Fetched once at mount and held here so that every card reads a name the
+ * same way. A card that resolved its own would be a card that can fetch,
+ * and the whole point of Sc5's arch row is that a card cannot.
+ *
+ * Absence is meaningful in both: a handle with no contact row has no display
+ * name and must render as the raw handle plus a signpost, never as a guess,
+ * and a draft with no rule was made by a person.
+ *
+ * There is no adapter catalogue, and that is a boundary decision rather than
+ * an omission. The store's reach is an allowlist of bridge members that a
+ * guard asserts exactly, so every entry here is a channel somebody opened on
+ * purpose — and an adapter's DISPLAY name buys a card nothing its id does not
+ * already say. The card renders the id.
+ */
+export interface Catalogue {
+  readonly contacts: ReadonlyMap<string, string>;
+  readonly rules: ReadonlyMap<string, string>;
+}
+
+export const EMPTY_CATALOGUE: Catalogue = {
+  contacts: new Map(),
+  rules: new Map(),
+};
+
 export type Refusal = 'offline' | 'unknown-draft' | 'in-flight';
 
 export type Started =
@@ -89,6 +163,46 @@ export interface OptimisticStore {
   stateOf(id: string): DraftState | undefined;
   chip(id: string): Chip | undefined;
   streamState(): ConnState;
+  /** What this app has watched happen in `chatGuid`. */
+  conversation(chatGuid: string): Conversation;
+  catalogue(): Catalogue;
+  /**
+   * The clamp the LIVE frame reported for a draft, if we ever saw one.
+   *
+   * `DraftSummary.clampedBy` rides the `draft.created` frame (F-108, an
+   * in-process Map in the daemon) and is NOT on `DraftPayload`, the REST
+   * record. So a card's clamp is knowable for a draft this window watched
+   * arrive and unknowable for the same draft after a refetch — and a queue
+   * that read it straight off whatever it last received would show the badge,
+   * lose it on the next resync, and show it again on the one after that.
+   *
+   * The answer is a SIDECAR: the fact is recorded when the frame carries it
+   * and survives every snapshot, because a snapshot is silent about clamps
+   * rather than contradicting them. It is dropped when the draft leaves the
+   * queue, because then there is no card to badge. The badge therefore never
+   * flickers, and it never claims a clamp for a draft nobody told us about —
+   * a window that missed the frame renders no badge, which is honest: it does
+   * not know.
+   */
+  clampOf(id: string): string | undefined;
+  /**
+   * The error CODE the live `draft.failed` frame carried, if we heard one.
+   *
+   * A second sidecar, for a reason that is nearly the clamp's and not quite.
+   * `draft.failed` is `{draftId, error}`: the frame knows exactly why the
+   * dispatcher refused, and `server.error` on the row beside it is whatever
+   * the last FETCH said, which for a draft that failed after we listed it is
+   * nothing at all. An event may not write `server` (that rule is the whole
+   * three-layer design), so the code is recorded here instead and the card
+   * reads whichever of the two it has.
+   *
+   * It differs from the clamp in what a snapshot means. `DraftPayload` HAS
+   * an `error` field, so a refetch is not silent about failure the way it is
+   * about clamps — it is authoritative, and the card prefers it. This holds
+   * the window between the frame and the next fetch, which for a draft that
+   * is never refetched is the whole life of the card.
+   */
+  failureOf(id: string): string | undefined;
   /** True when we know our map is stale and a refetch is owed. */
   needsSnapshot(): boolean;
   /** Audit rows written while we were disconnected, per the last resync. */
@@ -105,6 +219,7 @@ export interface OptimisticStore {
    * and it is owed exactly the same refetch.
    */
   markStale(): void;
+  setCatalogue(next: Catalogue): void;
   snapshot(
     drafts: readonly DraftPayload[],
     meta: { at: string; missed: number },
@@ -139,6 +254,10 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
   let gap = 0;
   let syncedAt: string | undefined;
   let batches = 0;
+  let turns = new Map<string, Conversation>();
+  let clamps = new Map<string, string>();
+  let failures = new Map<string, string>();
+  let catalogue: Catalogue = EMPTY_CATALOGUE;
   const listeners = new Set<() => void>();
 
   const notify = (): void => {
@@ -244,6 +363,10 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
     },
     chip: (id) => chips.get(id),
     streamState: () => stream,
+    conversation: (chatGuid) => turns.get(chatGuid) ?? NO_CONVERSATION,
+    catalogue: () => catalogue,
+    clampOf: (id) => clamps.get(id),
+    failureOf: (id) => failures.get(id),
     needsSnapshot: () => stale,
     missed: () => gap,
     syncedAt: () => syncedAt,
@@ -251,6 +374,11 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
     markStale() {
       if (stale) return;
       stale = true;
+      notify();
+    },
+
+    setCatalogue(next) {
+      catalogue = next;
       notify();
     },
 
@@ -297,6 +425,23 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
       const kept = new Map<string, Chip>();
       for (const [id, chip] of chips) if (map.has(id)) kept.set(id, chip);
       chips = kept;
+      // The clamp sidecar is pruned the same way and for the same reason,
+      // and is otherwise UNTOUCHED by a snapshot. A snapshot is silent about
+      // clamps rather than denying them: `DraftPayload` has no `clampedBy`
+      // field, so a refetch that cleared the sidecar would be treating the
+      // absence of a field for the absence of a fact, and the badge would
+      // blink out on every resync of a draft that is still clamped.
+      const clampsKept = new Map<string, string>();
+      for (const [id, why] of clamps) if (map.has(id)) clampsKept.set(id, why);
+      clamps = clampsKept;
+      // The failure sidecar is pruned by id for the same reason, and then
+      // deliberately left alone: a fetched payload that carries its own
+      // `error` simply wins at the card, and one that does not has nothing
+      // to say about a failure this window watched happen.
+      const failuresKept = new Map<string, string>();
+      for (const [id, code] of failures)
+        if (map.has(id)) failuresKept.set(id, code);
+      failures = failuresKept;
       gap = meta.missed;
       syncedAt = meta.at;
       stale = false;
@@ -320,15 +465,34 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
         case 'draft.sent':
           if (observe(payload.draftId, 'sent')) notify();
           return;
-        case 'draft.failed':
-          if (observe(payload.draftId, 'failed')) notify();
+        case 'draft.failed': {
+          // The dispatcher's own word, kept because the row's `server.error`
+          // is the last FETCH's answer and an event may not overwrite it.
+          const moved = observe(payload.draftId, 'failed');
+          const known = failures.get(payload.draftId) === payload.error.code;
+          if (!known) {
+            failures = new Map(failures);
+            failures.set(payload.draftId, payload.error.code);
+          }
+          if (moved || !known) notify();
           return;
+        }
         case 'draft.expired':
           if (observe(payload.draftId, 'expired')) notify();
           return;
-        case 'draft.requeued':
-          if (observe(payload.draftId, 'pending')) notify();
+        case 'draft.requeued': {
+          // Back in the queue is back to no verdict. A requeued draft still
+          // wearing the last attempt's error code would be telling the
+          // operator about a decision that has been taken back.
+          const moved = observe(payload.draftId, 'pending');
+          const had = failures.has(payload.draftId);
+          if (had) {
+            failures = new Map(failures);
+            failures.delete(payload.draftId);
+          }
+          if (moved || had) notify();
           return;
+        }
         case 'draft.superseded':
           // The card is terminal AND a newer draft exists that we have never
           // seen. The first half is a state change; the second is a hole.
@@ -341,10 +505,49 @@ export function createOptimisticStore(deps: OptimisticDeps): OptimisticStore {
           // its replacement instead, and we have never seen that one.
           drop(payload.draftId);
           clearChip(payload.draftId);
+          if (clamps.has(payload.draftId)) {
+            clamps = new Map(clamps);
+            clamps.delete(payload.draftId);
+          }
+          if (failures.has(payload.draftId)) {
+            failures = new Map(failures);
+            failures.delete(payload.draftId);
+          }
           stale = true;
           notify();
           return;
+        case 'message.received': {
+          // The only turn event there is, and the only source of context this
+          // screen can honestly claim. Attachments-only messages have a null
+          // text and are still turns — something happened in that thread and
+          // a gap in the transcript would be a lie of omission — so they are
+          // recorded with the word the operator would see in Messages.
+          const { message } = payload;
+          const previous = turns.get(message.chatGuid) ?? NO_CONVERSATION;
+          const next = [
+            ...previous.recent,
+            {
+              guid: message.guid,
+              text: message.content.text ?? '[ATTACHMENT]',
+              at: message.receivedAt,
+            },
+          ];
+          turns = new Map(turns);
+          turns.set(message.chatGuid, {
+            total: previous.total + 1,
+            recent: next.slice(-TURN_CEILING),
+          });
+          notify();
+          return;
+        }
         case 'draft.created':
+          // The clamp rides THIS frame and no other (F-108): it is an
+          // in-process fact in the daemon and is not on the REST record, so
+          // the only chance this app will ever get to learn it is here.
+          if (payload.draft.clampedBy !== undefined) {
+            clamps = new Map(clamps);
+            clamps.set(payload.draft.id, payload.draft.clampedBy);
+          }
           // The frame carries a `DraftSummary`, which is not a `DraftPayload`:
           // no `stateChangedAt`, no `inboundGuid`, no `idempotencyKey`, no
           // `originalBody`. Inserting one means inventing four fields, so the

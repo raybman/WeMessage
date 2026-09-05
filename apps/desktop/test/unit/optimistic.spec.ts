@@ -510,3 +510,93 @@ describe('s8 Sc5: the store notifies on change and only on change', () => {
     expect(count).toBe(1);
   });
 });
+
+/* ── the sidecars: facts that ride a frame and are not on the row ─────── */
+
+describe('s8 Sc6: the failure sidecar remembers what the frame said', () => {
+  /**
+   * Two sidecars now sit beside the row map for the same structural reason
+   * and behave differently for a good one.
+   *
+   * `clampOf` exists because a clamp is on the `draft.created` frame and on
+   * NOTHING else (F-108): a refetch is silent about it, so the sidecar is
+   * the only copy and a snapshot must not disturb it.
+   *
+   * `failureOf` exists because a card has to say WHY it failed the instant
+   * it turns red, and `draft.failed` is the only thing that knows before the
+   * next fetch. But `DraftPayload` HAS an `error` field, so the refetched
+   * row is authoritative and `cardOf` prefers it — the sidecar is a stand-in
+   * until the record catches up, not a second opinion competing with it.
+   *
+   * Both are keyed by draft id and pruned by the snapshot, because a map
+   * that only ever grew would leak a string per draft for the lifetime of
+   * the window.
+   */
+  /** The wire's own closed set (C-6), read off the frame rather than retyped. */
+  type FailureCode = Extract<
+    GatewayEventPayload,
+    { event: 'draft.failed' }
+  >['error']['code'];
+
+  const failedEvent = (
+    draftId: string,
+    code: FailureCode,
+  ): GatewayEventPayload => ({
+    event: 'draft.failed',
+    draftId,
+    error: { code, message: `synthetic ${code}`, at: AT },
+  });
+
+  it('records the dispatcher’s code and moves the card in one event', () => {
+    const { store, notifications } = seeded();
+    const seen = notifications();
+    expect(store.failureOf('d1')).toBeUndefined();
+    store.event(failedEvent('d1', 'group-send-disabled'));
+    expect(store.stateOf('d1')).toBe('failed');
+    expect(store.failureOf('d1')).toBe('group-send-disabled');
+    expect(notifications()).toBe(seen + 1);
+    // The row itself is untouched: an event is not a fetch, and the server
+    // layer is the last thing anybody fetched.
+    expect(store.row('d1')?.server.error).toBeUndefined();
+    expect(store.failureOf('d2')).toBeUndefined();
+  });
+
+  it('the same failure twice notifies once', () => {
+    const { store, notifications } = seeded();
+    store.event(failedEvent('d1', 'backend-error'));
+    const seen = notifications();
+    store.event(failedEvent('d1', 'backend-error'));
+    expect(notifications()).toBe(seen);
+    expect(store.failureOf('d1')).toBe('backend-error');
+  });
+
+  it('a requeue takes the verdict back, code and all', () => {
+    const { store } = seeded();
+    store.event(failedEvent('d1', 'no-conversation'));
+    store.event({ event: 'draft.requeued', draftId: 'd1' });
+    expect(store.stateOf('d1')).toBe('pending');
+    // A card back in the queue still wearing the last attempt's error would
+    // be reporting a decision that has been withdrawn.
+    expect(store.failureOf('d1')).toBeUndefined();
+  });
+
+  it('a redraft takes the whole card with it', () => {
+    const { store } = seeded();
+    store.event(failedEvent('d1', 'backend-error'));
+    store.event({ event: 'draft.redrafted', draftId: 'd1', newDraftId: 'd9' });
+    expect(store.row('d1')).toBeUndefined();
+    expect(store.failureOf('d1')).toBeUndefined();
+  });
+
+  it('a snapshot prunes codes for drafts that are gone and keeps the rest', () => {
+    const { store } = seeded();
+    store.event(failedEvent('d1', 'backend-error'));
+    store.event(failedEvent('d2', 'no-conversation'));
+    store.snapshot([draft('d2', 'failed')], { at: AT, missed: 0 });
+    // d1 left the queue between the frame and the fetch, so its code goes
+    // with it; d2 is still here and the frame is still the only place its
+    // reason has been seen.
+    expect(store.failureOf('d1')).toBeUndefined();
+    expect(store.failureOf('d2')).toBe('no-conversation');
+  });
+});

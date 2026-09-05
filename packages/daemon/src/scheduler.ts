@@ -44,6 +44,8 @@
 import {
   systemActor,
   type Clock,
+  type DraftError,
+  type MessageGuid,
   type Store,
   type Ulid,
 } from '@wemessage/core';
@@ -66,6 +68,13 @@ export interface SchedulerDeps {
    * when core reports that outcome. The circuit and arming sweeps already
    * did: a breaker flipping is a posture change an operator's UI has to see,
    * exactly as a kill-switch flip is.
+   *
+   * s8 Sc6 finished the job the sentence above started. The grace sweep now
+   * broadcasts ALL THREE dispatch outcomes, not just the requeue: an
+   * approved draft leaving is `draft.sent` and a refused one is
+   * `draft.failed`, and until this scenario neither had an emit site on the
+   * path that actually sends approved drafts. `POST /v1/send` had them,
+   * which is why the gap survived a ratchet that only counts names.
    */
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   /**
@@ -142,8 +151,41 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         // This is also the ONLY requeue site — `routes/send.ts` treats a
         // `requeued` outcome as an invariant violation, because a human who
         // pressed send is not subject to a schedule.
-        if ((result as { outcome?: unknown } | null)?.outcome === 'requeued') {
+        //
+        // s8 Sc6: the same translation, for the OTHER two outcomes.
+        //
+        // S3 wired `draft.sent` and `draft.failed` on `POST /v1/send` and
+        // nowhere else, which was complete while the send-test route was the
+        // only way a draft could leave: `draft.requeued` was added above in
+        // Sc3 because the sweep is the only place it can happen, and the
+        // other two looked like they were already covered. They were not.
+        // The grace sweep is how an APPROVED draft is actually sent, and a
+        // GUI that watches the queue instead of polling it was left watching
+        // a card that says `approved` for ever — the draft went out, or the
+        // dispatcher refused it in its own words, and the operator's screen
+        // was told neither. Both events are already in the vocabulary and in
+        // `EMITTED_WS_EVENTS`, so this is a second emit site for a name the
+        // ratchet already carries rather than a surface change.
+        //
+        // §1.8 holds here for the same reason it does above: core made the
+        // ledger and audit rows durable before `dispatch` resolved, so the
+        // frame cannot precede the record.
+        const outcome = (result as { outcome?: unknown } | null)?.outcome;
+        if (outcome === 'requeued') {
           sink.broadcast({ event: 'draft.requeued', draftId: due.draftId });
+        } else if (outcome === 'sent') {
+          sink.broadcast({
+            event: 'draft.sent',
+            draftId: due.draftId,
+            sentMessageGuid: (result as { sentMessageGuid: MessageGuid })
+              .sentMessageGuid,
+          });
+        } else if (outcome === 'failed') {
+          sink.broadcast({
+            event: 'draft.failed',
+            draftId: due.draftId,
+            error: (result as { error: DraftError }).error,
+          });
         }
       } catch (err) {
         // dispatchApproved throws only on an INV-2 validation failure, which

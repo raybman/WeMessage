@@ -9,8 +9,9 @@
  * owns everything either of them is about.
  *
  * INV-2's compile-time half lives on the next line but one. `StoreBridge` is
- * a `Pick` of three channels, so the send-test channel is not merely
- * unreachable from this module, it is not in this module's type. Naming it
+ * a `Pick` of the five request channels below plus the push subscription, so
+ * the send-test channel is not merely unreachable from this module, it is
+ * not in this module's type. Naming it
  * is a type error rather than a convention somebody has to notice in review,
  * and no amount of optimism in the reducer can turn a displayed `approved`
  * into a dispatch: the request this file makes is `approve`, the daemon
@@ -24,24 +25,40 @@
  * recovery is the same as main's: refetch through a real route, never
  * reconstruct.
  */
-import type { DraftPayload } from '@wemessage/client';
+import type {
+  ContactPolicyPayload,
+  DraftPayload,
+  RulePayload,
+} from '@wemessage/client';
 import type { GatewayEventPayload } from '@wemessage/protocol';
 import type { StreamFrame } from '../../main/event-stream.js';
 import type { WmBridge } from '../../preload/api.js';
 import {
   createOptimisticStore,
+  type Catalogue,
   type ConnState,
   type OptimisticStore,
   type QueueAction,
 } from './optimistic.js';
 
 /**
- * The three channels the queue may reach, sorted.
+ * The five request channels the queue may reach, sorted.
  *
  * A list rather than a comment, so `store-wiring.spec.ts` can assert that
- * none of them matches the send pattern and that the set has not grown.
+ * none of them matches the send pattern and that the set has not grown by
+ * accident. s8 Sc6 grew it from three to five, on purpose: a card that
+ * renders a rule NAME and a contact's DISPLAY name needs the two catalogues
+ * those names live in. Both are READS, both channels were already declared
+ * in `ipc-channels.ts`, and nothing was opened at the IPC boundary to get
+ * them — the arch row over this file moved in the same diff and says so.
  */
-export const STORE_CHANNELS = ['approve', 'bulk', 'drafts'] as const;
+export const STORE_CHANNELS = [
+  'approve',
+  'bulk',
+  'contacts',
+  'drafts',
+  'rules',
+] as const;
 
 /**
  * The bridge, cut down to what the queue needs.
@@ -51,12 +68,31 @@ export const STORE_CHANNELS = ['approve', 'bulk', 'drafts'] as const;
  * line rather than silently becoming a call to a channel that no longer
  * exists.
  */
-export type StoreBridge = Pick<WmBridge, 'approve' | 'bulk' | 'drafts' | 'on'>;
+export type StoreBridge = Pick<
+  WmBridge,
+  'approve' | 'bulk' | 'contacts' | 'drafts' | 'on' | 'rules'
+>;
 
 export interface StoreBinding {
   readonly store: OptimisticStore;
   approve(id: string): Promise<void>;
   bulk(ids: readonly string[], action: QueueAction): Promise<void>;
+  /**
+   * Fetch the two name catalogues, once.
+   *
+   * Deliberately NOT part of the connect path. `bindStore` is asserted to
+   * make no request until something asks it to, and four unit rows pin the
+   * exact channel sequence a reconnect produces; a catalogue fetch wired
+   * into `onStream` would appear in all four and turn "the store fetched
+   * the drafts it was owed" into "the store fetched three things, one of
+   * which was the drafts". The composition root calls this once, at mount,
+   * which is also the truth about the data: rules and contacts change on a
+   * human timescale and this screen is not their editor.
+   *
+   * Never rejects. A catalogue that will not load costs the cards their
+   * names, which they already know how to render without.
+   */
+  loadCatalogue(): Promise<void>;
   /** Resolves when every request this binding started has finished. */
   settled(): Promise<void>;
   dispose(): void;
@@ -130,6 +166,33 @@ function refusalOf(answer: unknown): Refusals | null {
       },
     };
   return null;
+}
+
+/**
+ * Index a list of records by one string field, keyed to another.
+ *
+ * Narrowed row by row rather than cast: these two answers cross the bridge
+ * as `unknown`, and a row missing its key or its name is DROPPED instead of
+ * indexed under `undefined`. A card that finds no entry renders the raw
+ * handle and a signpost, which is the correct outcome for a row we could not
+ * read as well as for a row that does not exist.
+ */
+function nameMap(
+  rows: unknown,
+  key: keyof RulePayload | keyof ContactPolicyPayload,
+  name: keyof RulePayload | keyof ContactPolicyPayload,
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows as readonly unknown[]) {
+    const record = asRecord(row);
+    if (record === null) continue;
+    const id = record[key];
+    const label = record[name];
+    if (typeof id === 'string' && typeof label === 'string' && label !== '')
+      out.set(id, label);
+  }
+  return out;
 }
 
 function reasonOf(error: unknown): string {
@@ -293,6 +356,18 @@ export function bindStore(
         for (const id of started.started)
           store.failed(id, { reason: 'daemon-unavailable' });
       }
+    },
+
+    async loadCatalogue(): Promise<void> {
+      const [rules, contacts] = await Promise.all([
+        track(bridge.rules()).catch(() => []),
+        track(bridge.contacts()).catch(() => []),
+      ]);
+      const next: Catalogue = {
+        rules: nameMap(rules, 'id', 'name'),
+        contacts: nameMap(contacts, 'handle', 'displayName'),
+      };
+      store.setCatalogue(next);
     },
 
     async settled(): Promise<void> {

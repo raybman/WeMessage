@@ -3890,38 +3890,110 @@ describe('S8 extensions (s8-execution Scenario 4: the Electron shell)', () => {
  *    other three close codes belong to the adapter transport, which the
  *    desktop never opens.
  */
-describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () => {
-  const SC5_SKIP = new Set([
-    'node_modules',
-    'dist',
-    '.git',
-    'coverage',
-    '.turbo',
-  ]);
-  const sc5Read = (rel: string): string =>
-    readFileSync(join(repoRoot, rel), 'utf8');
-  /** Every code file under a repo-relative root, repo-relative and sorted. */
-  function sc5Files(root: string): string[] {
-    const out: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (SC5_SKIP.has(entry.name)) continue;
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) walk(full);
-        else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name))
-          out.push(
-            full
-              .slice(repoRoot.length + 1)
-              .split('\\')
-              .join('/'),
-          );
-      }
-    };
-    const abs = join(repoRoot, root);
-    if (existsSync(abs)) walk(abs);
-    return out.sort();
-  }
+/**
+ * The S8 desktop guards' shared file walker and comment stripper.
+ *
+ * Hoisted here in s8 Sc6 because Scenario 6's view-layer rows judge the same
+ * trees the Scenario 5 rows do, and a second copy of a comment scanner is a
+ * second thing that can drift out of agreement with the first.
+ */
+const ARCH_SKIP = new Set([
+  'node_modules',
+  'dist',
+  '.git',
+  'coverage',
+  '.turbo',
+]);
+const archRead = (rel: string): string =>
+  readFileSync(join(repoRoot, rel), 'utf8');
+/** Every code file under a repo-relative root, repo-relative and sorted. */
+function archFiles(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (ARCH_SKIP.has(entry.name)) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name))
+        out.push(
+          full
+            .slice(repoRoot.length + 1)
+            .split('\\')
+            .join('/'),
+        );
+    }
+  };
+  const abs = join(repoRoot, root);
+  if (existsSync(abs)) walk(abs);
+  return out.sort();
+}
 
+/**
+ * Comments out, code in.
+ *
+ * Every row below is about what the code DOES, and all three of these
+ * files explain in prose exactly what they refuse to do. A text grep
+ * would therefore convict the most careful file in the tree, which is the
+ * self-trip this scenario was warned about. A scanner rather than a
+ * regex, because "strip comments" and "do not strip a comment marker
+ * inside a string" is not a thing a regex does.
+ */
+function codeOf(text: string): string {
+  let out = '';
+  let i = 0;
+  let mode: 'code' | 'line' | 'block' | 'sq' | 'dq' | 'tick' = 'code';
+  while (i < text.length) {
+    const ch = text[i] ?? '';
+    const two = text.slice(i, i + 2);
+    if (mode === 'code') {
+      if (two === '//') {
+        mode = 'line';
+        i += 2;
+        continue;
+      }
+      if (two === '/*') {
+        mode = 'block';
+        i += 2;
+        continue;
+      }
+      if (ch === "'") mode = 'sq';
+      else if (ch === '"') mode = 'dq';
+      else if (ch === '`') mode = 'tick';
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (mode === 'line') {
+      if (ch === '\n') {
+        mode = 'code';
+        out += ch;
+      }
+      i += 1;
+      continue;
+    }
+    if (mode === 'block') {
+      if (two === '*/') mode = 'code';
+      i += two === '*/' ? 2 : 1;
+      continue;
+    }
+    if (ch === '\\') {
+      out += text.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (
+      (mode === 'sq' && ch === "'") ||
+      (mode === 'dq' && ch === '"') ||
+      (mode === 'tick' && ch === '`')
+    )
+      mode = 'code';
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () => {
   const sc5Planted: string[] = [];
   function sc5Plant(rel: string, body: string): string {
     const abs = join(repoRoot, rel);
@@ -3941,77 +4013,16 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       rmSync(join(repoRoot, dir), { recursive: true, force: true });
   });
 
-  /**
-   * Comments out, code in.
-   *
-   * Every row below is about what the code DOES, and all three of these
-   * files explain in prose exactly what they refuse to do. A text grep
-   * would therefore convict the most careful file in the tree, which is the
-   * self-trip this scenario was warned about. A scanner rather than a
-   * regex, because "strip comments" and "do not strip a comment marker
-   * inside a string" is not a thing a regex does.
-   */
-  function code(text: string): string {
-    let out = '';
-    let i = 0;
-    let mode: 'code' | 'line' | 'block' | 'sq' | 'dq' | 'tick' = 'code';
-    while (i < text.length) {
-      const ch = text[i] ?? '';
-      const two = text.slice(i, i + 2);
-      if (mode === 'code') {
-        if (two === '//') {
-          mode = 'line';
-          i += 2;
-          continue;
-        }
-        if (two === '/*') {
-          mode = 'block';
-          i += 2;
-          continue;
-        }
-        if (ch === "'") mode = 'sq';
-        else if (ch === '"') mode = 'dq';
-        else if (ch === '`') mode = 'tick';
-        out += ch;
-        i += 1;
-        continue;
-      }
-      if (mode === 'line') {
-        if (ch === '\n') {
-          mode = 'code';
-          out += ch;
-        }
-        i += 1;
-        continue;
-      }
-      if (mode === 'block') {
-        if (two === '*/') mode = 'code';
-        i += two === '*/' ? 2 : 1;
-        continue;
-      }
-      if (ch === '\\') {
-        out += text.slice(i, i + 2);
-        i += 2;
-        continue;
-      }
-      if (
-        (mode === 'sq' && ch === "'") ||
-        (mode === 'dq' && ch === '"') ||
-        (mode === 'tick' && ch === '`')
-      )
-        mode = 'code';
-      out += ch;
-      i += 1;
-    }
-    return out;
-  }
-
   it('the comment stripper keeps strings and drops prose', () => {
     // The stripper is the load-bearing part of two rows below, so it is
     // tested directly rather than inferred from their greens.
-    expect(code('const a = 1; // setTimeout(x)\n').trim()).toBe('const a = 1;');
-    expect(code('/* setTimeout( */ const b = 2;').trim()).toBe('const b = 2;');
-    expect(code("const c = '// not a comment';").trim()).toBe(
+    expect(codeOf('const a = 1; // setTimeout(x)\n').trim()).toBe(
+      'const a = 1;',
+    );
+    expect(codeOf('/* setTimeout( */ const b = 2;').trim()).toBe(
+      'const b = 2;',
+    );
+    expect(codeOf("const c = '// not a comment';").trim()).toBe(
       "const c = '// not a comment';",
     );
   });
@@ -4035,14 +4046,14 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
     function timerOffenders(rels: readonly string[]): string[] {
       const out: string[] = [];
       for (const rel of rels) {
-        for (const m of code(sc5Read(rel)).matchAll(TIMERS))
+        for (const m of codeOf(archRead(rel)).matchAll(TIMERS))
           out.push(`${rel}: ${m[1] ?? ''}(`);
       }
       return [...new Set(out)].sort();
     }
 
     it('no file under apps/desktop/src schedules its own wait, except the composition root', () => {
-      const files = sc5Files('apps/desktop/src');
+      const files = archFiles('apps/desktop/src');
       expect(files.length).toBeGreaterThan(0);
       expect(files).toContain('apps/desktop/src/main/event-stream.ts');
       expect(timerOffenders(files.filter((f) => f !== TIMER_SITE))).toEqual([]);
@@ -4054,7 +4065,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       expect(timerOffenders([TIMER_SITE])).toEqual([
         `${TIMER_SITE}: setTimeout(`,
       ]);
-      const policy = code(sc5Read('apps/desktop/src/main/event-stream.ts'));
+      const policy = codeOf(archRead('apps/desktop/src/main/event-stream.ts'));
       expect(policy).toContain('deps.delay(');
       expect(policy).toContain('deps.random()');
     });
@@ -4070,7 +4081,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
           '',
         ].join('\n'),
       );
-      expect(timerOffenders(sc5Files('apps/desktop/src'))).toContain(
+      expect(timerOffenders(archFiles('apps/desktop/src'))).toContain(
         `${rel}: setTimeout(`,
       );
     });
@@ -4086,7 +4097,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
         ].join('\n'),
       );
       expect(
-        timerOffenders(sc5Files('apps/desktop/src')).filter((o) =>
+        timerOffenders(archFiles('apps/desktop/src')).filter((o) =>
           o.startsWith(rel),
         ),
       ).toEqual([]);
@@ -4098,14 +4109,25 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
   describe('the optimistic store cannot reach a send (INV-2 in the renderer)', () => {
     const STORE_ROOT = 'apps/desktop/src/renderer/store';
     const WIRING = `${STORE_ROOT}/index.ts`;
-    /** The bridge members the queue is allowed to touch, sorted. */
-    const ALLOWED = ['approve', 'bulk', 'drafts', 'on'];
+    /**
+     * The bridge members the queue is allowed to touch, sorted.
+     *
+     * s8 Sc6 widened this from four to six, deliberately and in one diff:
+     * a card that renders a rule NAME and a display NAME needs the two
+     * catalogues those names live in, and `rules`/`contacts` were already
+     * declared request channels, so nothing new was opened at the IPC
+     * boundary to get them. Both additions are READS. The guarantee this
+     * row exists for is unchanged and is asserted separately below: no
+     * identifier under the store may match /send/i, so the store still
+     * cannot reach the one channel that could dispatch.
+     */
+    const ALLOWED = ['approve', 'bulk', 'contacts', 'drafts', 'on', 'rules'];
 
     /** Every `bridge.<member>` the store's CODE names, sorted and unique. */
     function bridgeReach(rels: readonly string[]): string[] {
       const out: string[] = [];
       for (const rel of rels)
-        for (const m of code(sc5Read(rel)).matchAll(
+        for (const m of codeOf(archRead(rel)).matchAll(
           /\bbridge\s*\.\s*([A-Za-z_$][\w$]*)/g,
         ))
           out.push(m[1] ?? '');
@@ -4116,35 +4138,37 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
     function sendOffenders(rels: readonly string[]): string[] {
       const out: string[] = [];
       for (const rel of rels)
-        for (const m of code(sc5Read(rel)).matchAll(/[A-Za-z_$][\w$]*/g))
+        for (const m of codeOf(archRead(rel)).matchAll(/[A-Za-z_$][\w$]*/g))
           if (/send/i.test(m[0])) out.push(`${rel}: ${m[0]}`);
       return [...new Set(out)].sort();
     }
 
-    it('the store reaches exactly three request channels and one subscription', () => {
-      const files = sc5Files(STORE_ROOT);
+    it('the store reaches exactly five request channels and one subscription', () => {
+      const files = archFiles(STORE_ROOT);
       expect(files).toContain(WIRING);
       expect(bridgeReach(files)).toEqual(ALLOWED);
-      // The runtime list and the type-level `Pick` are the same three names,
-      // so widening one without the other is a diff somebody has to write on
+      // The runtime list and the type-level `Pick` are the same names, so
+      // widening one without the other is a diff somebody has to write on
       // purpose.
-      const declared = /STORE_CHANNELS = \[([^\]]*)\]/.exec(sc5Read(WIRING));
+      const declared = /STORE_CHANNELS = \[([^\]]*)\]/.exec(archRead(WIRING));
       expect(declared).not.toBeNull();
       expect(
         [...(declared?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]),
-      ).toEqual(['approve', 'bulk', 'drafts']);
-      expect(sc5Read(WIRING)).toContain("'approve' | 'bulk' | 'drafts' | 'on'");
+      ).toEqual(['approve', 'bulk', 'contacts', 'drafts', 'rules']);
+      expect(archRead(WIRING)).toContain(
+        "'approve' | 'bulk' | 'contacts' | 'drafts' | 'on' | 'rules'",
+      );
     });
 
     it('nothing in the store names a send, though the channel exists', () => {
       // Non-vacuous twice over: there IS a send-capable channel on the
       // bridge, and the store's prose talks about it constantly. The ban is
       // on the code.
-      expect(sc5Read('apps/desktop/src/main/ipc-channels.ts')).toContain(
+      expect(archRead('apps/desktop/src/main/ipc-channels.ts')).toContain(
         "sendTest: 'wm:wizard.send-test'",
       );
-      expect(/send/i.test(sc5Read(WIRING))).toBe(true);
-      expect(sendOffenders(sc5Files(STORE_ROOT))).toEqual([]);
+      expect(/send/i.test(archRead(WIRING))).toBe(true);
+      expect(sendOffenders(archFiles(STORE_ROOT))).toEqual([]);
     });
 
     it('PLANTED: a store file that reaches for the send-test channel is caught', () => {
@@ -4156,7 +4180,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
           '',
         ].join('\n'),
       );
-      const files = sc5Files(STORE_ROOT);
+      const files = archFiles(STORE_ROOT);
       expect(bridgeReach(files)).toContain('sendTest');
       expect(sendOffenders(files)).toContain(`${rel}: sendTest`);
     });
@@ -4174,7 +4198,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
           '',
         ].join('\n'),
       );
-      const files = sc5Files(STORE_ROOT);
+      const files = archFiles(STORE_ROOT);
       expect(sendOffenders(files).filter((o) => o.startsWith(rel))).toEqual([]);
       expect(bridgeReach(files)).toEqual(ALLOWED);
     });
@@ -4195,7 +4219,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
      * closes it, which in this file is the first `});` at handler indent.
      */
     function closeCodesInEventsRoute(text: string): string[] {
-      const body = code(text);
+      const body = codeOf(text);
       const start = body.indexOf("app.get('/v1/events',");
       if (start < 0) return ['<route not found>'];
       const end = body.indexOf('\n  });', start);
@@ -4210,20 +4234,20 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
     }
 
     it('the websocket route refuses with the protocol code and nothing else', () => {
-      expect(closeCodesInEventsRoute(sc5Read(SERVER))).toEqual(['protocol']);
+      expect(closeCodesInEventsRoute(archRead(SERVER))).toEqual(['protocol']);
     });
 
     it('the other three close codes belong to the adapter transport the desktop never opens', () => {
-      const offenders = [...sc5Files('packages'), ...sc5Files('apps')]
+      const offenders = [...archFiles('packages'), ...archFiles('apps')]
         .filter((f) => /^(packages|apps)\/[^/]+\/src\//.test(f))
         .filter((f) => f !== TRANSPORT)
         .filter((f) => f !== 'packages/protocol/src/index.ts')
         .filter((f) =>
-          /CLOSE_CODES\.(auth|timeout|version)\b/.test(code(sc5Read(f))),
+          /CLOSE_CODES\.(auth|timeout|version)\b/.test(codeOf(archRead(f))),
         );
       expect(offenders).toEqual([]);
       // Non-vacuity: the transport really does send all three.
-      const transport = code(sc5Read(TRANSPORT));
+      const transport = codeOf(archRead(TRANSPORT));
       for (const name of ['auth', 'timeout', 'version'])
         expect(transport).toContain(`CLOSE_CODES.${name}.code`);
     });
@@ -4232,7 +4256,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       // `verdictFor` is total by construction — two terminal branches and a
       // retry — and the two branches are exactly the two refusals this
       // route can produce: 401 at the upgrade, 4400 after it.
-      const policy = code(sc5Read(POLICY));
+      const policy = codeOf(archRead(POLICY));
       expect(policy).toContain('DaemonAuthError');
       expect(policy).toContain('DaemonEventFilterError');
       expect(policy).toContain("reason: 'token-rejected'");
@@ -4258,7 +4282,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
           '',
         ].join('\n'),
       );
-      expect(closeCodesInEventsRoute(sc5Read(rel))).toEqual([
+      expect(closeCodesInEventsRoute(archRead(rel))).toEqual([
         'auth',
         'protocol',
       ]);
@@ -4285,7 +4309,201 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
           '',
         ].join('\n'),
       );
-      expect(closeCodesInEventsRoute(sc5Read(rel))).toEqual(['protocol']);
+      expect(closeCodesInEventsRoute(archRead(rel))).toEqual(['protocol']);
+    });
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 6: the queue’s structure)', () => {
+  const sc6Planted: string[] = [];
+  function sc6Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc6Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc6Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/components/__s8_sc6_probe__',
+      'apps/desktop/src/renderer/screens/__s8_sc6_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  /* ── the view layer reads the store, and only the store ────────────── */
+
+  describe('nothing that renders can reach the bridge', () => {
+    /**
+     * The view tree: everything that paints, plus the two pure layers the
+     * queue derives from.
+     *
+     * Sc5 made `renderer/store/index.ts` the one module that touches
+     * `window.wm`, and typed its input as four bridge keys so that
+     * `sendTest` is not in scope. That guarantee is only worth having if the
+     * things ON TOP of the store cannot route around it — a card that read
+     * the bridge directly would be holding the full `WmBridge`, send channel
+     * and all, and would be doing it in the layer with the most files and
+     * the least review.
+     *
+     * So the ban is structural rather than a promise: under these roots
+     * there is no `window.wm` and no `bridge.<member>` at all. Data arrives
+     * as props, and actions leave as callbacks the composition root wires to
+     * the binding.
+     */
+    const VIEW_ROOTS = [
+      'apps/desktop/src/renderer/components',
+      'apps/desktop/src/renderer/screens',
+      'apps/desktop/src/renderer/keys',
+      'apps/desktop/src/renderer/derive',
+    ];
+    /** The composition root, and the only renderer file allowed the bridge. */
+    const ROOTS = [
+      'apps/desktop/src/renderer/main.tsx',
+      'apps/desktop/src/renderer/store/index.ts',
+    ];
+    const REACHES: ReadonlyArray<readonly [string, RegExp]> = [
+      ['window.wm', /\bwindow\s*\.\s*wm\b/g],
+      ['bridge.', /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/g],
+    ];
+
+    function reachOffenders(rels: readonly string[]): string[] {
+      const out: string[] = [];
+      for (const rel of rels) {
+        const body = codeOf(archRead(rel));
+        for (const [label, re] of REACHES)
+          if (re.test(body)) out.push(`${rel}: ${label}`);
+      }
+      return [...new Set(out)].sort();
+    }
+
+    it('the view tree names neither the bridge nor the global it hangs on', () => {
+      const files = VIEW_ROOTS.flatMap((root) => archFiles(root));
+      expect(files.length).toBeGreaterThan(0);
+      expect(reachOffenders(files)).toEqual([]);
+    });
+
+    it('the composition root and the store still do, which is what makes the ban mean something', () => {
+      // Non-vacuity: the reach EXISTS in this app, in exactly two files,
+      // and both are outside the view tree.
+      expect(reachOffenders(ROOTS)).toEqual([
+        'apps/desktop/src/renderer/main.tsx: window.wm',
+        'apps/desktop/src/renderer/store/index.ts: bridge.',
+      ]);
+      for (const root of ROOTS)
+        expect(VIEW_ROOTS.some((v) => root.startsWith(`${v}/`))).toBe(false);
+    });
+
+    it('PLANTED: a card that fetches its own drafts is caught', () => {
+      const rel = sc6Plant(
+        'apps/desktop/src/renderer/components/__s8_sc6_probe__/Eager.tsx',
+        [
+          'export async function refresh(): Promise<unknown> {',
+          '  return window.wm.drafts();',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(reachOffenders(archFiles(VIEW_ROOTS[0] ?? ''))).toContain(
+        `${rel}: window.wm`,
+      );
+    });
+
+    it('LEGITIMATE NEAR-MISS: a component that explains the ban, and takes props, is clean', () => {
+      const rel = sc6Plant(
+        'apps/desktop/src/renderer/screens/__s8_sc6_probe__/Card.tsx',
+        [
+          '/**',
+          ' * Reads from the store, never from window.wm: a card holding the',
+          ' * bridge would hold every channel on it, including bridge.sendTest.',
+          ' */',
+          'export function Card(props: { body: string }): string {',
+          '  return props.body; // no bridge.anything here',
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(
+        reachOffenders(archFiles(VIEW_ROOTS[1] ?? '')).filter((o) =>
+          o.startsWith(rel),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  /* ── the demo flag is read once, where policy lives ────────────────── */
+
+  describe('WEMESSAGE_DEMO is read in exactly one file', () => {
+    /**
+     * `policy.ts` already owns every other environment-derived constant in
+     * main, and the demo flag belongs with them for one reason: the badge is
+     * a HONESTY affordance. A screenshot of seeded data that does not say so
+     * is the failure mode, and a flag read in three places is a flag that
+     * will eventually be read as `!== undefined` in one of them and as
+     * `=== '1'` in the others.
+     */
+    const SITE = 'apps/desktop/src/main/policy.ts';
+    const FLAG = /WEMESSAGE_DEMO/;
+
+    function readers(): string[] {
+      return [...archFiles('apps'), ...archFiles('packages')]
+        .filter((f) => /^(apps|packages)\/[^/]+\/src\//.test(f))
+        .filter((f) => FLAG.test(codeOf(archRead(f))));
+    }
+
+    it('exactly one source file names the flag, and it is the policy module', () => {
+      expect(readers()).toEqual([SITE]);
+    });
+
+    it('PLANTED: a second reader is caught', () => {
+      const rel = sc6Plant(
+        'apps/desktop/src/renderer/components/__s8_sc6_probe__/Demo.tsx',
+        [
+          'export const demo = (env: Record<string, string | undefined>) =>',
+          "  env['WEMESSAGE_DEMO'] !== undefined;",
+          '',
+        ].join('\n'),
+      );
+      expect(readers()).toContain(rel);
+    });
+  });
+
+  /* ── one listbox, minted in one place ──────────────────────────────── */
+
+  describe('the queue is one listbox, and its options come from one file', () => {
+    const LISTBOX = 'apps/desktop/src/renderer/components/Listbox.tsx';
+
+    function roleSites(role: string): string[] {
+      const out: string[] = [];
+      for (const rel of archFiles('apps/desktop/src/renderer'))
+        if (codeOf(archRead(rel)).includes(`role="${role}"`)) out.push(rel);
+      return out.sort();
+    }
+
+    it('the listbox role and the option role are declared in the same single file', () => {
+      // The e2e asserts one `role="listbox"` in the rendered document. This
+      // asserts it in the SOURCE, which is the difference between "no screen
+      // we happened to open had two" and "there is one place that can mint
+      // one". Sc9's `BatchCard` and Sc7's empty states both render inside
+      // this listbox rather than beside it, and this row is what tells the
+      // author of either that a second one is a decision, not a detail.
+      expect(roleSites('listbox')).toEqual([LISTBOX]);
+      expect(roleSites('option')).toEqual([LISTBOX]);
+    });
+
+    it('the listbox declares the whole activedescendant contract in one place', () => {
+      const body = codeOf(archRead(LISTBOX));
+      // Roving focus, not roving tabindex: one tab stop on the container,
+      // and the active option named by id. A virtualized list cannot use
+      // roving tabindex, because the focused node is unmounted the moment it
+      // scrolls out of the window.
+      expect(body).toContain('aria-activedescendant');
+      expect(body).toContain('aria-multiselectable');
+      expect(body).toContain('aria-selected');
+      expect(body).toContain('tabIndex={0}');
+      expect(body).not.toContain('tabIndex={-1}');
     });
   });
 });

@@ -1,12 +1,233 @@
 /**
- * The `queue` screen — a stub at s8 Sc1, rendered in a later scenario.
+ * The queue screen: twenty drafts, one listbox, one tab stop.
  *
- * It exists now because the closed screen registry (F-113) has to be
- * enforceable before the screens exist: a guard written after the thing it
- * guards is a guard nobody proved. Returning `null` rather than markup is
- * the point — the directory set is real, the registry row is real, and
- * nothing renders until the scenario that owns this screen says it does.
+ * This is the screen Scenario 8's checkpoint runs on — twenty drafts triaged
+ * by keyboard in under a minute — so every structural decision here is made
+ * for that budget rather than for this scenario's rows.
+ *
+ * WHY `aria-activedescendant` AND NOT ROVING TABINDEX. Both are valid ARIA
+ * listbox patterns and the choice is forced by virtualization. With roving
+ * tabindex, DOM focus lives on the active OPTION; this list renders a window
+ * of its rows, so the focused node is unmounted the moment it scrolls out of
+ * that window, focus falls to `<body>`, and the next keystroke goes nowhere.
+ * The failure is silent and it ends the checkpoint run. With
+ * `aria-activedescendant` there is exactly one focus holder — the container —
+ * scrolling is a paint, and nothing can lose focus. The e2e asserts
+ * `tabbables === 1` and reads `document.activeElement.id` after a keystroke,
+ * so the claim is behavioural rather than a comment.
+ *
+ * WHY THE SCREEN HOLDS NO STATE. `activeIndex` and the expanded id live in
+ * the composition root and arrive here as props. An arch row bans
+ * `window.wm` and `bridge.<member>` from this whole subtree, and a screen
+ * that owned its own cursor would be a screen that needs an effect to keep
+ * it in step with a list that changes underneath it — which is the bug where
+ * a draft leaves the queue and the cursor silently names the wrong card.
+ * Data in as props, verbs out as one callback.
+ *
+ * WHY THERE IS NO TIMER. The app owns exactly one `setTimeout`, at the
+ * composition root, and an arch row proves it. So the scroll window is
+ * ARITHMETIC over the active index rather than a measured scroll position
+ * with a debounce, the relative times are computed from a `now` the root
+ * passes in, and there is no typeahead buffer to expire.
  */
-export default function QueueScreen(): null {
-  return null;
+import type { VNode } from 'preact';
+import { Listbox, type ListboxOption } from '../../components/Listbox.js';
+import type { CardModel } from '../../derive/queue.js';
+import { legendFor, verbOf, type QueueVerb } from '../../keys/index.js';
+import type { Conversation as Thread, Turn } from '../../store/optimistic.js';
+import { Card } from './Card.js';
+import { Conversation } from './Conversation.js';
+
+/**
+ * How many options are mounted at once.
+ *
+ * Comfortably more than the twenty-draft seed, so the checkpoint never pays
+ * for a re-window mid-run, and far short of the thousands a busy week could
+ * accumulate. The window is a SLICE of the sorted list, which is what keeps
+ * every child of the container a `role="option"` — a listbox whose children
+ * are two spacers and a group is not a listbox, whatever its role says, so
+ * the spacers are siblings of the list and not children of it.
+ */
+const LIST_WINDOW = 60;
+
+/** How many turns of the thread the right pane mounts. */
+const PANE_WINDOW = 40;
+
+/**
+ * A nominal card, in pixels, used only to size the virtualization spacers.
+ *
+ * NOMINAL and not measured. A spacer sized from a real row would need the
+ * rows measured, which needs a resize observer, which needs a debounce,
+ * which needs a timer — and this app owns exactly one, at the composition
+ * root. What the spacers are for is a scrollbar that describes the whole
+ * queue instead of the slice on screen, and an approximate one does that;
+ * nothing is positioned from this number, so being a few pixels out costs
+ * nothing but a slightly wrong thumb size on a queue of thousands.
+ */
+const ROW_HEIGHT = 78;
+
+/**
+ * How many turns a card shows inline when it is expanded.
+ *
+ * Three, because context is what came JUST BEFORE the thing you are being
+ * asked to approve. A card that expanded to the whole thread would push the
+ * next nineteen drafts off screen, which is the opposite of what the key is
+ * for.
+ */
+const CARD_TURNS = 3;
+
+export interface QueueScreenProps {
+  readonly cards: readonly CardModel[];
+  readonly activeIndex: number;
+  /** The draft whose context turns are open inline, or none. */
+  readonly expandedId: string | null;
+  readonly selected: ReadonlySet<string>;
+  /** The active card's thread, for the right pane. */
+  readonly thread: Thread;
+  readonly demo: boolean;
+  /** What assistive technology is told last happened. May be empty. */
+  readonly announcement: string;
+  readonly onVerb: (verb: QueueVerb) => void;
+}
+
+/**
+ * The mounted slice, and how far the list is scrolled to reach it.
+ *
+ * Kept together because they are one decision: the offset is what makes a
+ * windowed list scroll correctly, and computing them in two places is how
+ * the rows and the scrollbar end up disagreeing.
+ */
+function windowOf(
+  total: number,
+  active: number,
+): { readonly start: number; readonly end: number } {
+  if (total <= LIST_WINDOW) return { start: 0, end: total };
+  // Centre the window on the cursor, then clamp it inside the list, so the
+  // active option is always mounted and `aria-activedescendant` can never
+  // point at a node that is not in the document.
+  const half = Math.floor(LIST_WINDOW / 2);
+  const start = Math.max(0, Math.min(total - LIST_WINDOW, active - half));
+  return { start, end: start + LIST_WINDOW };
+}
+
+/** The last `count` turns, which is the tail a person actually reads. */
+const tail = (turns: readonly Turn[], count: number): readonly Turn[] =>
+  turns.length <= count ? turns : turns.slice(-count);
+
+export default function QueueScreen(props: QueueScreenProps): VNode {
+  const { cards, activeIndex } = props;
+  const active = activeIndex >= 0 ? cards[activeIndex] : undefined;
+  const slice = windowOf(cards.length, activeIndex);
+  const mounted = cards.slice(slice.start, slice.end);
+
+  const options: ListboxOption[] = mounted.map((card) => {
+    const expanded = props.expandedId === card.draftId;
+    return {
+      id: card.domId,
+      selected: props.selected.has(card.draftId),
+      active: card.draftId === active?.draftId,
+      label: card.label,
+      attrs: {
+        'data-draft': card.draftId,
+        'data-state': card.state,
+        // Always present, both ways: a card that only carried the attribute
+        // when open would make "is this expandable" and "is this expanded"
+        // the same question, and the e2e waits on the `false` spelling to
+        // prove a collapse really happened.
+        'aria-expanded': expanded ? 'true' : 'false',
+      },
+      body: (
+        <Card
+          card={card}
+          legend={
+            card.draftId === active?.draftId
+              ? legendFor({ group: card.isGroup })
+              : null
+          }
+          turns={expanded ? tail(props.thread.recent, CARD_TURNS) : []}
+        />
+      ),
+    };
+  });
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    const verb = verbOf({
+      key: event.key,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+    });
+    if (verb === null) return;
+    // Only for keys we claimed. A handler that preventDefault'd everything
+    // would eat the browser's own find, and refusing a keystroke we did not
+    // want is exactly what `verbOf` returning null means.
+    event.preventDefault();
+    props.onVerb(verb);
+  };
+
+  return (
+    <div
+      id="queue"
+      data-count={String(cards.length)}
+      // The ACTIVE conversation's observed total, not the length of what the
+      // pane mounted. A truncated render must never become a smaller number
+      // on screen.
+      data-turns={String(props.thread.total)}
+    >
+      <div id="queue-head">
+        <span id="queue-count">{`${String(cards.length)} PENDING`}</span>
+        {props.demo ? <span id="demo-badge">DEMO DATA</span> : null}
+      </div>
+      {/*
+        The one live region. `role="status"` rather than `alert`: a draft
+        arriving or leaving is not an interruption, and `status` is polite,
+        so it does not cut across a card the operator is having read to them.
+      */}
+      <p id="queue-live" role="status">
+        {props.announcement}
+      </p>
+      <div id="queue-body">
+        {/*
+          The virtualization spacers are SIBLINGS of the listbox, never
+          children of it: every child of a `role="listbox"` has to be a
+          `role="option"`, and a spacer is not one. The e2e asserts the
+          container has zero non-option children.
+        */}
+        <div id="queue-scroll">
+          {slice.start === 0 ? null : (
+            <div
+              id="queue-spacer-top"
+              data-rows={String(slice.start)}
+              style={{ height: `${String(slice.start * ROW_HEIGHT)}px` }}
+            />
+          )}
+          <Listbox
+            id="queue-list"
+            label="Drafts waiting for approval"
+            options={options}
+            activeId={active?.domId ?? null}
+            onKeyDown={onKeyDown}
+          />
+          {slice.end >= cards.length ? null : (
+            <div
+              id="queue-spacer-bottom"
+              data-rows={String(cards.length - slice.end)}
+              style={{
+                height: `${String((cards.length - slice.end) * ROW_HEIGHT)}px`,
+              }}
+            />
+          )}
+        </div>
+        {active === undefined ? null : (
+          <Conversation
+            draftId={active.draftId}
+            total={props.thread.total}
+            turns={tail(props.thread.recent, PANE_WINDOW)}
+            draftBody={active.body}
+          />
+        )}
+      </div>
+    </div>
+  );
 }

@@ -5,14 +5,20 @@
  * and it is deliberately thin: subscribe to the two pushes, narrow them, hand
  * them to the reducer, and turn a keystroke into exactly one request. This
  * file is where INV-2 stops being an argument and becomes an observation —
- * the bridge handed to the binding is a `Pick` of three channels, the fake
- * below records every invocation, and the rows assert both that the send
- * channel was never called AND that it is not reachable from here at all.
+ * the bridge handed to the binding is a `Pick` of five request channels, the
+ * fake below records every invocation, and the rows assert both that the
+ * send channel was never called AND that it is not reachable from here at
+ * all.
  *
- * The compile-time half is the stronger one: `StoreBridge` is
- * `Pick<WmBridge, 'drafts' | 'approve' | 'bulk' | 'on'>`, so naming the
- * wizard's send-test channel in this module is a type error rather than a
- * policy violation somebody has to notice.
+ * The compile-time half is the stronger one: `StoreBridge` is a `Pick` over
+ * a closed key list, so naming the wizard's send-test channel in this module
+ * is a type error rather than a policy violation somebody has to notice.
+ *
+ * s8 Sc6 widened that list from four keys to six (`rules` and `contacts`,
+ * both reads, both already-declared channels) so the cards can render names
+ * instead of ids. The widening is deliberate and guarded: `test/arch.spec.ts`
+ * asserts the store's `bridge.<member>` set is exactly the six, and asserts
+ * separately that no identifier under the store matches /send/i.
  */
 import { describe, expect, it } from 'vitest';
 import type { DraftPayload } from '@wemessage/client';
@@ -56,6 +62,20 @@ interface Fake {
   nextDrafts(list: readonly DraftPayload[]): void;
   /** Answer the next `approve` call with this value, or reject with it. */
   nextApprove(value: unknown, reject?: boolean): void;
+  /**
+   * Answer the two catalogue channels with these rows, or make them throw.
+   *
+   * `unknown` rather than a DTO: these two answers cross the bridge untyped
+   * and the store narrows them row by row, so the rows a test hands back
+   * have to be able to be malformed. A fake that could only produce valid
+   * records could not exercise the narrowing that exists for invalid ones.
+   */
+  nextCatalogue(next: {
+    rules?: unknown;
+    contacts?: unknown;
+    rulesThrow?: boolean;
+    contactsThrow?: boolean;
+  }): void;
   listeners(): string[];
 }
 
@@ -65,6 +85,10 @@ function fakeBridge(): Fake {
   let drafts: readonly DraftPayload[] = [];
   let approveAnswer: unknown = { draft: draft('d1'), approvalId: 'a1' };
   let approveRejects = false;
+  let rules: unknown = [];
+  let contacts: unknown = [];
+  let rulesThrow = false;
+  let contactsThrow = false;
   const record =
     (channel: string, answer: () => unknown) =>
     (...args: readonly unknown[]): Promise<unknown> => {
@@ -82,6 +106,12 @@ function fakeBridge(): Fake {
       approveAnswer = value;
       approveRejects = reject;
     },
+    nextCatalogue: (next) => {
+      if (next.rules !== undefined) rules = next.rules;
+      if (next.contacts !== undefined) contacts = next.contacts;
+      rulesThrow = next.rulesThrow ?? false;
+      contactsThrow = next.contactsThrow ?? false;
+    },
     bridge: {
       drafts: record('drafts', () => drafts),
       bulk: record('bulk', () => ({
@@ -96,6 +126,18 @@ function fakeBridge(): Fake {
         return approveRejects
           ? Promise.reject(new Error(String(approveAnswer)))
           : Promise.resolve(approveAnswer);
+      },
+      rules: (...args: readonly unknown[]): Promise<unknown> => {
+        calls.push({ channel: 'rules', args });
+        return rulesThrow
+          ? Promise.reject(new Error('rules route is down'))
+          : Promise.resolve(rules);
+      },
+      contacts: (...args: readonly unknown[]): Promise<unknown> => {
+        calls.push({ channel: 'contacts', args });
+        return contactsThrow
+          ? Promise.reject(new Error('contacts route is down'))
+          : Promise.resolve(contacts);
       },
       on: (key, listener) => {
         listeners.set(key, listener);
@@ -123,9 +165,19 @@ function connected(fake: Fake): void {
 
 /* ── the closed channel list ─────────────────────────────────────────── */
 
-describe('s8 Sc5 wiring: the store reaches three channels and no others', () => {
+describe('s8 Sc5 wiring: the store reaches five channels and no others', () => {
   it('the allowlist names nothing that could send', () => {
-    expect([...STORE_CHANNELS]).toEqual(['approve', 'bulk', 'drafts']);
+    // s8 Sc6 grew this from three to five: a card that renders a rule NAME
+    // and a display NAME needs the two catalogues those names live in. Both
+    // additions are reads, and the guarantee this row exists for is
+    // unchanged — none of the five is the channel that could dispatch.
+    expect([...STORE_CHANNELS]).toEqual([
+      'approve',
+      'bulk',
+      'contacts',
+      'drafts',
+      'rules',
+    ]);
     for (const channel of STORE_CHANNELS)
       expect(/send/i.test(channel)).toBe(false);
   });
@@ -368,5 +420,78 @@ describe('s8 Sc5 wiring: bulk', () => {
       { channel: 'bulk', args: ['approve', { ids: ['d1', 'd2'] }] },
     ]);
     expect(fake.calls.some((c) => /send/i.test(c.channel))).toBe(false);
+  });
+});
+
+/* ── the two name catalogues (s8 Sc6) ────────────────────────────────── */
+
+describe('s8 Sc6 wiring: the catalogue is fetched once, and never on connect', () => {
+  it('is not in the connect path, so a reconnect fetches drafts and nothing else', async () => {
+    const fake = fakeBridge();
+    const binding = bindStore(fake.bridge, { now: () => AT });
+    connected(fake);
+    await binding.settled();
+    // The whole point of keeping `loadCatalogue` off the connect path: the
+    // channel sequence a reconnect produces stays the one Sc5 pinned. A
+    // catalogue fetch wired into `onStream` would appear here and turn "the
+    // store fetched the drafts it was owed" into "the store fetched three
+    // things, one of which was the drafts".
+    expect(fake.calls.map((c) => c.channel)).toEqual(['drafts']);
+  });
+
+  it('indexes rules by id and contacts by handle', async () => {
+    const fake = fakeBridge();
+    const binding = bindStore(fake.bridge, { now: () => AT });
+    fake.nextCatalogue({
+      rules: [{ id: 'r1', name: 'weeknight replies' }],
+      contacts: [{ handle: '+15550002222', displayName: 'Second Line' }],
+    });
+
+    await binding.loadCatalogue();
+    expect(fake.calls.map((c) => c.channel).sort()).toEqual([
+      'contacts',
+      'rules',
+    ]);
+    const cat = binding.store.catalogue();
+    expect(cat.rules.get('r1')).toBe('weeknight replies');
+    expect(cat.contacts.get('+15550002222')).toBe('Second Line');
+  });
+
+  it('drops a row it cannot read rather than indexing it under undefined', async () => {
+    const fake = fakeBridge();
+    const binding = bindStore(fake.bridge, { now: () => AT });
+    fake.nextCatalogue({
+      // In order: no name, no id, an empty name, a non-object, and one good
+      // row. A card that found any of the first four would render a blank
+      // where a rule name goes, which reads as "no rule" and is a different
+      // claim from "a rule whose name did not load".
+      rules: [
+        { id: 'r1' },
+        { name: 'nameless' },
+        { id: 'r2', name: '' },
+        'not a record',
+        { id: 'r3', name: 'the real one' },
+      ],
+      contacts: 'not even an array',
+    });
+
+    await binding.loadCatalogue();
+    const cat = binding.store.catalogue();
+    expect([...cat.rules.entries()]).toEqual([['r3', 'the real one']]);
+    expect(cat.contacts.size).toBe(0);
+  });
+
+  it('never rejects: a catalogue that will not load costs names, not the queue', async () => {
+    const fake = fakeBridge();
+    const binding = bindStore(fake.bridge, { now: () => AT });
+    fake.push('event', snapshotFrame(1, ['d1']));
+    connected(fake);
+    fake.nextCatalogue({ rulesThrow: true, contactsThrow: true });
+
+    await expect(binding.loadCatalogue()).resolves.toBeUndefined();
+    expect(binding.store.catalogue().rules.size).toBe(0);
+    // The cards are still there. A name that would not load is a degraded
+    // card, never an empty screen.
+    expect(binding.store.rows()).toHaveLength(1);
   });
 });

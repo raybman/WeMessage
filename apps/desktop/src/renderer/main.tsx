@@ -36,14 +36,23 @@ import { batchOf } from './derive/batch.js';
 import { byAge, cardOf, type CardModel } from './derive/queue.js';
 import { moveTo, type QueueVerb } from './keys/index.js';
 import { screenFor } from './keys/screens.js';
-import { DEFAULT_SCREEN, type Screen } from './router.js';
+import {
+  DEFAULT_SCREEN,
+  WIZARD_STEPS,
+  type Screen,
+  type WizardStep,
+} from './router.js';
 import QueueScreen from './screens/queue/index.js';
 import RulesScreen from './screens/rules/index.js';
 import type { NamedOption, RuleDetailProps } from './screens/rules/Detail.js';
 import type { ServerVerdict } from './screens/rules/Matcher.js';
 import type { RuleRow } from './screens/rules/List.js';
 import type { DryRunPanelProps } from './screens/rules/DryRun.js';
-import WizardScreen from './screens/wizard/index.js';
+import {
+  WizardScreen,
+  type WizardCardView,
+  type WizardScreenProps,
+} from './screens/wizard/index.js';
 import ScheduleScreen from './screens/schedule/index.js';
 import type {
   ScheduleDetailProps,
@@ -179,6 +188,8 @@ import {
 import { permissionCards, probedLine } from './derive/permissionCards.js';
 import { adapterRows, dangerCounts } from './derive/adapterRows.js';
 import { bindSettings, type SettingsBinding } from './store/settings.js';
+import { bindWizard, type WizardBinding } from './store/wizard.js';
+import { exitFor, stepVerdict } from './derive/wizardExits.js';
 import type {
   ContactMode,
   SchedulePayload,
@@ -2011,6 +2022,29 @@ function exportReport(): void {
 const config: SettingsBinding = bindSettings(window.wm);
 
 /**
+ * The seventh binding, and the only one that is a MODE rather than a screen.
+ *
+ * Declared in the store partition alongside the other six: a binding file
+ * that owned a write channel nobody had declared is exactly what the
+ * partition row exists to catch, and this one owns two (`sendTest` and
+ * `wizardArm`) that no other file may touch.
+ */
+const wizard: WizardBinding = bindWizard(window.wm);
+
+/**
+ * Whether the setup flow is up over the top of a working app.
+ *
+ * It is NOT `screen`. `screen` is one of six things reachable by a ⌘-digit,
+ * and putting a seventh in that table would give the flow a stroke, a tab
+ * stop and a place in `MOUNTED` — all three of which are claims that it is
+ * a destination. It is a mode you enter, walk and leave.
+ */
+let wizardOpen = false;
+let wizardStep: WizardStep = 'welcome';
+/** What the operator typed on the last step. Never persisted. */
+let wizardHandle = '';
+
+/**
  * The instant this screen was last entered.
  *
  * Read HERE, once, and handed down as a prop, on the same terms as
@@ -2306,6 +2340,131 @@ function settingsFields(): SettingFieldView[] {
   });
 }
 
+/**
+ * The step the flow is on, as opposed to the step it last advanced to.
+ *
+ * With no daemon there is nothing past the first step to establish, so a
+ * dropped link puts the flow back at the beginning rather than leaving it
+ * parked on a page whose four checks nobody can answer. Computed here rather
+ * than bookkept on the edge so it is true by construction: there is no
+ * ordering of stream pushes that can leave a down app showing step four.
+ */
+function wizardStepNow(): WizardStep {
+  return stream.state === 'down' ? 'welcome' : wizardStep;
+}
+
+/**
+ * Enter the flow.
+ *
+ * The probe goes out HERE, in the gesture, and only while there is a link:
+ * with no daemon the request is guaranteed to fail, and a failed probe is
+ * indistinguishable on screen from one nobody made. `probe()` marks itself
+ * in flight synchronously, before the request leaves, so the very first
+ * paint of the flow already says it is checking.
+ */
+function openWizardMode(): void {
+  wizardOpen = true;
+  wizardStep = 'welcome';
+  // The POSITION resets; the RECORD does not. Re-entering setup starts at
+  // the first question again, but the code that was already sent and the
+  // handle it went to stay on screen — they are facts about a message that
+  // really left this Mac, and a flow that wiped its own receipt on re-entry
+  // would be the tidiest possible way to hide its only side effect. The
+  // stale part, the daemon's report, is overwritten by the probe below and
+  // dropped outright the moment the link goes down.
+  if (stream.state === 'connected') void wizard.probe();
+  paint();
+}
+
+function wizardBack(): void {
+  const at = WIZARD_STEPS.indexOf(wizardStepNow());
+  wizardStep = WIZARD_STEPS[at - 1] ?? 'welcome';
+  paint();
+}
+
+/**
+ * Move on, WITHOUT probing again.
+ *
+ * One report answers all four checks, so a probe per step would be four
+ * round trips telling the operator the same thing, and — worse — would make
+ * "checking…" appear at a moment nobody asked a question. Asking again is a
+ * gesture: grant the permission in the pane a card opened, come back, press
+ * RE-CHECK.
+ */
+function wizardContinue(): void {
+  const at = WIZARD_STEPS.indexOf(wizardStepNow());
+  wizardStep = WIZARD_STEPS[at + 1] ?? wizardStepNow();
+  paint();
+}
+
+function wizardRecheck(): void {
+  void wizard.probe();
+}
+
+/**
+ * Leave.
+ *
+ * It closes a mode; it does not certify anything. Whether the product is
+ * ready is `data-ready`, which is the daemon's own verdict quoted through
+ * `readyToFinish`, and it is computed the same way whether this was pressed
+ * on step one or step five.
+ */
+function wizardFinish(): void {
+  wizardOpen = false;
+  wizardStep = 'welcome';
+  screen = DEFAULT_SCREEN;
+  paint();
+}
+
+function wizardTyped(next: string): void {
+  wizardHandle = next;
+  paint();
+}
+
+function wizardSend(): void {
+  void wizard.sendTest(wizardHandle.trim());
+}
+
+function wizardPane(pane: string): void {
+  void wizard.reveal(pane);
+}
+
+function wizardView(): WizardScreenProps {
+  const data = wizard.data();
+  const down = stream.state === 'down' ? stream : null;
+  const step = wizardStepNow();
+  return {
+    step,
+    // The daemon's answer or the link's refusal, never this app's guess.
+    exit: exitFor(
+      { state: stream.state, reason: down === null ? null : down.reason },
+      data.report,
+    ),
+    verdict: stepVerdict(step, data.report),
+    cards: permissionCards(data.report).map((card): WizardCardView => ({
+      check: card.id,
+      state: card.state,
+      glyph: card.glyph,
+      word: card.state,
+      detail: card.detail,
+      pane: card.pane,
+    })),
+    probing: data.probing,
+    down,
+    handle: wizardHandle,
+    code: data.code,
+    outcome: data.outcome,
+    failure: data.failure,
+    onBack: wizardBack,
+    onContinue: wizardContinue,
+    onRecheck: wizardRecheck,
+    onFinish: wizardFinish,
+    onHandle: wizardTyped,
+    onSend: wizardSend,
+    onOpenPane: wizardPane,
+  };
+}
+
 function settingsView(): SettingsScreenProps {
   const data = config.data();
   const form = configForm;
@@ -2379,6 +2538,7 @@ function settingsView(): SettingsScreenProps {
       onRerun: rerunChecks,
       onRelink: relinkDaemon,
       onOpenPane: openPane,
+      onWizard: openWizardMode,
     },
     adapters: {
       rows: rows.map((row): AdapterRowView => ({
@@ -2459,6 +2619,11 @@ function onWindowKey(event: KeyboardEvent): void {
     paint();
     return;
   }
+  // The ⌘-digit table is not live while the setup flow is up. Two things
+  // that both answer a stroke is how a modal ends up with navigation firing
+  // underneath it, and a flow the operator can walk away from mid-step
+  // without leaving it is a flow whose "did you finish?" has no answer.
+  if (wizardOpen) return;
   const next = screenFor(event);
   if (next === null || !MOUNTED.has(next)) return;
   event.preventDefault();
@@ -2501,8 +2666,8 @@ function Shell({
         syncedAt={binding.store.syncedAt()}
         now={new Date().toISOString()}
       />
-      {current.state === 'down' ? (
-        <WizardScreen stream={current} />
+      {current.state === 'down' || wizardOpen ? (
+        <WizardScreen {...wizardView()} />
       ) : screen === 'rules' ? (
         <RulesScreen
           status={rules.data().status}
@@ -2668,9 +2833,9 @@ function paintStore(): void {
 function paint(): void {
   const html = document.documentElement;
   html.dataset['conn'] = stream.state;
-  if (stream.state === 'down') {
+  if (stream.state === 'down' || wizardOpen) {
     html.dataset['screen'] = 'wizard';
-    html.dataset['wizardStep'] = 'welcome';
+    html.dataset['wizardStep'] = wizardStepNow();
   } else {
     html.dataset['screen'] = screen;
     delete html.dataset['wizardStep'];
@@ -2752,11 +2917,22 @@ schedules.subscribe(schedulePaint);
 people.subscribe(schedulePaint);
 audits.subscribe(schedulePaint);
 config.subscribe(schedulePaint);
+wizard.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {
   const next = asStream(payload);
   if (next === null) return;
+  // On the edge INTO down, the setup flow forgets what it was told. A
+  // report is a statement about a daemon this app can no longer reach, and
+  // four cards still reading OK from thirty seconds ago would be the exact
+  // lie this scenario exists to make unwritable: a remembered pass is not a
+  // check. Dropping it leaves four NOT CHECKED cards, which is true.
+  if (next.state === 'down' && stream.state !== 'down') {
+    wizardStep = 'welcome';
+    wizardHandle = '';
+    wizard.reset();
+  }
   stream = next;
   // The catalogue is fetchable only while there is a daemon to fetch it
   // from, so the composition root asks on the edge INTO `connected` rather

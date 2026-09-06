@@ -50,6 +50,15 @@ export interface PermsPaneProps {
   readonly relinkNote: string;
   readonly onRerun: () => void;
   readonly onRelink: () => void;
+  /**
+   * Enter the setup flow.
+   *
+   * The flow is a MODE, not a screen: it is absent from `SCREENS` and from
+   * the ⌘-digit table, so it has no stroke of its own and adds no tab stop
+   * to any surface that counts them. It arrives by itself when there is no
+   * daemon, and this is the one place it can be asked for when there is.
+   */
+  readonly onWizard: () => void;
   readonly onOpenPane: (pane: string) => void;
 }
 
@@ -76,6 +85,14 @@ export function PermsPane(props: PermsPaneProps): VNode {
           onClick={props.onRelink}
         >
           RECONNECT
+        </button>
+        <button
+          id="set-perms-wizard"
+          type="button"
+          class="set-button"
+          onClick={props.onWizard}
+        >
+          RUN SETUP AGAIN
         </button>
       </div>
       <p class="set-note">{props.relinkNote}</p>

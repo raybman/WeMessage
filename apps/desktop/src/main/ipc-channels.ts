@@ -73,6 +73,15 @@ export const CHANNELS = {
   /** The only channel whose handler may reach the client's send verb — wizard
    * step 5, self-message only, guarded on both `to` and body (Sc 15 row 6). */
   sendTest: 'wm:wizard.send-test',
+  /**
+   * Nominate the handle the wizard's step 5 may reach, and mint the body it
+   * must carry. Main answers a four-hex code and REMEMBERS the pair; the
+   * channel above then refuses anything else. Named for the wizard rather
+   * than for the verb: the store's `/send/i` sweep is an equality over one
+   * identifier, and a second send-shaped name would have to be allowlisted
+   * to keep it — which is how a sweep stops being one.
+   */
+  wizardArm: 'wm:wizard.arm',
   /** `shell.openExternal` on an allowlisted `x-apple.systempreferences:` URL. */
   openSystemSettings: 'wm:open-system-settings',
 

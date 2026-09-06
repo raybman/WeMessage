@@ -59,6 +59,39 @@ export interface RequestLog {
   restore(): void;
   /** How many connections have been accepted since boot. */
   connections(): number;
+  /**
+   * Rewrite the FIRST upstream occurrence of `from` to `to`, once, and then
+   * never again. Returns nothing; `rewrites()` says whether it fired.
+   *
+   * s8 Sc15, and the one thing in this file that is not a passive tee — so
+   * it is worth saying exactly what it is for and what it is not.
+   *
+   * `link:stream-refused` is a real exit state with real product copy ("that
+   * is a version mismatch rather than a fault"), and it is reached when the
+   * daemon accepts the websocket upgrade and then closes it with 4400
+   * because it could not parse the event filter it was sent. `/v1/events`
+   * closes exactly one way and that is the way. But this desktop app sends
+   * no `?events=` filter at all — `live.events(onEvent)` is called with no
+   * options — so the state cannot arise between THIS app and THIS daemon,
+   * today, at these two versions.
+   *
+   * It can arise the moment those two versions differ, which is the whole
+   * point of the state: a newer app subscribing to an event name an older
+   * daemon does not know, or a filter syntax that changed under it. A wizard
+   * row that skipped the state because the current pair happens to agree
+   * would be a row that tests the pair rather than the product.
+   *
+   * So the skew is injected at the wire, not faked in the app: the request
+   * line the app really sent is altered in flight, the REAL daemon really
+   * refuses it, and the app really receives the real 4400 from the real
+   * `parseEventFilter`. Nothing downstream is simulated. The rewrite is
+   * counted so that a silent no-op — a chunk boundary landing mid-needle, a
+   * request line that changed shape — fails the row instead of quietly
+   * turning it into a test of the happy path.
+   */
+  rewriteOnce(from: string, to: string): void;
+  /** How many times `rewriteOnce`'s needle has actually been replaced. */
+  rewrites(): number;
   close(): Promise<void>;
 }
 
@@ -136,6 +169,8 @@ export async function startRequestLog(targetPort: number): Promise<RequestLog> {
 
   let severed = false;
   let connections = 0;
+  let rewrite: { from: string; to: string } | null = null;
+  let rewrites = 0;
 
   const server: Server = createServer((client) => {
     connections += 1;
@@ -151,8 +186,27 @@ export async function startRequestLog(targetPort: number): Promise<RequestLog> {
     const server2 = connect({ port: targetPort, host: '127.0.0.1' });
     sockets.add(server2);
     client.on('data', (d: Buffer) => {
-      upstream(d);
-      server2.write(d);
+      let out = d;
+      if (rewrite !== null) {
+        const at = out.indexOf(rewrite.from, 0, 'latin1');
+        if (at >= 0) {
+          const { from, to } = rewrite;
+          // Armed once and disarmed on the hit, so a reconnect that repeats
+          // the request goes through untouched: the skew is a fact about
+          // one attempt, not a permanent property of the socket.
+          rewrite = null;
+          rewrites += 1;
+          out = Buffer.concat([
+            out.subarray(0, at),
+            Buffer.from(to, 'latin1'),
+            out.subarray(at + Buffer.byteLength(from, 'latin1')),
+          ]);
+        }
+      }
+      // Scanned AFTER the rewrite, so `requests()` reports what the daemon
+      // was actually asked rather than what the app intended to ask.
+      upstream(out);
+      server2.write(out);
     });
     server2.on('data', (d: Buffer) => {
       downstream(d);
@@ -183,6 +237,10 @@ export async function startRequestLog(targetPort: number): Promise<RequestLog> {
     requests: () => [...requests],
     statuses: () => [...statuses],
     connections: () => connections,
+    rewriteOnce: (from: string, to: string) => {
+      rewrite = { from, to };
+    },
+    rewrites: () => rewrites,
     sever: () => {
       severed = true;
       for (const s of sockets) s.destroy();

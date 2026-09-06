@@ -4309,7 +4309,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       ).toEqual(ALLOWED);
     });
 
-    it('nothing in the store names a send, though the channel exists', () => {
+    it('exactly one file in the store names a send, and it is the wizard’s', () => {
       // Non-vacuous twice over: there IS a send-capable channel on the
       // bridge, and the store's prose talks about it constantly. The ban is
       // on the code.
@@ -4317,7 +4317,22 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
         "sendTest: 'wm:wizard.send-test'",
       );
       expect(/send/i.test(archRead(WIRING))).toBe(true);
-      expect(sendOffenders(archFiles(STORE_ROOT))).toEqual([]);
+      //
+      // s8 Sc15, deliberate amendment. This was `toEqual([])` from Sc5 to
+      // Sc14, and it was the right row for a tree where nothing sent. The
+      // wizard's step 5 sends, through `POST /v1/send` — which mints a real
+      // Draft, a real Approval and dispatches through the one call site —
+      // so an emptiness here would now have to be bought by routing the
+      // send somewhere the store cannot see, which is worse.
+      //
+      // The replacement is an EQUALITY, not an allowlist: exactly one file,
+      // exactly one identifier. A second sender, or a second send-shaped
+      // name in the same file, fails. `isEnding` — Sc9's self-trip, which
+      // lowercases to contain "sending" — would still fail here, and it was
+      // renamed rather than exempted for exactly that reason.
+      expect(sendOffenders(archFiles(STORE_ROOT))).toEqual([
+        `${STORE_ROOT}/wizard.ts: sendTest`,
+      ]);
     });
 
     it('PLANTED: a store file that reaches for the send-test channel is caught', () => {
@@ -5599,6 +5614,42 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
         'settingsWrite',
       ],
     },
+    [`${STORE_ROOT}/wizard.ts`]: {
+      constant: 'WIZARD_CHANNELS',
+      // Sc15, and the seventh entry. One read, one opener and two writes,
+      // and it is the smallest binding in the app on purpose: onboarding is
+      // the moment the operator trusts the product least, so every channel
+      // it can reach is a thing it could be blamed for.
+      //
+      // `doctor` is a SHARED read — Sc14's Permissions pane has it too — and
+      // it is the whole verification story here. `runDoctor` probes,
+      // derives, PERSISTS the connection state the gate later reads, and
+      // broadcasts only on change; so asking it is not a display act, it is
+      // the same act the daemon performs at boot. That is what lets the last
+      // step quote the daemon rather than count its own steps.
+      //
+      // `connect` is deliberately absent, and Sc14 called this shot: "a
+      // reconnect belongs on the wizard" was listed there as the second
+      // plausible home that does not get one. It would also be a lie in the
+      // one place it seems most needed — after the danger zone's disconnect
+      // the bearer this process holds has been rotated, so a RECONNECT
+      // button on the welcome step would be a control that cannot work,
+      // rendered at the exact moment the operator is deciding whether to
+      // believe the product.
+      //
+      // `wizardArm` and `sendTest` are the two writes, and they are one
+      // gesture split in half: main mints a four-hex code and remembers the
+      // handle, then refuses any send whose recipient or body is not that
+      // pair. The renderer therefore cannot choose what gets said, which is
+      // the only version of a "send yourself a test" that does not amount
+      // to a general-purpose send with a filter on it.
+      //
+      // Deliberately absent: `on`. The wizard's link state arrives as a
+      // prop from `main.tsx`'s single stream subscription; a second
+      // subscriber would be a second opinion about whether the daemon is
+      // there, and the whole screen is about there being one.
+      members: ['doctor', 'openSystemSettings', 'sendTest', 'wizardArm'],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -5659,6 +5710,12 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       'globalMode',
       'killSwitch',
       'settingsWrite',
+      // Sc15's two, and they are halves of one another. `wizardArm` is what
+      // makes `sendTest` narrow: main mints the body and holds the handle,
+      // so a second owner of EITHER would be a way to send something the
+      // operator did not see. One owner each is the whole guard.
+      'sendTest',
+      'wizardArm',
     ];
     for (const write of WRITES) {
       const owners = Object.entries(BINDINGS)
@@ -7688,8 +7745,13 @@ describe('S8 extensions (s8-execution Scenario 14: settings, the kill switch and
    * move a string (it re-sweeps the arming posture), and a settings screen
    * that acquired either channel would be a second owner of the hold with no
    * horizon of its own to publish. `adapterUpdate` and `contactDelete` are
-   * real channels this GUI has decided not to offer; `sendTest` belongs to
-   * the wizard and to nothing else (Sc15).
+   * real channels this GUI has decided not to offer.
+   *
+   * s8 Sc15, deliberate amendment: `sendTest` was in the absent list below
+   * because nothing called it. The wizard now does, through its own binding
+   * and through one call site, so the claim is STRENGTHENED rather than
+   * loosened — an exact owner instead of an emptiness that would have gone
+   * on being true if the settings screen had grown a send.
    */
   it('the settings screen writes through five channels and no others', () => {
     const callers = (needle: string): string[] =>
@@ -7720,9 +7782,10 @@ describe('S8 extensions (s8-execution Scenario 14: settings, the kill switch and
       'adapterUpdate',
       'contactDelete',
       'ruleDelete',
-      'sendTest',
     ])
       expect(callers(`bridge.${absent}(`), absent).toEqual([]);
+    // s8 Sc15: one owner, and it is not this screen.
+    expect(callers('bridge.sendTest(')).toEqual([`${STORE_ROOT}/wizard.ts`]);
   });
 
   /* ── row 3: a minted adapter token cannot reach a Chromium process ─── */
@@ -8104,5 +8167,650 @@ describe('S8 extensions (s8-execution Scenario 14: settings, the kill switch and
     expect(
       [...(mounted?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort(),
     ).toEqual((screens ?? []).map((q) => q.slice(1, -1)).sort());
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 15: the onboarding wizard and every exit state)', () => {
+  const sc15Planted: string[] = [];
+  function sc15Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc15Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc15Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/wizard/__s8_sc15_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc15_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc15_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc15_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const WIZARD = `${RENDERER}/screens/wizard`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+  const EXITS = `${RENDERER}/derive/wizardExits.ts`;
+  const POLICY = 'apps/desktop/src/main/policy.ts';
+  const GATEWAY = 'apps/desktop/src/main/gateway.ts';
+  const CHANNELS = 'apps/desktop/src/main/ipc-channels.ts';
+  const CLIENT = 'packages/client/src/index.ts';
+  const CORE_TYPES = 'packages/core/src/domain/types.ts';
+  const DAEMON_DOCTOR = 'packages/daemon/src/doctor.ts';
+  const SEND_ROUTE = 'packages/daemon/src/routes/send.ts';
+
+  /** Every quoted string inside the first `[ … ]` after `name`. */
+  function quotedArray(text: string, name: string): string[] {
+    const m = new RegExp(`${name}\\s*=\\s*\\[([\\s\\S]*?)\\]`).exec(text);
+    if (m === null) return [];
+    return [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+  }
+
+  /** Every quoted string in the union that `export type <name> =` opens. */
+  function unionMembers(text: string, name: string): string[] {
+    const m = new RegExp(`export type ${name}\\s*=([\\s\\S]*?);`).exec(text);
+    if (m === null) return [];
+    return [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+  }
+
+  /** The quoted keys of the `WIZARD_EXIT_SPEC` object literal. */
+  function exitKeys(): string[] {
+    const m = /WIZARD_EXIT_SPEC[^=]*=\s*\{([\s\S]*?)\n\};/.exec(
+      archRead(EXITS),
+    );
+    return [...(m?.[1] ?? '').matchAll(/'((?:link|daemon):[^']*)'\s*:/g)]
+      .map((x) => x[1] as string)
+      .sort();
+  }
+
+  const callers = (needle: string): string[] =>
+    archFiles(RENDERER)
+      .filter((rel) => codeOf(archRead(rel)).includes(needle))
+      .sort();
+
+  /* ── row 1: the exit vocabulary is two other people's unions ───────── */
+
+  /**
+   * The one claim this scenario is built to support is that the wizard
+   * cannot render a reassuring screen for a state nobody enumerated. That
+   * is only true if the enumeration is not the wizard's own.
+   *
+   * `WizardExit` is `link:${DownReason} | daemon:${ConnectionState}`, so
+   * `Readonly<Record<WizardExit, ExitSpec>>` rejects a missing key AND (by
+   * TypeScript's excess-property check on an object literal) an extra one.
+   * The compiler is the real guard; this row is its runtime shadow, and it
+   * exists because the compiler cannot tell you that the union you are
+   * total over is the union the DAEMON actually ships.
+   *
+   * So the cross-check runs the whole way down: the desktop's link reasons,
+   * the client's `ConnectionState`, core's `ConnectionState`, and the
+   * daemon's own runtime narrowing in `doctor.ts` — four spellings that
+   * INV-1 keeps deliberately separate — all have to agree before the eight
+   * exits are allowed to be these eight.
+   */
+  it('the eight exits are exactly the link reasons crossed with the daemon’s states', () => {
+    const reasons = quotedArray(archRead(POLICY), 'DOWN_REASONS');
+    expect(reasons).toEqual([
+      'no-token',
+      'token-rejected',
+      'unreachable',
+      'stream-refused',
+    ]);
+    // The S8 plan names a reason called `auth`. There is no such thing.
+    expect(reasons).not.toContain('auth');
+
+    const fromClient = unionMembers(archRead(CLIENT), 'ConnectionState');
+    const fromCore = unionMembers(archRead(CORE_TYPES), 'ConnectionState');
+    expect(fromClient).toEqual(fromCore);
+    expect([...fromClient].sort()).toEqual([
+      'disconnected',
+      'fully-connected',
+      'read-only',
+      'unsupported',
+    ]);
+    // `connected` is the word the plan uses. The daemon has never said it.
+    expect(fromClient).not.toContain('connected');
+
+    // And the daemon narrows the wire to exactly those four.
+    //
+    // Anchored on the DEFINITION, not on the name. The first mention of
+    // `isConnectionState` in this file is a CALL, twenty lines above the
+    // function, and a non-greedy sweep from there to the next `}` captures
+    // the caller's block — which of course spells none of the four states.
+    // A row that read a body the guard does not live in would have gone
+    // green the day somebody deleted a member from it.
+    const narrowing = codeOf(archRead(DAEMON_DOCTOR));
+    const guard = /function isConnectionState\([\s\S]*?\n\}/.exec(narrowing);
+    expect(guard).not.toBeNull();
+    // Non-vacuity: the captured body is the four-way `||`, not a stub.
+    expect(guard?.[0]).toContain('value is ConnectionState');
+    for (const state of fromCore)
+      expect(guard?.[0], `doctor narrows ${state}`).toContain(`'${state}'`);
+    // And nothing else: a fifth `'…'` in that body would be a state the
+    // daemon accepts off the wire that the exit vocabulary has no row for.
+    expect((guard?.[0].match(/'[a-z-]+'/g) ?? []).sort()).toEqual(
+      [...fromCore].map((s) => `'${s}'`).sort(),
+    );
+
+    expect(exitKeys()).toEqual(
+      [
+        ...reasons.map((r) => `link:${r}`),
+        ...fromClient.map((s) => `daemon:${s}`),
+      ].sort(),
+    );
+  });
+
+  /* ── row 2: the wizard spells no exit of its own ───────────────────── */
+
+  /**
+   * A totality that only holds in one file is a totality one `if` away from
+   * a hole. The screens read `WIZARD_EXITS` / `exitFor` / `exitView` and
+   * never a literal, so a step that wanted to special-case an exit would
+   * have to say so where the compiler is watching.
+   *
+   * `codeOf` strips comments, which is the point: the derive module's prose
+   * names these strings constantly, and prose is not a second vocabulary.
+   */
+  it('only the derive module spells an exit literal', () => {
+    const owners = archFiles(RENDERER).filter((rel) =>
+      /'(?:link|daemon):[^']*'/.test(codeOf(archRead(rel))),
+    );
+    expect(owners).toEqual([EXITS]);
+    // Non-vacuous: there really are literals in there to find.
+    expect(exitKeys()).toHaveLength(8);
+  });
+
+  it('PLANTED: a wizard step that special-cases one exit is caught', () => {
+    const rel = sc15Plant(
+      `${WIZARD}/__s8_sc15_probe__/Special.tsx`,
+      [
+        'export const friendly = (exit: string): boolean =>',
+        "  exit === 'link:unreachable';",
+        '',
+      ].join('\n'),
+    );
+    const owners = archFiles(RENDERER).filter((r) =>
+      /'(?:link|daemon):[^']*'/.test(codeOf(archRead(r))),
+    );
+    expect(owners).toContain(rel);
+  });
+
+  it('LEGITIMATE NEAR-MISS: a comment naming an exit, over derived code, is clean', () => {
+    const rel = sc15Plant(
+      `${WIZARD}/__s8_sc15_probe__/Documented.tsx`,
+      [
+        '/**',
+        " * Renders whatever `exitView` hands back. 'link:unreachable' and",
+        " * 'daemon:read-only' look different only in the datum, never here.",
+        ' */',
+        'export const word = (view: { word: string }): string => view.word;',
+        '',
+      ].join('\n'),
+    );
+    expect(/'(?:link|daemon):[^']*'/.test(codeOf(archRead(rel)))).toBe(false);
+    const owners = archFiles(RENDERER).filter((r) =>
+      /'(?:link|daemon):[^']*'/.test(codeOf(archRead(r))),
+    );
+    expect(owners).toEqual([EXITS]);
+  });
+
+  /* ── row 3: readiness is the daemon's word, not the step counter ───── */
+
+  /**
+   * The failure this slice keeps catching, in its final and worst form: a
+   * last screen that says READY because the operator got to it. Five steps
+   * completed is a fact about the operator, not about the product.
+   *
+   * `ready` is a field of `ExitSpec`, exactly one exit carries it, and that
+   * exit is minted only from a `DoctorReportPayload` the daemon returned.
+   * So the sentence "you are ready" is structurally a quotation of the
+   * daemon's `state`, and the row below forbids the wizard from computing
+   * it any other way: nothing under `screens/wizard` may reach the step
+   * list to decide it.
+   */
+  it('exactly one exit is ready, and the finish screen asks no one else', () => {
+    const src = archRead(EXITS);
+    const readies = [...src.matchAll(/ready:\s*true/g)];
+    expect(readies).toHaveLength(1);
+    const spec = /WIZARD_EXIT_SPEC[\s\S]*?\n\};/.exec(src)?.[0] ?? '';
+    const readyBlock = /'daemon:fully-connected'\s*:\s*\{[\s\S]*?\}/.exec(spec);
+    expect(readyBlock?.[0]).toContain('ready: true');
+
+    // `readyToFinish` is the only readiness verb, and it reads the spec.
+    const fn = /export function readyToFinish[\s\S]*?\n\}/.exec(src);
+    expect(fn).not.toBeNull();
+    expect(fn?.[0]).toContain('WIZARD_EXIT_SPEC');
+    expect(fn?.[0]).not.toMatch(/WIZARD_STEPS|stepIndex|length/);
+
+    // Every file that renders the readiness datum derives it from there.
+    for (const rel of archFiles(WIZARD)) {
+      const code = codeOf(archRead(rel));
+      if (!code.includes('data-ready')) continue;
+      expect(code, `${rel} renders data-ready`).toContain('readyToFinish');
+    }
+    expect(callers('readyToFinish(').length).toBeGreaterThan(0);
+  });
+
+  /* ── row 4: onboarding's send is THE send, or it is nothing ────────── */
+
+  /**
+   * INV-2 in the scenario most likely to break it. "Send yourself a test
+   * message" is a proposal for a second send path unless it is the first
+   * one, and the tree already decides which: the desktop's `sendTest` IPC
+   * handler calls `client.send`, which POSTs `/v1/send`, which mints a
+   * `Draft`, mints an `Approval` through `humanApiActor()`, appends both
+   * audit rows and only then calls `dispatchApproved` — the one function
+   * that owns the one `SendBackend.send` call site in the repo.
+   *
+   * So the answer is ROUTED, not refused, and this row states the chain
+   * link by link. The GUI side is pinned too: one call site, in the
+   * wizard's own binding, and no screen may reach the bridge at all.
+   */
+  it('the wizard’s send-test is the daemon’s approve-then-dispatch path', () => {
+    // One caller in the renderer, and it is the wizard's binding.
+    expect(callers('bridge.sendTest(')).toEqual([`${STORE_ROOT}/wizard.ts`]);
+    expect(
+      codeOf(archRead(`${STORE_ROOT}/wizard.ts`)).split('bridge.sendTest('),
+    ).toHaveLength(2);
+    // No screen, wizard included, reaches the bridge itself.
+    for (const rel of archFiles(WIZARD)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+
+    // Main's handler reaches the client and nothing else.
+    const handler = /sendTest:\s*async[\s\S]*?\n {4}\},/.exec(
+      codeOf(archRead(GATEWAY)),
+    );
+    expect(handler).not.toBeNull();
+    expect(handler?.[0]).toContain('.send(');
+    expect(handler?.[0]).not.toMatch(/dispatch|SendBackend|approve/i);
+
+    // The client's `send` is one POST, to the one route.
+    //
+    // Anchored on the member's own indentation and closed on its RESULT
+    // type, because it is a one-expression arrow and not a block: there is
+    // no `\n  },` to close on, and the shape this row first assumed matched
+    // nothing at all. A `null` match is not a failure by itself — it made
+    // `.toContain` throw on `undefined`, which is the only reason it was
+    // caught — so the match is asserted before it is read.
+    const client = codeOf(archRead(CLIENT));
+    const send = /\n {4}send: \(input\)[\s\S]*?as Promise<SendResult>,/.exec(
+      client,
+    );
+    expect(send).not.toBeNull();
+    expect(send?.[0]).toContain("'/v1/send'");
+    expect(send?.[0]).toContain('post(');
+    // And that member is the only place in the client that names the route,
+    // so there is no second spelling of it for a caller to reach.
+    expect(client.match(/'\/v1\/send'/g) ?? []).toHaveLength(1);
+
+    // And that route is the sanctioned path, in full.
+    const route = codeOf(archRead(SEND_ROUTE));
+    for (const needle of [
+      'humanApiActor',
+      'dispatchApproved',
+      "type: 'draft.created'",
+      "type: 'draft.approved'",
+    ])
+      expect(route, `send route names ${needle}`).toContain(needle);
+    // Log before broadcast, both times (§1.8).
+    const appends = [...route.matchAll(/\bappend\b|\bbroadcast\b/g)].map(
+      (m) => m[0],
+    );
+    expect(appends.slice(0, 4)).toEqual([
+      'append',
+      'broadcast',
+      'append',
+      'broadcast',
+    ]);
+  });
+
+  /* ── row 5: main chooses the body, so the renderer cannot ──────────── */
+
+  /**
+   * The IPC guard is only worth writing if it constrains something the
+   * renderer could otherwise choose. A handler that refuses a bad `to` and
+   * accepts any `body` is a general-purpose send with a recipient filter.
+   *
+   * So main mints the code, keeps it, and compares both fields; the arm
+   * channel is one-shot; and the arm channel is NOT named for a send —
+   * `wizardArm`, not `armSend` — because Sc1's `/send/i` sweep over the
+   * store is an equality and an allowlisted second name would dissolve it.
+   */
+  it('the send-test handler pins both the recipient and the body', () => {
+    const gw = codeOf(archRead(GATEWAY));
+    const handler = /sendTest:\s*async[\s\S]*?\n {4}\},/.exec(gw)?.[0] ?? '';
+    expect(handler).toContain('wizard-only');
+    // Both fields, and the code comes from main's own state.
+    expect(handler).toMatch(/\bto\s*!==\s*sendTest/);
+    expect(handler).toMatch(/\bbody\s*!==\s*sendTest/);
+    // One-shot: the armed pair is cleared as the send goes out.
+    expect(handler).toMatch(/sendTestTarget\s*=\s*null/);
+
+    // Arming is an IPC request, not a method on the interface: the dead
+    // `armSendTest` export Sc4 left behind is gone.
+    expect(gw).not.toContain('armSendTest');
+    expect(archRead(CHANNELS)).toContain("wizardArm: 'wm:wizard.arm'");
+    // ...and it is not spelled with a send in it.
+    expect(/send/i.test('wizardArm')).toBe(false);
+
+    // The four-hex code is minted in main, from main's randomness.
+    const arm = /wizardArm:\s*async[\s\S]*?\n {4}\},/.exec(gw)?.[0] ?? '';
+    expect(arm).not.toBe('');
+    expect(arm).toMatch(/randomBytes|randomUUID|getRandomValues/);
+  });
+
+  /* ── row 6: no timer, no listener, no clock ────────────────────────── */
+
+  /**
+   * A wizard wants three timers before breakfast: a spinner, a re-probe
+   * poll and a backoff. It gets none.
+   *
+   * The app owns exactly one `setTimeout`, in `main/gateway.ts`, and
+   * exactly one `addEventListener`, in `main.tsx`, and it listens for
+   * `keydown`. That forecloses the poll (no timer) AND the obvious dodge
+   * (a `focus` or `visibilitychange` listener that re-probes when the
+   * operator comes back from System Settings). What is left is a gesture:
+   * the operator grants in the pane the card opened, returns, and presses
+   * RE-CHECK. The "checking" state is the promise being in flight, which
+   * needs no clock at all.
+   */
+  it('the wizard mints no timer, no listener and reads no clock', () => {
+    const roots = [...archFiles(WIZARD), `${STORE_ROOT}/wizard.ts`, EXITS];
+    for (const rel of roots) {
+      const code = codeOf(archRead(rel));
+      for (const banned of [
+        'setTimeout(',
+        'setInterval(',
+        'requestAnimationFrame(',
+        'requestIdleCallback(',
+      ])
+        expect(code.includes(banned), `${rel} names ${banned}`).toBe(false);
+      expect(
+        /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(/.test(code),
+        `${rel} reads the clock`,
+      ).toBe(false);
+      expect(/addEventListener\s*\(/.test(code), `${rel} adds a listener`).toBe(
+        false,
+      );
+    }
+    // Still exactly one timer and one listener, app-wide.
+    const timers = archFiles('apps/desktop/src').filter((rel) =>
+      /\bset(?:Timeout|Interval)\s*\(/.test(codeOf(archRead(rel))),
+    );
+    expect(timers).toEqual([GATEWAY]);
+    const listeners = archFiles(RENDERER).filter((rel) =>
+      /addEventListener\s*\(/.test(codeOf(archRead(rel))),
+    );
+    expect(listeners).toEqual([`${RENDERER}/main.tsx`]);
+    // Non-vacuous: the in-flight state exists and is a datum.
+    expect(
+      archFiles(WIZARD).some((rel) => archRead(rel).includes('data-probing')),
+    ).toBe(true);
+  });
+
+  /* ── row 7: the wizard is not a dialog and is not a screen ─────────── */
+
+  /**
+   * A wizard is the most dialog-shaped thing in the app, and it is not one.
+   * It replaces the surface exactly as `#daemon-not-found` already did, so
+   * `role="dialog"` stays in `components/TypedConfirm.tsx` — one focus trap
+   * and one Escape handler in the whole renderer.
+   *
+   * It is not in the ⌘-digit table either, and cannot be: `SCREENS`,
+   * `MOUNTED` and the keymap are total over `Screen` in both directions,
+   * and a seventh entry would put the wizard in the sidebar, give it a
+   * stroke that must not collide, and add a second tab stop to the surface
+   * whose one-tab-stop claim Sc8's checkpoint rests on. It is reached by
+   * the link going down, or by a button on the Permissions pane, and it is
+   * left by finishing or skipping — a mode, not a destination.
+   */
+  it('the wizard owns no dialog, claims no stroke and is no screen', () => {
+    const withCode = (re: RegExp): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => re.test(codeOf(archRead(rel))))
+        .sort();
+    expect(withCode(/role="dialog"/)).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withCode(/role="alertdialog"/)).toEqual([]);
+    expect(withCode(/<textarea\b/)).toEqual([
+      `${RENDERER}/components/Editor.tsx`,
+    ]);
+    expect(withCode(/<a\s[^>]*\bhref\b/)).toEqual([]);
+
+    const router = archRead(`${RENDERER}/router.ts`);
+    const screens = quotedArray(router, 'SCREENS');
+    const steps = quotedArray(router, 'WIZARD_STEPS');
+    expect(screens).not.toContain('wizard');
+    for (const step of steps) expect(screens, step).not.toContain(step);
+    const keys = archRead(`${RENDERER}/keys/screens.ts`);
+    expect(keys).not.toContain('wizard');
+    for (const step of steps) expect(keys, step).not.toContain(`'${step}'`);
+    const mounted = /MOUNTED[^=]*=\s*new Set<Screen>\(\[([^\]]*)\]/.exec(
+      codeOf(archRead(`${RENDERER}/main.tsx`)),
+    );
+    expect(
+      [...(mounted?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort(),
+    ).toEqual([...screens].sort());
+  });
+
+  /* ── row 8: controls in the wizard, still none in the queue ────────── */
+
+  it('the wizard has real controls; the queue still has none', () => {
+    const controls = (root: string): string[] => {
+      const out: string[] = [];
+      for (const rel of archFiles(root)) {
+        const code = codeOf(archRead(rel));
+        for (const [name, re] of [
+          ['<button', /<button\b/],
+          ['<a href', /<a\s[^>]*\bhref\b/],
+          ['<input', /<input\b/],
+          ['tabIndex', /\btabIndex\s*=/],
+        ] as const)
+          if (re.test(code)) out.push(`${rel}: ${name}`);
+      }
+      return out.sort();
+    };
+    const wiz = controls(WIZARD);
+    expect(wiz.some((c) => c.endsWith(': <button'))).toBe(true);
+    expect(wiz.some((c) => c.endsWith(': <input'))).toBe(true);
+    expect(wiz.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(wiz.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    expect(controls(QUEUE)).toEqual([]);
+  });
+
+  /* ── row 9: it opens a pane by name, and navigates nowhere ─────────── */
+
+  /**
+   * macOS TCC is not grantable through any API. The wizard's remedy is
+   * therefore instructions plus an offer to open the pane, and the offer
+   * goes through main's closed allowlist keyed by a NAME — never a URL,
+   * never a navigation, never `shell` from the renderer.
+   *
+   * The pane names the wizard can ask for are `CARD_PANE`'s values, which
+   * is Sc14's map, which is the vocabulary this scenario was told not to
+   * mint a second copy of.
+   */
+  it('the only escape hatch is a pane name main already allows', () => {
+    const panes = Object.keys(
+      Object.fromEntries(
+        [
+          ...(
+            /SYSTEM_SETTINGS_PANES[^=]*=\s*\{([\s\S]*?)\n\}/.exec(
+              archRead(POLICY),
+            )?.[1] ?? ''
+          ).matchAll(/^\s*([A-Za-z]+)\s*:/gm),
+        ].map((m) => [m[1] as string, true]),
+      ),
+    ).sort();
+    expect(panes).toEqual([
+      'accessibility',
+      'automation',
+      'fullDisk',
+      'notifications',
+    ]);
+    const cardPane = archRead(`${RENDERER}/derive/permissionCards.ts`);
+    const offered = [
+      ...(
+        /CARD_PANE[^=]*=\s*\{([\s\S]*?)\n\}/.exec(cardPane)?.[1] ?? ''
+      ).matchAll(/:\s*'([^']+)'/g),
+    ].map((m) => m[1] as string);
+    expect(offered.length).toBeGreaterThan(0);
+    for (const p of offered) expect(panes, p).toContain(p);
+
+    for (const rel of [...archFiles(WIZARD), `${STORE_ROOT}/wizard.ts`]) {
+      const code = codeOf(archRead(rel));
+      for (const banned of [
+        'x-apple.systempreferences',
+        'shell.',
+        'window.open',
+        'location.href',
+        'http://',
+        'https://',
+      ])
+        expect(code.includes(banned), `${rel} names ${banned}`).toBe(false);
+    }
+  });
+
+  /* ── row 10: nothing about the wizard survives the wizard ──────────── */
+
+  /**
+   * Abandonment is an exit state. Quitting halfway and reopening must not
+   * resume into a step whose premise has since changed — the operator may
+   * have granted the permission, or revoked it, or moved the daemon.
+   *
+   * The decision is RESTART, and it is enforced by having nowhere to
+   * resume from: the wizard's step lives in renderer memory, the binding
+   * declares no persistence channel, and no file in the flow reaches
+   * `localStorage`, `sessionStorage`, `indexedDB` or `settingsWrite`. A
+   * wizard that wrote its progress into the daemon's settings table would
+   * be a wizard that changed the product's behaviour by being opened.
+   */
+  it('the wizard persists nothing, anywhere', () => {
+    for (const rel of [
+      ...archFiles(WIZARD),
+      `${STORE_ROOT}/wizard.ts`,
+      EXITS,
+    ]) {
+      const code = codeOf(archRead(rel));
+      for (const banned of [
+        'localStorage',
+        'sessionStorage',
+        'indexedDB',
+        'settingsWrite',
+        'writeFileSync',
+        'app.getPath',
+      ])
+        expect(code.includes(banned), `${rel} names ${banned}`).toBe(false);
+    }
+    // Non-vacuous: the channel it is forbidden to reach is a real one that
+    // another binding really does own.
+    expect(archRead(CHANNELS)).toContain("settingsWrite: '");
+    expect(
+      codeOf(archRead(`${STORE_ROOT}/settings.ts`)).includes(
+        'bridge.settingsWrite(',
+      ),
+    ).toBe(true);
+  });
+
+  /* ── row 11: the flow is total over the steps, in the type ─────────── */
+
+  /**
+   * The same shape Sc14 used for the settings list: a compile-time total
+   * `Readonly<Record<K, …>>` over a union somebody else owns, so a sixth
+   * `WizardStep` is a type error rather than a step that renders blank.
+   */
+  it('every step has a title and a check list, by type', () => {
+    const src = archRead(EXITS);
+    const steps = quotedArray(
+      archRead(`${RENDERER}/router.ts`),
+      'WIZARD_STEPS',
+    );
+    expect(steps).toHaveLength(5);
+    for (const record of ['STEP_TITLE', 'STEP_CHECKS']) {
+      expect(src, record).toMatch(
+        new RegExp(`${record}\\s*:\\s*Readonly<\\s*Record<\\s*WizardStep`),
+      );
+      const block =
+        new RegExp(`${record}[^=]*=\\s*\\{([\\s\\S]*?)\\n\\};`).exec(
+          src,
+        )?.[1] ?? '';
+      // Key POSITION, not merely presence, and quoted-or-not. `prettier`
+      // runs `quoteProps: "as-needed"` and strips the quotes from
+      // `welcome` while leaving them on `full-disk`, so a row that demanded
+      // the quoted spelling would be a row about the formatter. Anchoring
+      // to the colon is the stronger claim anyway: the step has to be a
+      // KEY of the record, not a word somewhere in a value.
+      for (const step of steps)
+        expect(block, `${record} covers ${step}`).toMatch(
+          new RegExp(`(?:^|[\\s{,])'?${step}'?\\s*:`),
+        );
+    }
+    expect(src).toMatch(
+      /WIZARD_EXIT_SPEC\s*:\s*Readonly<\s*Record<\s*WizardExit/,
+    );
+    // The runtime list is derived, never written down twice.
+    expect(src).toMatch(
+      /WIZARD_EXITS[^=]*=\s*Object\.keys\(\s*WIZARD_EXIT_SPEC/,
+    );
+  });
+
+  /* ── row 12: the public-repo sweep, over the new surface ───────────── */
+
+  /**
+   * A wizard is example paths and example handles from top to bottom, and
+   * this repo is public. The global sweep already runs; this row states it
+   * as a Sc15 claim over exactly the files this scenario adds, plus the
+   * `/Users/` count that has been three since S6 and is three now.
+   */
+  it('nothing the wizard shows an operator identifies one', () => {
+    expect(publicRepoOffenders()).toEqual([]);
+    const mine = [
+      ...archFiles(WIZARD),
+      `${STORE_ROOT}/wizard.ts`,
+      EXITS,
+      'apps/desktop/test/e2e/onboarding.e2e.spec.ts',
+      'apps/desktop/test/unit/wizard-exits.spec.ts',
+    ];
+    for (const rel of mine) {
+      const raw = archRead(rel);
+      expect(raw.includes('/Users/'), `${rel} names a home path`).toBe(false);
+      for (const phone of raw.match(/\+1\d{10}/g) ?? [])
+        expect(phone.startsWith('+1555'), `${rel}: ${phone}`).toBe(true);
+      for (const host of raw.match(/@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [])
+        expect(host.endsWith('example.com'), `${rel}: ${host}`).toBe(true);
+    }
+    // Three homes, and NAMING them beats counting them: a fourth fails on
+    // the list and says which file it was, where an integer would only say
+    // the number moved.
+    //
+    // Two of the three are here, because `trackedTextFiles()` deliberately
+    // excludes `test/arch.spec.ts` — the guard file is the third home, and
+    // it has to be able to spell the shape it hunts for. Asserting "three"
+    // over a list that structurally cannot contain the third was this
+    // scenario's own row being wrong rather than the tree.
+    const homes = trackedTextFiles().filter((rel) =>
+      readFileSync(join(repoRoot, rel), 'utf8').includes('/Users/'),
+    );
+    expect(homes.sort()).toEqual([
+      'packages/adapter-testkit/test/pack.spec.ts',
+      'packages/cli/test/skill-dryrun.spec.ts',
+    ]);
+    expect(readFileSync(join(repoRoot, 'test/arch.spec.ts'), 'utf8')).toContain(
+      '/Users/',
+    );
   });
 });

@@ -27,6 +27,17 @@ body {
   transition: background var(--dur-base) ease;
 }
 
+/* OPAQUE, unlike every other chrome surface in this app, and s8 Sc15's
+ * checkpoint is what forced it. The strip is the one element that says
+ * whether the product is connected; a translucent chip whose contrast
+ * depends on whatever is behind the window is a status indicator that can
+ * become unreadable without anything having gone wrong. axe measured
+ * `#state-strip-label` (--tint) at 2.4:1 and `#state-strip-arming`
+ * (--ink-dim) at 3.0:1 against the canvas it has to assume when the whole
+ * ancestor stack is translucent. Over `--layer-0` the same two are 4.7:1
+ * and 5.8:1, and --danger and --warn — the two colours it wears when
+ * something IS wrong — are 5.0:1 and 8.3:1. The window keeps its vibrancy;
+ * the one line that reports on the daemon stops betting on it. */
 #state-strip {
   display: flex;
   gap: 12px;
@@ -34,7 +45,7 @@ body {
   padding: 8px 12px;
   border: 1px solid var(--stroke);
   border-radius: 10px;
-  background: var(--layer-2);
+  background: var(--layer-0);
 }
 
 #state-strip-label {
@@ -67,7 +78,7 @@ body {
   background: var(--layer-0);
 }
 
-#daemon-not-found h1 {
+#daemon-not-found h2 {
   margin: 0 0 8px;
   font-size: 17px;
 }
@@ -2665,4 +2676,322 @@ button.people-handle {
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--ink-dim);
+}
+
+/* ── the setup flow (s8 Sc15) ───────────────────────────────────────────
+ *
+ * An OPAQUE panel, deliberately. Everything else in this app sits on a
+ * translucent layer over the window's vibrancy, which is correct for a
+ * surface an operator is glancing at all day and wrong for the one surface
+ * they read while deciding whether anything works. A contrast checker
+ * walking this subtree has a real colour to measure against rather than an
+ * unknowable blend, and the dim ink that carries the instructional copy
+ * clears 4.5:1 against it instead of being unmeasurable.
+ *
+ * Three colours and no green: blue for the pointer, amber for a warning,
+ * red for a refusal. None of the three carries a state on its own — every
+ * one of them sits beside a glyph and an uppercase word, and the same fact
+ * is on the element as a datum.
+ */
+
+#wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 12px;
+  background: var(--layer-0);
+}
+
+#wizard-progress {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.wiz-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.wiz-button {
+  padding: 5px 11px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+/* Refused, and said so twice: the border loses its pointer colour AND the
+ * control announces `aria-disabled` to anything reading the tree. The ink
+ * stays full strength, because a refusal an operator cannot read is a
+ * refusal they will keep pressing. */
+.wiz-button[aria-disabled='true'] {
+  border-color: var(--stroke);
+  color: var(--ink-dim);
+}
+
+#wizard-exit {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-0);
+}
+
+.wiz-exit-glyph {
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+#wizard-exit[data-state='FAIL'] .wiz-exit-glyph {
+  color: var(--danger);
+}
+
+#wizard-exit[data-state='WARN'] .wiz-exit-glyph {
+  color: var(--warn);
+}
+
+#wizard-exit[data-state='OK'] .wiz-exit-glyph {
+  color: var(--tint);
+}
+
+.wiz-exit-word {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+
+.wiz-exit-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.wiz-exit-detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  max-width: 68ch;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+  color: var(--ink-dim);
+}
+
+#wizard-verdict {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.wiz-verdict-glyph {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+#wizard-verdict[data-state='FAIL'] .wiz-verdict-glyph {
+  color: var(--danger);
+}
+
+#wizard-verdict[data-state='WARN'] .wiz-verdict-glyph {
+  color: var(--warn);
+}
+
+#wizard-verdict[data-state='OK'] .wiz-verdict-glyph {
+  color: var(--tint);
+}
+
+.wiz-verdict-word,
+.wiz-verdict-note {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+
+.wiz-verdict-note {
+  color: var(--ink-dim);
+}
+
+.wiz-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wiz-card {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--layer-0);
+}
+
+.wiz-card-glyph {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.wiz-card[data-state='FAIL'] .wiz-card-glyph {
+  color: var(--danger);
+}
+
+.wiz-card[data-state='WARN'] .wiz-card-glyph {
+  color: var(--warn);
+}
+
+.wiz-card[data-state='OK'] .wiz-card-glyph {
+  color: var(--tint);
+}
+
+.wiz-card-word,
+.wiz-card-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.wiz-card-detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  color: var(--ink-dim);
+}
+
+.wiz-card-pane {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 4px 9px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+.wiz-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wiz-para {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.wiz-test {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-0);
+}
+
+.wiz-input {
+  padding: 4px 8px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+}
+
+.wiz-receipt {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.wiz-receipt-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+
+/* The four characters the operator is about to compare against a phone.
+ * Large, monospaced and unstyled by state, because it is a quotation of
+ * something main minted and not a status of any kind. */
+.wiz-code {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  color: var(--ink);
+}
+
+#wizard-send-state {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.wiz-send-glyph {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+#wizard-send-state[data-state='FAIL'] .wiz-send-glyph {
+  color: var(--danger);
+}
+
+#wizard-send-state[data-state='OK'] .wiz-send-glyph {
+  color: var(--tint);
+}
+
+.wiz-send-word {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+
+/* The daemon's own words, uppercased and never reworded, and NOT attached
+ * to a field: a complaint pinned to the wrong box is worse than one pinned
+ * to none. */
+.wiz-failure {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  color: var(--danger);
 }

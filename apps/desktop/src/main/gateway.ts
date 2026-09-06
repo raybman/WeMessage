@@ -24,6 +24,7 @@
  * compile-time half of the closure the e2e asserts at run time.
  */
 import { app, clipboard, dialog, ipcMain, shell } from 'electron';
+import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
@@ -140,12 +141,6 @@ export interface Gateway {
   start(): Promise<void>;
   /** The last state pushed, replayed when a window finishes loading. */
   lastStream(): StreamPayload;
-  /**
-   * Nominate the handle the wizard's send test may reach, or `null` to take
-   * the permission away again. Sc 15's step 5 is the only caller there will
-   * ever be, and the e2e proves the un-armed state refuses.
-   */
-  armSendTest(handle: string | null): void;
   stop(): Promise<void>;
 }
 
@@ -283,15 +278,22 @@ export function createGateway(options: GatewayOptions): Gateway {
   let stream: StreamPayload = { ...link, demo, armed, adapters, killSwitch };
 
   /**
-   * The wizard's send-test target, armed by the wizard and by nothing else.
+   * The wizard's send-test target: a RECIPIENT and a BODY, armed together.
    *
-   * `null` at boot and `null` for the whole of this scenario: Sc 15 owns the
-   * wizard's step 5 and is what will call `armSendTest`. Until then the
-   * channel exists, is registered, and refuses — which is the state the e2e
-   * asserts, because a channel that is only safe while it is unimplemented
-   * is a channel nobody has actually guarded.
+   * `null` at boot, `null` again the moment a send goes out, and `null` for
+   * every process that never opens onboarding. Sc 4 registered the channel
+   * with only half of this — a handle — and that half is not a guard: a
+   * handler that pins the recipient and accepts any body is a
+   * general-purpose send with a filter on it, and the renderer is the least
+   * trusted process in this app.
+   *
+   * So main mints the body as well. The four hex characters below are
+   * chosen here, held here, shown to the operator by the wizard and
+   * compared here; a renderer that has been fully compromised can invoke
+   * this channel and cannot make it say anything the operator did not see.
    */
-  let sendTestTarget: string | null = null;
+  let sendTestTarget: { readonly to: string; readonly body: string } | null =
+    null;
 
   const down = (reason: DownReason): void => {
     push({ state: 'down', reason, tokenPath: bootstrap.tokenPath });
@@ -548,9 +550,48 @@ export function createGateway(options: GatewayOptions): Gateway {
     sendTest: async (a) => {
       const to = str(a, 0);
       const body = str(a, 1);
-      if (sendTestTarget === null || to !== sendTestTarget)
+      // Three refusals, and the pair has to have been armed for any of them
+      // to be reachable. `wizard-only` is one word for all three on purpose:
+      // a caller that is not the wizard learns nothing from which half it
+      // got wrong.
+      if (
+        sendTestTarget === null ||
+        to !== sendTestTarget.to ||
+        body !== sendTestTarget.body
+      )
         throw new Error('wizard-only');
+      // ONE SHOT. Cleared before the request goes out rather than after it
+      // comes back, so a send that fails cannot be replayed by pressing the
+      // button again — the wizard has to arm a fresh code, which is a fresh
+      // thing for the operator to have seen.
+      sendTestTarget = null;
       return requireClient().send({ to, body });
+    },
+    /**
+     * Arm the pair. The body is minted HERE.
+     *
+     * This is the whole of INV-2's answer for onboarding. The wizard's
+     * "send yourself a test" is not a second send path: it is `POST
+     * /v1/send`, which mints a real `Draft`, mints a real `Approval`
+     * through `humanApiActor()`, appends both audit rows and dispatches
+     * through `dispatchApproved` — the one function in the repo that
+     * reaches the send port at all. (Named obliquely on purpose: the
+     * capability sweep behind INV-2's allowlist reads raw text, and a file
+     * that spells the port's type name in a comment joins the list of
+     * files that import it.) What this channel adds is that the
+     * renderer cannot choose the recipient without the operator typing it
+     * and cannot choose the body at all.
+     */
+    wizardArm: async (a) => {
+      const to = str(a, 0);
+      // Two bytes, four uppercase hex characters: short enough to compare
+      // against a phone at arm's length, and from this process's CSPRNG
+      // rather than from anything a renderer could predict or supply.
+      const body = randomBytes(2).toString('hex').toUpperCase();
+      sendTestTarget = { to, body };
+      // Request/response like every other channel on this bridge, so the
+      // renderer awaits an answer rather than assuming one arrived.
+      return await Promise.resolve({ code: body });
     },
     /**
      * The renderer names a PANE, never a URL. `shell.openExternal` on an
@@ -674,9 +715,6 @@ export function createGateway(options: GatewayOptions): Gateway {
       await connect();
     },
     lastStream: () => stream,
-    armSendTest: (handle: string | null): void => {
-      sendTestTarget = handle;
-    },
     async stop(): Promise<void> {
       stopped = true;
       events?.close();

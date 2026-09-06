@@ -256,8 +256,13 @@ function adaptersOf(answer: unknown): readonly AdapterPayload[] {
  * the normal case and not a reason to reject the report. What IS rejected is
  * an answer with no array at all: the pane would then have nothing to be
  * total over, and four cards derived from nothing must read NOT CHECKED.
+ *
+ * Exported since s8 Sc15 because the wizard needs the SAME narrowing. Two
+ * screens that each decided for themselves what counts as a readable doctor
+ * report would be two definitions of "not checked", and the whole of Sc15 is
+ * the claim that there is one.
  */
-function reportOf(answer: unknown): DoctorReportPayload | null {
+export function reportOf(answer: unknown): DoctorReportPayload | null {
   const record = asRecord(answer);
   if (record === null) return null;
   if (typeof record['state'] !== 'string') return null;

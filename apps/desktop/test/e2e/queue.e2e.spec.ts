@@ -212,7 +212,7 @@ function readList(app: LaunchedApp): Promise<ListView> {
         hint: maybe(el, '.card-hint'),
         keys: maybe(el, '.card-keys'),
         turns: [...el.querySelectorAll('.turn')].map((t) => text(t)),
-        expanded: el.getAttribute('aria-expanded') ?? '',
+        expanded: el.getAttribute('data-expanded') ?? '',
         active: el.getAttribute('data-active') ?? '',
         selected: el.getAttribute('aria-selected') ?? '',
         label: el.getAttribute('aria-label') ?? '',
@@ -575,7 +575,7 @@ describe('s8 Sc6 row 5: SPACE opens three turns of context', () => {
     expect((await readList(app)).cards[0]?.turns).toEqual([]);
     await press(app, 'Space');
     await app.page.waitForSelector(
-      `[data-draft="${draft.id}"][aria-expanded="true"]`,
+      `[data-draft="${draft.id}"][data-expanded="true"]`,
       { timeout: 15_000 },
     );
     const open = await readList(app);
@@ -588,7 +588,7 @@ describe('s8 Sc6 row 5: SPACE opens three turns of context', () => {
     ]);
     await press(app, 'Space');
     await app.page.waitForSelector(
-      `[data-draft="${draft.id}"][aria-expanded="false"]`,
+      `[data-draft="${draft.id}"][data-expanded="false"]`,
       { timeout: 15_000 },
     );
     expect((await readList(app)).cards[0]?.turns).toEqual([]);

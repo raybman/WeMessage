@@ -51,6 +51,9 @@ importers:
       '@preact/preset-vite':
         specifier: ^2.10.6
         version: 2.10.6(@babel/core@7.29.7)(preact@10.29.8)(rollup@4.63.1)(vite@7.3.6(@types/node@24.13.3))
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
       axe-core:
         specifier: ^4.13.0
         version: 4.13.0
@@ -860,6 +863,9 @@ packages:
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
+
+  '@types/pngjs@6.0.5':
+    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -2821,6 +2827,10 @@ snapshots:
   '@types/node@24.13.3':
     dependencies:
       undici-types: 7.18.2
+
+  '@types/pngjs@6.0.5':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/ws@8.18.1':
     dependencies:

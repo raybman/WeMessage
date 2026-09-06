@@ -1,22 +1,50 @@
 name: ci-macos
 
-# STUB (§1.8). macOS smoke (doctor/send, live chat.db) lands in S3. Every S1 test is
-# Linux-fixture-driven by design, so there is nothing macOS-specific to gate in S1.
+# S8 Sc17 (§1.8, §4.0). The desktop app is a macOS app: it reads `chat.db`,
+# it asks for a vibrancy the platform provides, and Reduce Transparency is a
+# macOS system setting. Running its suite only on Linux under a synthetic
+# display tests a compositor nobody ships on. This lane runs the SAME gate on
+# a real macOS runner, and `arch.spec.ts` asserts step-for-step that it is the
+# same gate rather than a smaller one.
+#
+# What this lane deliberately does NOT do: sign, notarize, staple, or produce
+# a distributable. There is no Apple Developer ID and no notarization
+# credential for this project, the repo is public, and a step that pretended
+# to sign would either need a secret this repo must not carry or would be a
+# green tick attached to nothing. Packaging arrives with the credential, not
+# before it.
 on:
-  workflow_dispatch:
+  push:
+    branches: ['**']
+  pull_request:
 
 jobs:
-  smoke:
-    runs-on: macos-latest
+  build-and-test:
+    runs-on: macos-15
+    # Same reason as ci-linux: electron's postinstall IS the binary download.
+    # The cache key carries `runner.os`, so the macOS binary and the Linux one
+    # do not evict each other.
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
     steps:
-      - run: echo "macOS smoke lands in S3 (doctor/send) per plan §4.0"
-
-# Eventual matrix (§2.7 Compat, §4.0), commented out until S3:
-#   strategy:
-#     matrix:
-#       os: [macos-14, macos-15]
-#   steps:
-#     - uses: actions/checkout@v4
-#     - # ... pnpm install + build
-#     - # live chat.db read-only smoke: pragma table_info drift check (Scenario 6 [macOS smoke])
-#     - # sendkit availability probe + post-send verification (S3)
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-44.2.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm dep:check
+      - run: pnpm licenses:check
+      # No xvfb: macOS runners have a window server, so the Electron window
+      # opens for real. This is the ONE step that runs the suite, so nothing
+      # is excluded from it: an excluded file is an untested file.
+      - run: pnpm test

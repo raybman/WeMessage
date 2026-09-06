@@ -225,7 +225,16 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
         // when open would make "is this expandable" and "is this expanded"
         // the same question, and the e2e waits on the `false` spelling to
         // prove a collapse really happened.
-        'aria-expanded': expanded ? 'true' : 'false',
+        //
+        // `data-`, not `aria-`, and s8 Sc17 is why. ARIA 1.2 does not allow
+        // `aria-expanded` on `role="option"`, so Chromium drops it from the
+        // computed accessibility tree: the markup said "expanded" and the
+        // tree a screen reader reads said nothing at all, twenty times over.
+        // axe calls that `aria-allowed-attr`, critical. The state a reader
+        // needs is already carried by the card's own text, and the attribute
+        // that remains is what the e2e waits on — a test hook, spelled like
+        // one, rather than an ARIA promise the platform refuses to keep.
+        'data-expanded': expanded ? 'true' : 'false',
       },
       body: (
         <Card

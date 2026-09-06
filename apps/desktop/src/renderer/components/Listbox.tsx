@@ -45,7 +45,7 @@ export interface ListboxOption {
   readonly active: boolean;
   /** What assistive technology is handed, in words rather than glyphs. */
   readonly label: string;
-  /** `data-*` and `aria-expanded`, decided by the screen that owns the row. */
+  /** `data-*` attributes, decided by the screen that owns the row. */
   readonly attrs: Readonly<Record<string, string>>;
   readonly body: VNode;
 }

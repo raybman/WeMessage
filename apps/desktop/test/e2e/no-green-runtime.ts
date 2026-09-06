@@ -14,7 +14,16 @@
  * inside `page.evaluate` would be a fourth definition of "green".
  *
  * Sc 4 uses it on the empty shell. Sc 17 widens the callers to every screen
- * x theme x variant; this file is the mechanism, not the coverage.
+ * x theme x variant, and widened the mechanism too: this file used to read
+ * fifteen NAMED properties, and a named list is a list a colour can be set
+ * outside of. Chromium resolves 494 longhands per element on this app, and
+ * the fifteen missed `-webkit-text-fill-color`, `-webkit-text-stroke-color`,
+ * `-webkit-tap-highlight-color`, `text-emphasis-color`, `flood-color`,
+ * `lighting-color`, every `border-block-*`/`border-inline-*` logical alias,
+ * and — the largest hole — every CUSTOM PROPERTY, so a green declared in
+ * the token sheet and not yet used by anything was invisible to the sweep
+ * that exists to find greens in the token sheet. The census now iterates
+ * the `CSSStyleDeclaration` itself, so there is no list to fall off.
  */
 import type { Page } from 'playwright-core';
 import {
@@ -22,34 +31,25 @@ import {
   greenVerdict,
 } from '../../../../packages/cli/test/helpers/transcript-lint.js';
 
-/** The computed properties that can carry a colour. */
-const COLOUR_PROPERTIES: readonly string[] = [
-  'color',
-  'background-color',
-  'background-image',
-  'border-top-color',
-  'border-right-color',
-  'border-bottom-color',
-  'border-left-color',
-  'outline-color',
-  'text-decoration-color',
-  'column-rule-color',
-  'caret-color',
-  'box-shadow',
-  'fill',
-  'stroke',
-  'stop-color',
-];
-
 export interface ResolvedColour {
   readonly path: string;
   readonly property: string;
   readonly value: string;
 }
 
-/** Every resolved colour-bearing declaration in the loaded document. */
+/**
+ * Every resolved colour-bearing declaration in the loaded document.
+ *
+ * The only filter is on the VALUE, never on the property name: a value is
+ * kept when it contains a `#` or a `(`, which is exactly the set of forms
+ * `colourLiterals` can parse with `namedInContext: false` (hex of any
+ * length, and any functional notation — `rgb`, `rgba`, `hsl`, `oklch`,
+ * `color(display-p3 …)`). Filtering there rather than on the name is what
+ * makes the sweep total: it cannot miss a property because nobody thought
+ * of it, and it drops only values no judge would have had an opinion about.
+ */
 export async function resolvedColours(page: Page): Promise<ResolvedColour[]> {
-  return page.evaluate((properties: readonly string[]) => {
+  return page.evaluate(() => {
     const describe = (el: Element): string => {
       const parts: string[] = [];
       for (let n: Element | null = el; n !== null; n = n.parentElement) {
@@ -60,21 +60,19 @@ export async function resolvedColours(page: Page): Promise<ResolvedColour[]> {
     };
     const out: { path: string; property: string; value: string }[] = [];
     for (const el of Array.from(document.querySelectorAll('*'))) {
+      const path = describe(el);
       for (const pseudo of [null, '::before', '::after']) {
         const style = window.getComputedStyle(el, pseudo);
-        for (const property of properties) {
+        for (let i = 0; i < style.length; i += 1) {
+          const property = style.item(i);
           const value = style.getPropertyValue(property);
-          if (value === '' || value === 'none') continue;
-          out.push({
-            path: `${describe(el)}${pseudo ?? ''}`,
-            property,
-            value,
-          });
+          if (!value.includes('#') && !value.includes('(')) continue;
+          out.push({ path: `${path}${pseudo ?? ''}`, property, value });
         }
       }
     }
     return out;
-  }, COLOUR_PROPERTIES);
+  });
 }
 
 /**

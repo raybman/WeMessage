@@ -44,11 +44,32 @@ const SOURCE = readFileSync(
   'utf8',
 );
 
-/** One failing rule, flattened to the two facts a failure message needs. */
+/**
+ * One `color-contrast` node's arithmetic, as axe itself computed it.
+ *
+ * Added in Sc17. A selector alone names WHERE a contrast failure is and
+ * says nothing about WHAT is wrong, so a sweep over the whole product
+ * reports the same root cause a thousand times and a reader has to
+ * reproduce every one by hand. These four numbers collapse a thousand
+ * nodes to the handful of token pairs that actually failed, and they are
+ * the browser's RESOLVED colours rather than the values the stylesheet
+ * declared — which is the only version of the question worth asking, since
+ * a translucent layer resolves to something no author ever typed.
+ */
+export interface ContrastFact {
+  readonly fg: string;
+  readonly bg: string;
+  readonly ratio: number;
+  readonly required: number;
+}
+
+/** One failing rule, flattened to the facts a failure message needs. */
 export interface AxeFinding {
   readonly id: string;
   readonly impact: string;
   readonly nodes: readonly string[];
+  /** Empty for every rule but `color-contrast`. */
+  readonly contrast: readonly ContrastFact[];
 }
 
 /**
@@ -69,7 +90,17 @@ export async function axeFindings(page: Page): Promise<AxeFinding[]> {
             violations: {
               id: string;
               impact: string | null;
-              nodes: { target: unknown[] }[];
+              nodes: {
+                target: unknown[];
+                any?: {
+                  data?: {
+                    fgColor?: string;
+                    bgColor?: string;
+                    contrastRatio?: number;
+                    expectedContrastRatio?: string;
+                  };
+                }[];
+              }[];
             }[];
           }>;
         };
@@ -82,6 +113,24 @@ export async function axeFindings(page: Page): Promise<AxeFinding[]> {
         id: v.id,
         impact: v.impact ?? 'unknown',
         nodes: v.nodes.map((n) => n.target.map((t) => String(t)).join(' ')),
+        contrast: v.nodes.flatMap((n) =>
+          (n.any ?? []).flatMap((c) =>
+            c.data?.fgColor !== undefined &&
+            c.data.bgColor !== undefined &&
+            c.data.contrastRatio !== undefined
+              ? [
+                  {
+                    fg: c.data.fgColor,
+                    bg: c.data.bgColor,
+                    ratio: c.data.contrastRatio,
+                    required: Number.parseFloat(
+                      c.data.expectedContrastRatio ?? '0',
+                    ),
+                  },
+                ]
+              : [],
+          ),
+        ),
       }));
   });
 }

@@ -30,12 +30,23 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // the plan does not ratify.
 import { ESLint } from 'eslint';
 import {
+  // s8 Sc17 row 8: the slice's closing claim is that a GUI-era slice added
+  // no transport, and the ratchet snapshot is where that is already written
+  // down. Reading it here rather than restating it is the difference between
+  // a meta row and a second list to keep in step.
+  EMITTED_WS_EVENTS,
   PORT_IMPORTER_ALLOWLIST,
   // s7 Sc12: a public document may only name a route that exists. The
   // ratchet snapshot is already the arbiter of the route surface, so the
   // documentation sweep asks it rather than growing a second list.
   ROUTE_TABLE,
+  UNEMITTED_WS_EVENTS,
+  WS_EVENT_VOCABULARY,
 } from '../packages/daemon/test/transport-surface.snapshot.js';
+import {
+  FRAME_SPECS,
+  GATEWAY_EVENT_NAMES,
+} from '../packages/protocol/src/index.js';
 // s7 Sc11: the public-repo predicates now have ONE home, shared with the
 // transcript linter. Precedent for a root spec importing a package's test
 // helper is the line above, which has done exactly this since s5.
@@ -3380,6 +3391,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       ]);
       expect(Object.keys(pkg().devDependencies ?? {}).sort()).toEqual([
         '@preact/preset-vite',
+        '@types/pngjs',
         'axe-core',
         'electron',
         'pixelmatch',
@@ -3403,7 +3415,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         ...Object.keys(p.dependencies ?? {}),
         ...Object.keys(p.devDependencies ?? {}),
       ];
-      expect(names.length).toBe(10);
+      expect(names.length).toBe(11);
       expect(
         names.filter(
           (n) =>
@@ -3563,22 +3575,35 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         .split('\n')
         .filter((f) => f.length > 0)
         .sort();
-    /** The two reference rasters Sc 17 will commit, and nothing else. */
-    const SNAPSHOT_PNGS: readonly string[] = [
-      'apps/desktop/test/__snapshots__/rt-dark.png',
-      'apps/desktop/test/__snapshots__/rt-light.png',
-    ];
+    /**
+     * Empty, and empty is the Sc 17 answer.
+     *
+     * Sc 1 wrote this list expecting Sc 17 to commit two reduced-transparency
+     * reference PNGs and then tighten the subset below into an equality. Sc 17
+     * committed none, for three reasons that all point the same way. A golden
+     * PNG of a real window is a machine-dependent artefact — this window is
+     * translucent over a macOS material, and what sits behind it is not in the
+     * page. It is also a SNAPSHOT, and the mutation discipline says a teeth
+     * mutation must fail a structural row rather than a picture, so a golden
+     * would be an instrument the slice is not allowed to lean on. And a repo
+     * that bans rasters cannot make an exception for its own test data
+     * without the ban meaning "except where we found it inconvenient".
+     *
+     * What replaced it is stronger and needs nothing committed: the window's
+     * ALPHA CENSUS. `#app` covers the viewport and paints `--layer-1`, so the
+     * thinnest pixel in a capture is predictable from the token sheet — 184
+     * for 0.72, 199 for 0.78, 255 for the reduced branch — and `a11y.spec.ts`
+     * asserts the equality rather than a ratio against a picture of last week.
+     */
+    const SNAPSHOT_PNGS: readonly string[] = [];
 
     it('no brand string, no operator handle, no absolute home path', () => {
       expect(publicRepoOffenders()).toEqual([]);
     });
 
-    it('every tracked PNG is a reduced-transparency reference snapshot', () => {
-      // Subset until Sc 17 commits them; equality from Sc 17. Written this
-      // way on purpose: the row is real NOW (a stray screenshot fails it)
-      // rather than being a comment promising a future assertion.
-      const pngs = tracked('*.png');
-      expect(pngs.filter((p) => !SNAPSHOT_PNGS.includes(p))).toEqual([]);
+    it('the repo tracks no raster at all', () => {
+      // Equality from Sc 17, and the equality is with the empty list.
+      expect(tracked('*.png')).toEqual([...SNAPSHOT_PNGS]);
     });
 
     it('PLANTED: a screenshot committed anywhere else fails the row', () => {
@@ -9397,5 +9422,252 @@ describe('S8 extensions (s8-execution Scenario 16: the tray, PAUSE, deep links a
       'packages/adapter-testkit/test/pack.spec.ts',
       'packages/cli/test/skill-dryrun.spec.ts',
     ]);
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice’s own closing rows)', () => {
+  const sc17Planted: string[] = [];
+  function sc17Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc17Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc17Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+  });
+
+  const LINUX = '.github/workflows/ci-linux.yml';
+  const MACOS = '.github/workflows/ci-macos.yml';
+  const TOKENS = 'apps/desktop/src/renderer/theme/tokens.css';
+  const APP_CSS = 'apps/desktop/src/renderer/app.css';
+
+  /* ── row 7: the macOS lane is a lane, not a green tick ─────────────── */
+
+  /**
+   * A step reader for a file shape this repo writes, same as row 8's.
+   *
+   * Kept local rather than shared because the two rows ask different
+   * questions of it and row 8's copy is scoped inside its own describe; a
+   * lifted helper would be a refactor of a passing guard in a scenario whose
+   * job is to close the slice, and this scenario has already been warned
+   * about editing existing guards to fit new work.
+   */
+  const sc17Steps = (text: string): string[] =>
+    text
+      .split(/\n {6}- /)
+      .slice(1)
+      .map((body) => body.split('\n      #')[0] ?? body)
+      .map((body) =>
+        body
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !line.startsWith('#'))
+          .join(' | '),
+      );
+
+  it('the macOS lane runs the same gate as Linux, step for step', () => {
+    // The failure this catches is the one a "macOS smoke job" always drifts
+    // into: a lane that installs, builds, and then runs a subset — or worse,
+    // a lane that runs `pnpm test` with a filter, which is how the desktop
+    // project gets quietly excluded from the platform it actually ships on.
+    // The lanes are therefore compared as SEQUENCES rather than by spot
+    // checks, with the one legitimate difference normalised away: Linux has
+    // no window server and needs `xvfb-run -a`, macOS has one and must not
+    // use it. Any other difference is a difference.
+    const linux = sc17Steps(archRead(LINUX)).map((s) =>
+      s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
+    );
+    const macos = sc17Steps(archRead(MACOS));
+    expect(linux.length).toBeGreaterThanOrEqual(9);
+    expect(macos).toEqual(linux);
+    // …and the reader is not vacuous: it found the step that matters.
+    expect(macos).toContain('run: pnpm test');
+    expect(macos).toContain('run: pnpm build');
+  });
+
+  it('runs on a real macOS runner, and Linux still runs on Linux', () => {
+    expect(archRead(MACOS)).toContain('runs-on: macos-15');
+    expect(archRead(MACOS)).not.toContain('runs-on: ubuntu');
+    expect(archRead(LINUX)).toContain('runs-on: ubuntu-latest');
+    // A workflow that only ever runs when somebody presses a button is a
+    // workflow that is green because nobody ran it. This one is on push.
+    expect(archRead(MACOS)).not.toContain('workflow_dispatch');
+    expect(archRead(MACOS)).toContain('pull_request');
+  });
+
+  it('neither signs nor notarizes, and asks for no secret', () => {
+    // There is no Apple Developer ID and no notarization credential for this
+    // project, and the repo is public. A step that pretended to sign would
+    // either need a secret this repo must not carry, or would be a tick
+    // attached to nothing — and the second is worse, because it reads as
+    // "signing is covered". Packaging arrives with the credential.
+    const text = archRead(MACOS);
+    for (const forbidden of [
+      'secrets.',
+      'codesign',
+      'notarytool',
+      'xcrun',
+      'APPLE_ID',
+      'CSC_LINK',
+      'p12',
+      'keychain',
+    ])
+      expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
+    // The comment header has to SAY so, because the next person to read this
+    // file will otherwise add signing to it and wonder why it was missing.
+    expect(text).toContain('notarize');
+  });
+
+  it('PLANTED: a macOS lane that skips the suite is caught', () => {
+    const rel = sc17Plant(
+      '.github/workflows/__s8_sc17_probe__.yml',
+      archRead(MACOS).replace('      - run: pnpm test\n', ''),
+    );
+    const linux = sc17Steps(archRead(LINUX)).map((s) =>
+      s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
+    );
+    expect(sc17Steps(archRead(rel))).not.toEqual(linux);
+  });
+
+  it('LEGITIMATE NEAR-MISS: the same lane with a reworded comment is not a drift', () => {
+    // Comments are not steps. A row that compared raw text would fail on a
+    // typo fix, and a row that fails on a typo fix gets deleted.
+    const rel = sc17Plant(
+      '.github/workflows/__s8_sc17_probe__.yml',
+      archRead(MACOS).replace(
+        '# No xvfb: macOS runners have a window server',
+        '# macOS runners have a window server, so no xvfb',
+      ),
+    );
+    expect(sc17Steps(archRead(rel))).toEqual(sc17Steps(archRead(MACOS)));
+  });
+
+  /* ── row 8 (meta): the GUI-era slice added no transport ────────────── */
+
+  it('the wire vocabulary is one vocabulary, spelled three times', () => {
+    // Three lists, three files, three authors' worth of opportunity to drift:
+    // the protocol's own union, the ratchet's snapshot of what the vocabulary
+    // is, and the ratchet's snapshot of what the daemon actually emits. S8
+    // put a GUI in front of all of it and must not have moved any of them.
+    expect([...WS_EVENT_VOCABULARY].sort()).toEqual(
+      [...GATEWAY_EVENT_NAMES].sort(),
+    );
+    expect([...EMITTED_WS_EVENTS].sort()).toEqual(
+      [...GATEWAY_EVENT_NAMES].sort(),
+    );
+    // The list of events nobody emits is the interesting one: a name that
+    // exists in the vocabulary and comes out of nothing is a name a client
+    // can wait for forever.
+    expect([...UNEMITTED_WS_EVENTS]).toEqual([]);
+    expect(GATEWAY_EVENT_NAMES.length).toBe(21);
+  });
+
+  it('the route table, the frame table and the port allowlist are S7’s', () => {
+    // Numbers, because these are the slice's closing counts and a count is
+    // the one thing a relationship cannot express: "no new route" has no
+    // second source to compare against inside this repo. Each is also
+    // checked for the shape of drift a count alone would miss.
+    expect(ROUTE_TABLE.length).toBe(67);
+    expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
+    expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
+
+    expect(Object.keys(FRAME_SPECS).length).toBe(9);
+    // INV-2 at the wire: there is no frame that sends. Every path to a send
+    // goes through an approval the daemon validated, and a frame type would
+    // be a way around that which no amount of GUI review would catch.
+    expect(Object.keys(FRAME_SPECS)).not.toContain('send');
+
+    expect(PORT_IMPORTER_ALLOWLIST.length).toBe(15);
+    expect(new Set(PORT_IMPORTER_ALLOWLIST).size).toBe(
+      PORT_IMPORTER_ALLOWLIST.length,
+    );
+    // The GUI is not on it, and that is the whole of INV-2 in one line.
+    expect(
+      PORT_IMPORTER_ALLOWLIST.filter((f) => f.startsWith('apps/desktop')),
+    ).toEqual([]);
+  });
+
+  it('nothing under src spells a send frame into existence', () => {
+    const offenders: string[] = [];
+    for (const root of ['packages', 'apps'])
+      for (const rel of archFiles(root)) {
+        if (!/\/src\//.test(rel)) continue;
+        if (codeOf(archRead(rel)).includes("type: 'send'")) offenders.push(rel);
+      }
+    expect(offenders).toEqual([]);
+  });
+
+  it('apps/desktop/src imports five packages and the node builtins', () => {
+    // An inventory, which is stronger than the cruiser rule it doubles: the
+    // rule says "this may not reach core", the inventory says "this reaches
+    // exactly these", so a new dependency is a diff here even when it is one
+    // the cruiser has no opinion about.
+    const specifiers = new Set<string>();
+    for (const rel of archFiles('apps/desktop/src'))
+      for (const m of codeOf(archRead(rel)).matchAll(/from '([^']+)'/g)) {
+        const spec = m[1] ?? '';
+        if (!spec.startsWith('.')) specifiers.add(spec);
+      }
+    expect([...specifiers].sort()).toEqual([
+      '@wemessage/client',
+      '@wemessage/protocol',
+      'electron',
+      'node:crypto',
+      'node:fs',
+      'node:os',
+      'node:path',
+      'node:url',
+      'preact',
+    ]);
+    // `preact/hooks` and `preact/jsx-runtime` are reached through the vite
+    // alias rather than by specifier, so their absence here is not a hole;
+    // what would be a hole is a bare specifier nobody declared, and the
+    // manifest row above pins the declared set to the same three names.
+  });
+
+  /* ── the token sheet's one filter list goes in a filter property ───── */
+
+  it('--backdrop is only ever assigned to backdrop-filter', () => {
+    // `--backdrop` holds `blur(30px) saturate(180%)`. Assign it to
+    // `backdrop-filter` and the panel blurs; assign it to `background` and
+    // the declaration is invalid at computed-value time, unsets in silence,
+    // and the element paints NOTHING. No error, no warning, and nothing for
+    // a contrast reader or a screenshot to find missing, because the pixels
+    // that should have been there never existed. `.confirm-scrim` shipped
+    // exactly that from Sc 10 until this scenario measured it.
+    //
+    // The runtime half lives in `a11y.spec.ts`, which substitutes every
+    // `var()` in the CSSOM and asks `CSS.supports`. This half is the source
+    // statement, so the answer is a diff rather than a test run.
+    const uses: string[] = [];
+    for (const rel of [TOKENS, APP_CSS])
+      for (const m of archRead(rel).matchAll(
+        /^\s*([a-z-]+)\s*:\s*[^;]*var\(--backdrop\)/gm,
+      ))
+        uses.push(`${rel}: ${m[1] ?? ''}`);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter((u) => !u.endsWith(': backdrop-filter'))).toEqual([]);
+  });
+
+  /* ── row 9 (meta, PUBLIC): the checkpoint added nothing identifying ── */
+
+  it('nothing this scenario adds identifies an operator or a machine', () => {
+    expect(publicRepoOffenders()).toEqual([]);
+    const mine = [
+      'apps/desktop/test/e2e/a11y.spec.ts',
+      'apps/desktop/test/e2e/a11y.ts',
+      'apps/desktop/test/e2e/axe.ts',
+      'apps/desktop/test/e2e/no-green-runtime.ts',
+      MACOS,
+    ];
+    for (const rel of mine) {
+      const raw = archRead(rel);
+      expect(raw.includes('/Users/'), `${rel} names a home path`).toBe(false);
+      for (const phone of raw.match(/\+1\d{10}/g) ?? [])
+        expect(phone.startsWith('+1555'), `${rel}: ${phone}`).toBe(true);
+    }
   });
 });

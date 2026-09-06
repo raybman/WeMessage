@@ -1012,7 +1012,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--backdrop);
+  /* `backdrop-filter`, not `background`, and s8 Sc 17 is why. `--backdrop`
+     holds a FILTER list, and a filter list is not a valid `background`, so
+     the declaration was dropped at computed-value time and the scrim painted
+     nothing at all in any variant: the modal floated over a live, unblurred,
+     fully readable screen and the shipped screenshots showed the blur only
+     because `#app` has its own. The legality sweep in `a11y.spec.ts` reads
+     every `var()`-bearing declaration back through `CSS.supports`, which is
+     the only way a dropped declaration is observable at all. */
+  backdrop-filter: var(--backdrop);
 }
 
 .confirm {

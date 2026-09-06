@@ -135,6 +135,28 @@ import {
 import { bindStore, type StoreBinding } from './store/index.js';
 import { bindRules, REPLAY_LIMIT, type RulesBinding } from './store/rules.js';
 import { bindSchedule, type ScheduleBinding } from './store/schedule.js';
+import AuditScreen, {
+  type AuditChipView,
+  type AuditScreenProps,
+} from './screens/audit/index.js';
+import {
+  ACTORS,
+  FILTER_EMPTY,
+  LOG_EMPTY,
+  auditRows,
+  ceilingLine,
+  eventTypes,
+  filterAuditRows,
+  moreLine as auditWindowLine,
+  scopeLine,
+} from './derive/auditRows.js';
+import {
+  MAX_LIMIT,
+  PAGE_LIMIT,
+  bindAudit,
+  type AuditBinding,
+  type AuditQuery,
+} from './store/audit.js';
 import type {
   ContactMode,
   SchedulePayload,
@@ -517,11 +539,10 @@ const rules: RulesBinding = bindRules(window.wm);
 /**
  * The screen the ⌘-digit keymap last chose.
  *
- * Only `queue`, `rules`, `schedule` and `people` have a surface in this
- * slice. A stroke for one of the other two is INERT rather than navigating
- * to a blank pane: an empty document with `data-screen="audit"` is a screen
- * that claims to exist, and the next scenario is the honest place to build
- * it.
+ * Five of the six have a surface now. A stroke for `settings` is still
+ * INERT rather than navigating to a blank pane: an empty document with
+ * `data-screen="settings"` is a screen that claims to exist, and the next
+ * scenario is the honest place to build it.
  */
 let screen: Screen = DEFAULT_SCREEN;
 const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
@@ -529,6 +550,7 @@ const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
   'rules',
   'schedule',
   'people',
+  'audit',
 ]);
 
 /**
@@ -1665,6 +1687,283 @@ function peopleView(): PeopleScreenProps {
   };
 }
 
+/* ── the audit screen's own state (s8 Sc13) ───────────────────────────── */
+
+/**
+ * The fifth binding, and the first screen in this app that only READS.
+ *
+ * `AUDIT_CHANNELS` is three, and not one of the three can change a stored
+ * row: two are GETs and the third never reaches the daemon at all. That is
+ * not a promise about this file's behaviour, it is the shape of the surface
+ * — `packages/daemon/src/routes/audit.ts` registers two reads and nothing
+ * else, and an arch row pins that absence so a later scenario cannot add a
+ * mutation quietly. INV-2 falls out of the same fact: a screen with no write
+ * channel cannot approve anything, and the e2e proves it at the wire by
+ * exercising every control and finding zero non-GET requests.
+ */
+const audits: AuditBinding = bindAudit(window.wm);
+
+/**
+ * The instant every AGE on the audit screen is measured back from.
+ *
+ * Read HERE, once per load, and handed down — never read in the cell that
+ * draws it. Five thousand ages computed at draw time would be a property of
+ * when Preact happened to paint, would move with no act behind them, and
+ * would make the whole screen race a real clock (C-11). An arch row bans
+ * `Date.now()` and `new Date()` under `screens/` and `derive/` so this stays
+ * the only place it can be read, and `paint` publishes the value as
+ * `data-now-iso` so an age on screen can be checked against the moment it
+ * was computed from.
+ *
+ * Its own variable, like `peopleNow`: `nowIso` belongs to the schedule
+ * marker and moves only on a button, and sharing one would silently give
+ * each screen the other's rule.
+ */
+let auditNow = new Date().toISOString();
+
+/**
+ * The DRAWN window, in rows.
+ *
+ * A slice of a sorted array, recomputed when the filters change and at no
+ * other time. Nothing is scheduled and nothing is cancelled, which is what
+ * keeps this the one screen in the app with five thousand rows behind it
+ * and still no timer (an arch row proves the app schedules nothing).
+ */
+const AUDIT_PAGE = 60;
+
+/** A day, as the `since` box accepts it. Anything else is still being typed. */
+const AUDIT_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The event type the operator has CHOSEN, which the load may not have yet. */
+let auditEvent = '';
+/** What is in the since box, which may be half a date. */
+let auditSince = '';
+/** The limit the next load will ask for. */
+let auditLimit = PAGE_LIMIT;
+/** The local narrowings. Neither of them may ever cost a request. */
+let auditSearch = '';
+let auditActor = '';
+/** The row whose stored bytes are open, or `null`. */
+let auditOpen: number | null = null;
+/** What the last COPY handed over, published so it can be seen. */
+let auditCopied = '';
+
+function auditWanted(): AuditQuery {
+  return { since: auditSince, event: auditEvent, limit: auditLimit };
+}
+
+/** Enter, or re-ask: stamp the window's instant, then fetch. */
+function loadAudit(): void {
+  auditNow = new Date().toISOString();
+  void audits.load(auditWanted());
+}
+
+function closeAudit(): void {
+  auditEvent = '';
+  auditSince = '';
+  auditLimit = PAGE_LIMIT;
+  auditSearch = '';
+  auditActor = '';
+  auditOpen = null;
+  auditCopied = '';
+}
+
+function auditView(): AuditScreenProps {
+  const data = audits.data();
+  const all = auditRows({ nowIso: auditNow, rows: data.rows });
+  const filtered = filterAuditRows(all, {
+    actor: auditActor,
+    search: auditSearch,
+  });
+  const drawn = filtered.slice(0, AUDIT_PAGE);
+  const open = auditOpen === null ? null : all.find((r) => r.seq === auditOpen);
+  // Two emptinesses, told apart by whether THIS process narrowed anything.
+  // "The daemon returned nothing" and "nothing here matches what you typed"
+  // are different claims and only one of them is about the log.
+  const narrowed = auditSearch !== '' || auditActor !== '';
+  const verdict = verdictView();
+  return {
+    status: data.status,
+    nowIso: auditNow,
+    loaded: data.rows.length,
+    limit: data.query.limit,
+    since: data.query.since,
+    sinceTyped: auditSince,
+    event: data.query.event,
+    eventChosen: auditEvent,
+    search: auditSearch,
+    rows: drawn,
+    types: eventTypes(all),
+    chips: ACTORS.map((actor): AuditChipView => ({
+      actor,
+      state: auditActor === actor ? 'ON' : 'OFF',
+    })),
+    scope: scopeLine(data.rows.length),
+    window: auditWindowLine(drawn.length, filtered.length),
+    ceiling: ceilingLine(data.rows.length, MAX_LIMIT),
+    // LOAD MORE raises the LIMIT and nothing else: `since` is an inclusive
+    // LOWER bound under `ORDER BY seq DESC` and the route has no upper bound
+    // at all, so there is no older page to ask for. At the cap the control
+    // is GONE and `#audit-ceiling` says so in words, because a button that
+    // re-fetched the same thousand rows would be telling an auditor they had
+    // seen everything.
+    more:
+      data.query.limit < MAX_LIMIT && data.rows.length >= data.query.limit
+        ? 'LOAD MORE'
+        : '',
+    empty:
+      !narrowed && filtered.length === 0 && data.status === 'ready'
+        ? LOG_EMPTY
+        : '',
+    none: narrowed && filtered.length === 0 ? FILTER_EMPTY : '',
+    verify: verdict,
+    exportable: data.verify !== null,
+    exported: exportView(),
+    drawer:
+      open === undefined || open === null
+        ? null
+        : {
+            seq: open.seq,
+            at: open.at,
+            prevHash: open.prevHash,
+            hash: open.hash,
+            eventJson: open.eventJson,
+            actorJson: open.actorJson,
+            copied: auditCopied,
+            onCopy: copyRow,
+            onClose: () => {
+              auditOpen = null;
+              auditCopied = '';
+              paint();
+            },
+          },
+    onEvent: (next) => {
+      auditEvent = next;
+      auditLimit = PAGE_LIMIT;
+      auditOpen = null;
+      auditCopied = '';
+      loadAudit();
+    },
+    onSince: (next) => {
+      auditSince = next;
+      // A half-typed date is not a query. The box accepts a whole day or an
+      // empty string and asks for nothing in between, so a `2` on its way to
+      // `2026-…` cannot cost four requests and a wrong window.
+      if (next === '' || AUDIT_DAY.test(next)) {
+        auditLimit = PAGE_LIMIT;
+        auditOpen = null;
+        auditCopied = '';
+        loadAudit();
+      } else paint();
+    },
+    onSearch: (next) => {
+      auditSearch = next;
+      paint();
+    },
+    onChip: (actor) => {
+      const picked = ACTORS.find((known) => known === actor) ?? '';
+      if (picked === '') return;
+      auditActor = auditActor === picked ? '' : picked;
+      paint();
+    },
+    onMore: () => {
+      auditLimit = MAX_LIMIT;
+      loadAudit();
+    },
+    onVerify: () => {
+      void audits.check();
+    },
+    onExport: exportReport,
+    onOpen: (seq) => {
+      auditOpen = auditOpen === seq ? null : seq;
+      auditCopied = '';
+      paint();
+    },
+  };
+}
+
+/**
+ * The chain walk's answer, in words, or the absence of one.
+ *
+ * `unknown` is a real state and it is the one the screen lands in. A card
+ * that said VERIFIED because nothing had gone wrong yet would be the single
+ * lie this screen cannot survive: the operator would read a verdict about a
+ * walk that never happened.
+ *
+ * Glyph AND uppercase word AND `data-verify`, so colour carries nothing.
+ */
+function verdictView(): AuditScreenProps['verify'] {
+  const result = audits.data().verify;
+  if (result === null)
+    return { state: 'unknown', text: '◌ NOT VERIFIED — NOBODY HAS ASKED YET' };
+  if (result.ok)
+    return {
+      state: 'ok',
+      text: `✓ VERIFIED — ${String(result.length)} ROWS, EVERY LINK INTACT`,
+    };
+  return {
+    state: 'broken',
+    text: `⊘ CHAIN BREAK AT SEQ ${String(result.brokenAtSeq)} — ${result.reason.toUpperCase()} — ${String(result.length)} ROWS WALKED`,
+  };
+}
+
+function exportView(): AuditScreenProps['exported'] {
+  const written = audits.data().exported;
+  if (written === null) return { state: '', text: '' };
+  if (written.state === 'written')
+    return { state: 'written', text: `WROTE ${written.name}` };
+  if (written.state === 'canceled')
+    return { state: 'canceled', text: 'NOTHING WAS WRITTEN' };
+  return { state: 'failed', text: `COULD NOT WRITE — ${written.reason}` };
+}
+
+/**
+ * The whole row, or nothing.
+ *
+ * A fragment of a hash chain is not evidence of anything, so COPY hands over
+ * the stored strings, the seq and both hashes together. The clipboard is
+ * best-effort — it can be refused, and when it is, the JSON is published on
+ * the button where it can still be read and selected.
+ */
+function copyRow(): void {
+  const row = audits.data().rows.find((stored) => stored.seq === auditOpen);
+  if (row === undefined) return;
+  const json = JSON.stringify(row);
+  auditCopied = json;
+  try {
+    void navigator.clipboard.writeText(json).catch(() => undefined);
+  } catch {
+    /* a refused clipboard leaves the JSON on the button, which is the point */
+  }
+  paint();
+}
+
+/**
+ * The report, which reaches no daemon.
+ *
+ * `exportReport` is the one channel on this screen that talks only to main:
+ * a save dialog and a file. It carries the verdict and the three rows that
+ * make a break checkable by somebody who does not have the database — the
+ * doctored row, its predecessor and its successor, from which the chain is
+ * re-derivable across the break. It is not a mutation of anything: writing a
+ * copy out leaves the log exactly as it was.
+ */
+function exportReport(): void {
+  const data = audits.data();
+  const result = data.verify;
+  if (result === null) return;
+  const at = result.ok ? 0 : result.brokenAtSeq;
+  const rowAt = (seq: number) =>
+    result.ok ? null : (data.rows.find((row) => row.seq === seq) ?? null);
+  void audits.save({
+    verify: result,
+    broken: rowAt(at),
+    before: rowAt(at - 1),
+    after: rowAt(at + 1),
+    probedAt: new Date().toISOString(),
+  });
+}
+
 /**
  * The app's ONE window-level key listener.
  *
@@ -1701,12 +2000,15 @@ function onWindowKey(event: KeyboardEvent): void {
   // screen that painted `ready` from it would answer a harness's readiness
   // wait with last visit's facts.
   closePeople();
+  closeAudit();
   rules.reset();
   schedules.reset();
   people.reset();
+  audits.reset();
   if (next === 'rules') void rules.load(midnightIso());
   if (next === 'schedule') void schedules.load();
   if (next === 'people') loadPeople();
+  if (next === 'audit') loadAudit();
   paint();
 }
 
@@ -1745,6 +2047,8 @@ function Shell({
         />
       ) : screen === 'people' ? (
         <PeopleScreen {...peopleView()} />
+      ) : screen === 'audit' ? (
+        <AuditScreen {...auditView()} />
       ) : screen === 'schedule' ? (
         <ScheduleScreen
           status={schedules.data().status}
@@ -1879,6 +2183,13 @@ function paint(): void {
   if (screen === 'people')
     html.dataset['peopleRows'] = String(peopleAll().length);
   else delete html.dataset['peopleRows'];
+  // The instant the audit screen's ages were measured back from, published
+  // at the document level so an age on screen can be checked against the
+  // moment it was computed from. `setAttribute` rather than `dataset`
+  // because the ATTRIBUTE name is the contract, and `dataset['nowIso']`
+  // spells it nowhere a reader (or a grep) can see it.
+  if (screen === 'audit') html.setAttribute('data-now-iso', auditNow);
+  else html.removeAttribute('data-now-iso');
   const view = derive();
   // Written back so the cursor SURVIVES the resolution above. A queue whose
   // active card expired keeps re-resolving to the top on every paint; naming
@@ -1935,6 +2246,7 @@ binding.store.subscribe(schedulePaint);
 rules.subscribe(schedulePaint);
 schedules.subscribe(schedulePaint);
 people.subscribe(schedulePaint);
+audits.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {

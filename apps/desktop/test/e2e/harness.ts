@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import type { ElectronApplication, Page } from 'playwright-core';
 import type { Clock, FsWatcher } from '../../../../packages/core/dist/index.js';
 import {
+  createAuditSink,
   startDaemon,
   type DoctorProbes,
   type RunningDaemon,
@@ -110,6 +111,32 @@ export interface BootOptions {
   probes?: Partial<DoctorProbes>;
 }
 
+/**
+ * One §1.8 observation: a frame leaving the daemon, and the log AS IT STOOD
+ * at the instant it left.
+ *
+ * §1.8 is "the log is the record, the event is the courtesy": every emit
+ * site appends its audit row through `sink.append` BEFORE it hands a frame
+ * to `sink.broadcast`. The finished log is IDENTICAL whichever order the two
+ * lines run in, so no assertion made after the fact can tell them apart.
+ * The only witness is the log read from inside `broadcast`, which is what
+ * this record is.
+ *
+ * `auditAtBroadcast` holds the `type` of the newest few audit rows, newest
+ * first, rather than the whole log: the question is only ever "was THIS
+ * act's row already written", and a 5 000-row fixture would otherwise pay
+ * for a full table scan per frame.
+ */
+export interface BroadcastWitness {
+  /** The `event` name on the frame — the §3.4 wire vocabulary. */
+  readonly event: string;
+  /** `AuditEvent.type` for the newest rows, newest first, at that instant. */
+  readonly auditAtBroadcast: readonly string[];
+}
+
+/** How deep into the log each witness looks. Five acts of slack, not one. */
+const WITNESS_DEPTH = 5;
+
 export interface FixtureDaemon {
   daemon: RunningDaemon;
   /** A client aimed at the SAME port the app is given, tee included. */
@@ -150,6 +177,23 @@ export interface FixtureDaemon {
    * path working is what gives the zero its meaning.
    */
   loopback: LoopbackSendBackend;
+  /**
+   * Every frame this daemon has broadcast, with the log as it stood then.
+   *
+   * s8 Sc13. The audit screen is the first surface where §1.8's ordering is
+   * VISIBLE — an act, its row on disk, and only then its frame on the wire —
+   * so it is the honest place to prove the ordering end to end rather than
+   * inside the daemon's own unit suite. The sink is spread-wrapped, which is
+   * exactly the shape `audit-sink.ts` documents as supported ("nothing here
+   * uses `this`"), so this observes production behaviour instead of
+   * substituting for it.
+   *
+   * NOT every broadcast has an audit row: `connection.state` and
+   * `adapter.health` are derived facts about the host, not decisions, and
+   * §1.8 is a claim about the ORDER of the two when there are two — never
+   * that the two sets are equal. Rows assert against the acts they exercise.
+   */
+  broadcasts: readonly BroadcastWitness[];
   stop(): Promise<void>;
 }
 
@@ -184,6 +228,7 @@ export async function bootFixtureDaemon(
     clock.set(new Date(clock.nowMs() + ms).toISOString());
     return Promise.resolve();
   };
+  const broadcasts: BroadcastWitness[] = [];
   const daemon = await startDaemon({
     configDir,
     chatDbPath,
@@ -193,6 +238,36 @@ export async function bootFixtureDaemon(
     doctorProbes: probes,
     backend: loopback,
     backendName: 'loopback',
+    // §1.8's declared test seam, used for what it was declared for. The
+    // wrapper reads the log INSIDE `broadcast`, before the real one runs,
+    // which is the only vantage point from which "the append already
+    // happened" is an observation rather than an assumption.
+    createAuditSink: (deps) => {
+      const sink = createAuditSink(deps);
+      return {
+        ...sink,
+        broadcast(payload) {
+          broadcasts.push({
+            event: payload.event,
+            auditAtBroadcast: deps.store
+              .listAudit({ limit: WITNESS_DEPTH })
+              .map((row) => {
+                try {
+                  const parsed: unknown = JSON.parse(row.eventJson);
+                  const type =
+                    typeof parsed === 'object' && parsed !== null
+                      ? (parsed as { type?: unknown }).type
+                      : undefined;
+                  return typeof type === 'string' ? type : '?';
+                } catch {
+                  return '?';
+                }
+              }),
+          });
+          sink.broadcast(payload);
+        },
+      };
+    },
   });
   const token = daemon.server.token;
   if (token === null)
@@ -218,6 +293,7 @@ export async function bootFixtureDaemon(
     fixture,
     requests,
     loopback,
+    broadcasts,
     stop: async () => {
       await requests.close();
       await daemon.stop();

@@ -1829,3 +1829,302 @@ button.people-handle {
   letter-spacing: 0.04em;
   color: var(--ink-dim);
 }
+
+/* ══ the audit screen (s8 Sc13) ════════════════════════════════════════ */
+
+/*
+ * A reader, and it looks like one: a filter bar, a chain card, a dense
+ * table and a drawer. Nothing here is a control that changes a stored row,
+ * because there is no route that could — the daemon registers two GETs over
+ * `/v1/audit` and nothing else.
+ *
+ * Blue and neutrals only, as everywhere. State on this screen is carried by
+ * a glyph AND an uppercase word AND a `data-` attribute, never by a hue: a
+ * verdict an operator can only read in colour is a verdict they cannot read
+ * at all in a screenshot, in print, or with the eyes most people over fifty
+ * have.
+ */
+
+.audit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
+/* ---- the filter bar --------------------------------------------------- */
+
+.audit-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.audit-select,
+.audit-input {
+  padding: 3px 5px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.audit-input {
+  min-width: 150px;
+}
+
+.audit-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.audit-chip {
+  padding: 3px 6px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 999px;
+  background: var(--layer-1);
+  color: var(--ink-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: default;
+}
+
+/*
+ * The chip says ON or OFF in its own label, so this is emphasis and not
+ * information. Removing every rule below would cost the screen nothing an
+ * operator needs.
+ */
+.audit-chip[data-state='ON'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+  color: var(--ink);
+}
+
+.audit-scope,
+.audit-window,
+.audit-ceiling,
+.audit-empty,
+.audit-export-note {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--ink-dim);
+}
+
+.audit-ceiling:empty,
+.audit-window:empty,
+.audit-export-note:empty {
+  display: none;
+}
+
+/* ---- the chain card --------------------------------------------------- */
+
+.audit-chain-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.audit-button {
+  padding: 3px 7px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: default;
+}
+
+.audit-verdict {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+
+/*
+ * A BREAK is the one thing on this screen that earns an alarm colour, and
+ * it earns it only as a second carrier: the glyph and the words
+ * `CHAIN BREAK AT SEQ n` are already in the text.
+ */
+.audit-verdict[data-verify='broken'] {
+  color: var(--danger);
+}
+
+.audit-verdict[data-verify='ok'] {
+  color: var(--ink);
+}
+
+/* ---- the table -------------------------------------------------------- */
+
+/*
+ * A native `<table>`, spelling no ARIA role at all. `role="grid"` and its
+ * three companions belong to `people/Grid.tsx` and a second file claiming
+ * them is a second file that has to be kept honest about rowcount,
+ * selection and order.
+ */
+.audit-table {
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.audit-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+
+.audit-table th {
+  padding: 4px 8px;
+  background: var(--layer-2);
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-align: left;
+}
+
+.audit-table td {
+  max-width: 260px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--stroke);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-seq,
+.audit-age {
+  color: var(--ink-dim);
+}
+
+.audit-summary {
+  color: var(--ink-dim);
+}
+
+.audit-open {
+  padding: 1px 6px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font: inherit;
+  cursor: default;
+}
+
+/*
+ * A deny is drawn the same whether or not this build has heard of the
+ * reason. The glyph differs (`⊘` for one of §1.6's twelve, `?` for a word
+ * from a newer daemon) and the literal is shown either way: a reason
+ * swallowed because it was unrecognised is a decision the operator cannot
+ * see was made.
+ */
+.audit-deny {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.audit-deny[data-state='UNKNOWN'] {
+  border-style: dashed;
+  color: var(--ink-dim);
+}
+
+/* ---- the drawer ------------------------------------------------------- */
+
+.audit-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--tint);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.audit-drawer-title {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.audit-chain {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.audit-chain dt {
+  color: var(--ink-dim);
+}
+
+.audit-chain dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.audit-drawer-note {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+/*
+ * CLAMPED. A `draft.created` row carries a whole message body, and a pane
+ * that grew to fit one would push the row it belongs to off the screen.
+ * 40vh each, scrolled, with the bytes untouched inside.
+ */
+.audit-json {
+  max-height: 40vh;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+}
+
+.audit-drawer-acts {
+  display: flex;
+  gap: 6px;
+}

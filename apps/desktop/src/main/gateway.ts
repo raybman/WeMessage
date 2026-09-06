@@ -23,7 +23,9 @@
  * an implementation without a channel cannot be registered, which is the
  * compile-time half of the closure the e2e asserts at run time.
  */
-import { ipcMain, shell } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
+import { writeFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import {
   createClient,
   DaemonConflictError,
@@ -394,13 +396,38 @@ export function createGateway(options: GatewayOptions): Gateway {
     audit: (a) => requireClient().listAudit(maybeRecord(a, 0)),
     auditVerify: () => requireClient().verifyAudit(),
     /**
-     * Sc 12 turns this into a written file with a chosen destination. It is
-     * the audit list today because Sc 4 row 6 requires every registered
-     * channel to be in the registry AND every registry channel to be
-     * registered, and a channel that is declared but unhandled would fail
-     * that row in the direction that matters least and hide the drift.
+     * Sc 13: the one channel in this app that reaches no daemon.
+     *
+     * A chain-break report is evidence, and evidence is a file somebody
+     * mails to somebody else. So the renderer hands over the verdict and the
+     * three rows around the break, main asks WHERE, stamps the build that
+     * produced it, and writes it. No client call, no request in the log, and
+     * an e2e row asserts the whole gesture is silent on the wire.
+     *
+     * `dialog.showSaveDialog` is reached as a property of the module object
+     * rather than through a destructured binding. That is what lets the e2e
+     * patch the real handler from `electronApp.evaluate` without this file
+     * learning it is under test: the desktop test flag grants no capability
+     * anywhere in this path, by design.
+     *
+     * Only the BASENAME comes back. The absolute path is in the operator's
+     * home directory and would end up in a screenshot the moment the screen
+     * named the file, so it never crosses the bridge.
      */
-    exportReport: (a) => requireClient().listAudit(maybeRecord(a, 0)),
+    exportReport: async (a) => {
+      const report = record(a, 0);
+      const chosen = await dialog.showSaveDialog({
+        title: 'EXPORT AUDIT REPORT',
+        defaultPath: 'audit-report.json',
+      });
+      if (chosen.canceled || chosen.filePath === '') return { canceled: true };
+      writeFileSync(
+        chosen.filePath,
+        `${JSON.stringify({ ...report, appVersion: app.getVersion() }, null, 2)}\n`,
+        'utf8',
+      );
+      return { canceled: false, name: basename(chosen.filePath) };
+    },
     settings: () => requireClient().settings(),
     settingsWrite: (a) =>
       requireClient().setSettings(

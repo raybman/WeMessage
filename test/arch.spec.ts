@@ -1101,6 +1101,17 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'outside-window',
         [
+          // s8 Scenario 13, and the reason it is a NEW home rather than a
+          // deleted literal: the audit screen draws `gate.denied` rows, and
+          // a denial an operator cannot read the reason for is a row that
+          // tells them a refusal happened and nothing they can act on.
+          // `derive/auditRows.ts` re-declares §1.6's twelve because INV-1
+          // forbids the renderer a `@wemessage/core` dependency and the
+          // client exports `GateDenyReason` as a TYPE with no runtime array
+          // behind it — so this is a deliberate second projection, and this
+          // scenario adds an arch row tying the twelve back to the union in
+          // `packages/core/src/domain/types.ts` so the two cannot drift.
+          'apps/desktop/src/renderer/derive/auditRows.ts',
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
@@ -1153,6 +1164,17 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'rate-limited',
         [
+          // s8 Scenario 13, and the reason it is a NEW home rather than a
+          // deleted literal: the audit screen draws `gate.denied` rows, and
+          // a denial an operator cannot read the reason for is a row that
+          // tells them a refusal happened and nothing they can act on.
+          // `derive/auditRows.ts` re-declares §1.6's twelve because INV-1
+          // forbids the renderer a `@wemessage/core` dependency and the
+          // client exports `GateDenyReason` as a TYPE with no runtime array
+          // behind it — so this is a deliberate second projection, and this
+          // scenario adds an arch row tying the twelve back to the union in
+          // `packages/core/src/domain/types.ts` so the two cannot drift.
+          'apps/desktop/src/renderer/derive/auditRows.ts',
           // s8 Scenario 12, the SEVENTH deliberate edit to this guard and the
           // first time any of the five is named OUTSIDE the daemon's own
           // packages: the people screen reports, per row, why a handle set
@@ -1202,6 +1224,17 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'circuit-open',
         [
+          // s8 Scenario 13, and the reason it is a NEW home rather than a
+          // deleted literal: the audit screen draws `gate.denied` rows, and
+          // a denial an operator cannot read the reason for is a row that
+          // tells them a refusal happened and nothing they can act on.
+          // `derive/auditRows.ts` re-declares §1.6's twelve because INV-1
+          // forbids the renderer a `@wemessage/core` dependency and the
+          // client exports `GateDenyReason` as a TYPE with no runtime array
+          // behind it — so this is a deliberate second projection, and this
+          // scenario adds an arch row tying the twelve back to the union in
+          // `packages/core/src/domain/types.ts` so the two cannot drift.
+          'apps/desktop/src/renderer/derive/auditRows.ts',
           'packages/client/src/index.ts',
           'packages/core/src/domain/types.ts',
           // s6 Scenario 7, the FOURTH deliberate edit to this guard and the
@@ -1231,6 +1264,17 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'loop-detected',
         [
+          // s8 Scenario 13, and the reason it is a NEW home rather than a
+          // deleted literal: the audit screen draws `gate.denied` rows, and
+          // a denial an operator cannot read the reason for is a row that
+          // tells them a refusal happened and nothing they can act on.
+          // `derive/auditRows.ts` re-declares §1.6's twelve because INV-1
+          // forbids the renderer a `@wemessage/core` dependency and the
+          // client exports `GateDenyReason` as a TYPE with no runtime array
+          // behind it — so this is a deliberate second projection, and this
+          // scenario adds an arch row tying the twelve back to the union in
+          // `packages/core/src/domain/types.ts` so the two cannot drift.
+          'apps/desktop/src/renderer/derive/auditRows.ts',
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
@@ -1252,6 +1296,17 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'sms-auto-forbidden',
         [
+          // s8 Scenario 13, and the reason it is a NEW home rather than a
+          // deleted literal: the audit screen draws `gate.denied` rows, and
+          // a denial an operator cannot read the reason for is a row that
+          // tells them a refusal happened and nothing they can act on.
+          // `derive/auditRows.ts` re-declares §1.6's twelve because INV-1
+          // forbids the renderer a `@wemessage/core` dependency and the
+          // client exports `GateDenyReason` as a TYPE with no runtime array
+          // behind it — so this is a deliberate second projection, and this
+          // scenario adds an arch row tying the twelve back to the union in
+          // `packages/core/src/domain/types.ts` so the two cannot drift.
+          'apps/desktop/src/renderer/derive/auditRows.ts',
           // s8 Scenario 12. Same two homes, same argument as the
           // 'rate-limited' row above: `AutoHold` names this literal in a
           // type position and `autoCell` writes it into `data-held` when a
@@ -5408,6 +5463,36 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // is a gesture with no reason to exist.
       members: ['audit', 'contactSet', 'contacts', 'drafts', 'settings'],
     },
+    [`${STORE_ROOT}/audit.ts`]: {
+      constant: 'AUDIT_CHANNELS',
+      // Sc13, and the fifth entry. Two reads and one write, and the write
+      // does not leave this machine.
+      //
+      // This is the first binding whose whole reason for existing is that
+      // it reads. The audit log is append-only as an API property — the
+      // Store exposes no update or delete path for `audit_log` and the
+      // daemon registers no mutating route for it (see this scenario's
+      // route rows) — so a screen over it that could write would be a
+      // screen whose capability exceeded the thing it is looking at.
+      //
+      // `auditVerify` is separate from `audit` because it is a full chain
+      // walk on every call and never cached (§2.3): it is an ACT the
+      // operator performs, not a field of the list, and giving it its own
+      // channel is what lets a row assert it was asked for exactly once.
+      //
+      // `exportReport` is the odd one. It reaches no daemon at all: main
+      // opens a save dialog, writes the JSON and hands back the BASENAME,
+      // so no absolute home path ever crosses the bridge into a document.
+      // It is still declared a WRITE below, because it is the only channel
+      // in this GUI that writes bytes outside this process, and a second
+      // owner for that is a second place a report can be written from.
+      //
+      // Deliberately absent: `on`. A log that redrew itself under the
+      // operator would move the row they were reading, and `verify` would
+      // become a claim about a chain that has since grown. The screen says
+      // what it loaded and when, and reloads when asked.
+      members: ['audit', 'auditVerify', 'exportReport'],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -5450,6 +5535,12 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // on that screen is N of these — which is exactly why it may only
       // have one owner, and why the typed confirm names the request count.
       'contactSet',
+      // Sc13's one, and the only member of this list that reaches no
+      // daemon. `exportReport` writes a file to a path the operator chose,
+      // which is the one thing this GUI does that leaves the process
+      // without going through the wire — so the wire rows cannot see it and
+      // this partition is the only thing that can say who may do it.
+      'exportReport',
     ];
     for (const write of WRITES) {
       const owners = Object.entries(BINDINGS)
@@ -6704,5 +6795,605 @@ describe('S8 extensions (s8-execution Scenario 12: contacts and policies)', () =
     const code = codeOf(archRead(rel));
     expect(/\b(debounce|throttle)\b/i.test(code)).toBe(true);
     expect(/\b(setTimeout|setInterval)\(/.test(code)).toBe(true);
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 13: the audit screen)', () => {
+  const sc13Planted: string[] = [];
+  function sc13Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc13Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc13Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/audit/__s8_sc13_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc13_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc13_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc13_probe__',
+      'packages/daemon/src/routes/__s8_sc13_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const AUDIT = `${RENDERER}/screens/audit`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+  const PEOPLE = `${RENDERER}/screens/people`;
+  const ROUTES = 'packages/daemon/src/routes';
+  const AUDIT_ROUTE = `${ROUTES}/audit.ts`;
+  const DENY_UNION = 'packages/core/src/domain/types.ts';
+
+  /** Every `app.<verb>('<path>'` a route file registers, in source order. */
+  function registrationsIn(rel: string): string[] {
+    const out: string[] = [];
+    for (const m of codeOf(archRead(rel)).matchAll(
+      /\bapp\s*\.\s*(get|post|put|patch|delete|head|options|all)\s*\(\s*'([^']+)'/g,
+    ))
+      out.push(`${(m[1] as string).toUpperCase()} ${m[2] as string}`);
+    return out;
+  }
+
+  /* ── row 1: the log is append-only, and there is no route that isn't ── */
+
+  /**
+   * The strongest thing this scenario can assert, and it is an ABSENCE.
+   *
+   * `packages/core/src/ports/index.ts` states it as an API property rather
+   * than a convention: "The Store exposes NO update/delete path for
+   * audit_log." The daemon agrees by having nothing to expose — two reads,
+   * and the auto-HEAD twins fastify derives from them. This row pins the
+   * absence at both levels, so a later scenario that wants a `DELETE
+   * /v1/audit` (or a "clear history" affordance behind one) has to delete
+   * this row and say why in the same diff.
+   *
+   * It is a ban-style row and therefore vacuously satisfiable by a tree in
+   * which nobody ever writes a route at all, which is why the second half
+   * asserts the scanner FINDS mutating verbs elsewhere, and why the planted
+   * offender below is a real registration in a real route directory.
+   */
+  it('the audit surface is exactly two reads, and no route mutates the log', () => {
+    expect(registrationsIn(AUDIT_ROUTE)).toEqual([
+      'GET /v1/audit',
+      'GET /v1/audit/verify',
+    ]);
+    // …and the transport surface agrees, HEAD twins included.
+    expect(ROUTE_TABLE.filter((r) => r.includes('/v1/audit'))).toEqual([
+      'GET /v1/audit',
+      'GET /v1/audit/verify',
+      'HEAD /v1/audit',
+      'HEAD /v1/audit/verify',
+    ]);
+    // Nothing anywhere in the route directory mutates a path naming audit.
+    const mutating = archFiles(ROUTES).flatMap((rel) =>
+      registrationsIn(rel)
+        .filter((r) => /^(POST|PUT|PATCH|DELETE) /.test(r))
+        .map((r) => `${rel}: ${r}`),
+    );
+    expect(mutating.filter((r) => /\/v1\/audit/.test(r))).toEqual([]);
+    // Non-vacuous: the scanner really does see mutating registrations.
+    expect(mutating.length).toBeGreaterThan(10);
+  });
+
+  it('PLANTED: a route that deletes audit rows is caught', () => {
+    const rel = sc13Plant(
+      `${ROUTES}/__s8_sc13_probe__/purge.ts`,
+      [
+        "import type { FastifyInstance } from 'fastify';",
+        'export function registerPurge(app: FastifyInstance): void {',
+        "  app.delete('/v1/audit', () => ({ purged: true }));",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const mutating = archFiles(ROUTES).flatMap((r) =>
+      registrationsIn(r).map((x) => `${r}: ${x}`),
+    );
+    expect(mutating).toContain(`${rel}: DELETE /v1/audit`);
+  });
+
+  it('LEGITIMATE NEAR-MISS: a second READ over the log is not a mutation', () => {
+    const rel = sc13Plant(
+      `${ROUTES}/__s8_sc13_probe__/tail.ts`,
+      [
+        '/**',
+        ' * A reader may be added freely. What may not be added is a verb.',
+        ' */',
+        "import type { FastifyInstance } from 'fastify';",
+        'export function registerTail(app: FastifyInstance): void {',
+        "  app.get('/v1/audit/tail', () => []);",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const mine = registrationsIn(rel);
+    expect(mine).toEqual(['GET /v1/audit/tail']);
+    expect(mine.filter((r) => /^(POST|PUT|PATCH|DELETE) /.test(r))).toEqual([]);
+  });
+
+  /* ── row 2: the list query has no upper bound, and the copy knows it ── */
+
+  /**
+   * The plan says `LOAD MORE` "fetches with `since` set from the oldest
+   * loaded `at`". It cannot. `since` is `sinceAt` in
+   * `packages/store/src/store.ts`, which is an INCLUSIVE LOWER bound
+   * (`at >= ?`) under `ORDER BY seq DESC LIMIT ?`, and the route exposes no
+   * upper bound at all — no `until`, no `before`, no `beforeSeq`, and not
+   * even the `sinceSeq` the store itself supports. Re-fetching with the
+   * oldest loaded instant returns the SAME page.
+   *
+   * So the screen escalates the LIMIT to the route's cap and then says, in
+   * words, that it is at the newest thousand and that narrowing is how you
+   * reach the rest. That copy is only honest while this is true, which is
+   * why the query schema is pinned here rather than left to be discovered
+   * by an operator who thought they had seen everything.
+   */
+  it('the audit list query is exactly since, event and limit', () => {
+    const m = /listQuery = z\.strictObject\(\{([\s\S]*?)\}\)/.exec(
+      archRead(AUDIT_ROUTE),
+    );
+    expect(m).not.toBeNull();
+    const keys = [
+      ...(m?.[1] ?? '').matchAll(/^\s{2}([A-Za-z_$][\w$]*):/gm),
+    ].map((x) => x[1] as string);
+    expect(keys).toEqual(['since', 'event', 'limit']);
+    // `strictObject`, so an unknown param is a 400 rather than a silent
+    // no-op: the screen cannot ask for a window the daemon will ignore.
+    expect(archRead(AUDIT_ROUTE)).toContain('z.strictObject');
+    // And the cap the ceiling copy names is the one the route enforces.
+    expect(archRead(AUDIT_ROUTE)).toMatch(/\.max\(1000\)/);
+  });
+
+  /* ── row 3: the renderer's twelve are core's twelve ─────────────────── */
+
+  /**
+   * INV-1 forbids the renderer a `@wemessage/core` dependency, and
+   * `@wemessage/client` exports `GateDenyReason` as a TYPE with no runtime
+   * array behind it. A screen that draws `gate.denied` rows therefore has
+   * to re-declare the taxonomy, which makes it a second projection of C-6's
+   * closed union — the exact situation C-6 exists to keep honest.
+   *
+   * The tie is made here, by scraping both. A thirteenth reason added to
+   * core and not to the renderer fails this row, rather than reaching an
+   * operator as a word with no glyph.
+   */
+  it('the audit derivation names exactly the twelve gate deny reasons', () => {
+    const union = /GateDenyReason\s*=([\s\S]*?);/.exec(archRead(DENY_UNION));
+    expect(union).not.toBeNull();
+    const core = [...(union?.[1] ?? '').matchAll(/'([^']+)'/g)]
+      .map((m) => m[1] as string)
+      .sort();
+    expect(core).toHaveLength(12);
+    const screen = [
+      ...(/DENY_REASONS[^=]*=\s*\[([\s\S]*?)\]/.exec(
+        archRead(`${RENDERER}/derive/auditRows.ts`),
+      )?.[1] ?? ''),
+    ]
+      .join('')
+      .match(/'([^']+)'/g);
+    expect(screen).not.toBeNull();
+    expect((screen ?? []).map((q) => q.slice(1, -1)).sort()).toEqual(core);
+  });
+
+  /* ── row 4: no adapter token can reach this process's windows ───────── */
+
+  /**
+   * Adapter tokens are `wm_` plus 64 hex, scrypt-hashed at rest, minted
+   * once and never re-displayed. No audit event carries one — the
+   * `adapter.*` events carry an id, a kind and a reason — so this row is
+   * GREEN today, and that is exactly why it is worth writing: it is cheap
+   * now and it is the difference between a leak and a failing test on the
+   * day somebody adds a token field to an audit payload "for debugging".
+   *
+   * Scoped to the whole desktop app rather than to the audit screen. The
+   * screen is where a token would be SEEN, but main is where one would be
+   * carried, and a bridge that never holds one cannot hand one over.
+   *
+   * Over `codeOf`, deliberately: a comment explaining the ban (there is one
+   * in the audit binding) must not be an offender, and the recurring
+   * self-trip in this suite is a guard tripping over its own prose.
+   */
+  const TOKEN_PREFIX = /wm_/;
+
+  it('no file in the desktop app names an adapter token prefix', () => {
+    const offenders = archFiles('apps/desktop/src')
+      .filter((rel) => TOKEN_PREFIX.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    // Non-vacuous: the prefix is real, and the minting site spells it.
+    expect(
+      TOKEN_PREFIX.test(
+        codeOf(archRead('packages/adapter-testkit/src/spawn.ts')),
+      ),
+    ).toBe(true);
+  });
+
+  it('PLANTED: a drawer that renders a token field is caught', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Token.tsx`,
+      [
+        'export function Token(props: { row: { token?: string } }): unknown {',
+        "  return <code>{props.row.token ?? 'wm_'}</code>;",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(TOKEN_PREFIX.test(codeOf(archRead(rel)))).toBe(true);
+  });
+
+  it('LEGITIMATE NEAR-MISS: naming the adapter itself is not naming its token', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Adapter.tsx`,
+      [
+        '/**',
+        ' * An adapter IDENTITY is on every audit row and belongs on screen.',
+        ' * Its credential is not on any audit row and never will be.',
+        ' */',
+        'export function Adapter(props: { adapterId: string }): unknown {',
+        '  return <span>{props.adapterId}</span>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(TOKEN_PREFIX.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 5: a reader has no destructive verb, anywhere in its copy ──── */
+
+  /**
+   * The UI half of row 1. A route that does not exist cannot be called, but
+   * a screen can still IMPLY that it could — a greyed "CLEAR HISTORY", a
+   * per-row bin glyph, a "REMOVE" in a menu — and an operator who believes
+   * the log can be edited is an operator who does not trust it as evidence
+   * and does not expect anybody else to either. The append-only property is
+   * worth nothing that is not visible.
+   *
+   * The screen's copy is uppercase by convention (§1.7), so the ban is over
+   * uppercase words: the words a control would be LABELLED with. `EXPORT`
+   * is not among them — writing a copy out is not a mutation of the log —
+   * and neither is `VERIFY`.
+   */
+  const DESTRUCTIVE = /\b(DELETE|REMOVE|CLEAR|ERASE|PURGE|WIPE|DISCARD)\b/;
+
+  it('the audit screen offers no destructive verb', () => {
+    const offenders = archFiles(AUDIT)
+      .filter((rel) => DESTRUCTIVE.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    // Non-vacuous: the scanner does find these words where they belong.
+    expect(
+      archFiles(RENDERER).some((rel) =>
+        DESTRUCTIVE.test(codeOf(archRead(rel))),
+      ),
+    ).toBe(true);
+  });
+
+  it('PLANTED: a CLEAR HISTORY button on the audit screen is caught', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Clear.tsx`,
+      [
+        'export function Clear(props: { go: () => void }): unknown {',
+        '  return <button onClick={props.go}>CLEAR HISTORY</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(DESTRUCTIVE.test(codeOf(archRead(rel)))).toBe(true);
+  });
+
+  /* ── row 6: controls, per screen, for the fifth root ────────────────── */
+
+  const INTERACTIVE: readonly (readonly [string, RegExp])[] = [
+    ['<button', /<button\b/],
+    ['<a href', /<a\s[^>]*\bhref\b/],
+    ['<input', /<input\b/],
+    ['<select', /<select\b/],
+    ['onClick', /\bonClick\s*=/],
+    ['tabIndex', /\btabIndex\s*=/],
+  ];
+
+  function controlsIn(root: string): string[] {
+    const out: string[] = [];
+    for (const rel of archFiles(root)) {
+      const code = codeOf(archRead(rel));
+      for (const [name, re] of INTERACTIVE)
+        if (re.test(code)) out.push(`${rel}: ${name}`);
+    }
+    return out.sort();
+  }
+
+  /**
+   * Sc11 and Sc12 each kept this as SEPARATE expressions over SEPARATE
+   * roots in one row, so that widening one line structurally cannot reach
+   * the queue line. Fifth root, same shape.
+   *
+   * The audit screen earns controls: an event-type select, a free-text
+   * box, a since box, actor chips, VERIFY CHAIN, EXPORT REPORT, a per-row
+   * opener and a drawer close. What it may not have is `<a href` (banned
+   * renderer-wide) or `tabIndex` — a table with five hundred rows is the
+   * most tempting place in the app to hand-roll a roving tab stop, and the
+   * row opener being a real `<button>` is what makes that unnecessary.
+   */
+  it('the audit screen has real controls; the queue still has none', () => {
+    const audit = controlsIn(AUDIT);
+    expect(audit.some((c) => c.endsWith(': <button'))).toBe(true);
+    expect(audit.some((c) => c.endsWith(': <input'))).toBe(true);
+    expect(audit.some((c) => c.endsWith(': <select'))).toBe(true);
+    expect(audit.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(audit.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    // Its own expression, over its own root.
+    expect(controlsIn(QUEUE)).toEqual([]);
+    // And the screen before it is untouched by any of it.
+    expect(controlsIn(PEOPLE).some((c) => c.endsWith(': <button'))).toBe(true);
+  });
+
+  it('PLANTED: a row opener smuggled into the queue is caught', () => {
+    const rel = sc13Plant(
+      `${QUEUE}/__s8_sc13_probe__/Open.tsx`,
+      [
+        'export function Open(props: { seq: number }): unknown {',
+        '  return <button onClick={() => props.seq}>OPEN</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(QUEUE)).toEqual([`${rel}: <button`, `${rel}: onClick`]);
+  });
+
+  /* ── row 7: locality, with a table and a drawer in the tree ─────────── */
+
+  /**
+   * Both of this screen's two biggest surfaces are shaped exactly like
+   * something another file already owns, which is why they are re-asserted
+   * on the way in:
+   *
+   *  - the JSON drawer is NOT a dialog. `role="dialog"` has one home, and
+   *    a pane over an append-only log has no business being modal: the
+   *    table behind it stays readable and the keymap stays live.
+   *  - the row table is NOT a grid. `role="grid"` and its three companions
+   *    are `people/Grid.tsx`'s ARIA contract, and a second file spelling
+   *    `role="row"` is a second file that has to be kept consistent about
+   *    rowcount, selection and order. A native `<table>` spells no role at
+   *    all, which is the point.
+   */
+  it('the owned markup still lives in exactly one file each', () => {
+    const withCode = (re: RegExp): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => re.test(codeOf(archRead(rel))))
+        .sort();
+    expect(withCode(/<textarea\b/)).toEqual([
+      `${RENDERER}/components/Editor.tsx`,
+    ]);
+    expect(withCode(/role="dialog"/)).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withCode(/role="listbox"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/role="option"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/<a\s[^>]*\bhref\b/)).toEqual([]);
+    for (const role of ['grid', 'row', 'columnheader', 'gridcell'])
+      expect(withCode(new RegExp(`role="${role}"`)), role).toEqual([
+        `${PEOPLE}/Grid.tsx`,
+      ]);
+  });
+
+  it('PLANTED: an audit drawer that claims the modal role is caught', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Modal.tsx`,
+      [
+        'export function Modal(props: { json: string }): unknown {',
+        '  return <div role="dialog"><pre>{props.json}</pre></div>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const sites = archFiles(RENDERER).filter((r) =>
+      /role="dialog"/.test(codeOf(archRead(r))),
+    );
+    expect(sites).toContain(rel);
+  });
+
+  /* ── row 8: the screen that draws ages still reads no clock ─────────── */
+
+  /**
+   * Sc11's ban at its hardest test. Every row on this screen carries an
+   * age, and the obvious way to write "2S AGO" is `Date.now()` in the cell
+   * — which would make the column a property of when Preact happened to
+   * render, and would make a five-thousand-row fixture's ages race a real
+   * clock (C-11).
+   *
+   * The instant is read once in `main.tsx`, handed down as a prop,
+   * published as `data-now-iso`, and moves only when the operator asks.
+   */
+  const CLOCK_READ = /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)/;
+
+  it('no file under screens/ or derive/ reads a clock, ages included', () => {
+    for (const root of [`${RENDERER}/screens`, `${RENDERER}/derive`]) {
+      const offenders = archFiles(root)
+        .filter((rel) => CLOCK_READ.test(codeOf(archRead(rel))))
+        .sort();
+      expect(offenders, root).toEqual([]);
+    }
+    expect(CLOCK_READ.test(codeOf(archRead(`${RENDERER}/main.tsx`)))).toBe(
+      true,
+    );
+    // The screen publishes the instant it used, so an age on screen can be
+    // checked against the moment it was computed from.
+    expect(codeOf(archRead(`${RENDERER}/main.tsx`))).toContain('data-now-iso');
+  });
+
+  it('PLANTED: an age computed at draw time is caught', () => {
+    const rel = sc13Plant(
+      `${RENDERER}/derive/__s8_sc13_probe__/age.ts`,
+      [
+        'export function age(at: string): number {',
+        '  return Date.now() - Date.parse(at);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const offenders = archFiles(`${RENDERER}/derive`).filter((r) =>
+      CLOCK_READ.test(codeOf(archRead(r))),
+    );
+    expect(offenders).toEqual([rel]);
+  });
+
+  /* ── row 9: INV-2, at the fifth screen and the first read-only one ──── */
+
+  /**
+   * The audit screen is the first surface in this GUI with no write to the
+   * daemon at all, which makes the INV-2 claim both easier to state and
+   * easier to break by accident: a screen that lists `auto.approved` rows
+   * is a screen whose source is full of the word "approve".
+   *
+   * Sc12's shape, not a blanket ban. The binding may not name the approval
+   * VOCABULARY as identifiers, and the screen may not reach the bridge at
+   * all — but the screen is free to name an approval as a string in a read
+   * URL, because that is what reading approvals looks like. The e2e states
+   * the other half at the wire: every request naming an approval is a GET.
+   */
+  it('the audit binding names no approval, and the screen names no bridge', () => {
+    const binding = codeOf(archRead(`${STORE_ROOT}/audit.ts`));
+    for (const m of binding.matchAll(/[A-Za-z_$][\w$]*/g))
+      expect(m[0], `${m[0]} in the audit binding`).not.toMatch(
+        /^(approve|approval|draftId|dispatch)$/i,
+      );
+    for (const rel of archFiles(AUDIT)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * SELF-TRIP, recorded rather than papered over. This row was first
+   * written to claim that all three audit channels have one call site, and
+   * it was FACTUALLY WRONG about the product: `bridge.audit(` already has
+   * three callers, because the rules editor reads the log for its LAST
+   * MATCHED column and the people grid reads it for AUTO-SENDS PER HOUR.
+   *
+   * That is correct and the partition row above says so in as many words:
+   * READS may be shared, WRITES may not. So the row is strengthened rather
+   * than loosened — the shared read is enumerated exactly, which catches a
+   * fourth reader as surely as the original claim would have, and the two
+   * channels that are genuinely single-owner are asserted separately AND
+   * counted, because a `verify` that fired twice would walk the chain twice
+   * and the second answer would be about a longer log.
+   */
+  it('the shared read is enumerated; verify and export have one caller each', () => {
+    const callers = (needle: string): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => codeOf(archRead(rel)).includes(needle))
+        .sort();
+    expect(callers('bridge.audit(')).toEqual([
+      `${STORE_ROOT}/audit.ts`,
+      `${STORE_ROOT}/people.ts`,
+      `${STORE_ROOT}/rules.ts`,
+    ]);
+    for (const channel of ['auditVerify', 'exportReport'])
+      expect(callers(`bridge.${channel}(`), channel).toEqual([
+        `${STORE_ROOT}/audit.ts`,
+      ]);
+    for (const channel of ['auditVerify', 'exportReport'])
+      expect(
+        codeOf(archRead(`${STORE_ROOT}/audit.ts`)).split(`bridge.${channel}(`),
+        channel,
+      ).toHaveLength(2);
+  });
+
+  /* ── row 10: the keymap still holds, and prettier still leaves it ──── */
+
+  /**
+   * Sc10's trap, re-checked because it costs one row. `prettier --write`
+   * once unquoted the screen names in a record literal, which silently
+   * broke the arch row that proves every `SCREENS` member is reachable.
+   * The pair form survived that; this asserts it is still the pair form,
+   * and that this scenario's screen really is the one ⌘5 opens.
+   */
+  it('every screen is reachable by a quoted pair, audit on Digit5', () => {
+    const keys = archRead(`${RENDERER}/keys/screens.ts`);
+    const screens = [
+      ...(/SCREENS\s*=\s*\[([^\]]*)\]/.exec(
+        archRead(`${RENDERER}/router.ts`),
+      )?.[1] ?? ''),
+    ]
+      .join('')
+      .match(/'([^']+)'/g);
+    expect(screens).not.toBeNull();
+    for (const quoted of screens ?? []) expect(keys).toContain(quoted);
+    expect(keys).toContain("['audit', 'Digit5']");
+    // The load-time collision check is still there: two screens on one
+    // stroke would otherwise make the second silently unreachable.
+    expect(keys).toContain('two screens claim one navigation stroke');
+  });
+
+  /* ── row 11: the app still schedules nothing ───────────────────────── */
+
+  it('the desktop app still schedules nothing, five thousand rows included', () => {
+    const timers = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(timers).toEqual(['apps/desktop/src/main/gateway.ts']);
+    const delayed = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(debounce|throttle|requestIdleCallback|requestAnimationFrame)\b/i.test(
+          codeOf(archRead(rel)),
+        ),
+      )
+      .sort();
+    expect(delayed).toEqual([]);
+  });
+
+  it('PLANTED: a virtualiser that windows on a frame callback is caught', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Window.ts`,
+      [
+        'export function onScroll(fn: () => void): void {',
+        '  requestAnimationFrame(fn);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const code = codeOf(archRead(rel));
+    expect(/\brequestAnimationFrame\b/.test(code)).toBe(true);
+  });
+
+  it('LEGITIMATE NEAR-MISS: windowing by slice schedules nothing', () => {
+    const rel = sc13Plant(
+      `${AUDIT}/__s8_sc13_probe__/Slice.ts`,
+      [
+        '/**',
+        ' * The drawn window is a slice of a sorted array. It is recomputed',
+        ' * when the filters change and at no other time, so there is nothing',
+        ' * to schedule and nothing to cancel.',
+        ' */',
+        'export function drawn<T>(rows: readonly T[], page: number): readonly T[] {',
+        '  return rows.slice(0, page);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const code = codeOf(archRead(rel));
+    expect(/\b(setTimeout|setInterval)\(/.test(code)).toBe(false);
+    expect(
+      /\b(debounce|throttle|requestIdleCallback|requestAnimationFrame)\b/i.test(
+        code,
+      ),
+    ).toBe(false);
   });
 });

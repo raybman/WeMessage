@@ -44,11 +44,21 @@ import type { ServerVerdict } from './screens/rules/Matcher.js';
 import type { RuleRow } from './screens/rules/List.js';
 import type { DryRunPanelProps } from './screens/rules/DryRun.js';
 import WizardScreen from './screens/wizard/index.js';
+import ScheduleScreen from './screens/schedule/index.js';
+import type {
+  ScheduleDetailProps,
+  ScheduleInUse,
+  WindowEntry,
+} from './screens/schedule/Detail.js';
+import type { Gesture, GridProps } from './screens/schedule/Grid.js';
+import type { BlockView } from './screens/schedule/Window.js';
+import type { ScheduleRow } from './screens/schedule/List.js';
 import { TypedConfirm } from './components/TypedConfirm.js';
 import {
   acceptForm,
   editForm,
   formOf,
+  formPatch,
   isDirty,
   issuesByPath,
   revertForm,
@@ -77,8 +87,29 @@ import {
 } from './derive/dryRun.js';
 import { rulesToday } from './derive/rulesToday.js';
 import { globalModeOf, scopeLadder } from './derive/scopeLadder.js';
+import {
+  blocksOf,
+  hhmmOf,
+  hostZone,
+  mergeWindows,
+  minutesOf,
+  noteTitle,
+  nowInZone,
+  orderedDays,
+  scheduleProblems,
+  weekFromDate,
+  windowNote,
+  type ScheduleValue,
+  type WeekDay,
+} from './derive/projectWindow.js';
 import { bindStore, type StoreBinding } from './store/index.js';
 import { bindRules, REPLAY_LIMIT, type RulesBinding } from './store/rules.js';
+import { bindSchedule, type ScheduleBinding } from './store/schedule.js';
+import type {
+  SchedulePayload,
+  ScheduleInput,
+  ScheduleWindowPayload,
+} from '@wemessage/client';
 import type { Conversation } from './store/optimistic.js';
 import { applyTheme, asTheme } from './theme/theme.js';
 import type { StreamPayload } from '../main/gateway.js';
@@ -455,13 +486,17 @@ const rules: RulesBinding = bindRules(window.wm);
 /**
  * The screen the ⌘-digit keymap last chose.
  *
- * Only `queue` and `rules` have a surface in this slice. A stroke for one of
- * the other four is INERT rather than navigating to a blank pane: an empty
- * document with `data-screen="audit"` is a screen that claims to exist, and
- * the next scenario is the honest place to build it.
+ * Only `queue`, `rules` and `schedule` have a surface in this slice. A
+ * stroke for one of the other three is INERT rather than navigating to a
+ * blank pane: an empty document with `data-screen="audit"` is a screen that
+ * claims to exist, and the next scenario is the honest place to build it.
  */
 let screen: Screen = DEFAULT_SCREEN;
-const MOUNTED: ReadonlySet<Screen> = new Set<Screen>(['queue', 'rules']);
+const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
+  'queue',
+  'rules',
+  'schedule',
+]);
 
 /**
  * The rule being edited: `null` for none, `''` for one that is not stored.
@@ -478,6 +513,17 @@ let ruleServer: ServerVerdict | null = null;
 let ruleBusy = false;
 /** What has been typed into the confirm, or `null` when it is closed. */
 let confirmTyped: string | null = null;
+/**
+ * WHICH irreversible thing the open confirm is about.
+ *
+ * One mount, two questions. The dialog owns `role="dialog"` for the whole
+ * renderer and a second mount would be a second modal — so the phrase, the
+ * title and the verb are chosen from this, and the `onGo` that runs is the
+ * one that belongs to the sentence on screen. A single flag rather than two
+ * nullable strings, because "both confirms open" is a state that must not
+ * be spellable.
+ */
+let confirmIntent: 'auto' | 'delete-schedule' = 'auto';
 let dryRun: DryRunPanelProps | null = null;
 
 /**
@@ -580,6 +626,7 @@ async function saveRule(armed: boolean): Promise<void> {
   const id = ruleId;
   if (form === null || id === null || ruleBusy) return;
   if (!armed && needsTypedConfirm(form.draft)) {
+    confirmIntent = 'auto';
     confirmTyped = '';
     paint();
     return;
@@ -860,6 +907,442 @@ function ruleDetail(): RuleDetailProps | null {
   };
 }
 
+/* ── the schedule editor ───────────────────────────────────────────────── */
+
+/**
+ * The third binding, and the third screen.
+ *
+ * Its own object again, and for the sharpest version of the reason: a
+ * schedule is the most tempting place in this GUI to acquire a send path,
+ * because "the window is open now" reads like an instruction. It is not.
+ * `SCHEDULE_CHANNELS` is four channels, none of which can carry a draft id,
+ * so "editing a schedule is not an approval" is a key set rather than a
+ * promise — and an arch row scans every identifier in the binding for the
+ * approval vocabulary in case somebody tries to write one anyway.
+ */
+const schedules: ScheduleBinding = bindSchedule(window.wm);
+
+/**
+ * The zone this DEVICE is in, read ONCE.
+ *
+ * Not per paint: it cannot change while the process is running, and reading
+ * it in a component would put an environment lookup inside a render. It is
+ * here for exactly one purpose — to say, in words, when the schedule an
+ * operator is editing is not in the zone they are living in.
+ */
+const HOST_ZONE = hostZone();
+
+/**
+ * The app's ONE clock read for the schedule grid, and the marker's instant.
+ *
+ * A live NOW line is the obvious thing to build here and it is the wrong
+ * thing. A timer is banned (Sc5) and a CSS keyframe sweep was considered and
+ * rejected on the record: a linear twenty-four-hour animation is wrong by up
+ * to an hour on exactly the two days a year this screen is about, which
+ * would make the one moving thing on the grid lie on the only days the grid
+ * has anything interesting to say.
+ *
+ * So the marker is a READING. It is stamped with the instant it was taken,
+ * published as `data-now-iso` so the projection beside it can be checked
+ * exactly, and it moves when an operator asks it to and at no other time.
+ */
+let nowIso = new Date().toISOString();
+
+let scheduleId: string | null = null;
+let scheduleForm: Form<ScheduleValue> | null = null;
+/** The daemon's own complaints from the last refused write. */
+let scheduleIssues: readonly FieldIssue[] = [];
+/** The daemon's own error code from the last refused write. */
+let scheduleRefusal: string | null = null;
+/** The 409's count, plus the names this screen's own catalogue supplies. */
+let scheduleInUse: ScheduleInUse | null = null;
+let scheduleBusy = false;
+/**
+ * Any local date in the week the grid is showing, or `null` for "the one
+ * the marker is in". Null rather than a date computed at open time, so the
+ * default follows the clock instead of freezing whichever instant the screen
+ * happened to be entered at.
+ */
+let scheduleWeek: string | null = null;
+
+const DELETE_SCHEDULE = 'DELETE SCHEDULE';
+
+/** The three fields this editor writes, off a row the daemon answered with. */
+function valueOfSchedule(row: SchedulePayload): ScheduleValue {
+  return { name: row.name, timezone: row.timezone, windows: row.windows };
+}
+
+function closeScheduleForm(): void {
+  scheduleId = null;
+  scheduleForm = null;
+  scheduleIssues = [];
+  scheduleRefusal = null;
+  scheduleInUse = null;
+  scheduleWeek = null;
+  confirmTyped = null;
+}
+
+/**
+ * Open a schedule from the list. No request, for Sc10's reason: the row is
+ * already in hand and a GET per selection would be a round trip whose only
+ * effect is to redraw the same fields.
+ */
+function openSchedule(id: string): void {
+  const row = schedules.data().schedules.find((s) => s.id === id);
+  if (row === undefined) return;
+  closeScheduleForm();
+  scheduleId = id;
+  scheduleForm = formOf(valueOfSchedule(row));
+  paint();
+}
+
+/** The seven local days the grid is drawn over, in the schedule's zone. */
+function scheduleWeekDays(zone: string): WeekDay[] {
+  const anchor = scheduleWeek ?? nowInZone(nowIso, zone)?.date ?? null;
+  return anchor === null ? [] : weekFromDate(anchor, zone);
+}
+
+/**
+ * One window, as a sentence, INCLUDING what this week does to it.
+ *
+ * The note is a property of the DAY rather than of the window, so it is
+ * recomputed per visible week: the same 02:30 window is ordinary in June and
+ * is a window that never opens on the second Sunday in March. §3.10 in its
+ * strictest form — the hatching on the grid is a pattern, a pattern is a
+ * colour with extra steps, and this is the word that carries the same state.
+ */
+function windowEntries(
+  windows: readonly ScheduleWindowPayload[],
+  week: readonly WeekDay[],
+): WindowEntry[] {
+  return windows.map((window, index) => {
+    const days = orderedDays(window.days);
+    const label = `${days
+      .map((day) => day.toUpperCase())
+      .join(' ')} ${window.start}–${window.end}`;
+    const start = minutesOf(window.start);
+    const end = minutesOf(window.end);
+    if (start === null || end === null) return { index, text: label };
+    const to = end <= start ? 1440 : end;
+    const notes: string[] = [];
+    for (const day of days) {
+      const column = week.find((wd) => wd.day === day);
+      if (column === undefined || column.shift === null) continue;
+      const note = windowNote(start, to, column.shift);
+      if (note.kind !== 'none' && !notes.includes(note.words))
+        notes.push(note.words);
+    }
+    return {
+      index,
+      text: notes.length === 0 ? label : `${label} · ${notes.join(' · ')}`,
+    };
+  });
+}
+
+/** The rectangles, per column, with the day's seam applied to each. */
+function scheduleGrid(
+  value: ScheduleValue,
+  week: readonly WeekDay[],
+): GridProps {
+  const zone = value.timezone;
+  const blocks = blocksOf(value.windows);
+  const at = nowInZone(nowIso, zone);
+  return {
+    zone,
+    columns: week.map((column) => ({
+      day: column.day,
+      date: column.date,
+      shift: column.shift,
+      blocks: blocks
+        .filter((block) => block.day === column.day)
+        .map((block): BlockView => ({
+          index: block.index,
+          from: block.from,
+          to: block.to,
+          wraps: block.wraps,
+          tail: block.tail,
+          note: windowNote(block.from, block.to, column.shift).kind,
+          title: noteTitle(block.from, block.to, column.shift, column.date),
+          label: `${hhmmOf(block.from)}–${hhmmOf(block.to)}`,
+        })),
+    })),
+    now:
+      at === null
+        ? null
+        : {
+            iso: nowIso,
+            zone,
+            date: at.date,
+            day: at.day,
+            minutes: at.minutes,
+          },
+    onGesture: onScheduleGesture,
+  };
+}
+
+/**
+ * A completed pointer gesture, applied to the DRAFT and to nothing else.
+ *
+ * Every path ends in `mergeWindows`, which is the GUI's promise and not the
+ * daemon's: `canonicalWindows` dedupes and week-orders `days` INSIDE a
+ * window and merges nothing, so two windows that overlap are stored as two
+ * overlapping windows. Drawing them as two stacked bars would be drawing the
+ * storage rather than the behaviour, and the behaviour is what the operator
+ * is deciding about.
+ *
+ * Nothing here asks the daemon anything. A drag is an edit exactly as a
+ * keystroke in the name field is; SAVE is the decision.
+ */
+function onScheduleGesture(gesture: Gesture): void {
+  const form = scheduleForm;
+  if (form === null || scheduleBusy) return;
+  const current = form.draft.windows;
+  let next: ScheduleWindowPayload[];
+  if (gesture.kind === 'create') {
+    next = [
+      ...current,
+      {
+        days: [gesture.day],
+        start: hhmmOf(gesture.from % 1440),
+        // A window drawn to the bottom of a column closes at `00:00`, which
+        // is the daemon's own spelling for the far end of a day.
+        end: hhmmOf(gesture.to % 1440),
+      },
+    ];
+  } else {
+    const target = current[gesture.index];
+    if (target === undefined) return;
+    const start = minutesOf(target.start);
+    const end = minutesOf(target.end);
+    if (start === null || end === null) return;
+    // Unwrapped into a monotonic pair first: a window that crosses a
+    // midnight is one interval, and arithmetic on `end < start` in place
+    // would make a drag on the tail move the head the wrong way.
+    const finish = end <= start ? end + 1440 : end;
+    let from = start;
+    let to = finish;
+    if (gesture.kind === 'resize') {
+      if (gesture.edge === 'start') from = gesture.minute;
+      else to = gesture.minute;
+    } else {
+      from = start + gesture.delta;
+      to = finish + gesture.delta;
+    }
+    // A resize that inverts the window is not a window. Refused rather than
+    // normalised: swapping the ends would silently turn "shrink this to
+    // nothing" into a twenty-two-hour window nobody drew.
+    if (to <= from) return;
+    const wrap = (minute: number): string =>
+      hhmmOf(((minute % 1440) + 1440) % 1440);
+    next = current.map((window, index) =>
+      index === gesture.index
+        ? { days: [...window.days], start: wrap(from), end: wrap(to) }
+        : window,
+    );
+  }
+  scheduleForm = editForm(form, 'windows', mergeWindows(next));
+  // The daemon's complaint was about the array as it stood. Keeping it on
+  // screen over an array that has since been redrawn is a claim nobody made.
+  scheduleIssues = [];
+  scheduleRefusal = null;
+  paint();
+}
+
+function removeScheduleWindow(index: number): void {
+  const form = scheduleForm;
+  if (form === null || scheduleBusy) return;
+  scheduleForm = editForm(
+    form,
+    'windows',
+    form.draft.windows.filter((_, at) => at !== index),
+  );
+  scheduleIssues = [];
+  scheduleRefusal = null;
+  paint();
+}
+
+function revertSchedule(): void {
+  const form = scheduleForm;
+  if (form === null) return;
+  scheduleForm = revertForm(form);
+  scheduleIssues = [];
+  scheduleRefusal = null;
+  scheduleInUse = null;
+  paint();
+}
+
+/**
+ * SAVE: one PATCH, carrying the WHOLE `windows` array.
+ *
+ * Not a diff of rectangles. `patchBody` is `scheduleFields.partial()`, so a
+ * `windows` key REPLACES the array; a partial one would delete every day it
+ * failed to mention, which is the kind of bug that looks like a rendering
+ * glitch until somebody notices Thursday stopped answering.
+ *
+ * Note what the body cannot contain. `ScheduleValue` has three fields, all
+ * of them schedule columns; there is no draft id, no approval and no
+ * dispatch in the shape, and the binding reaches no channel that would take
+ * one. Opening a window changes what AUTONOMY may do NEXT and says nothing
+ * about work a human has already been asked to decide.
+ */
+async function saveSchedule(): Promise<void> {
+  const form = scheduleForm;
+  const id = scheduleId;
+  if (form === null || id === null || scheduleBusy) return;
+  const changed = formPatch(form);
+  const body: Partial<ScheduleInput> = {};
+  if (changed.name !== undefined) body.name = changed.name;
+  if (changed.timezone !== undefined) body.timezone = changed.timezone;
+  if (changed.windows !== undefined)
+    body.windows = changed.windows.map((window) => ({
+      days: [...window.days],
+      start: window.start,
+      end: window.end,
+    }));
+  scheduleIssues = [];
+  scheduleRefusal = null;
+  scheduleInUse = null;
+  scheduleBusy = true;
+  paint();
+  const answer = await schedules.write(id, body);
+  if (answer.ok) {
+    // Rebaselined onto the row the DAEMON stored, never onto the body that
+    // was sent: `canonicalWindows` week-orders `days` inside each window, so
+    // a form that rebaselined onto its own request would say "no unsaved
+    // changes" about an array the daemon had reordered underneath it.
+    scheduleForm = acceptForm(form, valueOfSchedule(answer.schedule));
+  } else {
+    scheduleIssues = answer.issues;
+    scheduleRefusal = answer.reason;
+  }
+  scheduleBusy = false;
+  paint();
+}
+
+/** DELETE, which is a question this screen refuses to answer for itself. */
+function askDeleteSchedule(): void {
+  if (scheduleId === null || scheduleBusy) return;
+  confirmIntent = 'delete-schedule';
+  confirmTyped = '';
+  paint();
+}
+
+/**
+ * …and the ask, once the sentence has been typed.
+ *
+ * The request is MADE even though this screen holds the rules catalogue and
+ * could pre-check it. Guessing is how a GUI ends up refusing something the
+ * daemon would have allowed; the 409 is the daemon's answer and the count in
+ * it is the daemon's count. Only the NAMES are local, because "which two" is
+ * the question a person actually has and the wire does not carry it.
+ */
+async function deleteSchedule(): Promise<void> {
+  const id = scheduleId;
+  if (id === null || scheduleBusy) return;
+  confirmTyped = null;
+  scheduleInUse = null;
+  scheduleBusy = true;
+  paint();
+  const answer = await schedules.remove(id);
+  if (answer.ok) closeScheduleForm();
+  else {
+    const named = schedules
+      .data()
+      .rules.filter((rule) => rule.scheduleId === id)
+      .map((rule) => rule.name.toUpperCase());
+    scheduleInUse = { count: answer.rules ?? named.length, names: named };
+  }
+  scheduleBusy = false;
+  paint();
+}
+
+/** The list, with the two numbers that say how much a schedule decides. */
+function scheduleRows(): readonly ScheduleRow[] {
+  const data = schedules.data();
+  return data.schedules.map((row) => ({
+    id: row.id,
+    name: row.name,
+    timezone: row.timezone,
+    enabled: row.enabled,
+    windows: row.windows.length,
+    rules: data.rules.filter((rule) => rule.scheduleId === row.id).length,
+  }));
+}
+
+/**
+ * What a shut window COSTS, counted by what each rule asked for.
+ *
+ * F-69: a stored `queue` degrades to `draft-only`, so it is counted with the
+ * drafters rather than shown as a third thing that does not exist at
+ * runtime. "IGNORES" is not pluralised because it is the verb.
+ */
+function scheduleFootnote(id: string): string {
+  const rows = schedules.data().rules.filter((rule) => rule.scheduleId === id);
+  const ignores = rows.filter((rule) => rule.outsideWindow === 'ignore').length;
+  return `${String(rows.length)} RULE${rows.length === 1 ? '' : 'S'} · ${String(
+    rows.length - ignores,
+  )} STILL DRAFT · ${String(ignores)} IGNORES`;
+}
+
+/** Everything the detail pane renders, or `null` when nothing is open. */
+function scheduleDetail(): ScheduleDetailProps | null {
+  const form = scheduleForm;
+  const id = scheduleId;
+  if (form === null || id === null) return null;
+  const zone = form.draft.timezone;
+  const week = scheduleWeekDays(zone);
+  const dirty = isDirty(form);
+  const problems = scheduleProblems(form.draft);
+  return {
+    scheduleId: id,
+    name: form.draft.name,
+    zone,
+    hostZone: HOST_ZONE,
+    week: scheduleWeek ?? week[0]?.date ?? '',
+    grid: scheduleGrid(form.draft, week),
+    windows: windowEntries(form.draft.windows, week),
+    dirty,
+    saveDisabled: scheduleBusy || problems.length > 0 || !dirty,
+    busy: scheduleBusy,
+    // The daemon's issues FIRST. `issuesByPath` is first-wins, and
+    // `scheduleProblems` is deliberately incomplete, so a field the
+    // validator refused shows the validator's own sentence.
+    issues: issuesByPath([...scheduleIssues, ...problems]),
+    refusal: scheduleRefusal,
+    inUse: scheduleInUse,
+    armed: armingGlance(stream.armed),
+    footnote: scheduleFootnote(id),
+    onName: (next) => {
+      if (scheduleForm === null) return;
+      scheduleForm = editForm(scheduleForm, 'name', next);
+      scheduleIssues = [];
+      scheduleRefusal = null;
+      paint();
+    },
+    onZone: (next) => {
+      if (scheduleForm === null) return;
+      scheduleForm = editForm(scheduleForm, 'timezone', next);
+      scheduleIssues = [];
+      scheduleRefusal = null;
+      paint();
+    },
+    onWeek: (next) => {
+      scheduleWeek = next;
+      paint();
+    },
+    onNow: () => {
+      nowIso = new Date().toISOString();
+      paint();
+    },
+    onRemoveWindow: removeScheduleWindow,
+    onSave: () => {
+      void saveSchedule();
+    },
+    onRevert: revertSchedule,
+    onDelete: askDeleteSchedule,
+  };
+}
+
 /**
  * The app's ONE window-level key listener.
  *
@@ -890,12 +1373,15 @@ function onWindowKey(event: KeyboardEvent): void {
   if (next === screen) return;
   screen = next;
   closeRuleForm();
+  closeScheduleForm();
   // RESET, then load. The catalogue held from a previous visit is a set of
   // claims about contacts, settings and counts that may all have moved; a
   // screen that painted `ready` from it would answer a harness's readiness
   // wait with last visit's facts.
   rules.reset();
+  schedules.reset();
   if (next === 'rules') void rules.load(midnightIso());
+  if (next === 'schedule') void schedules.load();
   paint();
 }
 
@@ -932,6 +1418,17 @@ function Shell({
           detail={ruleDetail()}
           dryRun={dryRun}
         />
+      ) : screen === 'schedule' ? (
+        <ScheduleScreen
+          status={schedules.data().status}
+          list={{
+            rows: scheduleRows(),
+            selectedId: scheduleId,
+            busy: scheduleBusy,
+            onSelect: openSchedule,
+          }}
+          detail={scheduleDetail()}
+        />
       ) : (
         <QueueScreen
           cards={view.cards}
@@ -961,7 +1458,21 @@ function Shell({
       {/* Outside the screen branch on purpose: the modal belongs to the
           document, not to the pane underneath it, and mounting it inside
           the detail pane would put a dialog inside a form. */}
-      {confirmTyped === null ? null : (
+      {confirmTyped === null ? null : confirmIntent === 'delete-schedule' ? (
+        <TypedConfirm
+          phrase={DELETE_SCHEDULE}
+          title="DELETE THIS SCHEDULE"
+          body="EVERY RULE THAT NAMES THIS SCHEDULE LOSES ITS WINDOW, AND THE DAEMON REFUSES WHILE ANY RULE STILL DOES. NOTHING ALREADY DRAFTED IS RE-DECIDED. TYPE THE SENTENCE TO CONFIRM."
+          typed={confirmTyped}
+          onType={(next) => {
+            confirmTyped = next;
+            paint();
+          }}
+          onGo={() => {
+            void deleteSchedule();
+          }}
+        />
+      ) : (
         <TypedConfirm
           phrase={AUTO_EVERYONE}
           title="TURN ON AUTO REPLIES"
@@ -1070,6 +1581,7 @@ function schedulePaint(): void {
 
 binding.store.subscribe(schedulePaint);
 rules.subscribe(schedulePaint);
+schedules.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {

@@ -1048,3 +1048,340 @@ body {
   color: var(--ink-dim);
   cursor: not-allowed;
 }
+
+/* ── the schedule editor (s8 Sc11) ──────────────────────────────────────
+ *
+ * The same two-column shape as the rules screen, deliberately: this is the
+ * third sibling editor and a third layout would be a third thing to learn.
+ *
+ * The one rule in here that is load-bearing rather than cosmetic is
+ * `.sched-col`. A column IS the local day — 1440 minutes, no header, no
+ * padding, no border — because the pointer arithmetic in `Grid.tsx` and the
+ * pointer arithmetic in the e2e both read `getBoundingClientRect()` off this
+ * element and divide by 1440. Day names live in `.sched-head`, one row up,
+ * and the column separators are inset box-shadows precisely so that they
+ * cost the canvas no height. `--sched-hour` is the only knob; change it and
+ * every rectangle, seam and marker follows, because all of them are
+ * percentages of the column rather than pixels of their own.
+ *
+ * `.sched-now-line` takes `pointer-events: none` and it is not optional. It
+ * is a child of `.sched-body` rather than of a column — it has to span the
+ * grid to sit in the right day — so a mousedown that landed on it would
+ * `closest('.sched-col')` to `null` and the drag would silently do nothing
+ * on whatever day the marker happens to be over that week.
+ *
+ * The seams are a hatch of `--tint-soft`, which is the product's one blue at
+ * low alpha. They are never the only carrier: the column says `data-shift`,
+ * the block says `data-note`, the list entry says it in words, and the
+ * rectangle carries the sentence as a `title`.
+ */
+.schedule {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: 1px;
+  min-height: 0;
+  margin-top: 16px;
+  background: var(--stroke);
+  overflow: hidden;
+}
+
+.sched-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--layer-0);
+  overflow-y: auto;
+}
+
+.sched-listwrap {
+  min-height: 0;
+}
+
+#sched-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#sched-list li {
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+#sched-list li[aria-selected='true'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+#sched-list li[data-active='true'] {
+  border-color: var(--stroke-strong);
+}
+
+/* The dim, never alone: the row also spells the counts out in words. */
+#sched-list li[data-enabled='no'] {
+  opacity: 0.55;
+}
+
+.sched-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.sched-row-name {
+  letter-spacing: 0.04em;
+}
+
+.sched-row-zone {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.sched-row-count {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.sched-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sched-armed {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sched-mismatch {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--warn);
+}
+
+.sched-weekbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- the week ---------------------------------------------------------- */
+
+.sched-grid {
+  --sched-hour: 20px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sched-head,
+.sched-body {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.sched-head {
+  border-bottom: 1px solid var(--stroke);
+  background: var(--layer-2);
+}
+
+.sched-head-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.sched-head-day {
+  color: var(--ink);
+}
+
+.sched-head-date {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  color: var(--ink-dim);
+}
+
+.sched-body {
+  position: relative;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * EXACTLY the local day and nothing else. No padding, no border, no content
+ * that is not positioned against it: every pixel here is 1/1440th of a
+ * minute to both the app and its tests.
+ */
+.sched-col {
+  position: relative;
+  box-sizing: border-box;
+  height: calc(var(--sched-hour) * 24);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: inset -1px 0 0 var(--stroke);
+  cursor: crosshair;
+}
+
+.sched-col:last-child {
+  box-shadow: none;
+}
+
+.sched-gap,
+.sched-fold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+/* A hole in the day: the clocks skipped this, so nothing can open in it. */
+.sched-gap {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--tint-soft) 0 3px,
+    transparent 3px 7px
+  );
+}
+
+/* An hour the day holds twice. Same ink, other direction. */
+.sched-fold {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--tint-soft) 0 3px,
+    transparent 3px 7px
+  );
+}
+
+.sched-block {
+  position: absolute;
+  left: 2px;
+  right: 3px;
+  box-sizing: border-box;
+  min-height: 2px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 1px 3px;
+  border: 1px solid var(--tint);
+  border-radius: 4px;
+  background: var(--tint-soft);
+  overflow: hidden;
+}
+
+.sched-block-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* The mark that says the two rectangles either side of a midnight are one
+   window. Both halves carry it, which is what makes it readable as a join
+   rather than as a decoration on whichever half happened to be drawn. */
+.sched-join {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--ink-dim);
+}
+
+.sched-now-line {
+  position: absolute;
+  height: 0;
+  border-top: 1px solid var(--tint);
+  /* Mandatory. See the block note: this element spans the columns, and a
+     mousedown that hit it would resolve to no column at all. */
+  pointer-events: none;
+}
+
+/* ---- the windows, as sentences ---------------------------------------- */
+
+.sched-windows,
+.sched-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sched-window {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+/*
+ * The glyph is a pseudo-element ON PURPOSE. `#sched-windows > li` is read as
+ * one sentence, by the e2e and by a screen reader, and a character inside
+ * the button would land in the middle of it. The accessible name is on the
+ * button's `aria-label`.
+ */
+.sched-x {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 5px;
+  background: var(--layer-1);
+  color: var(--ink-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sched-x::after {
+  content: '\00D7';
+}
+
+.sched-x:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#sched-inuse,
+#sched-refuse {
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  color: var(--danger);
+}

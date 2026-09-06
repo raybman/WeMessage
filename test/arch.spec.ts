@@ -5334,6 +5334,22 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
         'settings',
       ],
     },
+    [`${STORE_ROOT}/schedule.ts`]: {
+      constant: 'SCHEDULE_CHANNELS',
+      // Sc11, and the third entry this row was written to demand. Three
+      // reads and two writes. `rules` is here because a schedule is only
+      // ever ABOUT rules — the footnote counts what each rule does outside
+      // the window (F-69) and the 409 that refuses a delete names how many
+      // rules still point at it — and `scheduleDelete` is here, unlike the
+      // rules editor's `ruleDelete`, because the DAEMON refuses a delete
+      // that would strand a rule. An affordance the server already guards
+      // is an affordance the GUI may offer; one it does not, is not.
+      //
+      // No `on`, for the same reason the rules binding declares none: an
+      // editor that rendered a schedule from a stream would eventually
+      // render a row somebody else was halfway through changing.
+      members: ['rules', 'scheduleDelete', 'scheduleWrite', 'schedules'],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -5354,7 +5370,7 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
     }
   });
 
-  it('the two bindings do not overlap on any WRITE channel', () => {
+  it('no two bindings overlap on any WRITE channel', () => {
     // Reads may be shared — both screens name a rule — but two files that
     // can both mutate the same resource is two places for one keystroke to
     // become two requests. Sc7, Sc8 and Sc9 each pinned their write to one
@@ -5366,6 +5382,12 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       'reject',
       'retry',
       'ruleWrite',
+      // Sc11's two. A schedule is the only resource in this GUI a screen may
+      // DELETE, and it is deliberately owned by the binding that also owns
+      // the patch: two files that could both remove a schedule is two places
+      // for one keystroke to become two requests, and the second one 404s.
+      'scheduleDelete',
+      'scheduleWrite',
     ];
     for (const write of WRITES) {
       const owners = Object.entries(BINDINGS)
@@ -5762,5 +5784,434 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       /addEventListener\s*\(/.test(codeOf(archRead(r))),
     );
     expect(sites).not.toContain(rel);
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 11: the schedule editor)', () => {
+  const sc11Planted: string[] = [];
+  function sc11Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc11Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc11Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/schedule/__s8_sc11_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc11_probe__',
+      'apps/desktop/src/renderer/screens/rules/__s8_sc11_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc11_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc11_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const SCHEDULE = `${RENDERER}/screens/schedule`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+  const RULES = `${RENDERER}/screens/rules`;
+
+  /* ── row 1: the renderer may not decide arming, only draw it ────────── */
+
+  /**
+   * The load-bearing claim of this whole scenario, and the one the
+   * dependency graph is already enforcing for free.
+   *
+   * `packages/core` owns the window math (F-57): `isArmed`, `projectToZone`,
+   * `windowCloseAfter`, `nextWindowOpen`. The daemon calls them. The
+   * renderer CANNOT, because `apps/desktop/package.json` does not depend on
+   * `@wemessage/core` — and that is the reason `derive/projectWindow.ts`
+   * exists as a second, DISPLAY-ONLY projection rather than an import.
+   *
+   * Two implementations of "what time is it there" is normally a smell, and
+   * here it is the design: one of them decides whether a message goes out
+   * and the other decides where a rectangle is drawn, and the second one
+   * being wrong must never be able to change the first. This row states
+   * that the wall between them is structural, so that a later scenario
+   * cannot dissolve it by adding one line to a manifest.
+   *
+   * Non-vacuous from both ends: core really does export the verb, and the
+   * renderer really does have a projection of its own.
+   */
+  it('the renderer cannot reach the daemon`s window math', () => {
+    const manifest = JSON.parse(
+      archRead('apps/desktop/package.json'),
+    ) as Record<string, Record<string, string>>;
+    const declared = [
+      ...Object.keys(manifest['dependencies'] ?? {}),
+      ...Object.keys(manifest['devDependencies'] ?? {}),
+    ];
+    expect(declared).not.toContain('@wemessage/core');
+    const importers = archFiles('apps/desktop/src')
+      .filter((rel) => /['"]@wemessage\/core['"]/.test(codeOf(archRead(rel))))
+      .sort();
+    expect(importers).toEqual([]);
+    // …and the thing it cannot reach is real, and is the decider.
+    const core = archRead('packages/core/src/schedule/index.ts');
+    expect(core).toContain('export function isArmed');
+    expect(core).toContain('export function projectToZone');
+    // …and the renderer's own projection exists and is display-only, which
+    // is asserted as the absence of the verb that would make it authority.
+    const mine = codeOf(archRead(`${RENDERER}/derive/projectWindow.ts`));
+    expect(mine).not.toMatch(/\bisArmed\b/);
+  });
+
+  /* ── row 2: no screen reads a clock ──────────────────────────────────── */
+
+  /**
+   * A schedule editor wants a live NOW marker, and the two ways to build one
+   * are a timer (banned since Sc5) and a clock read inside the component
+   * that draws it. The second is the subtler mistake: it is not a timer, so
+   * no existing row catches it, and it makes the marker's instant a
+   * property of WHEN PREACT HAPPENED TO RENDER rather than a value the
+   * composition root chose and can be handed a different one of.
+   *
+   * So: the clock belongs to `main.tsx`, exactly as `midnightIso()` already
+   * does, and every screen is a pure function of the instant it was given.
+   * That is also what makes the e2e able to say the marker follows the
+   * OPERATOR's clock and not the daemon's — two clocks are only
+   * distinguishable if the screen is handed one rather than reading one.
+   */
+  const CLOCK_READ = /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)/;
+
+  it('no file under screens/ reads a clock', () => {
+    const offenders = archFiles(`${RENDERER}/screens`)
+      .filter((rel) => CLOCK_READ.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    // Non-vacuous: the composition root really does read one, so this scan
+    // is looking at a tree where the pattern occurs.
+    expect(CLOCK_READ.test(codeOf(archRead(`${RENDERER}/main.tsx`)))).toBe(
+      true,
+    );
+  });
+
+  it('PLANTED: a NOW marker that reads the clock where it draws is caught', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/Now.tsx`,
+      [
+        'export function NowLine(): unknown {',
+        '  const at = new Date().toISOString();',
+        '  return <div class="now" data-now={at} />;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const offenders = archFiles(`${RENDERER}/screens`).filter((r) =>
+      CLOCK_READ.test(codeOf(archRead(r))),
+    );
+    expect(offenders).toEqual([rel]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: a marker handed its instant is clean', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/Given.tsx`,
+      [
+        '/**',
+        ' * The instant arrives as a prop. The composition root owns the one',
+        ' * clock read in this app, and a screen that read its own would be a',
+        ' * screen no test could stand still.',
+        ' */',
+        'export function NowLine(props: { nowIso: string }): unknown {',
+        '  return <div class="now" data-now={props.nowIso} />;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(CLOCK_READ.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 3: controls, per screen, still ──────────────────────────────── */
+
+  /**
+   * Sc7 banned controls under `screens/queue`; Sc10 permitted them under
+   * `screens/rules` and re-asserted the queue's ban in the same row. This is
+   * the third root, and it is a SEPARATE row on purpose.
+   *
+   * The separation is the point the user of this guard should read first:
+   * `screens/schedule` being allowed a button cannot widen `screens/queue`,
+   * because the queue's emptiness is asserted here by its own expression
+   * over its own root. One `expect` per claim; no union that could be
+   * satisfied by the wrong half.
+   *
+   * The schedule editor earns its controls the same way the rules editor
+   * did. It has a ZONE to choose out of several hundred, a SAVE, a DELETE
+   * and a typed confirmation, and §1.7 spells the last of those as "a click
+   * or ⌘↩ on the confirm button". A 7x24 grid of drag targets is not the
+   * argument — a drag needs no tab stop and mints no control — the zone
+   * select and the two verbs are.
+   *
+   * The queue's one-tab-stop claim (Sc6) is what Sc8's twenty-drafts-under-
+   * a-minute checkpoint rests on, and it is a claim about the QUEUE. It has
+   * never been a claim about the app, which is why navigation is a ⌘-digit
+   * keymap rather than the nav rail that would have put six tab stops in
+   * front of every screen including that one.
+   */
+  const INTERACTIVE: readonly (readonly [string, RegExp])[] = [
+    ['<button', /<button\b/],
+    ['<a href', /<a\s[^>]*\bhref\b/],
+    ['<input', /<input\b/],
+    ['<select', /<select\b/],
+    ['onClick', /\bonClick\s*=/],
+    ['tabIndex', /\btabIndex\s*=/],
+  ];
+
+  function controlsIn(root: string): string[] {
+    const out: string[] = [];
+    for (const rel of archFiles(root)) {
+      const code = codeOf(archRead(rel));
+      for (const [name, re] of INTERACTIVE)
+        if (re.test(code)) out.push(`${rel}: ${name}`);
+    }
+    return out.sort();
+  }
+
+  it('the schedule editor has real controls; the queue still has none', () => {
+    const schedule = controlsIn(SCHEDULE);
+    expect(schedule.some((c) => c.endsWith(': <button'))).toBe(true);
+    expect(schedule.some((c) => c.endsWith(': <select'))).toBe(true);
+    expect(schedule.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(schedule.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    // Its own expression, over its own root. Widening the line above cannot
+    // reach this one.
+    expect(controlsIn(QUEUE)).toEqual([]);
+    // And the rules editor is untouched by any of it.
+    expect(controlsIn(RULES).some((c) => c.endsWith(': <button'))).toBe(true);
+  });
+
+  it('PLANTED: a zone select smuggled into the queue is caught', () => {
+    const rel = sc11Plant(
+      `${QUEUE}/__s8_sc11_probe__/Zone.tsx`,
+      [
+        'export function Zone(props: { zones: readonly string[] }): unknown {',
+        '  return (',
+        '    <select>',
+        '      {props.zones.map((z) => (',
+        '        <option value={z}>{z}</option>',
+        '      ))}',
+        '    </select>',
+        '  );',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(QUEUE)).toEqual([`${rel}: <select`]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: the same select in the schedule editor is allowed', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/Zone.tsx`,
+      [
+        'export function Zone(props: { zones: readonly string[] }): unknown {',
+        '  return (',
+        '    <select>',
+        '      {props.zones.map((z) => (',
+        '        <option value={z}>{z}</option>',
+        '      ))}',
+        '    </select>',
+        '  );',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(SCHEDULE)).toContain(`${rel}: <select`);
+    expect(controlsIn(QUEUE)).toEqual([]);
+  });
+
+  /* ── row 4: the locality rows, with a third screen in scope ─────────── */
+
+  /**
+   * Sc8 pinned the multi-line text field to one component, Sc10 pinned the
+   * modal role to one component and the list roles have belonged to
+   * `components/Listbox.tsx` since Sc6. A grid editor is a plausible way to
+   * break all three at once — a notes field on a window, a "delete this
+   * schedule?" panel with its own role, a hand-rolled list of windows — so
+   * they are re-asserted here with the new directory in the tree rather
+   * than left to a row whose non-vacuity list predates it.
+   *
+   * Re-spelling a banned literal in a second file is the failure; reusing
+   * the component that owns it is the fix.
+   */
+  it('the owned markup still lives in exactly one file each', () => {
+    const withCode = (re: RegExp): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => re.test(codeOf(archRead(rel))))
+        .sort();
+    expect(withCode(/<textarea\b/)).toEqual([
+      `${RENDERER}/components/Editor.tsx`,
+    ]);
+    expect(withCode(/role="dialog"/)).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withCode(/role="listbox"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/role="option"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/<a\s[^>]*\bhref\b/)).toEqual([]);
+  });
+
+  it('PLANTED: a second modal role in the schedule editor is caught', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/Confirm.tsx`,
+      [
+        'export function Ask(): unknown {',
+        '  return <div role="dialog">DELETE THIS SCHEDULE?</div>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const sites = archFiles(RENDERER).filter((r) =>
+      /role="dialog"/.test(codeOf(archRead(r))),
+    );
+    expect(sites).toContain(rel);
+  });
+
+  it('LEGITIMATE NEAR-MISS: reusing the confirm component spells nothing', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/Reuse.tsx`,
+      [
+        '/**',
+        ' * The typed confirmation is a component, not a shape to re-draw.',
+        ' * Its ARIA contract has one home and this file is not it.',
+        ' */',
+        "import { TypedConfirm } from '../../../components/TypedConfirm.js';",
+        'export const Ask = TypedConfirm;',
+        '',
+      ].join('\n'),
+    );
+    expect(/role="dialog"/.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 5: no zone literal in the renderer ─────────────────────────── */
+
+  /**
+   * The zone menu is `Intl.supportedValuesOf('timeZone')`, evaluated in the
+   * renderer at paint time. That is not a convenience: a hand-written list
+   * is a tz database with no maintainer, and this repo is PUBLIC, so row (f)
+   * of the S6 guard above already pins every IANA literal in the tree to
+   * five zones chosen for DST SHAPES rather than for anybody's location.
+   *
+   * Shipping a menu of four hundred zone names as source would either break
+   * that row or force it open. Asking the runtime keeps the tree at zero
+   * zone literals and keeps the menu correct on every future ICU.
+   */
+  const IANA_LITERAL =
+    /['"`](?:Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|Pacific|Etc)\/[A-Za-z0-9_+-]+['"`]/;
+
+  it('the renderer names no IANA zone, and asks the runtime instead', () => {
+    const offenders = archFiles('apps/desktop/src')
+      .filter((rel) => IANA_LITERAL.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    const askers = archFiles(RENDERER)
+      .filter((rel) =>
+        /supportedValuesOf\s*\(\s*'timeZone'\s*\)/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(askers).toEqual([`${RENDERER}/screens/schedule/TzSelector.tsx`]);
+  });
+
+  it('PLANTED: a hand-written zone list in the renderer is caught', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/zones.ts`,
+      ["export const ZONES = ['Europe/Lisbon', 'Indian/Mahe'];", ''].join('\n'),
+    );
+    const offenders = archFiles('apps/desktop/src').filter((r) =>
+      IANA_LITERAL.test(codeOf(archRead(r))),
+    );
+    expect(offenders).toEqual([rel]);
+  });
+
+  /* ── row 6: INV-2, at the third screen ──────────────────────────────── */
+
+  /**
+   * A schedule is the most tempting place in this GUI to acquire a send
+   * path, because "the window is open now" reads like an instruction. It is
+   * not: opening a window changes what AUTONOMY may do next, and it says
+   * nothing at all about work a human has already been asked to decide.
+   *
+   * Two halves, exactly as Sc10 stated them for the rules editor. The
+   * binding may not name the approval vocabulary, and the screen may not
+   * reach the bridge at all.
+   */
+  it('the schedule binding names no approval, and the screen names no bridge', () => {
+    const binding = codeOf(archRead(`${STORE_ROOT}/schedule.ts`));
+    for (const m of binding.matchAll(/[A-Za-z_$][\w$]*/g))
+      expect(m[0], `${m[0]} in the schedule binding`).not.toMatch(
+        /^(approve|approval|draftId|dispatch)$/i,
+      );
+    for (const rel of archFiles(SCHEDULE)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+  });
+
+  it('scheduleWrite and scheduleDelete have exactly one call site each', () => {
+    const callers = (needle: string): string[] =>
+      archFiles(RENDERER).filter((rel) =>
+        codeOf(archRead(rel)).includes(needle),
+      );
+    for (const needle of ['bridge.scheduleWrite(', 'bridge.scheduleDelete(']) {
+      expect(callers(needle), needle).toEqual([`${STORE_ROOT}/schedule.ts`]);
+      expect(
+        codeOf(archRead(`${STORE_ROOT}/schedule.ts`)).split(needle),
+        needle,
+      ).toHaveLength(2);
+    }
+  });
+
+  /* ── row 7: the app still schedules nothing ─────────────────────────── */
+
+  /**
+   * Re-asserted with the marker in the tree. The NOW line is the single most
+   * likely thing in this application to acquire a timer, and it did not: it
+   * is painted from an instant the composition root read, labelled with the
+   * instant it was read at, and moved by an operator keystroke. F-117 in the
+   * small — nothing is armed for a deadline, so nothing can fire late,
+   * early, or after the window closed.
+   */
+  it('the desktop app still schedules nothing, marker included', () => {
+    const timers = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(timers).toEqual(['apps/desktop/src/main/gateway.ts']);
+    const delayed = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(debounce|throttle|requestIdleCallback|requestAnimationFrame)\b/i.test(
+          codeOf(archRead(rel)),
+        ),
+      )
+      .sort();
+    expect(delayed).toEqual([]);
+  });
+
+  it('PLANTED: a ticking NOW marker is caught', () => {
+    const rel = sc11Plant(
+      `${SCHEDULE}/__s8_sc11_probe__/tick.ts`,
+      [
+        'export function tick(paint: () => void): void {',
+        '  setInterval(paint, 60_000);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const timers = archFiles('apps/desktop/src').filter((r) =>
+      /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(r))),
+    );
+    expect(timers).toContain(rel);
   });
 });

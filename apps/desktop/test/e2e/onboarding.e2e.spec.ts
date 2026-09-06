@@ -278,6 +278,10 @@ async function settledWizard(app: LaunchedApp): Promise<WizardView> {
   return read(app);
 }
 
+/** One control's `aria-disabled`, or `absent` when it is not rendered. */
+const disabledOf = (view: WizardView, id: string): string =>
+  view.controls.find((c) => c.id === id)?.disabled ?? 'absent';
+
 /** Every request the app started has come back (Sc8's third witness). */
 async function settled(app: LaunchedApp): Promise<void> {
   await app.page.evaluate(() =>
@@ -910,5 +914,113 @@ describe('s8 Sc15 — onboarding: the wizard through every exit state', () => {
         (f) => `${f.id} (${f.impact}): ${f.nodes.join(', ')}`,
       ),
     ).toEqual([]);
+  }, 600_000);
+
+  /**
+   * The refusal that had no witness: CONTINUE, while the check is in the air.
+   *
+   * s8 close, gate 9. `TN-continue-anyway` — `mayContinue` answering true
+   * while `probing` — survived the whole seventeen-mutation sweep, and it
+   * survived for a structural reason rather than a lucky one. Every other
+   * row in this file reads a control through `settledWizard`, which waits
+   * for `#wizard[data-probing="no"]` first; and while that attribute is
+   * `no` the mutant and the original are the SAME function. The one window
+   * the defect lives in was the one window nothing ever looked at.
+   *
+   * It is a real defect. This is the screen guaranteed to run while
+   * something is broken, and a CONTINUE that lights up for the length of a
+   * probe is a CONTINUE an operator can press past a step that has not
+   * answered — arriving at a queue nobody has established is safe, having
+   * been told nothing.
+   *
+   * The window is made a STATE rather than a race by holding the probe open
+   * at the daemon: `fda()` waits on a promise this row resolves, so
+   * `data-probing="yes"` is stable for exactly as long as the assertions
+   * need and not one instant longer. No timer, on either side of the wire.
+   * The gate is then released and CONTINUE is pressed for real, so
+   * "refused" is a measurement rather than a property of a button that
+   * never worked in the first place.
+   */
+  it('refuses CONTINUE while a re-check is in the air, and offers it back when the answer lands', async () => {
+    const scripted = scriptedProbes();
+    let open: (() => void) | null = null;
+    let gate: Promise<void> | null = null;
+    const release = (): void => {
+      open?.();
+      open = null;
+      gate = null;
+    };
+    const fixture = await boot({
+      probes: {
+        ...scripted.probes,
+        fda: async () => {
+          if (gate !== null) await gate;
+          return scripted.probes.fda();
+        },
+      },
+    });
+    const app = await launch(fixture);
+    try {
+      await waitForConnected(app.page);
+      // Set after boot, exactly as the ninth-state block above does: the
+      // daemon has to really start, and it is the PROBE that fails.
+      scripted.script.explode = true;
+      await openWizard(app);
+
+      // The report could not be read, so the step's verdict is NOT CHECKED,
+      // which is worse than WARN — and that is what CONTINUE is refused on
+      // here while nothing at all is in flight.
+      const before = await settledWizard(app);
+      expect(before.step).toBe('welcome');
+      expect(before.verdict).toBe('NOT CHECKED');
+      expect(disabledOf(before, 'wizard-continue')).toBe('true');
+
+      // Arm the gate, mend the probes, and ask for the re-check an operator
+      // who has just been to System Settings would ask for.
+      gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      scripted.script.explode = false;
+      await app.page.click('#wizard-recheck');
+      await app.page.waitForSelector('#wizard[data-probing="yes"]', {
+        timeout: 30_000,
+      });
+
+      const during = await read(app);
+      // Non-vacuity, both halves: the row is inside the window it claims to
+      // be inside, and the verdict it is refusing on is still the one the
+      // probe has not answered yet.
+      expect(during.probing).toBe('yes');
+      expect(during.verdict).toBe('NOT CHECKED');
+      expect(disabledOf(during, 'wizard-continue')).toBe('true');
+
+      // And the refusal belongs to the handler, not to a renderer that
+      // declined to deliver the gesture. Pressed from the KEYBOARD, which
+      // is this file's idiom and the only one that reaches an
+      // `aria-disabled` control at all: playwright's own actionability
+      // wait treats `aria-disabled="true"` as not-enabled and would sit
+      // there for thirty seconds proving nothing. Enter on a focused
+      // button really lands, and it is the handler that says no.
+      const keys = new Presses(app);
+      await keys.tabTo('wizard-continue');
+      await keys.key('Enter');
+      const pressed = await read(app);
+      expect(pressed.step).toBe('welcome');
+      expect(pressed.probing).toBe('yes');
+
+      // The other direction, so this is not a row about a dead control.
+      release();
+      const answered = await settledWizard(app);
+      expect(answered.verdict).toBe('OK');
+      expect(disabledOf(answered, 'wizard-continue')).toBe('false');
+      await keys.tabTo('wizard-continue');
+      await keys.key('Enter');
+      await app.page.waitForSelector('#wizard[data-step="full-disk"]', {
+        timeout: 30_000,
+      });
+      expect((await read(app)).step).toBe('full-disk');
+    } finally {
+      release();
+    }
   }, 600_000);
 });

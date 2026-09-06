@@ -3249,23 +3249,60 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       expect(PORT_IMPORTER_ALLOWLIST.length).toBeGreaterThan(0);
     });
 
-    it('client.send( appears in at most one file, and that file owns sendTest', () => {
-      const callers = desktopSrcFiles()
+    /**
+     * Every call of a `.send(` method under `apps/desktop/src`, one entry per
+     * occurrence, comments and string bodies stripped.
+     *
+     * The `webContents` form is main pushing a frame AT the renderer over an
+     * enumerated channel; it is the opposite direction and it is already
+     * pinned by the channel-list rows above. Everything else is a candidate
+     * for the outbound path this row exists to keep at one.
+     */
+    const sendCallSites = (): string[] =>
+      desktopSrcFiles()
         .filter((rel) => /\.(ts|tsx)$/.test(rel))
-        .filter((rel) => /\bclient\.send\(/.test(s8Read(rel)));
-      // Sc 1 ships constants only, so the honest assertion today is a subset
-      // one: whoever adds the call has to add it in `gateway.ts`, in the
-      // handler registered for `CHANNELS.sendTest`, and Sc 4 tightens this
-      // to an equality once the file exists.
-      expect(
-        callers.filter((f) => f !== 'apps/desktop/src/main/gateway.ts'),
-      ).toEqual([]);
-      for (const rel of callers)
-        expect(s8Read(rel)).toContain('CHANNELS.sendTest');
+        .flatMap((rel) =>
+          [...codeOf(s8Read(rel)).matchAll(/([A-Za-z_$][\w$]*|\))\.send\(/g)]
+            .filter((m) => m[1] !== 'webContents')
+            .map(() => rel),
+        );
+
+    it('exactly one outbound send call exists in the app, and it is the wizard handler', () => {
+      // TIGHTENED AT THE S8 CLOSE. What stood here was the Sc 1 subset
+      // assertion, with a comment promising Sc 4 would make it an equality
+      // once `gateway.ts` existed. Sc 4 landed and the promise did not, and
+      // the sweep found the row was worse than merely loose: it filtered on
+      // the literal `client.send(`, while the call the app actually makes is
+      // `requireClient().send(`. The receiver is a CALL, not a name, so the
+      // regex matched nothing, the subset assertion held over an empty list,
+      // and the row could not have failed for any edit to any file. A guard
+      // that passes on the empty set is a guard that is not there.
+      //
+      // The predicate now reads the receiver as either an identifier or a
+      // closing paren, which covers `client.send(`, `requireClient().send(`
+      // and `getClient().send(` alike, and the enumeration is asserted
+      // non-empty before anything is concluded from it.
+      const callers = sendCallSites();
+      expect(callers.length).toBe(1);
+      expect(callers).toEqual(['apps/desktop/src/main/gateway.ts']);
+      // …and it is the wizard's handler, not merely the wizard's file. The
+      // one occurrence has to sit inside the block registered for
+      // `CHANNELS.sendTest`, which is the block that refuses any pair the
+      // operator did not arm and clears the pair before the request leaves.
+      const code = codeOf(s8Read('apps/desktop/src/main/gateway.ts'));
+      const handler = code.slice(code.indexOf('sendTest: async'));
+      expect(handler).not.toBe('');
+      expect(handler).toContain('.send(');
+      expect(handler.slice(0, handler.indexOf('.send('))).toContain(
+        'sendTestTarget = null',
+      );
     });
 
-    it('PLANTED: a send call outside gateway.ts is caught', () => {
-      const rel = plant(
+    it('PLANTED: a send call outside gateway.ts is caught, in either receiver form', () => {
+      // Both forms, because the gap the close found was exactly the gap
+      // between them: a probe that only ever writes `client.send(` cannot
+      // notice that the production form is spelled the other way.
+      const named = plant(
         'apps/desktop/src/__s8_probe__/quick-send.ts',
         [
           'export async function shortcut(client: { send: (a: unknown) => Promise<void> }) {',
@@ -3274,13 +3311,20 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
           '',
         ].join('\n'),
       );
-      const callers = desktopSrcFiles()
-        .filter((f) => /\.(ts|tsx)$/.test(f))
-        .filter((f) => /\bclient\.send\(/.test(s8Read(f)));
-      expect(callers).toContain(rel);
-      expect(
-        callers.filter((f) => f !== 'apps/desktop/src/main/gateway.ts'),
-      ).not.toEqual([]);
+      const called = plant(
+        'apps/desktop/src/__s8_probe__/quick-send-2.ts',
+        [
+          'declare function grab(): { send: (a: unknown) => Promise<void> };',
+          'export async function shortcut() {',
+          "  await grab().send({ to: '+15550000001', body: 'hi' });",
+          '}',
+          '',
+        ].join('\n'),
+      );
+      const callers = sendCallSites();
+      expect(callers).toContain(named);
+      expect(callers).toContain(called);
+      expect(callers.length).toBe(3);
     });
   });
 

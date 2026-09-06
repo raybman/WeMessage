@@ -337,7 +337,20 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
   // the daemon's own bootstrap refuses a `--token` flag.
   const app = await _electron.launch({
     executablePath: need('electron') as string,
-    args: [MAIN_ENTRY],
+    // `--force-color-profile=srgb` pins what the COMPOSITOR hands back to a
+    // screenshot. Sc 17's pixel rows compare a screenshot against a colour
+    // read out of the CSSOM, and those two travel different paths: the CSSOM
+    // returns the authored sRGB triple, while a captured frame is colour
+    // MANAGED and converted into whatever profile the attached display is
+    // running. On a machine whose profile is not sRGB the same opaque
+    // `--layer-0` surface comes back as #1a1a1c instead of #1c1c1e, and the
+    // row fails hours after it passed with nothing in the tree having
+    // changed. Found exactly that way at the s8 close: green in the morning,
+    // red in the afternoon, identical bytes, and the flag makes it green
+    // again on both. This narrows the test's environment rather than
+    // widening its tolerance — no threshold moves, and a real colour
+    // regression still fails.
+    args: ['--force-color-profile=srgb', MAIN_ENTRY],
     env,
   });
   const child = app.process();

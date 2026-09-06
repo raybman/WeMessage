@@ -221,6 +221,28 @@ const JUDGEABLE: Variant = (() => {
   return v;
 })();
 
+/**
+ * The same, under a LIGHT appearance.
+ *
+ * `--danger` is one token for both schemes and it is the light one that is
+ * marginal: #ff453a scores 3.13:1 on the light `--layer-0` and 4.5:1 is the
+ * threshold for normal text, so the only reason the sweep is green is that
+ * every element painting it is LARGE, where axe's threshold is 3:1. That is
+ * a real pass with 0.13 to spare, and the row at the bottom of this file is
+ * what stops a font-size edit spending it. Derived by predicate, like the
+ * one above, so the table can be reordered.
+ */
+const LIGHT_JUDGEABLE: Variant = (() => {
+  const v = VARIANTS.find((c) => c.reduced && c.scheme === 'light');
+  if (v === undefined) throw new Error('no reduced light variant to judge in');
+  return v;
+})();
+
+/** The ids of every variant painted under a light appearance. */
+const LIGHT_IDS: ReadonlySet<string> = new Set(
+  VARIANTS.filter((v) => v.scheme === 'light').map((v) => v.id),
+);
+
 async function applyVariant(app: LaunchedApp, v: Variant): Promise<void> {
   await app.page.emulateMedia({ colorScheme: v.scheme });
   await app.app.evaluate((_electron, reducedTransparency: boolean) => {
@@ -271,6 +293,86 @@ async function settle(app: LaunchedApp): Promise<void> {
 /* ── one scan ─────────────────────────────────────────────────────────── */
 
 /** Everything one (surface, variant) pair yields, so the caller can print it. */
+/**
+ * One element painting the danger ink, and the two facts axe judges it by.
+ */
+interface DangerInk {
+  readonly path: string;
+  /** Computed `font-size`, in px. */
+  readonly px: number;
+  /** Computed `font-weight`, as a number. */
+  readonly weight: number;
+  /** Whether axe would treat this text as LARGE, and so judge it at 3:1. */
+  readonly large: boolean;
+  /** The text it paints, trimmed. */
+  readonly text: string;
+}
+
+/**
+ * Every rendered element whose own text is painted in the danger token.
+ *
+ * The ink is RESOLVED by the browser, not parsed here: a probe element is
+ * given `color: var(--danger)`, its computed `color` is read back, and the
+ * probe is removed before the walk begins. That is one triple to compare
+ * against, it survives the token being re-authored in any notation the
+ * platform accepts, and it means this file holds no second opinion about
+ * what `--danger` is.
+ *
+ * Only elements that own a non-empty TEXT node are kept, and only ones the
+ * layout actually placed. An element that inherits the colour but paints no
+ * characters has no contrast to judge, and counting it would put rows in
+ * the census that no threshold could ever apply to — a census with vacuous
+ * members is a census whose emptiness check means nothing.
+ *
+ * `large` mirrors axe: 18pt, or 14pt at weight 700 and above, converted
+ * from px at 0.75 rather than written as 24 and 18.66, so the two magic
+ * numbers in the WCAG text are the two numbers that appear here.
+ */
+async function dangerInk(
+  app: LaunchedApp,
+): Promise<{ token: string; ink: string; found: readonly DangerInk[] }> {
+  return app.page.evaluate(() => {
+    const token = window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue('--danger')
+      .trim();
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--danger)';
+    document.body.appendChild(probe);
+    const ink = window.getComputedStyle(probe).color;
+    probe.remove();
+    const describe = (el: Element): string => {
+      const parts: string[] = [];
+      for (let n: Element | null = el; n !== null; n = n.parentElement) {
+        const id = n.id === '' ? '' : `#${n.id}`;
+        parts.unshift(`${n.tagName.toLowerCase()}${id}`);
+      }
+      return parts.join('>');
+    };
+    const found: DangerInk[] = [];
+    for (const el of Array.from(document.querySelectorAll('*'))) {
+      const style = window.getComputedStyle(el);
+      if (style.color !== ink) continue;
+      const owns = Array.from(el.childNodes).some(
+        (n) =>
+          n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() !== '',
+      );
+      if (!owns || el.getClientRects().length === 0) continue;
+      const px = Number.parseFloat(style.fontSize);
+      const weight = Number.parseFloat(style.fontWeight);
+      const pt = px * 0.75;
+      found.push({
+        path: describe(el),
+        px,
+        weight,
+        large: pt >= 18 || (pt >= 14 && weight >= 700),
+        text: (el.textContent ?? '').trim(),
+      });
+    }
+    return { token, ink, found };
+  });
+}
+
 interface Scan {
   readonly surface: string;
   readonly variant: string;
@@ -288,6 +390,8 @@ interface Scan {
   readonly judged: number;
   /** Every distinct resolved `color` this surface actually painted. */
   readonly inks: readonly string[];
+  /** Every element painting the danger ink, at the size axe judges it at. */
+  readonly danger: readonly DangerInk[];
 }
 
 const scans: Scan[] = [];
@@ -330,6 +434,14 @@ async function scan(
   const elements = await app.page.evaluate(
     () => document.querySelectorAll('*').length,
   );
+  // Rides this walk rather than a second one: the row that judges it is at
+  // the bottom of this file and it reads what the sweep already saw, which
+  // is what makes it a census of the PRODUCT rather than of a typed list.
+  const danger = await dangerInk(app);
+  expect(
+    danger.token,
+    `${surface} @ ${v.id}: --danger resolves to nothing`,
+  ).not.toBe('');
   const legality = await declarationLegality(app.page);
   const out = {
     surface,
@@ -342,6 +454,7 @@ async function scan(
     unjudged: legality.unjudged,
     judged: legality.judged,
     inks,
+    danger: danger.found,
   };
   scans.push(out);
   return out;
@@ -2041,4 +2154,163 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
       'the two schemes declare the same layer, which is the Sc 17 bug',
     ).not.toBe(block(pairs[1]?.[1] as string)['--layer-1']);
   });
+});
+
+describe('s8 Sc17 — the light danger red passes on a precondition, so the precondition is a row', () => {
+  /**
+   * Why this row exists, and why the token was NOT repainted instead.
+   *
+   * `--danger` is #ff453a in both schemes. On the light layers it scores
+   * 3.4:1. Normal text needs 4.5:1 and large text needs 3:1, so every light
+   * appearance of this token passes for exactly one reason: the text is
+   * large. The margin is 0.4 and a font-size edit anywhere in the sheet
+   * spends it, at which point the sweep above turns red with no clue as to
+   * which of twenty `color: var(--danger)` sites moved — and a reviewer
+   * looking at a one-line size change has no reason to suspect contrast.
+   *
+   * Darkening the token was the obvious alternative and it is wrong. A red
+   * dark enough for 4.5:1 on white reads brown, and a semantic colour that
+   * no longer reads as danger has failed at the only job it has. The
+   * contrast number is fine. What is fragile is the PRECONDITION it leans
+   * on, so the precondition is asserted directly, where a violation names
+   * the element and its size instead of arriving as an axe finding three
+   * abstractions away.
+   *
+   * And there is a second, larger reason, found while writing this row.
+   * axe's `color-contrast` rule SILENTLY SKIPS an element whose whole text
+   * is one symbol character. The plant below proves it: `⊘` and a word,
+   * same token, same background, same 14px/600, and axe reports the word
+   * and says nothing at all about the glyph. So the sweep's zero is not a
+   * statement about single-glyph text — it never looked. This census does,
+   * which is why the exempt set below is PINNED rather than emptied: the
+   * product ships exactly one such glyph, the kill-switch state marker,
+   * and the row names it so that a second one cannot arrive unnoticed.
+   *
+   * That one is defensible and is NOT quietly excused. It is a single
+   * character, it sits beside `.kill-word` which says KILLED in `--ink` at
+   * full contrast, and colour is never its only carrier — the same closed
+   * glyph set the state strip uses. WCAG's incidental-decoration exception
+   * is the clause it lives under. It should still get `aria-hidden` so a
+   * screen reader stops announcing a slashed circle, and that is a product
+   * change rather than a guard, so it is written down and left for S9.
+   */
+  it('holds every light-mode danger ink to large text, and names the one glyph axe cannot see', async () => {
+    // (a) The product, as the sweep actually found it.
+    const light = scans.filter((s) => LIGHT_IDS.has(s.variant));
+    expect(
+      light.length,
+      'this row reads the census the sweep collects: run the whole file',
+    ).toBeGreaterThan(0);
+    const painted = light.flatMap((s) =>
+      s.danger.map((d) => ({ ...d, where: `${s.surface} @ ${s.variant}` })),
+    );
+    expect(
+      painted.length,
+      'no light-mode surface painted the danger token at all, so this row proves nothing',
+    ).toBeGreaterThan(0);
+    const small = painted.filter((d) => !d.large);
+    // The element, not the path to it: a wrapper added three levels up is
+    // not a contrast change and should not read as one. Every entry has to
+    // carry an id, so an anonymous node cannot join the set unnamed.
+    const leaf = (d: { readonly path: string }): string =>
+      d.path.split('>').at(-1) ?? '';
+    expect(
+      small.map(leaf).filter((l) => !l.includes('#')),
+      'danger ink at normal size on an element with no id: name it before excusing it',
+    ).toEqual([]);
+    expect(
+      [...new Set(small.map(leaf))].sort(),
+      'the set of normal-size danger sites changed; each one is text axe cannot judge, so it has to be justified here',
+    ).toEqual(['span#kill-glyph']);
+    // Earned, not asserted: the exemption is for ONE character, which is
+    // the only thing axe's blind spot covers and the only thing the
+    // adjacent word can stand in for.
+    expect(
+      small.map((d) => `${d.where}: ${leaf(d)} = ${JSON.stringify(d.text)}`),
+      'a multi-character danger string is claiming the glyph exemption',
+    ).toEqual(
+      small.map((d) => `${d.where}: ${leaf(d)} = ${JSON.stringify('⊘')}`),
+    );
+
+    // (b) The plant: the whole truth table, in one place, so neither the
+    //     emptiness above nor the pin above is the emptiness of a predicate
+    //     that never says no.
+    const fixture = await bootHere();
+    const app = await launchHere(fixture);
+    await waitForConnected(app.page);
+    await applyVariant(app, LIGHT_JUDGEABLE);
+    expect(
+      await axeFindings(app.page),
+      'the light appearance was not clean before the plant',
+    ).toEqual([]);
+
+    // Their own background, named as the token the 3.4:1 was computed
+    // against, so what axe judges is the pairing this row is about rather
+    // than whatever happened to be under the body.
+    await app.page.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'planted-danger';
+      for (const [id, text] of [
+        ['planted-glyph', '⊘'],
+        ['planted-words', 'THE SAME RED, IN WORDS'],
+      ] as const) {
+        const el = document.createElement('span');
+        el.id = id;
+        el.textContent = text;
+        el.style.color = 'var(--danger)';
+        el.style.background = 'var(--layer-1)';
+        el.style.display = 'block';
+        el.style.fontWeight = '600';
+        el.style.fontSize = '14px';
+        host.appendChild(el);
+      }
+      document.body.appendChild(host);
+    });
+    const normal = (await dangerInk(app)).found.filter((d) =>
+      d.path.includes('#planted-'),
+    );
+    expect(
+      normal.map(
+        (d) => `${d.path.split('>').at(-1) ?? ''} large=${String(d.large)}`,
+      ),
+      'the census did not see both plants at normal size',
+    ).toEqual([
+      'span#planted-glyph large=false',
+      'span#planted-words large=false',
+    ]);
+    // axe sees ONE of the two. Same colour, same background, same size,
+    // same weight — the only difference is that one of them is a single
+    // symbol, and that is enough for the rule to skip it entirely.
+    const judged = await axeFindings(app.page);
+    expect(
+      judged.flatMap((f) => f.nodes),
+      'axe no longer skips single-glyph text, which is the blind spot this row exists to cover',
+    ).toEqual(['#planted-words']);
+    expect(
+      judged.flatMap((f) => f.contrast.map((c) => `${c.ratio.toFixed(1)}:1`)),
+      'the danger red is no longer the marginal number this row was written for',
+    ).toEqual(['3.4:1']);
+
+    // One property changes, on both.
+    await app.page.evaluate(() => {
+      for (const id of ['planted-glyph', 'planted-words']) {
+        const el = document.getElementById(id);
+        if (el !== null) el.style.fontSize = '24px';
+      }
+    });
+    const big = (await dangerInk(app)).found.filter((d) =>
+      d.path.includes('#planted-'),
+    );
+    expect(big.map((d) => d.large)).toEqual([true, true]);
+    expect(
+      await axeFindings(app.page),
+      'axe refused the danger token at large size, which is the whole reason the sweep is green',
+    ).toEqual([]);
+
+    // And quiet again, so the finding above belonged to the plant.
+    await app.page.evaluate(() => {
+      document.getElementById('planted-danger')?.remove();
+    });
+    expect(await axeFindings(app.page)).toEqual([]);
+  }, 600_000);
 });

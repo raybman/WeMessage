@@ -554,7 +554,6 @@ describe('s8 Sc16 row 1: the icon carries state as a SHAPE', () => {
     );
     expect(killed.tooltip).toContain('KILLED');
 
-    console.log('DEBUG t-after-loop:', Date.now());
     await fixture.directClient.setKillSwitch(false);
     await trayUntil(app, (t) => t.image === 'armedTemplate');
   }, 300_000);

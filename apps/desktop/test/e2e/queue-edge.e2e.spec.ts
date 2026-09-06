@@ -452,6 +452,34 @@ describe('s8 Sc7 row 2: a queue that cannot hear the daemon says so and refuses'
     expect(urls(fixture).length).toBe(before);
     expect(approvePosts(fixture)).toEqual([]);
 
+    // And the app made no ATTEMPT either, which is a different claim.
+    //
+    // Added at the s8 close, because the sweep proved the clause above
+    // cannot fail. The socket is SEVERED, so nothing the renderer tries
+    // during the outage reaches the daemon's request log whether it was
+    // refused locally or not: "the log did not grow" is true in a world
+    // where A is refused, and equally true in a world where A is handed to
+    // a dead socket. Only the screen can tell those two apart.
+    //
+    // TWO layers refuse this keystroke and each has its own unit rows: the
+    // keymap answers `a` with nothing while the mode is `offline`, and the
+    // store refuses to start while the stream is not connected. Remove both
+    // and A reaches the bridge, the bridge cannot reach the daemon, and the
+    // failure comes back as a chip on the card. That chip is the witness.
+    // The state and the word are NOT: the rollback has already put the card
+    // back to `pending` by the time this read happens, which is exactly the
+    // trap that let the sweep through.
+    //
+    // Read while the outage is still up — `disabled` and `options` are the
+    // bookends that say so — because the interesting moment is the one
+    // before `restore()`, not after it.
+    const chipped = await readEdge(app);
+    expect(chipped.disabled).toBe('true');
+    expect(chipped.options).toBe(2);
+    expect(chipped.cards.map((c) => c.state)).toEqual(['pending', 'pending']);
+    expect(chipped.cards.map((c) => c.word)).toEqual(['PENDING', 'PENDING']);
+    expect(chipped.cards.flatMap((c) => c.badges)).toEqual([]);
+
     fixture.requests.restore();
     await app.page.waitForSelector('#queue[data-link="connected"]', {
       timeout: 60_000,

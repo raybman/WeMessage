@@ -86,7 +86,37 @@ import {
   type ShadowReplay,
 } from './derive/dryRun.js';
 import { rulesToday } from './derive/rulesToday.js';
-import { globalModeOf, scopeLadder } from './derive/scopeLadder.js';
+import {
+  contactLadder,
+  globalModeOf,
+  scopeLadder,
+} from './derive/scopeLadder.js';
+import PeopleScreen, {
+  type ChipView,
+  type PeopleScreenProps,
+} from './screens/people/index.js';
+import type { PeopleGridRow } from './screens/people/Grid.js';
+import type { PeopleScopeProps } from './screens/people/Scope.js';
+import {
+  BULK_AUTO_PHRASE,
+  DENY_NOTE,
+  EMPTY_SENTENCE,
+  MODES,
+  PAGE,
+  PRECEDENCE_LINE,
+  autoCell,
+  bannerOf,
+  bulkBody,
+  filterRows,
+  modeAttr,
+  modeCell,
+  moreLine,
+  peopleRows,
+  type ModeFilter,
+  type PersonRow,
+} from './derive/peopleRows.js';
+import { autoSendsPerHour, capsOf, heldBy } from './derive/autoSendsPerHour.js';
+import { bindPeople, type PeopleBinding } from './store/people.js';
 import {
   blocksOf,
   hhmmOf,
@@ -106,6 +136,7 @@ import { bindStore, type StoreBinding } from './store/index.js';
 import { bindRules, REPLAY_LIMIT, type RulesBinding } from './store/rules.js';
 import { bindSchedule, type ScheduleBinding } from './store/schedule.js';
 import type {
+  ContactMode,
   SchedulePayload,
   ScheduleInput,
   ScheduleWindowPayload,
@@ -486,16 +517,18 @@ const rules: RulesBinding = bindRules(window.wm);
 /**
  * The screen the ⌘-digit keymap last chose.
  *
- * Only `queue`, `rules` and `schedule` have a surface in this slice. A
- * stroke for one of the other three is INERT rather than navigating to a
- * blank pane: an empty document with `data-screen="audit"` is a screen that
- * claims to exist, and the next scenario is the honest place to build it.
+ * Only `queue`, `rules`, `schedule` and `people` have a surface in this
+ * slice. A stroke for one of the other two is INERT rather than navigating
+ * to a blank pane: an empty document with `data-screen="audit"` is a screen
+ * that claims to exist, and the next scenario is the honest place to build
+ * it.
  */
 let screen: Screen = DEFAULT_SCREEN;
 const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
   'queue',
   'rules',
   'schedule',
+  'people',
 ]);
 
 /**
@@ -516,14 +549,14 @@ let confirmTyped: string | null = null;
 /**
  * WHICH irreversible thing the open confirm is about.
  *
- * One mount, two questions. The dialog owns `role="dialog"` for the whole
+ * One mount, three questions. The dialog owns `role="dialog"` for the whole
  * renderer and a second mount would be a second modal — so the phrase, the
  * title and the verb are chosen from this, and the `onGo` that runs is the
- * one that belongs to the sentence on screen. A single flag rather than two
- * nullable strings, because "both confirms open" is a state that must not
- * be spellable.
+ * one that belongs to the sentence on screen. A single flag rather than
+ * three nullable strings, because "two confirms open" is a state that must
+ * not be spellable.
  */
-let confirmIntent: 'auto' | 'delete-schedule' = 'auto';
+let confirmIntent: 'auto' | 'delete-schedule' | 'bulk-auto' = 'auto';
 let dryRun: DryRunPanelProps | null = null;
 
 /**
@@ -1343,6 +1376,295 @@ function scheduleDetail(): ScheduleDetailProps | null {
   };
 }
 
+/* ── contacts and policies ─────────────────────────────────────────────── */
+
+/**
+ * The fourth binding, and the fourth screen.
+ *
+ * Its own object again, and this is the screen where that matters most.
+ * "This person is set to AUTO" reads like an instruction about the queue,
+ * and it is not one: a contact policy governs what AUTONOMY may do NEXT and
+ * says nothing at all about work a human has already been asked to decide.
+ * `PEOPLE_CHANNELS` is five channels, exactly one of which writes, and none
+ * of the five can carry a draft id — so "editing a policy is not an
+ * approval" is a key set rather than a promise, and an arch row scans every
+ * identifier in the binding for the approval vocabulary in case somebody
+ * tries to write one anyway.
+ */
+const people: PeopleBinding = bindPeople(window.wm);
+
+/**
+ * The instant the AUTO-SENDS column is counted back from.
+ *
+ * Read HERE, once per visit, and handed down as an argument — never read in
+ * the cell that draws the number. An hour window computed inside a render
+ * would make the count a property of when Preact happened to paint, would
+ * move without anything having happened, and would make the rate-cap row
+ * untestable without racing a real clock (C-11). An arch row bans
+ * `Date.now()` and `new Date()` under `screens/` and `derive/` precisely so
+ * this stays the only place it can be read.
+ *
+ * Separate from `nowIso`, which belongs to the schedule marker and whose
+ * contract is that it moves ONLY when an operator presses a button. Sharing
+ * one variable would have silently given each screen the other's rule.
+ */
+let peopleNow = new Date().toISOString();
+
+/** The narrowing an operator has typed, LOCALLY. Never a request. */
+let peopleSearch = '';
+/** The chip filter, where `'none'` is "has no policy row at all". */
+let peopleMode: ModeFilter | '' = '';
+/** The handle whose ladder is open, or `null`. */
+let peopleScope: string | null = null;
+/**
+ * Handles named on this screen that are in neither catalogue.
+ *
+ * Local, and deliberately so: naming a handle is not deciding about one.
+ * These rows draw exactly as any other handle with no policy does — denied
+ * for rules and agents — until a mode is stored, at which point the daemon's
+ * own row replaces them.
+ */
+let peopleNamed: readonly string[] = [];
+/** The bulk selection, by key. */
+const peoplePicked = new Set<string>();
+let peopleBusy = false;
+/** The DAEMON's own words from the last refused write. */
+let peopleRefusal = '';
+/** The rows the OPEN typed confirm is about, in the order they will be written. */
+let peopleBulk: readonly string[] = [];
+
+function closePeople(): void {
+  peopleSearch = '';
+  peopleMode = '';
+  peopleScope = null;
+  peopleNamed = [];
+  peoplePicked.clear();
+  peopleBusy = false;
+  peopleRefusal = '';
+  peopleBulk = [];
+  confirmTyped = null;
+}
+
+/** Enter the screen: stamp the window's instant, then fetch. */
+function loadPeople(): void {
+  peopleNow = new Date().toISOString();
+  void people.load();
+}
+
+/** Every handle the daemon knows about, plus the ones just named here. */
+function peopleAll(): readonly PersonRow[] {
+  const data = people.data();
+  return peopleRows({
+    contacts: data.contacts,
+    drafts: data.drafts,
+    named: peopleNamed,
+  });
+}
+
+/**
+ * THE write, and the only one this screen has.
+ *
+ * The stored name travels BACK with every policy change on purpose:
+ * `PUT /v1/contacts/:handle` REPLACES the row and its handler spreads
+ * `displayName` only when the body carries one, so a mode-only write would
+ * quietly erase a name somebody typed on an earlier visit. The route is the
+ * authority on that, not this comment — the binding merges on the handle the
+ * daemon answers with, because the route normalizes it.
+ */
+async function writePolicy(key: string, mode: ContactMode): Promise<void> {
+  const row = peopleAll().find((person) => person.key === key);
+  // A room has no counterparty and therefore no policy (INV-5). There is no
+  // control on screen that could ask for this, and it refuses anyway.
+  if (row === undefined || row.isGroup) return;
+  peopleBusy = true;
+  peopleRefusal = '';
+  paint();
+  const outcome =
+    row.displayName === ''
+      ? await people.put(key, mode)
+      : await people.put(key, mode, row.displayName);
+  peopleBusy = false;
+  // The daemon's sentence, letter for letter. `formProblems` has no
+  // counterpart here because there is nothing to validate locally: the mode
+  // comes from a closed set of three buttons.
+  peopleRefusal = outcome.ok
+    ? ''
+    : [
+        outcome.reason,
+        ...outcome.issues.map((issue) => `${issue.path}: ${issue.message}`),
+      ].join(' · ');
+  paint();
+}
+
+/**
+ * N writes, in the grid's order, one at a time.
+ *
+ * Sequential rather than parallel, and that is the honest shape: there is
+ * no bulk route for contacts, the daemon decides each one separately and may
+ * refuse any of them, and the typed confirm says so in the number of
+ * REQUESTS. A `Promise.all` would land them in whatever order the socket
+ * chose and make a partial failure impossible to describe.
+ */
+async function applyBulk(
+  keys: readonly string[],
+  mode: ContactMode,
+): Promise<void> {
+  for (const key of keys) await writePolicy(key, mode);
+  peoplePicked.clear();
+  peopleBulk = [];
+  paint();
+}
+
+/**
+ * A bulk gesture, and the one direction that has to be typed.
+ *
+ * DENY and DRAFT-ONLY narrow; AUTO is the only value on this screen that
+ * takes autonomy away from a human, so it is the only one that asks. And it
+ * asks for ONE row as readily as for forty: "it is only one" is exactly the
+ * reasoning that turns a deliberate decision into a select that fires.
+ */
+function askBulk(mode: ContactMode): void {
+  const keys = peopleAll()
+    .filter((row) => peoplePicked.has(row.key) && !row.isGroup)
+    .map((row) => row.key);
+  if (keys.length === 0) return;
+  if (mode !== 'auto') {
+    void applyBulk(keys, mode);
+    return;
+  }
+  peopleBulk = keys;
+  confirmIntent = 'bulk-auto';
+  confirmTyped = '';
+  paint();
+}
+
+/** One drawn row, with the ladder and the hour window folded into it. */
+function peopleGridRows(rows: readonly PersonRow[]): PeopleGridRow[] {
+  const data = people.data();
+  const global = globalModeOf(data.settings);
+  const caps = capsOf(data.settings);
+  const tallies = autoSendsPerHour(data.autoRows, data.draftRows, peopleNow);
+  return rows.map((row) => {
+    // The LADDER's answer, not the stored mode: a row set to AUTO under a
+    // `draft-only` global may not auto-send, and a column that counted
+    // against the stored value would be advertising autonomy the daemon
+    // will withhold.
+    const effective = contactLadder({ global, contact: row.mode }).effective;
+    const tally = tallies.get(row.key) ?? { last2Min: 0, lastHour: 0 };
+    const cell = autoCell({
+      isGroup: row.isGroup,
+      effective,
+      service: row.service,
+      count: tally.lastHour,
+      capped: heldBy(tally, caps) !== null,
+    });
+    return {
+      key: row.key,
+      // A room's only name is its guid, so the guid is what is shown.
+      handle: row.isGroup ? row.key : row.handle,
+      // Uppercased HERE rather than in CSS: `text-transform` changes what is
+      // painted and not what is read, and the e2e reads.
+      name: row.displayName.toUpperCase(),
+      modeAttr: modeAttr(row),
+      mode: row.mode,
+      modeText: modeCell(row),
+      service: row.service,
+      isGroup: row.isGroup,
+      auto: cell.value,
+      autoText: cell.text,
+      held: cell.held,
+      dim: row.isGroup || row.mode === 'deny',
+      selected: peoplePicked.has(row.key),
+      queued: row.queued,
+    };
+  });
+}
+
+function peopleView(): PeopleScreenProps {
+  const data = people.data();
+  const all = peopleAll();
+  const shown = filterRows(all, { search: peopleSearch, mode: peopleMode });
+  // A WINDOW, and the screen says so below it. Two thousand policies is an
+  // ordinary number for a hotel and two thousand segmented controls is six
+  // thousand buttons.
+  const page = shown.slice(0, PAGE);
+  const global = globalModeOf(data.settings);
+  const open = all.find((row) => row.key === peopleScope) ?? null;
+  let scope: PeopleScopeProps | null = null;
+  if (open !== null && !open.isGroup) {
+    const ladder = contactLadder({ global, contact: open.mode });
+    scope = {
+      rowKey: open.key,
+      name: open.displayName.toUpperCase(),
+      rungs: ladder.rungs.map((rung) => ({
+        label: rung.label,
+        value: rung.value,
+      })),
+      effective: ladder.effective,
+      narrowed: ladder.narrowedBy.join(' > '),
+      sentence: ladder.sentence,
+      note: ladder.note,
+    };
+  }
+  return {
+    status: data.status,
+    banner: bannerOf(global),
+    globalMode: global,
+    denyNote: DENY_NOTE,
+    precedence: PRECEDENCE_LINE,
+    // The sentence is about the BOOK, not about the filter: an empty result
+    // for a search is not a claim about the gate.
+    empty: all.length === 0 ? EMPTY_SENTENCE : '',
+    search: peopleSearch,
+    chips: MODES.map((mode): ChipView => ({
+      mode,
+      state: peopleMode === mode ? 'ON' : 'OFF',
+    })),
+    rows: peopleGridRows(page),
+    total: shown.length,
+    more: page.length < shown.length ? moreLine(page.length, shown.length) : '',
+    picked: peoplePicked.size,
+    scope,
+    refusal: peopleRefusal,
+    busy: peopleBusy,
+    onSearch: (next) => {
+      peopleSearch = next;
+      paint();
+    },
+    onChip: (mode) => {
+      // Matched against the closed set rather than cast into it: `MODES` is
+      // the vocabulary, and a string that is not in it is not a filter.
+      const picked = MODES.find((known) => known === mode) ?? null;
+      if (picked === null) return;
+      peopleMode = peopleMode === picked ? '' : picked;
+      paint();
+    },
+    onAdd: () => {
+      const handle = peopleSearch.trim();
+      if (handle === '' || peopleNamed.includes(handle)) return;
+      peopleNamed = [...peopleNamed, handle];
+      paint();
+    },
+    onOpen: (key) => {
+      peopleScope = peopleScope === key ? null : key;
+      paint();
+    },
+    onPick: (key) => {
+      if (peoplePicked.has(key)) peoplePicked.delete(key);
+      else peoplePicked.add(key);
+      paint();
+    },
+    onMode: (key, mode) => {
+      // The ladder opens with the write, because the write is the moment an
+      // operator most needs to be told that AUTO here may resolve to
+      // DRAFT-ONLY. Silence would read as agreement.
+      peopleScope = key;
+      void writePolicy(key, mode);
+    },
+    onBulk: askBulk,
+  };
+}
+
 /**
  * The app's ONE window-level key listener.
  *
@@ -1378,10 +1700,13 @@ function onWindowKey(event: KeyboardEvent): void {
   // claims about contacts, settings and counts that may all have moved; a
   // screen that painted `ready` from it would answer a harness's readiness
   // wait with last visit's facts.
+  closePeople();
   rules.reset();
   schedules.reset();
+  people.reset();
   if (next === 'rules') void rules.load(midnightIso());
   if (next === 'schedule') void schedules.load();
+  if (next === 'people') loadPeople();
   paint();
 }
 
@@ -1418,6 +1743,8 @@ function Shell({
           detail={ruleDetail()}
           dryRun={dryRun}
         />
+      ) : screen === 'people' ? (
+        <PeopleScreen {...peopleView()} />
       ) : screen === 'schedule' ? (
         <ScheduleScreen
           status={schedules.data().status}
@@ -1470,6 +1797,25 @@ function Shell({
           }}
           onGo={() => {
             void deleteSchedule();
+          }}
+        />
+      ) : confirmIntent === 'bulk-auto' ? (
+        <TypedConfirm
+          phrase={BULK_AUTO_PHRASE}
+          title="TURN ON AUTO REPLIES FOR THESE CONTACTS"
+          body={bulkBody(peopleBulk.length)}
+          typed={confirmTyped}
+          onType={(next) => {
+            confirmTyped = next;
+            paint();
+          }}
+          onGo={() => {
+            // The list is read BEFORE the dialog closes, because closing it
+            // is what makes the screen redraw and the selection is what the
+            // redraw is about.
+            const keys = peopleBulk;
+            confirmTyped = null;
+            void applyBulk(keys, 'auto');
           }}
         />
       ) : (
@@ -1527,6 +1873,12 @@ function paint(): void {
   if (screen === 'rules')
     html.dataset['rulesRows'] = String(rules.data().rules.length);
   else delete html.dataset['rulesRows'];
+  // The people screen's readiness idiom. The UNFILTERED total, because it is
+  // a fact about the daemon's catalogues; what the grid draws is a window on
+  // it and `#people-more` says so.
+  if (screen === 'people')
+    html.dataset['peopleRows'] = String(peopleAll().length);
+  else delete html.dataset['peopleRows'];
   const view = derive();
   // Written back so the cursor SURVIVES the resolution above. A queue whose
   // active card expired keeps re-resolving to the top on every paint; naming
@@ -1582,6 +1934,7 @@ function schedulePaint(): void {
 binding.store.subscribe(schedulePaint);
 rules.subscribe(schedulePaint);
 schedules.subscribe(schedulePaint);
+people.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {

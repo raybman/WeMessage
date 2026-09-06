@@ -19,12 +19,23 @@
  * carries that sentence and the count behind it, because "why is nothing
  * happening" is the question this screen exists to answer.
  */
-import type { SettingsPayload } from '@wemessage/client';
+import type { ContactMode, SettingsPayload } from '@wemessage/client';
 
 /** §2.3's two modes. There is no third, and `OFF` is the enabled column. */
 export type RespondMode = 'draft-only' | 'auto';
 
 export type RungLabel = 'GLOBAL' | 'RULE' | 'CONTACT';
+
+/**
+ * The one sentence both ladders end on, and the reason it is a constant.
+ *
+ * s8 Sc12 renders §2.4.3 a second time, per CONTACT rather than per rule.
+ * Two spellings of "narrowing only" is two chances to disagree about the
+ * invariant in front of the operator, so the note is minted once here and
+ * an arch row pins the ladder to this file. The rules screen and the people
+ * screen are the same claim about the same gate, drawn twice.
+ */
+export const LADDER_NOTE = 'EACH RUNG CAN ONLY NARROW THE ONE ABOVE IT';
 
 export interface ScopeRung {
   readonly label: RungLabel;
@@ -96,8 +107,112 @@ export function scopeLadder(input: ScopeInput): ScopeLadder {
       { label: 'RULE', value: label(input.rule) },
       { label: 'CONTACT', value: 'PER CONTACT' },
     ],
-    note: 'EACH RUNG CAN ONLY NARROW THE ONE ABOVE IT',
+    note: LADDER_NOTE,
     drafts,
     deny,
+  };
+}
+
+/* ── the same ladder, one contact at a time (s8 Sc12) ─────────────────── */
+
+/**
+ * What the CONTACT rung can be.
+ *
+ * Four values, not three: `null` is "no `ContactPolicy` row exists", and the
+ * whole point of the people screen is that it is not a neutral fourth state.
+ * `evaluateGate` reads `ctx.contact === null || ctx.contact.mode === 'deny'`
+ * in ONE branch, so absence and DENY reach the same refusal.
+ */
+export interface ContactScopeInput {
+  readonly global: RespondMode;
+  readonly contact: ContactMode | null;
+}
+
+/** The resolved mode for a handle. `deny` is a fourth outcome, not a mode. */
+export type EffectiveMode = ContactMode;
+
+export interface ContactLadder {
+  readonly effective: EffectiveMode;
+  /** Every rung strictly narrower than AUTO, top to bottom. */
+  readonly narrowedBy: readonly RungLabel[];
+  readonly rungs: readonly ScopeRung[];
+  readonly note: string;
+  /** What this resolves to, and who it binds, in one line of prose. */
+  readonly sentence: string;
+}
+
+/** How much autonomy each value grants. Lower is stricter. */
+const RANK: Readonly<Record<EffectiveMode, number>> = {
+  deny: 0,
+  'draft-only': 1,
+  auto: 2,
+};
+
+function narrowest(a: EffectiveMode, b: EffectiveMode): EffectiveMode {
+  return RANK[a] <= RANK[b] ? a : b;
+}
+
+/** The word this screen prints for a stored value. */
+function contactLabel(mode: ContactMode | null): string {
+  if (mode === null) return 'NO POLICY';
+  return mode.toUpperCase();
+}
+
+/**
+ * §2.4.3, resolved for ONE handle, and provably narrowing-only.
+ *
+ * There is no branch below in which a lower rung raises a higher one:
+ * `narrowest` is the only combinator, `RANK` is total over the three values,
+ * and a missing row enters as `deny`. A unit row proves the property
+ * exhaustively over every (global, contact) pair rather than trusting the
+ * reading — which matters, because "grant AUTO to this person" is exactly
+ * what an operator believes the segmented control does.
+ *
+ * The RULE rung is `PER RULE` rather than a value. A contact policy is not
+ * about any one rule, and §1.7 evaluates rules first-match-wins per message,
+ * so there is no single number to print there. What the screen CAN say
+ * honestly is the direction: whatever rule matches may narrow this further
+ * and can never widen it.
+ *
+ * The sentence carries three facts the ordering alone does not:
+ *
+ *  - the deny is SCOPED. The gate guards it with `ctx.rule !== null ||
+ *    agentOrigin`, and `dispatchApproved` re-gates a human-minted draft with
+ *    a null rule and no agent origin — so a person can still approve for a
+ *    handle with no row. A screen that said DENIED full stop would be
+ *    over-claiming, and an operator who believed it would stop approving.
+ *  - a stored DENY and a missing row are the same refusal, WORDED
+ *    differently, because the audit trail can answer "did anybody ever
+ *    decide about this person" and the screen must not throw that away.
+ *  - editing this re-decides NOTHING already in the queue. INV-2: the only
+ *    path to the send port is `dispatchApproved` with a validated approval,
+ *    and a policy write is not one.
+ */
+export function contactLadder(input: ContactScopeInput): ContactLadder {
+  const stored: EffectiveMode = input.contact ?? 'deny';
+  const effective = narrowest(input.global, stored);
+  const narrowedBy: RungLabel[] = [];
+  if (input.global !== 'auto') narrowedBy.push('GLOBAL');
+  if (stored !== 'auto') narrowedBy.push('CONTACT');
+  const head =
+    input.contact === null
+      ? 'NO POLICY ROW · A RULE OR AN AGENT IS DENIED OUTRIGHT · A HUMAN CAN STILL APPROVE A DRAFT FOR THIS HANDLE'
+      : input.contact === 'deny'
+        ? 'DENY IS STORED · A RULE OR AN AGENT IS DENIED OUTRIGHT · A HUMAN CAN STILL APPROVE A DRAFT FOR THIS HANDLE'
+        : effective === 'auto'
+          ? 'EVERY RUNG ABOVE SAYS AUTO, SO THIS HANDLE MAY BE ANSWERED WITHOUT A HUMAN'
+          : `${contactLabel(input.contact)} IS STORED HERE AND ${
+              input.global === 'auto' ? 'CONTACT' : 'GLOBAL'
+            } RESOLVES IT TO AT MOST DRAFT-ONLY`;
+  return {
+    effective,
+    narrowedBy,
+    rungs: [
+      { label: 'GLOBAL', value: label(input.global) },
+      { label: 'RULE', value: 'PER RULE' },
+      { label: 'CONTACT', value: contactLabel(input.contact) },
+    ],
+    note: LADDER_NOTE,
+    sentence: `${head} · ANY RULE MAY NARROW THIS FURTHER AND NONE MAY WIDEN IT · NOTHING ALREADY IN THE QUEUE IS RE-DECIDED`,
   };
 }

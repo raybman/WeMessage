@@ -1385,3 +1385,447 @@ body {
   letter-spacing: 0.04em;
   color: var(--danger);
 }
+
+/* ======================================================================= */
+/* s8 Sc12 — contacts and policies                                         */
+/* ======================================================================= */
+
+/*
+ * The policy column is the single most tempting place in this app for a
+ * coloured dot, and F-104 forbids exactly that: colour is never the sole
+ * carrier of state. Every cell below carries the WORD and a `data-*`
+ * attribute, and the hue is decoration on top of both. Green is banned
+ * outright; the accents here are `--tint` (blue), `--danger` and `--warn`,
+ * all of them declared in `tokens.css` and none of them written here.
+ */
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
+/* ---- what the gate does, before any row of it ------------------------- */
+
+.people-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.people-banner,
+.people-note {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+
+.people-banner {
+  color: var(--ink);
+}
+
+.people-note {
+  color: var(--ink-dim);
+}
+
+/* ---- narrowing, which is local and asks the daemon for nothing -------- */
+
+.people-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.people-search {
+  flex: 1 1 180px;
+  min-width: 140px;
+  padding: 4px 6px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.people-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.people-chip,
+.people-add {
+  padding: 3px 7px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 999px;
+  background: var(--layer-1);
+  color: var(--ink-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+/* The chip's own state, and it is not carried by the tint alone: the border
+   thickens and the label brightens with it. */
+.people-chip[data-state='ON'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+  color: var(--ink);
+}
+
+.people-add {
+  border-radius: 6px;
+}
+
+.people-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- the bulk strip --------------------------------------------------- */
+
+.people-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--tint-soft);
+}
+
+.people-bulk-count {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.people-bulk-mode {
+  padding: 3px 5px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+}
+
+/* ---- the grid --------------------------------------------------------- */
+
+.people-grid {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/*
+ * The header row and every data row share ONE template, so the columns line
+ * up without a table and without either side knowing the other's widths.
+ */
+.people-row {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.2fr) minmax(90px, 1fr) minmax(220px, 1.6fr)
+    minmax(150px, 1fr) 70px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--stroke);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+
+.people-headrow {
+  border-top: 0;
+  background: var(--layer-2);
+  color: var(--ink-dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+/*
+ * DIM, not hidden. A denied handle and a room are still rows an operator
+ * needs to be able to find and read; what they are not is rows anything may
+ * be sent to. The word in the policy cell says which of the two it is.
+ */
+.people-row[data-dim='yes'] {
+  color: var(--ink-dim);
+}
+
+.people-row[data-selected='yes'] {
+  background: var(--tint-soft);
+}
+
+.people-th,
+.people-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.people-cell-handle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * The selection box, drawn with a pseudo-element for the reason `.sched-x`
+ * is: the row is read as one sentence and a glyph inside the handle button
+ * would land in the middle of it. The accessible name is the `aria-label`.
+ */
+.people-x {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 4px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.people-x[data-state='ON'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+.people-x[data-state='ON']::after {
+  content: '\00D7';
+}
+
+.people-x:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.people-handle {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.people-handle {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--stroke-strong);
+}
+
+.people-name {
+  color: var(--ink-dim);
+}
+
+.people-policy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.people-mode {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.people-row[data-mode='deny'] .people-mode {
+  color: var(--danger);
+}
+
+.people-row[data-mode='auto'] .people-mode {
+  color: var(--tint);
+}
+
+/* ---- the segmented policy control ------------------------------------- */
+
+.people-seg {
+  flex: none;
+  display: inline-flex;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.people-seg-btn {
+  padding: 2px 6px;
+  border: 0;
+  border-left: 1px solid var(--stroke);
+  background: var(--layer-1);
+  color: var(--ink-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.people-seg-btn:first-child {
+  border-left: 0;
+}
+
+/* ON is a filled cell AND the word is brighter AND `data-state` says so. */
+.people-seg-btn[data-state='ON'] {
+  background: var(--tint-soft);
+  color: var(--ink);
+}
+
+.people-seg-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- the counted column ----------------------------------------------- */
+
+.people-auto {
+  color: var(--ink-dim);
+}
+
+/*
+ * A HELD row is warned about, in a hue and in the word the cell already
+ * carries — `HELD · RATE CAP`, `HELD · SMS, NOT IMESSAGE`. The attribute is
+ * a `GateDenyReason` so the daemon's own vocabulary is what is in the DOM.
+ */
+.people-row[data-held]:not([data-held='']) .people-auto {
+  color: var(--warn);
+}
+
+.people-queued {
+  text-align: right;
+  color: var(--ink-dim);
+}
+
+/* ---- what the window is hiding, and what an empty book means ---------- */
+
+.people-empty,
+.people-more,
+.people-refusal,
+.people-precedence {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+
+.people-empty {
+  padding: 8px;
+  border: 1px dashed var(--stroke-strong);
+  border-radius: 6px;
+  color: var(--ink);
+}
+
+.people-more {
+  color: var(--ink-dim);
+}
+
+.people-refusal {
+  color: var(--danger);
+}
+
+.people-precedence {
+  padding-top: 6px;
+  border-top: 1px solid var(--stroke);
+  color: var(--ink-dim);
+}
+
+/* ---- the ladder for one handle ---------------------------------------- */
+
+.people-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.people-scope-head {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.people-rungs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.people-rung {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+
+.people-rung-label {
+  color: var(--ink-dim);
+}
+
+.people-effective {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.people-effective-word {
+  color: var(--ink);
+}
+
+/* The rung that TOOK the decision, which is the half the ordering does not
+   carry and the half an operator cannot reconstruct. */
+.people-effective-why {
+  color: var(--warn);
+}
+
+.people-scope-sentence,
+.people-scope-note {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}

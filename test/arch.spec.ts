@@ -1153,6 +1153,33 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'rate-limited',
         [
+          // s8 Scenario 12, the SEVENTH deliberate edit to this guard and the
+          // first time any of the five is named OUTSIDE the daemon's own
+          // packages: the people screen reports, per row, why a handle set
+          // to AUTO is not auto-sending, and it reports it in the DAEMON's
+          // word rather than in one of its own. `data-held` in the DOM is
+          // the literal, so an operator reading "rate-limited" on a row and
+          // "rate-limited" in an audit row is reading about the same clamp.
+          //
+          // That is the whole argument for the two homes below, and it is
+          // the argument this guard exists to force into a reviewed diff:
+          // the alternative is a renderer-side display vocabulary that
+          // starts out as a faithful copy of §1.7 and drifts the first time
+          // a clamp is renamed. INV-1 keeps `@wemessage/core` out of the
+          // renderer, so the copy cannot be imported; making it a LITERAL,
+          // in exactly two files, is the version of that copy which fails
+          // the build when the original moves.
+          //
+          //  - `autoSendsPerHour.ts` owns `AutoHold` and `heldBy`, which is
+          //    where the cap comparison lives.
+          //  - `peopleRows.ts` owns `autoCell`, which picks between the
+          //    holds in §1.7's own else-if order.
+          //
+          // Neither MINTS anything: no `gate.denied` row, no `clampedBy`,
+          // nothing on the wire. They are read-only echoes of a decision the
+          // daemon already made and already logged.
+          'apps/desktop/src/renderer/derive/autoSendsPerHour.ts',
+          'apps/desktop/src/renderer/derive/peopleRows.ts',
           'packages/client/src/index.ts',
           'packages/core/src/audit/events.ts',
           'packages/core/src/domain/types.ts',
@@ -1225,6 +1252,15 @@ describe('arch invariants (dependency-cruiser)', () => {
       [
         'sms-auto-forbidden',
         [
+          // s8 Scenario 12. Same two homes, same argument as the
+          // 'rate-limited' row above: `AutoHold` names this literal in a
+          // type position and `autoCell` writes it into `data-held` when a
+          // handle every rung of which says AUTO is on SMS. It is the LAST
+          // branch of §1.7's else-if chain, so it is also the last thing
+          // `autoCell` checks, and an e2e row reads the attribute back off
+          // the row to prove the two orders agree.
+          'apps/desktop/src/renderer/derive/autoSendsPerHour.ts',
+          'apps/desktop/src/renderer/derive/peopleRows.ts',
           'packages/client/src/index.ts',
           'packages/core/src/domain/types.ts',
           // s6 Scenario 9, the SIXTH deliberate edit to this guard and the
@@ -5350,6 +5386,28 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // render a row somebody else was halfway through changing.
       members: ['rules', 'scheduleDelete', 'scheduleWrite', 'schedules'],
     },
+    [`${STORE_ROOT}/people.ts`]: {
+      constant: 'PEOPLE_CHANNELS',
+      // Sc12, and the fourth entry. Four reads and one write.
+      //
+      // `audit` is here because the AUTO-SENDS column does not exist in any
+      // catalogue: `auto.approved` carries no handle, so the count per
+      // person only exists as a JOIN of that event against `draft.created`'s
+      // draft snapshot, and both live in the audit log. `settings` is here
+      // because the GLOBAL rung of §2.4.3's ladder is `send.globalMode`, and
+      // a screen that assumed the shipped default would tell an operator
+      // their AUTO took when the daemon had already narrowed it.
+      //
+      // Deliberately absent: `rules`, because the RULE rung of this screen's
+      // ladder is `PER RULE` — a contact row is not about any one rule, and
+      // fetching every rule to render a constant string would be nine
+      // catalogues for a word. And `contactDelete`, which is a real channel
+      // the CLI uses: DENY is the reversible answer, and deleting the row
+      // does not mean "no policy", it means the strictest policy there is.
+      // A destructive gesture that is indistinguishable from the strict one
+      // is a gesture with no reason to exist.
+      members: ['audit', 'contactSet', 'contacts', 'drafts', 'settings'],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -5388,6 +5446,10 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // for one keystroke to become two requests, and the second one 404s.
       'scheduleDelete',
       'scheduleWrite',
+      // Sc12's one. There is no bulk route for contacts, so a bulk gesture
+      // on that screen is N of these — which is exactly why it may only
+      // have one owner, and why the typed confirm names the request count.
+      'contactSet',
     ];
     for (const write of WRITES) {
       const owners = Object.entries(BINDINGS)
@@ -6213,5 +6275,434 @@ describe('S8 extensions (s8-execution Scenario 11: the schedule editor)', () => 
       /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(r))),
     );
     expect(timers).toContain(rel);
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 12: contacts and policies)', () => {
+  const sc12Planted: string[] = [];
+  function sc12Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc12Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc12Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/people/__s8_sc12_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc12_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc12_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc12_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const PEOPLE = `${RENDERER}/screens/people`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+  const RULES = `${RENDERER}/screens/rules`;
+  const GATE = 'packages/core/src/gate/index.ts';
+
+  /** The single-quoted members of a named `const X = [ … ]`, in order. */
+  function literalsOf(rel: string, name: string): string[] {
+    const m = new RegExp(`${name}\\s*=\\s*\\[([^\\]]*)\\]`).exec(archRead(rel));
+    if (m === null) return [];
+    return [...(m[1] as string).matchAll(/'([^']+)'/g)].map(
+      (x) => x[1] as string,
+    );
+  }
+
+  /* ── row 1: absence is deny, and the screen may not soften it ───────── */
+
+  /**
+   * The load-bearing claim of the whole scenario, stated as a tie between
+   * two packages that cannot import each other.
+   *
+   * §2.4.3 step 3 lives in `evaluateGate`: with no `ContactPolicy` row the
+   * gate returns `contact-denied`. So a contacts grid whose policy column is
+   * blank for a handle with no row is not "showing no policy" — it is
+   * drawing the strictest state this product has as the absence of a state,
+   * and an operator who reads it that way will wait forever for a reply the
+   * daemon already refused.
+   *
+   * The renderer cannot import the gate (INV-1: `apps/desktop` has no
+   * `@wemessage/core` dependency), so the sentence it prints is a COPY of a
+   * behaviour it cannot see. That is exactly the kind of copy that rots. So
+   * this row reads both ends and pins them together:
+   *
+   *  - the gate still denies when `ctx.contact === null`, and
+   *  - the guard on that branch is still `ctx.rule !== null || agentOrigin`,
+   *    which is what makes the screen's HUMAN carve-out true rather than
+   *    generous, and
+   *  - the screen's sentence for the absence is non-empty and says DENIED.
+   *
+   * If a later slice makes the default permissive, this row fails and the
+   * sentence gets rewritten, rather than quietly becoming a lie.
+   */
+  it('the gate still denies an unknown contact, and the screen says so in words', () => {
+    const gate = codeOf(archRead(GATE));
+    expect(gate).toContain('function evaluateGate');
+    // The guard, and the branch under it. Written as one match so a
+    // reordering that moved the deny out from under the guard fails here.
+    expect(gate).toMatch(
+      /if \(ctx\.rule !== null \|\| agentOrigin\) \{\s*if \(ctx\.contact === null \|\| ctx\.contact\.mode === 'deny'\) \{\s*return \{ allow: false, reason: 'contact-denied' \};/,
+    );
+    // …and narrowing, never raising, on the line after it.
+    expect(gate).toContain('mode = narrower(mode, ctx.contact.mode);');
+
+    const derive = archRead(`${RENDERER}/derive/peopleRows.ts`);
+    const sentence = /UNKNOWN_MODE_SENTENCE\s*=\s*'([^']*)'/.exec(derive)?.[1];
+    expect(sentence).toBeDefined();
+    expect(sentence).not.toBe('');
+    expect(sentence).toMatch(/DENIED/);
+  });
+
+  /* ── row 2: the footer is the gate's chain, read from the gate ──────── */
+
+  /**
+   * The precedence footer is the one piece of prose on this screen that
+   * claims to describe an ORDER, and the plan's version of it
+   * (`KILL > DENY > window > rate cap > rule mode`) is wrong twice: the mode
+   * ladder resolves BEFORE the clamp chain, and the chain has five distinct
+   * clamps rather than two.
+   *
+   * A footer written by hand is a comment with a stylesheet. So the clamp
+   * half of it is tied to the `clampedBy` assignments in `evaluateGate`,
+   * in source order, deduped — `outside-window` is assigned twice, by the
+   * pause and by the shut window, and an operator reading a list does not
+   * need to be told the same word twice.
+   *
+   * The tie is by first word rather than by a mapping table, because a
+   * mapping table in this file would be a third place for the order to
+   * disagree with itself.
+   */
+  it('the clamp footer is the gate`s else-if chain, in the gate`s order', () => {
+    const assigned: string[] = [];
+    for (const m of codeOf(archRead(GATE)).matchAll(/clampedBy = '([a-z-]+)'/g))
+      if (!assigned.includes(m[1] as string)) assigned.push(m[1] as string);
+    expect(assigned).toEqual([
+      'outside-window',
+      'rate-limited',
+      'circuit-open',
+      'loop-detected',
+      'sms-auto-forbidden',
+    ]);
+    const footer = literalsOf(
+      `${RENDERER}/derive/peopleRows.ts`,
+      'CLAMP_ORDER',
+    );
+    expect(footer).toHaveLength(assigned.length);
+    for (const [i, word] of footer.entries())
+      expect(
+        (assigned[i] as string).toUpperCase(),
+        `${word} is clamp ${String(i)}`,
+      ).toContain(word.split(' ')[0] as string);
+    // …and the denies are a SEPARATE list, because they bind different
+    // people: `if (!gate.allow) return gateDeny(...)` runs before
+    // `if (isAutoApproval)`, so a deny stops everybody and a clamp stops
+    // only the machine. One flat list would erase that.
+    expect(
+      literalsOf(`${RENDERER}/derive/peopleRows.ts`, 'DENY_ORDER'),
+    ).toEqual(['KILL', 'LINK', 'CONTACT DENY']);
+  });
+
+  /* ── row 3: controls, per screen, still ─────────────────────────────── */
+
+  /**
+   * Sc7 banned controls under `screens/queue`; Sc10 permitted them under
+   * `screens/rules`; Sc11 permitted them under `screens/schedule`. This is
+   * the fourth root and, as in Sc11, it is a SEPARATE row over its own
+   * expressions: `screens/people` being allowed a button cannot widen
+   * `screens/queue`, because the queue's emptiness is asserted here by its
+   * own expression over its own root.
+   *
+   * The people screen earns them. It has a search field, a per-row
+   * segmented control of three modes, a selection toggle, a bulk mode
+   * select and a typed confirmation, and §1.7 spells the last as "a click
+   * or ⌘↩ on the confirm button". What it may NOT have is a link or a
+   * hand-rolled tab stop: `<a href` is banned renderer-wide and `tabIndex`
+   * is how a grid grows the focus holders the queue proved it cannot keep.
+   */
+  const INTERACTIVE: readonly (readonly [string, RegExp])[] = [
+    ['<button', /<button\b/],
+    ['<a href', /<a\s[^>]*\bhref\b/],
+    ['<input', /<input\b/],
+    ['<select', /<select\b/],
+    ['onClick', /\bonClick\s*=/],
+    ['tabIndex', /\btabIndex\s*=/],
+  ];
+
+  function controlsIn(root: string): string[] {
+    const out: string[] = [];
+    for (const rel of archFiles(root)) {
+      const code = codeOf(archRead(rel));
+      for (const [name, re] of INTERACTIVE)
+        if (re.test(code)) out.push(`${rel}: ${name}`);
+    }
+    return out.sort();
+  }
+
+  it('the people screen has real controls; the queue still has none', () => {
+    const people = controlsIn(PEOPLE);
+    expect(people.some((c) => c.endsWith(': <button'))).toBe(true);
+    expect(people.some((c) => c.endsWith(': <input'))).toBe(true);
+    expect(people.some((c) => c.endsWith(': <select'))).toBe(true);
+    expect(people.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(people.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    // Its own expression, over its own root.
+    expect(controlsIn(QUEUE)).toEqual([]);
+    // And the editors before it are untouched by any of it.
+    expect(controlsIn(RULES).some((c) => c.endsWith(': <button'))).toBe(true);
+  });
+
+  it('PLANTED: a segmented control smuggled into the queue is caught', () => {
+    const rel = sc12Plant(
+      `${QUEUE}/__s8_sc12_probe__/Mode.tsx`,
+      [
+        'export function Mode(props: { set: (m: string) => void }): unknown {',
+        '  return <button onClick={() => props.set("auto")}>AUTO</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(QUEUE)).toEqual([`${rel}: <button`, `${rel}: onClick`]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: the same control in the people screen is allowed', () => {
+    const rel = sc12Plant(
+      `${PEOPLE}/__s8_sc12_probe__/Mode.tsx`,
+      [
+        'export function Mode(props: { set: (m: string) => void }): unknown {',
+        '  return <button onClick={() => props.set("auto")}>AUTO</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(PEOPLE)).toContain(`${rel}: <button`);
+    expect(controlsIn(QUEUE)).toEqual([]);
+  });
+
+  /* ── row 4: the locality rows, with a grid in the tree ──────────────── */
+
+  /**
+   * Sc8 pinned the multi-line text field, Sc10 the modal role, Sc6 the list
+   * roles, and Sc11 re-asserted all four with a third screen in scope. A
+   * grid is a plausible way to break every one of them at once — a notes
+   * field on a contact, a "set 40 contacts to AUTO?" panel with its own
+   * role, a hand-rolled listbox of modes — so they are re-asserted here.
+   *
+   * The GRID roles are new, and they are pinned the same way on the way in
+   * rather than after somebody re-spells them: `role="grid"`, `"row"`,
+   * `"columnheader"` and `"gridcell"` are one component's ARIA contract, and
+   * a second file that spells `role="row"` is a second file that has to be
+   * kept consistent with the first about rowcount, selection and order.
+   */
+  it('the owned markup still lives in exactly one file each', () => {
+    const withCode = (re: RegExp): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => re.test(codeOf(archRead(rel))))
+        .sort();
+    expect(withCode(/<textarea\b/)).toEqual([
+      `${RENDERER}/components/Editor.tsx`,
+    ]);
+    expect(withCode(/role="dialog"/)).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withCode(/role="listbox"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/role="option"/)).toEqual([
+      `${RENDERER}/components/Listbox.tsx`,
+    ]);
+    expect(withCode(/<a\s[^>]*\bhref\b/)).toEqual([]);
+    for (const role of ['grid', 'row', 'columnheader', 'gridcell'])
+      expect(withCode(new RegExp(`role="${role}"`)), role).toEqual([
+        `${PEOPLE}/Grid.tsx`,
+      ]);
+  });
+
+  it('PLANTED: a second file spelling the grid`s row role is caught', () => {
+    const rel = sc12Plant(
+      `${PEOPLE}/__s8_sc12_probe__/Row.tsx`,
+      [
+        'export function Row(props: { handle: string }): unknown {',
+        '  return <div role="row">{props.handle}</div>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const sites = archFiles(RENDERER).filter((r) =>
+      /role="row"/.test(codeOf(archRead(r))),
+    );
+    expect(sites).toContain(rel);
+  });
+
+  it('LEGITIMATE NEAR-MISS: reusing the confirm component spells nothing', () => {
+    const rel = sc12Plant(
+      `${PEOPLE}/__s8_sc12_probe__/Reuse.tsx`,
+      [
+        '/**',
+        ' * The typed confirmation is a component, not a shape to re-draw.',
+        ' * Its ARIA contract has one home and this file is not it.',
+        ' */',
+        "import { TypedConfirm } from '../../../components/TypedConfirm.js';",
+        'export const Ask = TypedConfirm;',
+        '',
+      ].join('\n'),
+    );
+    expect(/role="dialog"/.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 5: no screen reads a clock, and this one counts an hour ────── */
+
+  /**
+   * Sc11's ban, re-asserted where it is most tempting to break. The
+   * AUTO-SENDS column is a count over a window ending NOW, and the obvious
+   * way to write it is `Date.now()` inside the cell that draws it — which
+   * would make the number a property of when Preact happened to render, and
+   * would make the e2e's rate-cap row untestable without racing a real
+   * clock (C-11).
+   *
+   * The instant is read once, in `main.tsx`, and handed down. `derive/` is
+   * pure and takes the instant as an argument.
+   */
+  const CLOCK_READ = /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)/;
+
+  it('no file under screens/ or derive/ reads a clock', () => {
+    for (const root of [`${RENDERER}/screens`, `${RENDERER}/derive`]) {
+      const offenders = archFiles(root)
+        .filter((rel) => CLOCK_READ.test(codeOf(archRead(rel))))
+        .sort();
+      expect(offenders, root).toEqual([]);
+    }
+    // Non-vacuous: the composition root really does read one.
+    expect(CLOCK_READ.test(codeOf(archRead(`${RENDERER}/main.tsx`)))).toBe(
+      true,
+    );
+  });
+
+  it('PLANTED: an hour window that reads the clock where it counts is caught', () => {
+    const rel = sc12Plant(
+      `${RENDERER}/derive/__s8_sc12_probe__/hour.ts`,
+      [
+        'export function recent(at: readonly string[]): number {',
+        '  const cut = Date.now() - 3_600_000;',
+        '  return at.filter((iso) => Date.parse(iso) >= cut).length;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const offenders = archFiles(`${RENDERER}/derive`).filter((r) =>
+      CLOCK_READ.test(codeOf(archRead(r))),
+    );
+    expect(offenders).toEqual([rel]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: the same window handed its instant is clean', () => {
+    const rel = sc12Plant(
+      `${RENDERER}/derive/__s8_sc12_probe__/given.ts`,
+      [
+        '/**',
+        ' * The instant arrives as an argument. `Date.parse` reads a string',
+        ' * somebody else stamped; it asks nothing of the machine.',
+        ' */',
+        'export function recent(at: readonly string[], nowIso: string): number {',
+        '  const cut = Date.parse(nowIso) - 3_600_000;',
+        '  return at.filter((iso) => Date.parse(iso) >= cut).length;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(CLOCK_READ.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 6: INV-2, at the fourth screen ─────────────────────────────── */
+
+  /**
+   * A contact policy is the most tempting place in this GUI to acquire a
+   * send path, because "this person is set to AUTO" reads like an
+   * instruction about the queue. It is not: a policy governs what AUTONOMY
+   * may do NEXT, and says nothing at all about work a human has already
+   * been asked to decide. Loosening it must not dispatch or auto-approve a
+   * draft that already exists.
+   *
+   * Two halves, as Sc10 and Sc11 stated them. The binding may not name the
+   * approval vocabulary, and the screen may not reach the bridge at all.
+   */
+  it('the people binding names no approval, and the screen names no bridge', () => {
+    const binding = codeOf(archRead(`${STORE_ROOT}/people.ts`));
+    for (const m of binding.matchAll(/[A-Za-z_$][\w$]*/g))
+      expect(m[0], `${m[0]} in the people binding`).not.toMatch(
+        /^(approve|approval|draftId|dispatch)$/i,
+      );
+    for (const rel of archFiles(PEOPLE)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+  });
+
+  it('contactSet has exactly one call site, and contactDelete has none', () => {
+    const callers = (needle: string): string[] =>
+      archFiles(RENDERER).filter((rel) =>
+        codeOf(archRead(rel)).includes(needle),
+      );
+    expect(callers('bridge.contactSet(')).toEqual([`${STORE_ROOT}/people.ts`]);
+    // One site, once. A bulk gesture is N calls THROUGH this site, which is
+    // what lets the typed confirm count the requests it is about to make.
+    expect(
+      codeOf(archRead(`${STORE_ROOT}/people.ts`)).split('bridge.contactSet('),
+    ).toHaveLength(2);
+    expect(callers('bridge.contactDelete(')).toEqual([]);
+    // Non-vacuous: the channel exists and is spelled in the registry.
+    expect(archRead('apps/desktop/src/main/ipc-channels.ts')).toContain(
+      "contactDelete: 'wm:contact.delete'",
+    );
+  });
+
+  /* ── row 7: the app still schedules nothing ─────────────────────────── */
+
+  it('the desktop app still schedules nothing, two thousand rows included', () => {
+    const timers = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(timers).toEqual(['apps/desktop/src/main/gateway.ts']);
+    const delayed = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(debounce|throttle|requestIdleCallback|requestAnimationFrame)\b/i.test(
+          codeOf(archRead(rel)),
+        ),
+      )
+      .sort();
+    expect(delayed).toEqual([]);
+  });
+
+  it('PLANTED: a debounced contact search is caught', () => {
+    const rel = sc12Plant(
+      `${PEOPLE}/__s8_sc12_probe__/search.ts`,
+      [
+        'export function debounce(fn: () => void, ms: number): () => void {',
+        '  let t: ReturnType<typeof setTimeout> | null = null;',
+        '  return () => {',
+        '    if (t !== null) clearTimeout(t);',
+        '    t = setTimeout(fn, ms);',
+        '  };',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const code = codeOf(archRead(rel));
+    expect(/\b(debounce|throttle)\b/i.test(code)).toBe(true);
+    expect(/\b(setTimeout|setInterval)\(/.test(code)).toBe(true);
   });
 });

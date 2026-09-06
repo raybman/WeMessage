@@ -8814,3 +8814,588 @@ describe('S8 extensions (s8-execution Scenario 15: the onboarding wizard and eve
     );
   });
 });
+
+describe('S8 extensions (s8-execution Scenario 16: the tray, PAUSE, deep links and the global shortcut)', () => {
+  const sc16Planted: string[] = [];
+  function sc16Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc16Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc16Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    rmSync(join(repoRoot, 'apps/desktop/src/main/__s8_sc16_probe__'), {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  const MAIN = 'apps/desktop/src/main';
+  const RENDERER16 = 'apps/desktop/src/renderer';
+  const DESKTOP_SRC = 'apps/desktop/src';
+  const DEEP_LINK = `${MAIN}/deep-link.ts`;
+  const TRAY_MODEL = `${MAIN}/tray-model.ts`;
+  const TRAY = `${MAIN}/tray.ts`;
+  const GLYPHS = `${MAIN}/tray-glyphs.ts`;
+  const SHORTCUT = `${MAIN}/shortcut.ts`;
+  const INDEX16 = `${MAIN}/index.ts`;
+  const ROUTER16 = `${RENDERER16}/router.ts`;
+  const KILL_PANE = `${RENDERER16}/screens/settings/Kill.tsx`;
+  const TOGGLES = 'packages/daemon/src/routes/toggles.ts';
+  const GATE = 'packages/core/src/gate/index.ts';
+
+  /** Every quoted string inside the first `[ … ]` after `name`. */
+  const sc16Array = (text: string, name: string): string[] => {
+    const m = new RegExp(`${name}\\s*=\\s*\\[([\\s\\S]*?)\\]`).exec(text);
+    if (m === null) return [];
+    return [...(m[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1] as string);
+  };
+
+  /** Files under a root whose CODE (comments stripped) contains `needle`. */
+  const namers = (root: string, needle: string): string[] =>
+    archFiles(root)
+      .filter((rel) => codeOf(archRead(rel)).includes(needle))
+      .sort();
+
+  /* ── row 1: the host allowlist IS the router's screen set ──────────── */
+
+  /**
+   * A deep link's host is the one field an attacker fully controls, so the
+   * set it is matched against has to be a closed list expressed as DATA and
+   * it has to be the same list the app can actually navigate to.
+   *
+   * Two projections, deliberately. Main does not import the renderer (row 4)
+   * — a main-process security decision that could be widened by editing a
+   * renderer file is not a security decision — so `DEEP_LINK_HOSTS` is its
+   * own array and this row is what keeps the two honest. The model is
+   * Sc15's, whose union is cross-checked against four independently-spelled
+   * upstream sources rather than trusted because it compiles.
+   */
+  it('the deep-link hosts are the router’s screens, spelled twice on purpose', () => {
+    const hosts = sc16Array(archRead(DEEP_LINK), 'DEEP_LINK_HOSTS');
+    const screens = sc16Array(archRead(ROUTER16), 'SCREENS');
+    expect(screens.length).toBe(6);
+    expect([...hosts].sort()).toEqual([...screens].sort());
+    // `wizard` is a MODE, not a destination (Sc15), so no URL may name it.
+    expect(hosts).not.toContain('wizard');
+  });
+
+  it('matches the host against the list and never against a literal', () => {
+    // A chain of `if (host === 'queue')` is the shape that grows a seventh
+    // branch nobody reviews. Each screen name appears exactly once in this
+    // file, inside the array, and the match is a membership test.
+    const code = codeOf(archRead(DEEP_LINK));
+    for (const screen of sc16Array(archRead(ROUTER16), 'SCREENS')) {
+      const hits = [...code.matchAll(new RegExp(`'${screen}'`, 'g'))].length;
+      expect([screen, hits]).toEqual([screen, 1]);
+    }
+    expect(code).toMatch(/DEEP_LINK_HOSTS[\s\S]{0,120}includes\(/);
+  });
+
+  it('registers the protocol under the scheme the parser enforces', () => {
+    const scheme = /DEEP_LINK_SCHEME\s*=\s*'([^']+)'/.exec(archRead(DEEP_LINK));
+    expect(scheme?.[1]).toBe('wemessage');
+    const boot = codeOf(archRead(INDEX16));
+    expect(boot).toContain('setAsDefaultProtocolClient(DEEP_LINK_SCHEME)');
+    // Not a second spelling of the word on the OS side of the handshake.
+    expect(boot).not.toContain("setAsDefaultProtocolClient('");
+  });
+
+  /* ── row 2: the parser is pure, and provably ───────────────────────── */
+
+  /**
+   * The whole security argument for `parseDeepLink` is that it is a total
+   * function from a string to a value. That argument dies the moment the
+   * module can reach anything: a parser that can `fetch` is a parser that
+   * can be talked into fetching.
+   */
+  it('the parser imports nothing that can act', () => {
+    const FORBIDDEN = [
+      "from 'electron'",
+      '@wemessage/client',
+      'fetch(',
+      'ipcMain',
+      'ipcRenderer',
+      'child_process',
+      'node:fs',
+    ];
+    const code = codeOf(archRead(DEEP_LINK));
+    for (const needle of FORBIDDEN) expect(code).not.toContain(needle);
+    // Non-vacuity: the file exists and is the parser.
+    expect(code).toContain('export function parseDeepLink');
+    expect(code).toContain('export function deepLinkFromArgv');
+  });
+
+  it('catches the planted parser that reaches for the network', () => {
+    const rel = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/hungry.ts',
+      'export const probe = async (id: string) => fetch(`/v1/drafts/${id}`);\n',
+    );
+    expect(codeOf(archRead(rel))).toContain('fetch(');
+    // And the legitimate near-miss: a module that merely NAMES the word in
+    // a string it will never call is not an offender.
+    const ok = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/polite.ts',
+      "export const NOTE = 'this module does not prefetch anything';\n",
+    );
+    expect(codeOf(archRead(ok))).not.toContain('fetch(');
+  });
+
+  /* ── row 3: a deep link may navigate and select, and may not act ───── */
+
+  /**
+   * The strongest statement available: the handler's code names the two
+   * things it is allowed to do and nothing that could do a third.
+   *
+   * The ban list is the union of every verb this app has. `CHANNELS.pause`
+   * and `CHANNELS.kill` are on it too — the tray is allowed to reach those,
+   * a URL is not, and the two live in different files precisely so this row
+   * can say which.
+   */
+  it('the deep-link path names no verb at all', () => {
+    const FORBIDDEN = [
+      'approve',
+      'reject',
+      'recall',
+      'retry',
+      'bulk',
+      'dispatch',
+      'SendBackend',
+      'killSwitch',
+      'CHANNELS.pause',
+      'CHANNELS.resume',
+      'CHANNELS.kill',
+      'setSetting',
+      'createAdapter',
+      'disconnect',
+    ];
+    const code = codeOf(archRead(DEEP_LINK));
+    for (const needle of FORBIDDEN)
+      expect([needle, code.includes(needle)]).toEqual([needle, false]);
+  });
+
+  it('routes both delivery doors through one validated call', () => {
+    // `open-url` (which can fire before `app.whenReady`) and the argv of a
+    // `second-instance` are the same untrusted input arriving by different
+    // doors. Two call sites would be two grammars eventually.
+    const boot = codeOf(archRead(INDEX16));
+    expect(boot).toContain("app.on('open-url'");
+    expect(boot).toContain("app.on('second-instance'");
+    expect(boot).toContain('deepLinkFromArgv(');
+    const handlers = [...boot.matchAll(/handleDeepLink\(/g)].length;
+    // Two callers and one definition.
+    expect(handlers).toBeGreaterThanOrEqual(3);
+    expect(namers(DESKTOP_SRC, 'parseDeepLink(').sort()).toEqual([
+      DEEP_LINK,
+      INDEX16,
+    ]);
+  });
+
+  /* ── row 4: main does not import the renderer ──────────────────────── */
+
+  it('no main-process file imports a renderer module', () => {
+    const offenders = archFiles(MAIN).filter((rel) =>
+      /from\s+'[^']*renderer\//.test(codeOf(archRead(rel))),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('catches the planted main file that reaches into the renderer', () => {
+    const rel = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/borrowed.ts',
+      "import { SCREENS } from '../../renderer/router.js';\nexport const s = SCREENS;\n",
+    );
+    expect(
+      archFiles(MAIN).filter((f) =>
+        /from\s+'[^']*renderer\//.test(codeOf(archRead(f))),
+      ),
+    ).toEqual([rel]);
+    // Near-miss: a file whose PROSE mentions the renderer is not an import.
+    const ok = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/prose.ts',
+      '// the renderer/ tree owns this word and this file does not import it\nexport const x = 1;\n',
+    );
+    expect(
+      archFiles(MAIN).filter((f) =>
+        /from\s+'[^']*renderer\//.test(codeOf(archRead(f))),
+      ),
+    ).not.toContain(ok);
+  });
+
+  /* ── row 5: a tray does not tick ───────────────────────────────────── */
+
+  /**
+   * The hardest constraint in this scenario. A tray that says "PAUSED UNTIL
+   * 14:30" is one small step from a tray that counts down, and a countdown
+   * is a timer, and this app has exactly one timer (the reconnect backoff in
+   * `gateway.ts`). So the tray is rebuilt by EVENTS — `push()` for the
+   * posture, a `draft.*` frame for the queue — and the horizon it renders is
+   * a wall-clock instant that stays true until the daemon corrects it with
+   * `arming.changed`.
+   */
+  it('no tray or shortcut module owns a clock', () => {
+    const TICKS = /\b(setTimeout|setInterval|requestAnimationFrame)\(/;
+    for (const rel of [TRAY, TRAY_MODEL, GLYPHS, SHORTCUT, DEEP_LINK]) {
+      expect([rel, TICKS.test(codeOf(archRead(rel)))]).toEqual([rel, false]);
+    }
+    // And the one timer in the app is still where Sc5 left it.
+    expect(namers(DESKTOP_SRC, 'setTimeout(')).toEqual([`${MAIN}/gateway.ts`]);
+  });
+
+  it('catches the planted countdown', () => {
+    const rel = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/counting.ts',
+      'export const start = (f: () => void) => setInterval(f, 1000);\n',
+    );
+    expect(/\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel)))).toBe(
+      true,
+    );
+    // Near-miss: naming the horizon is not polling it.
+    const ok = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/horizon.ts',
+      'export const untilLabel = (iso: string) => `PAUSED UNTIL ${iso.slice(11, 16)}`;\n',
+    );
+    expect(/\b(setTimeout|setInterval)\(/.test(codeOf(archRead(ok)))).toBe(
+      false,
+    );
+  });
+
+  /* ── row 6: the two public strings have one writer each ────────────── */
+
+  /**
+   * `setTitle` puts a string on the operator's menu bar, where anyone in the
+   * room can read it and (on macOS) accessibility tooling can scrape it. One
+   * writer, whose argument is a function that is total over `number` and
+   * returns one of eleven strings, is the difference between a rule and a
+   * habit.
+   */
+  it('the tray title and tooltip are each written in exactly one place', () => {
+    expect(namers(DESKTOP_SRC, '.setTitle(')).toEqual([TRAY]);
+    expect(namers(DESKTOP_SRC, '.setToolTip(')).toEqual([TRAY]);
+    const code = codeOf(archRead(TRAY));
+    expect(code).toMatch(/\.setTitle\(\s*trayBadge\(/);
+    expect(code).toMatch(/\.setToolTip\(\s*trayTooltip\(/);
+    // Neither string can be built from a draft, because neither computing
+    // function can SEE one. `badgeFor` takes a number and a boolean; the
+    // tooltip is built from the posture and the count and nothing else.
+    const model = codeOf(archRead(TRAY_MODEL));
+    expect(model).toMatch(
+      /function badgeFor\(\s*count: number,\s*connected: boolean,?\s*\)/,
+    );
+    const body = /function trayTooltip\([\s\S]*?\n\}/.exec(model)?.[0] ?? '';
+    expect(body).not.toBe('');
+    for (const needle of ['preview', 'oldest', 'draftId', 'body', 'handle'])
+      expect([needle, body.includes(needle)]).toEqual([needle, false]);
+  });
+
+  it('the title and tooltip are computed, never interpolated', () => {
+    // A template literal at either call site is how a body ends up on a
+    // menu bar. The two computing functions live in the pure model, where
+    // the unit rows sweep them against a distinctive synthetic body.
+    const code = codeOf(archRead(TRAY));
+    expect(code).not.toMatch(/setTitle\(`/);
+    expect(code).not.toMatch(/setToolTip\(`/);
+    const model = codeOf(archRead(TRAY_MODEL));
+    expect(model).toContain('export function trayBadge');
+    expect(model).toContain('export function trayTooltip');
+    expect(model).toContain('export function badgeFor');
+  });
+
+  /* ── row 7: nothing in the tray can approve ────────────────────────── */
+
+  it('no tray module names an approving verb', () => {
+    const FORBIDDEN = [
+      'approveDraft',
+      'bulkDrafts',
+      'rejectDraft',
+      'recallDraft',
+      'retryDraft',
+      'dispatchApproved',
+      'SendBackend',
+      'CHANNELS.approve',
+      'CHANNELS.bulk',
+      "'/approve'",
+    ];
+    for (const rel of [TRAY, TRAY_MODEL, GLYPHS]) {
+      const code = codeOf(archRead(rel));
+      for (const needle of FORBIDDEN)
+        expect([rel, needle, code.includes(needle)]).toEqual([
+          rel,
+          needle,
+          false,
+        ]);
+    }
+    // Non-vacuity, as a closed SET rather than as two substrings.
+    //
+    // The first version of this clause asserted the tray's code contained
+    // `CHANNELS.pause` and `CHANNELS.kill`, and both halves were wrong.
+    // `CHANNELS` maps a request KEY to a `wm:` string for the preload
+    // bridge; the tray lives in MAIN, on the far side of that bridge, and
+    // reaches the daemon by naming the KEY and calling the handler. There is
+    // no `CHANNELS.kill` at all — the key is `killSwitch` — so that half was
+    // passing only because `'CHANNELS.killSwitch'` contains it as a
+    // substring, which is the shape of assertion that convicts nothing.
+    //
+    // So: scrape every key the registry declares, keep the ones the tray
+    // actually invokes, and assert the whole set. An equality bans
+    // `approve`, `bulk` and every other key by construction rather than by
+    // somebody remembering to add it to a list.
+    const tray = codeOf(archRead(TRAY));
+    const keys = [
+      ...codeOf(archRead(`${MAIN}/ipc-channels.ts`)).matchAll(
+        /^\s+(\w+): '(?:wm:)/gm,
+      ),
+    ].map((m) => m[1] as string);
+    expect(keys).toContain('approve');
+    expect(keys.length).toBeGreaterThan(20);
+    const reached = keys.filter((key) => tray.includes(`invoke('${key}'`));
+    expect([...new Set(reached)].sort()).toEqual([
+      'drafts',
+      'killSwitch',
+      'pause',
+      'resume',
+    ]);
+  });
+
+  it('catches the planted Approve submenu item', () => {
+    const rel = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/eager.ts',
+      "import { CHANNELS } from '../ipc-channels.js';\nexport const item = { label: 'APPROVE', channel: CHANNELS.approve };\n",
+    );
+    expect(codeOf(archRead(rel))).toContain('CHANNELS.approve');
+    // Near-miss: the WORD in a refusal string is not the channel.
+    const ok = sc16Plant(
+      'apps/desktop/src/main/__s8_sc16_probe__/refusal.ts',
+      "export const NOTE = 'no approvals are offered from this menu';\n",
+    );
+    expect(codeOf(archRead(ok))).not.toContain('CHANNELS.approve');
+  });
+
+  /* ── row 8: the glyphs are procedural, because they have to be ─────── */
+
+  /**
+   * §1.7 asks for template SVGs under `apps/desktop/assets/tray/`. That
+   * cannot exist: `nativeImage` on this Electron decodes PNG and JPEG and
+   * has no SVG path at all, and Sc1 row 4 bans every raster under
+   * `apps/desktop/src` and `apps/desktop/assets` with an allowlist that is
+   * deliberately EMPTY. So the five glyphs are drawn into a BGRA buffer in
+   * a pure module, which is the better answer anyway: "monochrome" becomes
+   * a fact about bytes rather than a fact about a text sweep.
+   */
+  it('draws its icons rather than loading them', () => {
+    expect(namers(DESKTOP_SRC, 'createFromBitmap(')).toEqual([TRAY]);
+    expect(namers(DESKTOP_SRC, 'createFromPath(')).toEqual([]);
+    expect(namers(DESKTOP_SRC, 'createFromDataURL(')).toEqual([]);
+    expect(codeOf(archRead(GLYPHS))).not.toContain("from 'electron'");
+    // Every posture has a bitmap, and the names are the plan's.
+    const model = codeOf(archRead(TRAY_MODEL));
+    for (const name of [
+      'armedTemplate',
+      'draftOnlyTemplate',
+      'sendingTemplate',
+      'killedTemplate',
+      'disconnectedTemplate',
+    ])
+      expect(model).toContain(name);
+  });
+
+  /* ── row 9: the shortcut is registered once and its answer is read ─── */
+
+  it('registers one accelerator, once, and does not swallow the answer', () => {
+    expect(namers(DESKTOP_SRC, 'globalShortcut.register(')).toEqual([SHORTCUT]);
+    const code = codeOf(archRead(SHORTCUT));
+    // The return value is BOUND, and this is the STRONGER spelling of that.
+    // The first draft of this row demanded a `const` initialiser and was
+    // wrong: the call belongs inside a `try`, because some platforms THROW
+    // for an accelerator they cannot parse and a throw during boot would
+    // take the whole app down over a convenience — so the binding is an
+    // assignment to a `let` declared above it. Relaxing the row to "contains
+    // the word" would have let the discarded form back in, so instead it now
+    // pins BOTH facts the original was reaching for: there is exactly one
+    // call site, and its value is assigned rather than dropped.
+    const calls = [...code.matchAll(/(.{2})globalShortcut\.register\(/g)].map(
+      (m) => m[1] as string,
+    );
+    expect(calls).toEqual(['= ']);
+    // And the throw is handled rather than left to kill the process.
+    expect(code).toMatch(/try\s*\{[\s\S]{0,200}globalShortcut\.register\(/);
+    expect(code).toMatch(/\}\s*catch\s*\{/);
+    expect(code).toContain('isRegistered(');
+    // One accelerator, named in the model and used here.
+    expect(codeOf(archRead(TRAY_MODEL))).toContain(
+      "TRAY_ACCELERATOR = 'CommandOrControl+Shift+K'",
+    );
+    expect(code).toContain('TRAY_ACCELERATOR');
+  });
+
+  it('the chord summons and cannot act', () => {
+    // The organising principle of this scenario, made structural: a
+    // system-wide keystroke carries no context, so it may show, hide or
+    // focus the window and it may not decide anything. If it toggled, then
+    // half the time the chord meant to STOP the world would RELEASE the
+    // deny — and the operator pressing it cannot see which case they are in.
+    const code = codeOf(archRead(SHORTCUT));
+    for (const needle of [
+      'CHANNELS.kill',
+      'CHANNELS.pause',
+      'CHANNELS.resume',
+      'CHANNELS.approve',
+      'setKillSwitch',
+      'killSwitch',
+    ])
+      expect([needle, code.includes(needle)]).toEqual([needle, false]);
+    // What it does instead.
+    expect(code).toContain('showMainWindow');
+  });
+
+  it('says the failure out loud, in three agreeing spellings', () => {
+    const model = archRead(TRAY_MODEL);
+    const states = sc16Array(model, 'SHORTCUT_STATES');
+    expect([...states].sort()).toEqual(['declined', 'registered', 'taken']);
+    // `Readonly<Record<ShortcutState, string>>` is the compile-time half;
+    // this is the runtime shadow, and it is what catches a copy table that
+    // was widened with `as` somewhere.
+    const spec = /SHORTCUT_LINE[^=]*=\s*\{([\s\S]*?)\n\};/.exec(model);
+    const keys = [...(spec?.[1] ?? '').matchAll(/(\w[\w-]*)\s*:/g)].map(
+      (m) => m[1] as string,
+    );
+    expect([...keys].sort()).toEqual([...states].sort());
+    // And the window says it too, on the pane the chord summons.
+    expect(codeOf(archRead(KILL_PANE))).toContain('kill-shortcut');
+  });
+
+  /* ── row 10: PAUSE is a clamp, and the menu is not allowed to lie ──── */
+
+  /**
+   * The organising distinction of this slice: DENIES bind everyone
+   * including the operator; CLAMPS bind only autonomy. `evaluateGate`
+   * answers the kill switch with `allow: false` and answers a pause with
+   * `allow: true, mode: 'draft-only', clampedBy: 'outside-window'` — so a
+   * paused daemon still sends what a human approves and a killed one
+   * refuses the human too.
+   *
+   * That is why the tray may set AND release a pause, and may only ARM the
+   * kill switch: a control that can only be set from a menu is a trap, and
+   * a control that binds the operator is not released from a surface that
+   * can be mis-clicked while nobody is looking at the screen.
+   */
+  it('takes the daemon’s own three pause tokens, not an instant it computed', () => {
+    const route = archRead(TOGGLES);
+    // The route's own vocabulary, read from the route.
+    for (const token of ['1h', 'until-tomorrow', 'rest-of-window'])
+      expect(route).toContain(`'${token}'`);
+    const model = codeOf(archRead(TRAY_MODEL));
+    for (const token of ['1h', 'until-tomorrow', 'rest-of-window'])
+      expect([token, model.includes(`'${token}'`)]).toEqual([token, true]);
+    // The plan says the third item passes `armed.until`. It does not: the
+    // daemon resolves `rest-of-window` through `armedWindowClose` and
+    // answers 409 `not-armed` when no SCHEDULE window is open, which is a
+    // different fact from `armed.until === null`.
+    expect(route).toContain('armedWindowClose');
+    expect(model).not.toMatch(/until:\s*armed\.until/);
+  });
+
+  it('pause is a clamp in the gate, and the menu says the word', () => {
+    // Read from the gate, so the menu's copy cannot drift from the truth.
+    const gate = archRead(GATE);
+    expect(gate).toMatch(/pausedAt\([\s\S]{0,200}clampedBy = 'outside-window'/);
+    const model = archRead(TRAY_MODEL);
+    expect(model).toContain('CLAMP');
+    expect(model).toContain('NOT A DENY');
+    // The half that gets people: resume does not replay.
+    expect(model).toContain('RELEASES NOTHING');
+  });
+
+  it('the kill switch is armed from the tray and released only in the window', () => {
+    const tray = codeOf(archRead(TRAY));
+    const model = codeOf(archRead(TRAY_MODEL));
+    // The command has no argument, so there is no spelling of it that turns
+    // the switch OFF. That is a type-level fact; this is its shadow.
+    expect(model).toMatch(/kind:\s*'kill'/);
+    expect(model).not.toMatch(/kind:\s*'unkill'/);
+    expect(model).not.toMatch(/kind:\s*'kill';\s*readonly\s+on:/);
+    // Pinned to the ARGUMENT, not to a substring within eighty characters.
+    // The earlier spelling would have been satisfied by `CHANNELS.killSwitch`
+    // appearing anywhere near the word `true`, including in an unrelated
+    // line; this says exactly what is passed, and the negative says there is
+    // no call that passes anything else.
+    expect(tray).toMatch(/invoke\('killSwitch', \[true\]\)/);
+    expect(tray).not.toMatch(/invoke\('killSwitch', \[(?!true\])/);
+  });
+
+  /* ── row 11: the window is no longer the app ───────────────────────── */
+
+  it('closing the last window does not quit, and QUIT is a menu item', () => {
+    const boot = codeOf(archRead(INDEX16));
+    // Sc4 quit on `window-all-closed` because the window WAS the app. A
+    // tray that dies with the window is a tray that is never there when it
+    // is wanted, so the handler goes and the operator gets an explicit way
+    // out instead of an implicit one.
+    expect(boot).not.toMatch(/window-all-closed[\s\S]{0,120}app\.quit\(\)/);
+    expect(codeOf(archRead(TRAY_MODEL))).toMatch(/kind:\s*'quit'/);
+    // Exactly one window constructor, still (Sc4).
+    expect(namers(DESKTOP_SRC, 'new BrowserWindow(')).toEqual([
+      `${MAIN}/window.ts`,
+    ]);
+  });
+
+  it('there is one way to show the window and everything uses it', () => {
+    // The tray's OPEN, the shortcut's summon and a deep link all have to
+    // re-create a window that may not exist. Three spellings of "make a
+    // window" is three places for Sc4's frozen `WINDOW_OPTIONS` to be
+    // bypassed.
+    expect(namers(DESKTOP_SRC, 'createWindow(').sort()).toEqual([
+      INDEX16,
+      `${MAIN}/window.ts`,
+    ]);
+    const boot = codeOf(archRead(INDEX16));
+    expect(boot).toContain('function showMainWindow');
+    for (const rel of [TRAY, SHORTCUT])
+      expect([rel, codeOf(archRead(rel)).includes('createWindow(')]).toEqual([
+        rel,
+        false,
+      ]);
+  });
+
+  /* ── row 12: the public repo is still public-safe ──────────────────── */
+
+  it('nothing the tray puts on screen identifies an operator', () => {
+    expect(publicRepoOffenders()).toEqual([]);
+    // Sc15's row 12 owns the `/Users/` census and gets it right (the guard
+    // file is excluded from `trackedTextFiles()`, so "three" cannot be
+    // asserted over that list — asserting it there was Sc15's own row being
+    // wrong rather than the tree). This row does not re-count. It sweeps
+    // exactly the files Sc16 adds, which is the part that could regress.
+    const mine = [
+      DEEP_LINK,
+      TRAY_MODEL,
+      TRAY,
+      GLYPHS,
+      SHORTCUT,
+      'apps/desktop/test/unit/deep-link.spec.ts',
+      'apps/desktop/test/unit/tray-model.spec.ts',
+      'apps/desktop/test/e2e/tray.e2e.spec.ts',
+    ];
+    for (const rel of mine) {
+      const raw = archRead(rel);
+      expect(raw.includes('/Users/'), `${rel} names a home path`).toBe(false);
+      for (const phone of raw.match(/\+1\d{10}/g) ?? [])
+        expect(phone.startsWith('+1555'), `${rel}: ${phone}`).toBe(true);
+      for (const host of raw.match(/@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [])
+        expect(host.endsWith('example.com'), `${rel}: ${host}`).toBe(true);
+    }
+    // And the census itself is still the three it has been since S6, so a
+    // fourth introduced by this scenario fails HERE with a filename rather
+    // than three scenarios later with an integer.
+    const homes = trackedTextFiles().filter((rel) =>
+      readFileSync(join(repoRoot, rel), 'utf8').includes('/Users/'),
+    );
+    expect(homes.sort()).toEqual([
+      'packages/adapter-testkit/test/pack.spec.ts',
+      'packages/cli/test/skill-dryrun.spec.ts',
+    ]);
+  });
+});

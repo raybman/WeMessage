@@ -273,8 +273,19 @@ describe('s8 Sc5 row 3: the display is a display', () => {
 
     await approve(app, draft.id);
 
+    // Writes enumerated rather than the whole slice compared, for the reason
+    // s8 Sc16 gave `queue.e2e.spec.ts` row 3: the tray now listens to the
+    // same stream and re-reads the queue whenever a draft moves, so an extra
+    // `GET /v1/drafts` may or may not have landed by the time this line runs.
+    // The claim that matters is unchanged and is now stated directly — one
+    // write, and it is the approval — and the reads are closed to the tray's
+    // own, so a second write could not hide among them.
     const asked = urls(fixture).slice(before);
-    expect(asked).toEqual([`POST /v1/drafts/${draft.id}/approve`]);
+    expect(asked.filter((u) => !u.startsWith('GET '))).toEqual([
+      `POST /v1/drafts/${draft.id}/approve`,
+    ]);
+    for (const read of asked.filter((u) => u.startsWith('GET ')))
+      expect(read).toBe('GET /v1/drafts');
     expect(urls(fixture).filter((u) => /send/i.test(u))).toEqual([]);
     const state = await probe(app, draft.id);
     expect(state.state).toBe('approved');

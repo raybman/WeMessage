@@ -10,10 +10,10 @@
  * exact defect the setting exists to prevent. So all three travel the same
  * path, and the e2e asserts the pair moves together.
  */
-import { nativeTheme, type BrowserWindow } from 'electron';
+import { nativeTheme } from 'electron';
 import { CHANNELS } from './ipc-channels.js';
 import { TEST_FLAG } from './policy.js';
-import { applyVibrancy, pushToWindows } from './window.js';
+import { applyVibrancyToAll, pushToWindows } from './window.js';
 
 export interface ThemePayload {
   dark: boolean;
@@ -45,13 +45,36 @@ function fromSystem(): ThemePayload {
   };
 }
 
-function apply(win: BrowserWindow): void {
-  applyVibrancy(win, !current.reducedTransparency);
+/**
+ * No window argument, on purpose.
+ *
+ * Sc16 gave the app a life without a window: the tray keeps it running after
+ * the last one closes, and a deep link or the chord builds a new one. A theme
+ * that had captured a window at boot would be re-vibrancying a destroyed
+ * object from inside a `nativeTheme` listener. Both halves therefore ask for
+ * the live set at the moment they act.
+ */
+function apply(): void {
+  applyVibrancyToAll(!current.reducedTransparency);
   pushToWindows(CHANNELS.theme, current);
 }
 
 /**
- * Begin tracking the system theme for `win`.
+ * Re-assert the current theme, for a window that has just been created.
+ *
+ * `WINDOW_OPTIONS` gives a new window the vibrant material unconditionally,
+ * which is right for the common case and wrong for exactly one: an operator
+ * with "reduce transparency" on, who closed the window and opened a new one.
+ * That window would be born transparent. This is the call that corrects it,
+ * and it is a re-assertion of state main already holds rather than a second
+ * source of truth.
+ */
+export function refreshTheme(): void {
+  apply();
+}
+
+/**
+ * Begin tracking the system theme.
  *
  * Under `WEMESSAGE_DESKTOP_TEST` a `__wmPushTheme` hook is exposed on main's
  * `globalThis`. It is an OBSERVATION point, not a capability: it moves the
@@ -59,12 +82,12 @@ function apply(win: BrowserWindow): void {
  * exists because no CI machine can be asked to toggle "reduce transparency"
  * in System Settings. The e2e proves the hook is absent without the flag.
  */
-export function startTheme(win: BrowserWindow): void {
+export function startTheme(): void {
   current = fromSystem();
-  apply(win);
+  apply();
   nativeTheme.on('updated', () => {
     current = fromSystem();
-    apply(win);
+    apply();
   });
   if (process.env[TEST_FLAG] === '1')
     (
@@ -73,6 +96,6 @@ export function startTheme(win: BrowserWindow): void {
       }
     ).__wmPushTheme = (patch: Partial<ThemePayload>): void => {
       current = { ...current, ...patch };
-      apply(win);
+      apply();
     };
 }

@@ -138,6 +138,17 @@ export interface QueueScreenProps {
   /** What assistive technology is told last happened. May be empty. */
   readonly announcement: string;
   /**
+   * A draft id a deep link named that this queue does not have, or `null`.
+   *
+   * Echoed back so that a URL which went nowhere says so instead of looking
+   * like a click that missed. The value reaches the DOM as text inside a
+   * `<p>` and as an attribute on `<html>`, never as markup and never
+   * interpolated into a selector or a request: a URL is chosen by whoever
+   * sent it, and the parser has already bounded it to 32 characters of
+   * `[0-9A-Za-z_-]` before it gets this far.
+   */
+  readonly notFound: string | null;
+  /**
    * The body being edited, or `null` when nobody is editing.
    *
    * `null` and not `''`: an empty string is a body somebody has deleted
@@ -315,6 +326,15 @@ export default function QueueScreen(props: QueueScreenProps): VNode {
       {props.stale ? (
         <p id="queue-stale">◌ STALE · QUEUE MAY BE OUT OF DATE</p>
       ) : null}
+      {/*
+        A link that named a draft nobody has. Said out loud, next to the
+        stale banner and in the same register, because the alternative is an
+        operator who followed a link, landed on the queue, and has no way to
+        tell whether the card they wanted is missing or merely scrolled off.
+      */}
+      {props.notFound === null ? null : (
+        <p id="queue-not-found">{`⊘ NO SUCH DRAFT · ${props.notFound}`}</p>
+      )}
       {props.link === 'reconnecting' ? (
         <DisconnectedOverlay
           attempt={props.attempt}

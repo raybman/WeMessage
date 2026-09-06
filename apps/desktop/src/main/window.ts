@@ -248,6 +248,26 @@ export function applyVibrancy(win: BrowserWindow, on: boolean): void {
   if (testState !== null) testState.vibrancy = wanted;
 }
 
+/**
+ * Apply the material to every live window, and record the decision either way.
+ *
+ * The theme used to hold the one `BrowserWindow` it was started with. Sc16
+ * made that unsound: the window is now closable and re-creatable, so a
+ * captured reference outlives its object and `setVibrancy` on a destroyed
+ * window throws inside a `nativeTheme` listener, where nothing catches it.
+ * Asking for the live set at call time has no such window.
+ *
+ * The recording happens even when the set is EMPTY, which is deliberate. The
+ * fact being recorded is what main decided, not how many windows happened to
+ * be open when it decided it; a tray-only app with the window closed still
+ * has a reduced-transparency answer, and the next window must be born with it.
+ */
+export function applyVibrancyToAll(on: boolean): void {
+  for (const win of BrowserWindow.getAllWindows())
+    if (!win.isDestroyed()) applyVibrancy(win, on);
+  if (testState !== null) testState.vibrancy = on ? 'sidebar' : null;
+}
+
 /** Push a payload to every live window. */
 export function pushToWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows())

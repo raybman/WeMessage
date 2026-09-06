@@ -470,12 +470,26 @@ describe('s8 Sc6 row 3: GROUP is a chip, and the refusal is the daemon’s', () 
       `[data-draft="${group.id}"][data-state="approved"]`,
       { timeout: 15_000 },
     );
-    // One request, and it is an approval. The GUI does not know this draft
-    // is doomed, and must not need to: pre-validating in the renderer is how
-    // a second policy vocabulary gets in front of the operator.
-    expect(urls(fixture).slice(asked)).toEqual([
+    // One WRITE, and it is an approval. The GUI does not know this draft is
+    // doomed, and must not need to: pre-validating in the renderer is how a
+    // second policy vocabulary gets in front of the operator.
+    //
+    // s8 Sc16 gave this window a second legitimate inhabitant. The tray
+    // subscribes to the same stream the renderer does and re-reads the queue
+    // whenever a draft moves, so `GET /v1/drafts` can now land inside this
+    // slice at an instant nobody controls. The row is NOT exempted for it: an
+    // exemption large enough to admit the tray is large enough to admit a
+    // second approval path arriving as a read. It is enumerated instead —
+    // every write is the one approval, and every read is the tray's own queue
+    // read — which is a stronger statement than the exact list it replaces,
+    // because the exact list only ever held while nothing else was listening.
+    const raised = urls(fixture).slice(asked);
+    expect(raised.length).toBeGreaterThan(0);
+    expect(raised.filter((u) => !u.startsWith('GET '))).toEqual([
       `POST /v1/drafts/${group.id}/approve`,
     ]);
+    for (const read of raised.filter((u) => u.startsWith('GET ')))
+      expect(read).toBe('GET /v1/drafts');
 
     // Now the daemon answers. The undo grace elapses, the dispatcher refuses
     // the room in its own words, and the card carries that word.

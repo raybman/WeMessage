@@ -231,6 +231,10 @@ let stream: StreamPayload = {
   // killed, and a settings screen that drew ARMED on a guess would be
   // telling an operator the product is sending when it may not be.
   killSwitch: null,
+  // s8 Sc16: `null` until main has asked the operating system for the chord.
+  // "We have not been told" and "the chord is dead" are different facts and
+  // the settings pane says so rather than picking the cheerful one.
+  shortcut: null,
 };
 
 function asStream(payload: unknown): StreamPayload | null {
@@ -254,6 +258,17 @@ function asStream(payload: unknown): StreamPayload | null {
  * queue or is not, and "is not" is resolved once, visibly, at derive time.
  */
 let activeId: string | null = null;
+
+/**
+ * A draft id a deep link named that the queue does not hold, or `null`.
+ *
+ * Renderer state and nothing more. It is set from the link, cleared by the
+ * next navigation the operator performs themselves, and it never causes a
+ * request: `GET /v1/drafts/<id>` on an id an attacker chose is a probe this
+ * app would be running on their behalf, and its 404 is an oracle for which
+ * drafts exist. The answer comes from the rows already in hand.
+ */
+let linkNotFound: string | null = null;
 /** The draft whose context turns are open inline, or none. */
 let expandedId: string | null = null;
 /**
@@ -2493,6 +2508,13 @@ function settingsView(): SettingsScreenProps {
       banner: killed
         ? '⊘ THE KILL SWITCH IS ON · NOTHING SENDS · DRAFTS STILL COLLECT · AN APPROVAL IS REFUSED TOO'
         : '',
+      // The SENTENCE travels, not the state word. Main asked the operating
+      // system for the chord and main is the only process that knows what it
+      // said; re-deriving the copy over here from a bare `taken`/`declined`
+      // would be a second table to keep in step with the tray's, and INV-1
+      // exists to stop exactly that. `null` until main has answered, which is
+      // a third fact and not a cheerful default.
+      shortcut: stream.shortcut?.line ?? '⌘⇧K NOT YET CLAIMED',
       onToggle: toggleKill,
     },
     form: {
@@ -2628,6 +2650,30 @@ function onWindowKey(event: KeyboardEvent): void {
   if (next === null || !MOUNTED.has(next)) return;
   event.preventDefault();
   if (next === screen) return;
+  // An operator navigating themselves has answered the chip: they have gone
+  // somewhere on purpose and the link that missed is over.
+  linkNotFound = null;
+  goToScreen(next);
+  paint();
+}
+
+/**
+ * Select a screen. The ONE mechanism, used by both things that can navigate.
+ *
+ * Sc8 put navigation in the Cmd-digit keymap and Sc16 gave a `wemessage://`
+ * URL the same power. Two routers would be two answers to "what does leaving
+ * a screen reset", and the one that gets forgotten is always the one an
+ * attacker arrives through. So the keymap kept its guards — the wizard mode,
+ * the `MOUNTED` check, the no-op when the screen has not changed — and the
+ * deep link goes through the same door with the same guards applied by its
+ * own caller.
+ *
+ * Deliberately does NOT paint: both callers have more to say first, and a
+ * function that painted in the middle would render the half-updated state.
+ * Deliberately does not touch `linkNotFound` either, for the same reason —
+ * one caller clears it and the other sets it.
+ */
+function goToScreen(next: Screen): void {
   screen = next;
   closeRuleForm();
   closeScheduleForm();
@@ -2643,12 +2689,13 @@ function onWindowKey(event: KeyboardEvent): void {
   people.reset();
   audits.reset();
   config.reset();
+  // Every one of these is a GET. A screen change is a read and never a
+  // write, which is what makes it safe for a URL to be able to cause one.
   if (next === 'rules') void rules.load(midnightIso());
   if (next === 'schedule') void schedules.load();
   if (next === 'people') loadPeople();
   if (next === 'audit') loadAudit();
   if (next === 'settings') loadSettings();
-  paint();
 }
 
 function Shell({
@@ -2722,6 +2769,7 @@ function Shell({
           arming={armingGlance(current.armed)}
           watching={binding.store.catalogue().watching}
           announcement={announcementFor(view)}
+          notFound={linkNotFound}
           editing={editing}
           onEdit={onEdit}
           onVerb={onVerb}
@@ -2859,6 +2907,15 @@ function paint(): void {
   if (screen === 'audit') html.setAttribute('data-now-iso', auditNow);
   else if (screen === 'settings') html.setAttribute('data-now-iso', configNow);
   else html.removeAttribute('data-now-iso');
+  // The id a deep link named and this queue does not have, published at the
+  // document level so a harness can wait on the REFUSAL rather than on the
+  // absence of a selection — "nothing happened" and "we told you nothing
+  // happened" are different outcomes and only one of them is honest.
+  // `setAttribute` for the same reason as the line above, and as an
+  // ATTRIBUTE rather than as markup: the value came off a URL, and an
+  // attribute is escaped by the DOM where an `innerHTML` would not be.
+  if (linkNotFound === null) html.removeAttribute('data-not-found');
+  else html.setAttribute('data-not-found', linkNotFound);
   const view = derive();
   // Written back so the cursor SURVIVES the resolution above. A queue whose
   // active card expired keeps re-resolving to the top on every paint; naming
@@ -2956,6 +3013,62 @@ window.wm.on('stream', (payload: unknown) => {
 window.wm.on('theme', (payload: unknown) => {
   const theme = asTheme(payload);
   if (theme !== null) applyTheme(theme);
+});
+
+/**
+ * A `wemessage://` link, after main has already validated it.
+ *
+ * Narrowed AGAIN here, and not because main is not trusted. Everything
+ * arriving over the bridge crosses as `unknown` and is narrowed on this side
+ * — `asStream` and `asTheme` are the same shape — because the alternative is
+ * a renderer whose types are a promise about a process it cannot see. The
+ * `screen` is matched against `MOUNTED` by IDENTITY rather than by a cast, so
+ * a seventh name could not be smuggled through a `as Screen`.
+ *
+ * What comes back has no verb in it. The three fields are a screen, an id to
+ * put the cursor on, and a string to echo, and there is no fourth.
+ */
+function asNavigate(payload: unknown): {
+  readonly screen: Screen;
+  readonly draftId: string | null;
+  readonly notFound: string | null;
+} | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const raw = payload as Record<string, unknown>;
+  const asked = raw['screen'];
+  const known = [...MOUNTED].find((name) => name === asked);
+  if (known === undefined) return null;
+  const draftId = raw['draftId'];
+  const notFound = raw['notFound'];
+  return {
+    screen: known,
+    draftId: typeof draftId === 'string' ? draftId : null,
+    notFound: typeof notFound === 'string' ? notFound : null,
+  };
+}
+
+window.wm.on('navigate', (payload: unknown) => {
+  const link = asNavigate(payload);
+  if (link === null) return;
+  // The screen change goes through the keymap's own function, so a link and
+  // a keystroke reset exactly the same things. Skipped when the screen has
+  // not moved, because re-entering the screen you are on would drop a
+  // half-typed rule for no reason.
+  if (link.screen !== screen) goToScreen(link.screen);
+  // The cursor. `derive()` resolves an id that is not in the queue to the
+  // top rather than to nothing, so a link naming a draft that has since
+  // gone leaves the operator somewhere real.
+  if (link.draftId !== null) activeId = link.draftId;
+  // Two ways to have named nothing: a string that could not be a draft id at
+  // all (the parser says so, and echoes it back bounded), and a well-formed
+  // id that this queue does not hold. Both are answered from what is already
+  // in hand — asking the daemon about an id an attacker chose would make
+  // this app their existence oracle.
+  const missing =
+    link.draftId !== null &&
+    !binding.store.rows().some((row) => row.server.id === link.draftId);
+  linkNotFound = link.notFound ?? (missing ? link.draftId : null);
+  paint();
 });
 
 paint();

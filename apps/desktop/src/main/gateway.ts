@@ -41,6 +41,7 @@ import {
   type SettingPatchValue,
   type WeMessageClient,
 } from '@wemessage/client';
+import type { GatewayEventPayload } from '@wemessage/protocol';
 import type { Bootstrap } from './auth.js';
 import {
   createEventStream,
@@ -122,6 +123,21 @@ interface StreamCommon {
    * means the daemon has no store to answer from rather than "off".
    */
   readonly killSwitch: boolean | null;
+  /**
+   * s8 Sc16: whether the operating system gave us the global chord, and the
+   * sentence that says so.
+   *
+   * The LINE travels rather than being re-derived in the renderer. INV-1
+   * allows a second projection but asks it to be worth the duplication, and
+   * this one would not be: the three sentences are the shortcut's own
+   * vocabulary, they are already `Readonly<Record<ShortcutState, string>>` in
+   * main, and a renderer copy would be a fourth spelling of a fact whose
+   * whole job is to agree with itself in the tray and in the window.
+   *
+   * `null` before `createShortcut` has answered, which is a real state: a
+   * pane that rendered "AVAILABLE" during that gap would be guessing.
+   */
+  readonly shortcut: { readonly state: string; readonly line: string } | null;
 }
 
 export type StreamPayload =
@@ -136,11 +152,73 @@ export type StreamPayload =
       readonly tokenPath: string;
     } & StreamCommon);
 
+/**
+ * The four request keys the TRAY is allowed to reach, and no others.
+ *
+ * s8 Sc16. The tray acts while the window is invisible and while nobody is
+ * necessarily looking at the screen, so "the tray cannot approve a draft" had
+ * better not be a property of a handler somebody could edit. It is a UNION: a
+ * tray that wanted `approve` would have to widen this line, in a diff, next
+ * to this comment, and an arch row reads the same fact back out of the tray's
+ * source as a runtime shadow of the type.
+ *
+ * `drafts` is the queue read. `killSwitch` is the deny the tray may ARM and
+ * may not release. `pause` and `resume` are the clamp, symmetric because a
+ * clamp binds only the daemon's own initiative and a control that can only be
+ * set from a menu is a trap.
+ */
+export const TRAY_KEYS = [
+  'drafts',
+  'killSwitch',
+  'pause',
+  'resume',
+] as const satisfies readonly RequestKey[];
+
+export type TrayKey = (typeof TRAY_KEYS)[number];
+
+/**
+ * Somebody in MAIN who wants what the windows get.
+ *
+ * The tray is not a window: it has no `webContents`, so `pushToWindows` does
+ * not reach it, and it has to learn the same two things by another route.
+ * One watcher, not a list, because there is exactly one tray and a fan-out
+ * would be an invitation to attach a second consumer that nobody counted.
+ */
+export interface GatewayWatcher {
+  /** Every state the windows were pushed, at the same moment they were. */
+  stream(payload: StreamPayload): void;
+  /** Every event frame, AFTER §1.8 has appended it for the renderer. */
+  frame(event: GatewayEventPayload): void;
+}
+
 export interface Gateway {
   /** Connect, register the handlers, and push the first stream state. */
   start(): Promise<void>;
   /** The last state pushed, replayed when a window finishes loading. */
   lastStream(): StreamPayload;
+  /**
+   * Call one of the four tray-reachable handlers directly.
+   *
+   * The SAME function the IPC bridge calls, not a parallel path: a tray that
+   * built its own client would be a second place holding the bearer token and
+   * a second place deciding what a 409 means. `TrayKey` is what keeps it
+   * narrow, and every call site still goes through `requireClient`.
+   */
+  invoke(key: TrayKey, args: readonly unknown[]): Promise<unknown>;
+  /**
+   * Re-read the daemon's posture now, because a human asked.
+   *
+   * Deliberately NOT a socket reconnect. `EventStream` owns the reconnect
+   * ladder and can be mid-backoff; a second party tearing the connection down
+   * would race the run loop and can leak the socket the ladder is about to
+   * hand back. This is the read the operator actually wants, and it re-pushes
+   * to every window and to the watcher when it lands.
+   */
+  checkNow(): void;
+  /** Attach main's non-window consumer, or detach it with `null`. */
+  watch(watcher: GatewayWatcher | null): void;
+  /** Record what the OS said about the global chord, and push it. */
+  setShortcut(next: { readonly state: string; readonly line: string }): void;
   stop(): Promise<void>;
 }
 
@@ -268,6 +346,8 @@ export function createGateway(options: GatewayOptions): Gateway {
   let armed: StreamPayload['armed'] = null;
   let adapters: readonly AdapterDot[] = [];
   let killSwitch: boolean | null = null;
+  let shortcut: StreamPayload['shortcut'] = null;
+  let watcher: GatewayWatcher | null = null;
   /**
    * Read once, at construction, from the process that owns the environment.
    * The renderer never sees `process`, and a demo badge that could be turned
@@ -275,7 +355,14 @@ export function createGateway(options: GatewayOptions): Gateway {
    * OFF from inside one.
    */
   const demo = isDemoMode(process.env);
-  let stream: StreamPayload = { ...link, demo, armed, adapters, killSwitch };
+  let stream: StreamPayload = {
+    ...link,
+    demo,
+    armed,
+    adapters,
+    killSwitch,
+    shortcut,
+  };
 
   /**
    * The wizard's send-test target: a RECIPIENT and a BODY, armed together.
@@ -301,8 +388,11 @@ export function createGateway(options: GatewayOptions): Gateway {
 
   function push(next: Link): void {
     link = next;
-    stream = { ...next, demo, armed, adapters, killSwitch };
+    stream = { ...next, demo, armed, adapters, killSwitch, shortcut };
     pushToWindows(CHANNELS.stream, stream);
+    // The tray is told at the same instant and from the same value, so the
+    // menu and the window cannot disagree about what the daemon just said.
+    watcher?.stream(stream);
   }
 
   /**
@@ -684,6 +774,9 @@ export function createGateway(options: GatewayOptions): Gateway {
         // is answered by the arming sweep that follows it, and refreshing on
         // both would put a second status request on the wire for one fact.
         if (frame.kind !== 'event') return;
+        // §1.8 again: the renderer's record was appended above, and only then
+        // is the frame handed to main's own consumer.
+        watcher?.frame(frame.event);
         const name = frame.event.event;
         if (
           name === 'toggle.changed' ||
@@ -715,8 +808,20 @@ export function createGateway(options: GatewayOptions): Gateway {
       await connect();
     },
     lastStream: () => stream,
+    invoke: (key, args) => handlers[key](args),
+    checkNow(): void {
+      if (client !== null) void refreshStatus(client);
+    },
+    watch(next): void {
+      watcher = next;
+    },
+    setShortcut(next): void {
+      shortcut = next;
+      push(link);
+    },
     async stop(): Promise<void> {
       stopped = true;
+      watcher = null;
       events?.close();
       events = null;
       client = null;

@@ -502,6 +502,22 @@ body {
 }
 
 /*
+ * The same banner, for a link that named a draft nobody has. Deliberately
+ * identical in weight to the stale line: both are "what you are looking at is
+ * not quite what you asked for", and giving one of them an alarm colour would
+ * make a mistyped URL look like an incident.
+ */
+#queue-not-found {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/*
  * The disconnected overlay is the opposite decision, and looks like it: a
  * bordered block above the list, and the list below it dimmed and marked
  * `aria-disabled`.

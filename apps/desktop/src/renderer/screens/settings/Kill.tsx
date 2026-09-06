@@ -41,6 +41,17 @@ export interface KillPaneProps {
   readonly horizonArmed: string;
   /** The screen-wide sentence, or `''` when there is nothing to say. */
   readonly banner: string;
+  /**
+   * What the system-wide chord does, in the state the OS actually left it in.
+   *
+   * On this pane and not somewhere in a preferences list, because the chord
+   * lands HERE: an operator who presses it arrives looking at the kill switch
+   * and reads, an inch below it, what the key they just pressed did. And when
+   * the key did nothing — another application owns the combination, or the
+   * platform has no such thing — that is said in the same place, in words,
+   * rather than being swallowed into a boolean nobody sees.
+   */
+  readonly shortcut: string;
   readonly onToggle: () => void;
 }
 
@@ -81,6 +92,13 @@ export function KillPane(props: KillPaneProps): VNode {
       </button>
       <p id="kill-note" class="set-note">
         {props.note}
+      </p>
+      {/* The chord, and the honest report of whether it exists. Always in
+          the document: "the shortcut is dead" is a fact an operator needs
+          BEFORE the moment they reach for it, and a line that only appeared
+          on failure would be a line nobody had ever read. */}
+      <p id="kill-shortcut" class="set-note">
+        {props.shortcut}
       </p>
     </section>
   );

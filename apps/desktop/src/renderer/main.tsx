@@ -157,11 +157,34 @@ import {
   type AuditBinding,
   type AuditQuery,
 } from './store/audit.js';
+import SettingsScreen, {
+  type SettingsScreenProps,
+} from './screens/settings/index.js';
+import type { AdapterRowView } from './screens/settings/Adapters.js';
+import type { DangerStepView } from './screens/settings/Danger.js';
+import type {
+  SettingFieldView,
+  SettingPointerView,
+} from './screens/settings/Form.js';
+import type { PermCardView } from './screens/settings/Perms.js';
+import {
+  GROUPS,
+  WRITABLE_KEYS,
+  draftOf,
+  fieldRows,
+  pointerRows,
+  settingsIssue,
+  type SettingsDraft,
+} from './derive/settingsFields.js';
+import { permissionCards, probedLine } from './derive/permissionCards.js';
+import { adapterRows, dangerCounts } from './derive/adapterRows.js';
+import { bindSettings, type SettingsBinding } from './store/settings.js';
 import type {
   ContactMode,
   SchedulePayload,
   ScheduleInput,
   ScheduleWindowPayload,
+  SettingPatchValue,
 } from '@wemessage/client';
 import type { Conversation } from './store/optimistic.js';
 import { applyTheme, asTheme } from './theme/theme.js';
@@ -192,6 +215,11 @@ let stream: StreamPayload = {
   demo: false,
   armed: null,
   adapters: [],
+  // `null` is a third state and not a synonym for `false`: before the first
+  // status fetch this process genuinely does not know whether outbound is
+  // killed, and a settings screen that drew ARMED on a guess would be
+  // telling an operator the product is sending when it may not be.
+  killSwitch: null,
 };
 
 function asStream(payload: unknown): StreamPayload | null {
@@ -539,10 +567,11 @@ const rules: RulesBinding = bindRules(window.wm);
 /**
  * The screen the ⌘-digit keymap last chose.
  *
- * Five of the six have a surface now. A stroke for `settings` is still
- * INERT rather than navigating to a blank pane: an empty document with
- * `data-screen="settings"` is a screen that claims to exist, and the next
- * scenario is the honest place to build it.
+ * All six have a surface now, and this set is the last gate between the
+ * keymap and a blank pane: an empty document with `data-screen="settings"`
+ * would be a screen that claims to exist. An arch row asserts this set,
+ * sorted, equals `SCREENS` sorted, so the registry, the keymap and the
+ * mount are one closed list rather than three that agree by habit.
  */
 let screen: Screen = DEFAULT_SCREEN;
 const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
@@ -551,6 +580,7 @@ const MOUNTED: ReadonlySet<Screen> = new Set<Screen>([
   'schedule',
   'people',
   'audit',
+  'settings',
 ]);
 
 /**
@@ -571,14 +601,16 @@ let confirmTyped: string | null = null;
 /**
  * WHICH irreversible thing the open confirm is about.
  *
- * One mount, three questions. The dialog owns `role="dialog"` for the whole
+ * One mount, five questions. The dialog owns `role="dialog"` for the whole
  * renderer and a second mount would be a second modal — so the phrase, the
  * title and the verb are chosen from this, and the `onGo` that runs is the
  * one that belongs to the sentence on screen. A single flag rather than
  * three nullable strings, because "two confirms open" is a state that must
  * not be spellable.
  */
-let confirmIntent: 'auto' | 'delete-schedule' | 'bulk-auto' = 'auto';
+let confirmIntent:
+  'auto' | 'delete-schedule' | 'bulk-auto' | 'global-auto' | 'disconnect' =
+  'auto';
 let dryRun: DryRunPanelProps | null = null;
 
 /**
@@ -1964,6 +1996,445 @@ function exportReport(): void {
   });
 }
 
+/* ── the settings screen ──────────────────────────────────────────────── */
+
+/**
+ * The sixth binding, and the only screen carrying a control that can stop
+ * the product outright.
+ *
+ * Eleven channels, declared in the store's own partition row: four reads,
+ * six writes, and one that reaches no daemon at all. Everything dangerous
+ * about this screen is a fact about which of those a gesture may touch, so
+ * the gestures are here, in the composition root, and the panes under
+ * `screens/settings/` are markup with props.
+ */
+const config: SettingsBinding = bindSettings(window.wm);
+
+/**
+ * The instant this screen was last entered.
+ *
+ * Read HERE, once, and handed down as a prop, on the same terms as
+ * `auditNow`. Nothing on this screen counts down: `arming.pauseUntil` is
+ * printed as the daemon's own horizon rather than as "in 89 minutes",
+ * because a remaining time is a value that moves with no act behind it, and
+ * a value that moves by itself needs a timer. This app owns exactly one and
+ * it is main's reconnect backoff.
+ */
+let configNow = new Date().toISOString();
+
+/**
+ * The local draft over the daemon's row, or `null` before the first read.
+ *
+ * The Sc10 form model, unchanged: gestures edit a draft, SAVE issues exactly
+ * one write carrying only what moved, and the baseline is replaced with what
+ * the daemon ANSWERED rather than with what was sent.
+ */
+let configForm: Form<SettingsDraft> | null = null;
+
+/**
+ * The raw text in each number box, keyed by setting.
+ *
+ * Kept beside the draft rather than in it, because they answer different
+ * questions. A half-typed `-` or an empty box is a keystroke, not a value:
+ * folding it into the draft as `0` would offer to write a number nobody
+ * typed, and re-deriving the box's text from the draft on every input would
+ * snap a value back under a typist mid-word. Only text that parses to a
+ * whole number reaches the draft; the rest stays here and is discarded when
+ * the daemon answers.
+ */
+let configTyped: Readonly<Record<string, string>> = {};
+
+/** The adapter whose ARM step is open, or `null`. */
+let configArm: string | null = null;
+
+/**
+ * The arming reasons that mean the daemon cannot honour a send setting.
+ *
+ * Three, and none of them is one of §1.6's dormant deny reasons: those name
+ * a REFUSAL of one message, and this names a daemon that cannot send at all.
+ * The shut-schedule reason and the open-breaker reason are deliberately
+ * absent — a window that has closed and a breaker that has tripped are both
+ * temporary states of a working daemon, and dimming the caps for either
+ * would tell an operator their configuration was unavailable when it is
+ * merely idle. Both are described here in prose rather than spelled as
+ * quoted literals, and that is deliberate too: §1.6's dormancy guard scans
+ * production sources for the QUOTED form of the five, and a comment is not
+ * an emission. This file has no business becoming a sixth home for either
+ * word, so it does not spell either one.
+ */
+const DIM_REASONS: ReadonlySet<string> = new Set([
+  'read-only',
+  'disconnected',
+  'unsupported',
+]);
+
+/** A whole number and nothing else. `''`, `-` and `1.5` are still typing. */
+const WHOLE_NUMBER = /^-?\d+$/;
+
+/** The phrase that arms autonomy for everybody. */
+const GLOBAL_AUTO = 'AUTO';
+/** The phrase that ends this machine's link to the daemon. */
+const DISCONNECT = 'DISCONNECT';
+
+/**
+ * What a disconnect costs, said before it is armed and at every count.
+ *
+ * Five, always rendered. The count above them is the daemon's; these are the
+ * consequences that are true whatever the count says, and a list that
+ * shortened itself when it judged the work small would be missing exactly
+ * when the number is wrong.
+ */
+const DISCONNECT_BULLETS: readonly string[] = [
+  'EVERY ADAPTER CREDENTIAL IS REVOKED. AN AGENT STILL HOLDING ONE STARTS FAILING AT ITS NEXT REQUEST.',
+  'THE DAEMON ROTATES ITS OWN BEARER, SO THIS WINDOW IS HOLDING A DEAD TOKEN THE MOMENT IT ANSWERS AND CANNOT RECONNECT ITSELF.',
+  'THE MESSAGE WATCHER STOPS. NOTHING NEW IS MIRRORED AND NO NEW DRAFT IS PROPOSED.',
+  'EVERY DRAFT STILL WAITING IS ABANDONED WHERE IT STANDS. NONE OF THEM IS SENT AND NONE IS REJECTED.',
+  'THE AUDIT LOG IS LEFT EXACTLY AS IT IS. THIS APP HAS NO CONTROL THAT CAN ALTER IT, AND THE DAEMON EXPOSES NO ROUTE THAT WOULD.',
+];
+
+/** Enter, or re-ask: stamp the window's instant, then read the four. */
+function loadSettings(): void {
+  configNow = new Date().toISOString();
+  void config.load().then(rebaseSettings, rebaseSettings);
+}
+
+/** Take the daemon's answer as the new baseline and drop what was typed. */
+function rebaseSettings(): void {
+  configForm = formOf(draftOf(config.data().settings));
+  configTyped = {};
+  paint();
+}
+
+function closeSettings(): void {
+  configForm = null;
+  configTyped = {};
+  configArm = null;
+}
+
+/**
+ * ONE write, carrying only what moved, and no request at all when nothing
+ * did.
+ *
+ * The early return is the row: a SAVE on a clean form issues nothing, not
+ * even the re-read the binding would otherwise do. A button that quietly
+ * asked the daemon every time it was pressed would make "one gesture, one
+ * write" a claim about intent rather than about the wire.
+ */
+function saveSettings(): void {
+  const form = configForm;
+  if (form === null) return;
+  const patch = formPatch(form);
+  if (Object.keys(patch).length === 0) return;
+  void config
+    .save(patch as Record<string, SettingPatchValue>)
+    .then(afterSave, afterSave);
+}
+
+/**
+ * Rebaseline only onto a row the daemon actually stored.
+ *
+ * A refused patch is all-or-nothing: the daemon did not move, and rebasing
+ * would throw away the edit the operator has to see in order to understand
+ * the complaint sitting next to it. So on a refusal the draft stays exactly
+ * where it was and the form stays dirty, which is the truth.
+ */
+function afterSave(): void {
+  const data = config.data();
+  if (data.refusal === null && data.failure === '') {
+    configForm = formOf(draftOf(data.settings));
+    configTyped = {};
+  }
+  paint();
+}
+
+function editSetting(key: string, text: string): void {
+  configTyped = { ...configTyped, [key]: text };
+  const form = configForm;
+  const writable = WRITABLE_KEYS.find((known) => known === key);
+  if (form !== null && writable !== undefined && WHOLE_NUMBER.test(text))
+    configForm = editForm(form, writable, Number(text));
+  paint();
+}
+
+function toggleSetting(key: string, on: boolean): void {
+  const form = configForm;
+  const writable = WRITABLE_KEYS.find((known) => known === key);
+  if (form === null || writable === undefined) return;
+  configForm = editForm(form, writable, on);
+  paint();
+}
+
+function revertSettings(): void {
+  const form = configForm;
+  if (form === null) return;
+  configForm = revertForm(form);
+  configTyped = {};
+  paint();
+}
+
+/**
+ * AUTO asks; DRAFT-ONLY does not.
+ *
+ * The asymmetry is the point and it is the Sc10 precedent: arming autonomy
+ * for every contact at once is the one setting on this screen whose blast
+ * radius is every future message, and it is typed. Turning it back off
+ * narrows what the product may do by itself, so it is a click.
+ */
+function chooseMode(next: string): void {
+  if (next === 'auto') {
+    confirmIntent = 'global-auto';
+    confirmTyped = '';
+    paint();
+    return;
+  }
+  void config.mode(next);
+}
+
+/**
+ * The kill switch, flipped against the DAEMON's last word rather than
+ * against a local flag.
+ *
+ * `stream.killSwitch` is refreshed from `GET /v1/status` on every
+ * `toggle.changed`, so a switch thrown in another terminal moves this one.
+ * `!== true` rather than `=== false` so the unknown state asks to turn it
+ * ON: if this process does not know, the safe request is the one that
+ * stops sending.
+ */
+function toggleKill(): void {
+  void config.kill(stream.killSwitch !== true);
+}
+
+function armAdapter(id: string): void {
+  configArm = id;
+  paint();
+}
+
+function cancelArm(): void {
+  configArm = null;
+  paint();
+}
+
+/**
+ * Mint, and close the ARM step in the same gesture.
+ *
+ * Closed FIRST, so a second click on a button that is already gone cannot
+ * put a second rotation on the wire: the first mint would then be the token
+ * on screen and the second the one in the clipboard, and the receipt would
+ * be describing a credential the operator does not have.
+ */
+function mintAdapter(id: string): void {
+  configArm = null;
+  void config.mint(id);
+}
+
+function dismissReceipt(): void {
+  config.dismiss();
+}
+
+function rerunChecks(): void {
+  void config.probe();
+}
+
+function relinkDaemon(): void {
+  void config.relink();
+}
+
+/**
+ * Open a System Settings pane by NAME.
+ *
+ * The most an app may honestly offer for a TCC permission. macOS exposes no
+ * API that grants Full Disk Access or Automation to another process, by
+ * design, so a GRANT button would be a button that lies about what a click
+ * does. Main holds the URL allowlist; this hands over a name.
+ */
+function openPane(pane: string): void {
+  void config.reveal(pane);
+}
+
+function askDisconnect(): void {
+  confirmIntent = 'disconnect';
+  confirmTyped = '';
+  paint();
+}
+
+/**
+ * `POST /v1/disconnect`, with NO body.
+ *
+ * The absence of an argument is load-bearing. The daemon's teardown takes an
+ * option that would delete the configuration directory, and that directory
+ * holds the audit-log database; Sc13 pinned at both the source and the route
+ * table that nothing may mutate that log. Calling with no input is how this
+ * app makes that unaskable rather than merely unasked, and the daemon's own
+ * report names the skipped step so an operator can see it was not done.
+ */
+function fireDisconnect(): void {
+  confirmTyped = null;
+  void config.unlink();
+}
+
+function settingsFields(): SettingFieldView[] {
+  const data = config.data();
+  const form = configForm;
+  const dim = DIM_REASONS.has(stream.armed?.reason ?? '');
+  const issues = issuesByPath(
+    data.refusal === null ? [] : [settingsIssue(data.refusal)],
+  );
+  return fieldRows(data.settings).map((row): SettingFieldView => {
+    const drafted = form?.draft[row.key];
+    const kind =
+      row.entry === null
+        ? 'absent'
+        : row.entry.type === 'bool'
+          ? 'bool'
+          : 'int';
+    return {
+      key: row.key,
+      group: row.group,
+      label: row.label,
+      note: row.note,
+      kind,
+      value:
+        configTyped[row.key] ??
+        (typeof drafted === 'number' ? String(drafted) : ''),
+      checked: drafted === true,
+      dimmed: dim,
+      // The daemon's own error NAME and its own datum, uppercased and not
+      // reworded. C-3: a client is told which key and what bound, never
+      // prose it would have to parse.
+      issue: (issues.get(row.key) ?? '').toUpperCase(),
+    };
+  });
+}
+
+function settingsView(): SettingsScreenProps {
+  const data = config.data();
+  const form = configForm;
+  const dirty = form !== null && isDirty(form);
+  const killed = stream.killSwitch === true;
+  const known = stream.killSwitch !== null;
+  const rows = adapterRows(data.adapters);
+  const receipt = data.receipt;
+  const report = data.report;
+  return {
+    status: data.status,
+    nowIso: configNow,
+    kill: {
+      state: !known ? 'unknown' : killed ? 'killed' : 'armed',
+      glyph: !known ? '◌' : killed ? '⊘' : '●',
+      word: !known
+        ? 'OUTBOUND: NOT KNOWN'
+        : killed
+          ? 'OUTBOUND: KILLED'
+          : 'OUTBOUND: ARMED',
+      next: killed ? 'off' : 'on',
+      action: killed ? 'TURN THE KILL SWITCH OFF' : 'TURN THE KILL SWITCH ON',
+      note: 'THIS IS A DENY, NOT A PAUSE. WHILE IT IS ON, EVERY SEND IS REFUSED, INCLUDING ONE A HUMAN APPROVAL ASKS FOR. TURNING IT OFF RELEASES NOTHING: WHATEVER WAS REFUSED WHILE IT WAS ON STAYS WHERE IT IS UNTIL SOMEBODY ASKS AGAIN.',
+      horizon: armingGlance(stream.armed),
+      horizonArmed: stream.armed?.reason === 'armed' ? 'yes' : 'no',
+      banner: killed
+        ? '⊘ THE KILL SWITCH IS ON · NOTHING SENDS · DRAFTS STILL COLLECT · AN APPROVAL IS REFUSED TOO'
+        : '',
+      onToggle: toggleKill,
+    },
+    form: {
+      mode: globalModeOf(data.settings),
+      modeNote:
+        'DRAFT ONLY MEANS EVERY REPLY WAITS FOR A PERSON. AUTO IS A CEILING, NOT A FLOOR: A RULE OR A CONTACT MAY STILL NARROW IT, AND NOTHING WIDENS IT.',
+      loaded: `READ AT ${configNow}`,
+      dirty,
+      saveDisabled: !dirty,
+      groups: [...GROUPS],
+      fields: settingsFields(),
+      pointers: pointerRows(data.settings).map((row): SettingPointerView => ({
+        key: row.key,
+        label: row.label,
+        note: row.note,
+        use: row.use,
+        value: row.value,
+      })),
+      // A complaint the daemon did not pin to a key. It is NOT rendered
+      // inside a field, because a message attached to the wrong box is
+      // worse than one attached to none.
+      failure: data.failure.toUpperCase(),
+      onMode: chooseMode,
+      onEdit: editSetting,
+      onToggle: toggleSetting,
+      onSave: saveSettings,
+      onRevert: revertSettings,
+    },
+    perms: {
+      probed: probedLine(data.doctor),
+      cards: permissionCards(data.doctor).map((card): PermCardView => ({
+        check: card.id,
+        state: card.state,
+        glyph: card.glyph,
+        // §1.7: the state is said as an uppercase WORD as well as being
+        // drawn, so colour carries nothing that is not already written.
+        word: card.state,
+        detail: card.detail,
+        pane: card.pane,
+      })),
+      relinkNote:
+        'RE-RUN CHECKS ASKS THE DAEMON WHAT IT CAN SEE RIGHT NOW. RECONNECT ASKS IT TO ATTACH AGAIN AFTER A PERMISSION WAS GRANTED IN SYSTEM SETTINGS. NEITHER GRANTS ANYTHING: macOS HAS NO API THAT WOULD, AND THIS APP DOES NOT PRETEND OTHERWISE.',
+      onRerun: rerunChecks,
+      onRelink: relinkDaemon,
+      onOpenPane: openPane,
+    },
+    adapters: {
+      rows: rows.map((row): AdapterRowView => ({
+        id: row.id,
+        name: row.name,
+        health: row.health,
+        glyph: row.glyph,
+        word: row.word,
+        token: row.token,
+        dev: row.dev,
+        note: row.note,
+      })),
+      arming: configArm,
+      armNote:
+        'A NEW CREDENTIAL IS MINTED ONCE AND PUT ON THE CLIPBOARD. IT IS NEVER SHOWN, NEVER STORED BY THIS APP AND CANNOT BE READ BACK FROM THE DAEMON. THE OLD ONE STOPS WORKING SHORTLY AFTERWARDS, SO ANY PROCESS STILL USING IT WILL START FAILING.',
+      receipt:
+        receipt === null
+          ? null
+          : {
+              adapter: receipt.adapter,
+              delivered: receipt.delivered,
+              variable: receipt.variable,
+              run: receipt.run,
+              note:
+                receipt.delivered === 'clipboard'
+                  ? 'THE NEW CREDENTIAL IS ON YOUR CLIPBOARD. IT IS NOT SHOWN AGAIN AND CANNOT BE RECOVERED FROM HERE OR FROM THE DAEMON. PASTE IT SOMEWHERE THE AGENT READS BEFORE YOU COPY ANYTHING ELSE.'
+                  : 'THE CLIPBOARD REFUSED THE WRITE, SO THE NEW CREDENTIAL WENT NOWHERE YOU CAN REACH. IT IS NOT SHOWN AGAIN. ROTATE ONCE MORE.',
+            },
+      onArm: armAdapter,
+      onCancelArm: cancelArm,
+      onMint: mintAdapter,
+      onDismiss: dismissReceipt,
+    },
+    danger: {
+      counts: dangerCounts(data.adapters.length, data.waiting),
+      bullets: DISCONNECT_BULLETS,
+      report:
+        report === null
+          ? null
+          : {
+              // The daemon's own ids and statuses, as data. Nothing here
+              // decides what a step MEANS, which is why the step this app
+              // never asks for still appears, saying it was skipped.
+              steps: report.steps.map((step): DangerStepView => ({
+                id: step.id,
+                state: step.status.toUpperCase(),
+                text: `${step.id.toUpperCase()} · ${step.status.toUpperCase()} · ${step.detail ?? ''}`,
+              })),
+              manual: report.manualRevocation,
+              manualTitle: 'WHAT A DISCONNECT CANNOT DO FOR YOU',
+            },
+      onDisconnect: askDisconnect,
+    },
+  };
+}
+
 /**
  * The app's ONE window-level key listener.
  *
@@ -2001,14 +2472,17 @@ function onWindowKey(event: KeyboardEvent): void {
   // wait with last visit's facts.
   closePeople();
   closeAudit();
+  closeSettings();
   rules.reset();
   schedules.reset();
   people.reset();
   audits.reset();
+  config.reset();
   if (next === 'rules') void rules.load(midnightIso());
   if (next === 'schedule') void schedules.load();
   if (next === 'people') loadPeople();
   if (next === 'audit') loadAudit();
+  if (next === 'settings') loadSettings();
   paint();
 }
 
@@ -2049,6 +2523,8 @@ function Shell({
         <PeopleScreen {...peopleView()} />
       ) : screen === 'audit' ? (
         <AuditScreen {...auditView()} />
+      ) : screen === 'settings' ? (
+        <SettingsScreen {...settingsView()} />
       ) : screen === 'schedule' ? (
         <ScheduleScreen
           status={schedules.data().status}
@@ -2089,7 +2565,34 @@ function Shell({
       {/* Outside the screen branch on purpose: the modal belongs to the
           document, not to the pane underneath it, and mounting it inside
           the detail pane would put a dialog inside a form. */}
-      {confirmTyped === null ? null : confirmIntent === 'delete-schedule' ? (
+      {confirmTyped === null ? null : confirmIntent === 'disconnect' ? (
+        <TypedConfirm
+          phrase={DISCONNECT}
+          title="DISCONNECT THIS MAC"
+          body="THIS REVOKES EVERY ADAPTER CREDENTIAL, ROTATES THE DAEMON'S OWN, STOPS THE WATCHER AND ABANDONS EVERY DRAFT STILL WAITING. THIS WINDOW LOSES ITS LINK AND CANNOT RESTORE IT ITSELF. THE AUDIT LOG IS LEFT UNTOUCHED. TYPE THE SENTENCE TO CONFIRM."
+          typed={confirmTyped}
+          onType={(next) => {
+            confirmTyped = next;
+            paint();
+          }}
+          onGo={fireDisconnect}
+        />
+      ) : confirmIntent === 'global-auto' ? (
+        <TypedConfirm
+          phrase={GLOBAL_AUTO}
+          title="LET EVERY RULE ANSWER BY ITSELF"
+          body="AUTO RAISES THE CEILING FOR EVERY CONTACT AT ONCE. A RULE OR A CONTACT MAY STILL NARROW IT, AND NOTHING ALREADY DRAFTED IS RE-DECIDED. TYPE THE SENTENCE TO CONFIRM."
+          typed={confirmTyped}
+          onType={(next) => {
+            confirmTyped = next;
+            paint();
+          }}
+          onGo={() => {
+            confirmTyped = null;
+            void config.mode('auto');
+          }}
+        />
+      ) : confirmIntent === 'delete-schedule' ? (
         <TypedConfirm
           phrase={DELETE_SCHEDULE}
           title="DELETE THIS SCHEDULE"
@@ -2189,6 +2692,7 @@ function paint(): void {
   // because the ATTRIBUTE name is the contract, and `dataset['nowIso']`
   // spells it nowhere a reader (or a grep) can see it.
   if (screen === 'audit') html.setAttribute('data-now-iso', auditNow);
+  else if (screen === 'settings') html.setAttribute('data-now-iso', configNow);
   else html.removeAttribute('data-now-iso');
   const view = derive();
   // Written back so the cursor SURVIVES the resolution above. A queue whose
@@ -2247,6 +2751,7 @@ rules.subscribe(schedulePaint);
 schedules.subscribe(schedulePaint);
 people.subscribe(schedulePaint);
 audits.subscribe(schedulePaint);
+config.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {

@@ -23,7 +23,7 @@
  * an implementation without a channel cannot be registered, which is the
  * compile-time half of the closure the e2e asserts at run time.
  */
-import { app, dialog, ipcMain, shell } from 'electron';
+import { app, clipboard, dialog, ipcMain, shell } from 'electron';
 import { writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
@@ -108,6 +108,19 @@ interface StreamCommon {
     readonly until: string | null;
   } | null;
   readonly adapters: readonly AdapterDot[];
+  /**
+   * s8 Sc14: the kill switch, carried in its own right rather than read off
+   * the arming word.
+   *
+   * `armed.reason` cannot answer this question. §1.3.6's precedence puts
+   * `disconnected` and `read-only` ABOVE `kill-switch`, so a read-only
+   * daemon with the switch thrown reports `read-only` and the switch
+   * disappears from the strip — which is true about what is stopping the
+   * traffic and false about the state of the control the operator is
+   * looking at. `StatusPayload.killSwitch` is the fact itself, and `null`
+   * means the daemon has no store to answer from rather than "off".
+   */
+  readonly killSwitch: boolean | null;
 }
 
 export type StreamPayload =
@@ -173,6 +186,56 @@ function maybeRecord(
   return args[i] === undefined ? undefined : record(args, i);
 }
 
+/* ── the rotation receipt ─────────────────────────────────────────────── */
+
+/**
+ * The environment variable every adapter in this product reads its
+ * credential from (`packages/adapter-testkit/src/spawn.ts`).
+ *
+ * Named here rather than in the renderer for the same reason the value is:
+ * the screen renders whatever the receipt says, so the one place that has to
+ * be right is the process that mints.
+ */
+const ADAPTER_TOKEN_VAR = 'WEMESSAGE_ADAPTER_TOKEN';
+
+/**
+ * The daemon's own connect command, with the credential taken OUT of it.
+ *
+ * `connectCmd` is built as `… --token <plaintext>`, which is argv, and argv
+ * is world-readable through `ps` on a shared machine. `spawn.ts` documents
+ * the opposite convention for the same credential — "the token travels by
+ * environment, never by argv" — and the CLI already elides it before
+ * printing. A GUI that offered to copy that string would be teaching the
+ * unsafe carriage, so the flag and its value are dropped and the line is
+ * prefixed with the variable read straight off the pasteboard.
+ *
+ * Derived from the daemon's answer rather than rebuilt from parts, because
+ * the port and the binary name are the daemon's to decide and a second copy
+ * of them here is a second copy that drifts.
+ *
+ * The last line is a guard and not a formality: if the credential survives
+ * the elision for any reason — a shell-quoted copy, a second occurrence, a
+ * command whose shape changed — this refuses to answer at all. A receipt is
+ * not worth handing back a secret for.
+ */
+function runLine(connectCmd: string, token: string): string {
+  const words = connectCmd.split(/\s+/);
+  const kept: string[] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i] ?? '';
+    if (word === '') continue;
+    if (word === '--token') {
+      i += 1;
+      continue;
+    }
+    if (word.includes(token)) continue;
+    kept.push(word);
+  }
+  const line = `${ADAPTER_TOKEN_VAR}="$(pbpaste)" ${kept.join(' ')}`;
+  if (line.includes(token)) throw new Error('rotation-receipt-unsafe');
+  return line;
+}
+
 export interface GatewayOptions {
   bootstrap: Bootstrap;
 }
@@ -209,6 +272,7 @@ export function createGateway(options: GatewayOptions): Gateway {
   };
   let armed: StreamPayload['armed'] = null;
   let adapters: readonly AdapterDot[] = [];
+  let killSwitch: boolean | null = null;
   /**
    * Read once, at construction, from the process that owns the environment.
    * The renderer never sees `process`, and a demo badge that could be turned
@@ -216,7 +280,7 @@ export function createGateway(options: GatewayOptions): Gateway {
    * OFF from inside one.
    */
   const demo = isDemoMode(process.env);
-  let stream: StreamPayload = { ...link, demo, armed, adapters };
+  let stream: StreamPayload = { ...link, demo, armed, adapters, killSwitch };
 
   /**
    * The wizard's send-test target, armed by the wizard and by nothing else.
@@ -235,7 +299,7 @@ export function createGateway(options: GatewayOptions): Gateway {
 
   function push(next: Link): void {
     link = next;
-    stream = { ...next, demo, armed, adapters };
+    stream = { ...next, demo, armed, adapters, killSwitch };
     pushToWindows(CHANNELS.stream, stream);
   }
 
@@ -280,6 +344,7 @@ export function createGateway(options: GatewayOptions): Gateway {
       adapters = status.adapters
         .map((row) => asDot(row))
         .filter((dot): dot is AdapterDot => dot !== null);
+      killSwitch = status.killSwitch;
     } catch {
       // Leave the last known posture in place. A status route that is not
       // answering is not evidence that the hold has lifted, and clearing the
@@ -439,7 +504,26 @@ export function createGateway(options: GatewayOptions): Gateway {
     resume: () => requireClient().resume(),
     globalMode: (a) => requireClient().setGlobalMode(str(a, 0) as RespondMode),
     adapters: () => requireClient().listAdapters(),
-    adapterRotate: (a) => requireClient().rotateAdapterToken(str(a, 0)),
+    adapterRotate: async (a) => {
+      const credential = await requireClient().rotateAdapterToken(str(a, 0));
+      // The clipboard write and the read-back, in that order, in the
+      // process that already holds the daemon's bearer. `delivered` is a
+      // FACT about where the secret went and not a reassurance: a clipboard
+      // that refused the write (another app holding it, a locked pasteboard)
+      // leaves the operator with a credential they cannot use, and the only
+      // honest thing left to say is "rotate again".
+      await clipboard.writeText(credential.token);
+      const delivered =
+        (await clipboard.readText()) === credential.token
+          ? 'clipboard'
+          : 'unavailable';
+      return {
+        adapter: credential.adapter.id,
+        delivered,
+        variable: ADAPTER_TOKEN_VAR,
+        run: runLine(credential.connectCmd, credential.token),
+      };
+    },
     adapterUpdate: (a) =>
       requireClient().updateAdapter(str(a, 0), record(a, 1)),
     connect: () => requireClient().connect(),

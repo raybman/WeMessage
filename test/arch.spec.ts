@@ -5066,12 +5066,66 @@ describe('S8 extensions (s8-execution Scenario 8: keyboard triage)', () => {
       expect(body).toContain('animationDuration');
       expect(body).toContain('animationDelay');
       // The setting's NAME may appear in the prose above the code — it is
-      // the thing the comments are warning about — but in NO renderer code.
-      for (const rel of archFiles(RENDERER))
-        expect([
-          rel,
-          codeOf(archRead(rel)).includes('undoGraceSeconds'),
-        ]).toEqual([rel, false]);
+      // the thing the comments are warning about — but in renderer CODE it
+      // has exactly one home, and that home is not a ring.
+      //
+      // s8 Scenario 14 is the first legitimate namer and the reason this
+      // row grew teeth instead of an exemption. A settings screen whose job
+      // is to EDIT the eleven writable keys must spell all eleven, and
+      // `send.undoGraceSeconds` is one of them; INV-1 keeps the renderer off
+      // `@wemessage/core`, so `derive/settingsFields.ts` re-declares the
+      // daemon's closed list the way `derive/auditRows.ts` re-declares
+      // §1.6's twelve. Listing a key as editable is the opposite of the harm
+      // this row exists to prevent: the harm is a ring whose sweep is
+      // computed from a NUMBER rather than from the two instants the daemon
+      // supplied, and it would show up as this file naming an instant or an
+      // animation, or as the ring's derivation reaching for this file. So
+      // the row now says all four of those things out loud, and a second
+      // namer anywhere in the renderer is still a build failure.
+      const SETTING_HOMES = [`${RENDERER}/derive/settingsFields.ts`];
+      const namers = archFiles(RENDERER)
+        .filter((f) => codeOf(archRead(f)).includes('undoGraceSeconds'))
+        .sort();
+      expect(namers).toEqual(SETTING_HOMES);
+      // Non-vacuity, and the SHAPE of the exemption: it is a settings key,
+      // spelled with the namespace the daemon's schema uses.
+      const home = codeOf(archRead(SETTING_HOMES[0] ?? ''));
+      expect(home).toContain("'send.undoGraceSeconds'");
+      // And it is only that. Neither instant, neither animation handle.
+      for (const banned of [
+        'sendNotBefore',
+        'stateChangedAt',
+        'animationDuration',
+        'animationDelay',
+      ])
+        expect([banned, home.includes(banned)]).toEqual([banned, false]);
+      // The ring's own derivation cannot reach the projection either.
+      expect(derived).not.toContain('settingsFields');
+    });
+
+    it('PLANTED: a second renderer namer of the setting is caught', () => {
+      const rel = sc8Plant(
+        `${RENDERER}/derive/__s8_sc8_probe__/ring.ts`,
+        [
+          'export const total = (s: { undoGraceSeconds: number }): number =>',
+          '  s.undoGraceSeconds * 1000;',
+          '',
+        ].join('\n'),
+      );
+      const namers = archFiles(RENDERER)
+        .filter((f) => codeOf(archRead(f)).includes('undoGraceSeconds'))
+        .sort();
+      expect(namers).toContain(rel);
+      expect(namers).not.toEqual([`${RENDERER}/derive/settingsFields.ts`]);
+    });
+
+    it('NEAR-MISS: the settings projection itself is not an offender', () => {
+      // The legitimate home, read the way the ban reads it, carries the key
+      // and nothing that could draw a ring — so the row above is an
+      // enumeration and not a blanket amnesty.
+      const home = codeOf(archRead(`${RENDERER}/derive/settingsFields.ts`));
+      expect(home).toContain('undoGraceSeconds');
+      expect(/animation|sendNotBefore|stateChangedAt/.test(home)).toBe(false);
     });
   });
 });
@@ -5493,6 +5547,58 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // what it loaded and when, and reloads when asked.
       members: ['audit', 'auditVerify', 'exportReport'],
     },
+    [`${STORE_ROOT}/settings.ts`]: {
+      constant: 'SETTINGS_CHANNELS',
+      // Sc14, and the sixth entry. Four reads, six writes and one channel
+      // that reaches nothing — more writes than the other five bindings put
+      // together, because this is the screen where every control that
+      // changes the daemon's posture lives and putting them anywhere else
+      // would be putting them in two places.
+      //
+      // `doctor` is here for the Permissions pane, which is the ONLY
+      // consumer of that channel outside the wizard: a report the screen
+      // re-runs on request rather than polls (Sc15 owns the polling, and
+      // owns it only while its own step is on screen).
+      //
+      // `drafts` is a shared READ — the rules editor and the people grid
+      // already have it — and it is here for the danger zone's confirm,
+      // which states how many drafts are in flight before an operator
+      // agrees to stop the watcher. A count in a destructive confirm that
+      // was not fetched at the moment of asking is a count that lies.
+      //
+      // `adapterRotate` is a write in the strongest sense in this app: it
+      // destroys a credential. Its plaintext answer never reaches this
+      // process — main copies it to the clipboard and returns a receipt —
+      // so this binding may ASK for a rotation and can never hold one.
+      //
+      // `openSystemSettings` is the eleventh, and it is not a write: it
+      // reaches no daemon, changes no state and can refuse nothing. It is
+      // here because macOS TCC is not grantable through any API — that is
+      // the OS's design, not an omission — so a Permissions card that
+      // claimed a GRANT button would be lying about what a click does. The
+      // most a card may offer is to open the pane the operator has to act
+      // in, by NAME, against main's allowlist.
+      //
+      // Deliberately absent: `on`. A settings form that redrew itself from
+      // a stream would discard a half-typed field the moment somebody
+      // else's event arrived. The kill switch's own state does not come
+      // through this binding either: it rides the stream push that main
+      // already sends, so the control moves when the daemon says so rather
+      // than when the click returns.
+      members: [
+        'adapterRotate',
+        'adapters',
+        'connect',
+        'disconnect',
+        'doctor',
+        'drafts',
+        'globalMode',
+        'killSwitch',
+        'openSystemSettings',
+        'settings',
+        'settingsWrite',
+      ],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -5541,6 +5647,18 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // without going through the wire — so the wire rows cannot see it and
       // this partition is the only thing that can say who may do it.
       'exportReport',
+      // Sc14's six, and the reason this list is the right place for them.
+      // Every one of these changes what the daemon will DO with the next
+      // message, and five of the six have a second plausible home: a kill
+      // switch belongs on a toolbar, a global mode belongs beside the rule
+      // that it narrows, a reconnect belongs on the wizard. One owner each
+      // is what makes "the switch flipped once" a checkable claim.
+      'adapterRotate',
+      'connect',
+      'disconnect',
+      'globalMode',
+      'killSwitch',
+      'settingsWrite',
     ];
     for (const write of WRITES) {
       const owners = Object.entries(BINDINGS)
@@ -7395,5 +7513,596 @@ describe('S8 extensions (s8-execution Scenario 13: the audit screen)', () => {
         code,
       ),
     ).toBe(false);
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 14: settings, the kill switch and the danger zone)', () => {
+  const sc14Planted: string[] = [];
+  function sc14Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc14Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc14Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/screens/settings/__s8_sc14_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc14_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc14_probe__',
+      'apps/desktop/src/renderer/store/__s8_sc14_probe__',
+      'apps/desktop/src/preload/__s8_sc14_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const SETTINGS = `${RENDERER}/screens/settings`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+  const AUDIT = `${RENDERER}/screens/audit`;
+  const PEOPLE = `${RENDERER}/screens/people`;
+  const SCHEMA = 'packages/daemon/src/settings/schema.ts';
+  const GATE = 'packages/core/src/gate/index.ts';
+  const TOGGLES = 'packages/daemon/src/routes/toggles.ts';
+
+  /**
+   * Every `export const SETTING_… = '…'` in core, as a map from the
+   * identifier to the string it stands for.
+   *
+   * The schema names its keys by CONSTANT, never by literal (that is the
+   * whole point of the constants), so a row that scraped `schema.ts` for
+   * quoted strings would find the five refusal names and none of the keys.
+   * `\s*` spans newlines on purpose: prettier has already wrapped one of
+   * these declarations onto a second line, and a line-anchored scan would
+   * have silently lost `send.circuitFailureWindowMin`.
+   */
+  function settingConstants(): ReadonlyMap<string, string> {
+    const out = new Map<string, string>();
+    for (const rel of archFiles('packages/core/src'))
+      for (const m of archRead(rel).matchAll(
+        /export const (SETTING_[A-Z0-9_]+)\s*=\s*'([^']+)'/g,
+      ))
+        out.set(m[1] as string, m[2] as string);
+    return out;
+  }
+
+  /** The schema's entries, in source order: `[literal key, readOnly]`. */
+  function schemaEntries(): Array<readonly [string, boolean]> {
+    const consts = settingConstants();
+    const text = codeOf(archRead(SCHEMA));
+    const specs = /const SPECS[^=]*=\s*\[([\s\S]*?)\n\];/.exec(text);
+    expect(specs, 'the SPECS array is still an array literal').not.toBeNull();
+    const out: Array<readonly [string, boolean]> = [];
+    for (const block of (specs?.[1] ?? '').split(/\n  \{/)) {
+      const key = /\bkey:\s*(SETTING_[A-Z0-9_]+)/.exec(block);
+      if (key === null) continue;
+      const literal = consts.get(key[1] as string);
+      expect(literal, `${key[1] as string} resolves to a literal`).toBeTypeOf(
+        'string',
+      );
+      out.push([literal as string, /\breadOnly:\s*true/.test(block)]);
+    }
+    return out;
+  }
+
+  /** The single-quoted members of a named `const X = [ … ] as const`. */
+  function quotedArray(rel: string, name: string): string[] {
+    const m = new RegExp(`${name}\\s*=\\s*\\[([^\\]]*)\\]`).exec(archRead(rel));
+    if (m === null) return [];
+    return [...(m[1] as string).matchAll(/'([^']+)'/g)].map(
+      (x) => x[1] as string,
+    );
+  }
+
+  /* ── row 1: the screen's key list IS the daemon's, at both ends ────── */
+
+  /**
+   * The settings screen is the first surface in this GUI that has to be
+   * TOTAL over a list somebody else owns. Every other screen renders rows
+   * the daemon happens to have; this one renders a fixed form, and a form
+   * that is missing a key is a knob an operator cannot reach while the
+   * daemon goes on enforcing it.
+   *
+   * INV-1 is why this is a row and not an import: the renderer has no
+   * `@wemessage/core` dependency and cannot reach `packages/daemon` at all,
+   * so `derive/settingsFields.ts` re-declares the list — the same deliberate
+   * second projection as `derive/auditRows.ts`'s twelve deny reasons (Sc13
+   * row 3), and tied back the same way, so the two cannot drift.
+   *
+   * The plan's §1.1 list is STALE and this row is what proves it: it names
+   * `send.circuitTripThreshold`, `send.circuitOpen` and `arming.globalMode`,
+   * none of which exist, and claims five writable and five read-only against
+   * a tree that has eleven and four.
+   */
+  it('the renderer re-declares the daemon settings list exactly', () => {
+    const entries = schemaEntries();
+    const writable = entries
+      .filter(([, ro]) => !ro)
+      .map(([k]) => k)
+      .sort();
+    const readOnly = entries
+      .filter(([, ro]) => ro)
+      .map(([k]) => k)
+      .sort();
+    // Non-vacuous, and the count the plan is wrong about.
+    expect(entries).toHaveLength(15);
+    expect(writable).toHaveLength(11);
+    expect(readOnly).toHaveLength(4);
+    const FIELDS = `${RENDERER}/derive/settingsFields.ts`;
+    expect([...quotedArray(FIELDS, 'WRITABLE_KEYS')].sort()).toEqual(writable);
+    expect([...quotedArray(FIELDS, 'READ_ONLY_KEYS')].sort()).toEqual(readOnly);
+  });
+
+  /**
+   * The four read-only keys each name the ROUTE that owns them, and a
+   * settings screen that offered to PATCH one would be offering a write the
+   * daemon refuses in fourth place (`unknown-key` → `read-only-key` → …).
+   *
+   * `arming.pauseUntil` is the one worth naming out loud: a "pause until"
+   * field is the most natural thing in the world to put on a settings form,
+   * and it is exactly the key whose refusal points somewhere else. Both the
+   * verb and the path are checked against the route file AND the ratcheted
+   * transport surface, because the plan has been wrong about its own routes,
+   * verbs and status codes in four consecutive scenarios.
+   */
+  it('every read-only key points at a route that really exists', () => {
+    const consts = settingConstants();
+    const text = codeOf(archRead(SCHEMA));
+    const uses = new Map<string, string>();
+    for (const block of text.split(/\n  \{/)) {
+      const key = /\bkey:\s*(SETTING_[A-Z0-9_]+)/.exec(block);
+      const use = /\buse:\s*'([^']+)'/.exec(block);
+      if (key === null || use === null) continue;
+      uses.set(consts.get(key[1] as string) ?? '', use[1] as string);
+    }
+    expect([...uses.keys()].sort()).toEqual([
+      'arming.pauseUntil',
+      'send.circuitOpenedAt',
+      'send.globalMode',
+      'send.killSwitch',
+    ]);
+    expect(uses.get('arming.pauseUntil')).toBe('POST /v1/toggles/pause');
+    const toggles = codeOf(archRead(TOGGLES));
+    for (const use of uses.values()) {
+      // The `use` string may carry an example body after the path.
+      const [verb, path] = use.split(' ') as [string, string];
+      expect(ROUTE_TABLE, use).toContain(`${verb} ${path}`);
+      expect(toggles, use).toMatch(
+        new RegExp(`app\\s*\\.\\s*${verb.toLowerCase()}\\s*\\(\\s*'${path}'`),
+      );
+    }
+  });
+
+  /* ── row 2: the write channels the screen may and may not reach ────── */
+
+  /**
+   * The partition row above (Sc10) says the settings binding declares its
+   * own reach. This says what that reach may NOT contain, by name, over the
+   * whole renderer — which is the half a `Pick` cannot state.
+   *
+   * `pause` and `resume` are the load-bearing absences. `arming.pauseUntil`
+   * is read-only precisely because `POST /v1/toggles/pause` does more than
+   * move a string (it re-sweeps the arming posture), and a settings screen
+   * that acquired either channel would be a second owner of the hold with no
+   * horizon of its own to publish. `adapterUpdate` and `contactDelete` are
+   * real channels this GUI has decided not to offer; `sendTest` belongs to
+   * the wizard and to nothing else (Sc15).
+   */
+  it('the settings screen writes through five channels and no others', () => {
+    const callers = (needle: string): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => codeOf(archRead(rel)).includes(needle))
+        .sort();
+    for (const channel of [
+      'adapterRotate',
+      'connect',
+      'disconnect',
+      'globalMode',
+      'killSwitch',
+      'settingsWrite',
+    ]) {
+      expect(callers(`bridge.${channel}(`), channel).toEqual([
+        `${STORE_ROOT}/settings.ts`,
+      ]);
+      expect(
+        codeOf(archRead(`${STORE_ROOT}/settings.ts`)).split(
+          `bridge.${channel}(`,
+        ),
+        channel,
+      ).toHaveLength(2);
+    }
+    for (const absent of [
+      'pause',
+      'resume',
+      'adapterUpdate',
+      'contactDelete',
+      'ruleDelete',
+      'sendTest',
+    ])
+      expect(callers(`bridge.${absent}(`), absent).toEqual([]);
+  });
+
+  /* ── row 3: a minted adapter token cannot reach a Chromium process ─── */
+
+  /**
+   * Sc4 banned five credential SHAPES from the renderer and the preload and
+   * Sc13 proved no `wm_` prefix reaches the desktop app at all. Neither of
+   * them could say anything about the channel that MINTS one, because
+   * nothing called it yet. This scenario calls it, so the claim has to
+   * become structural.
+   *
+   * The decision, argued rather than assumed: **the plaintext token never
+   * crosses the bridge.** `main` calls `rotateAdapterToken`, writes the
+   * secret to the system clipboard from the process that already holds the
+   * daemon's bearer, and answers the renderer with a RECEIPT — the adapter
+   * row, the environment variable the operator must set, and the command to
+   * run WITHOUT the credential in it. The sandboxed renderer is the least
+   * trusted process in this app and the clipboard is where the operator
+   * needs the value anyway, so handing it through a Chromium process buys
+   * nothing and costs the DOM, two web storages, the performance timeline
+   * and every string-valued window property as places it could persist.
+   *
+   * `connectCmd` is refused outright and does not reach the screen in any
+   * form. The daemon builds it as `--token <plaintext>` — argv, which is
+   * world-readable through `ps` — and `packages/adapter-testkit/src/spawn.ts`
+   * documents the opposite convention for the same credential ("the token
+   * travels by environment, never by argv"). The CLI already elides it
+   * before printing. A GUI that offered a COPY button for that string would
+   * be teaching the operator the unsafe carriage, so the receipt names the
+   * variable instead.
+   */
+  const MINTING = /\bconnectCmd\b|\brotateAdapterToken\b/;
+
+  /**
+   * SELF-TRIP, recorded rather than papered over. This row was first written
+   * with `clipboard` in the MINTING alternation, and it was factually wrong
+   * about the product: `main.tsx` already writes to `navigator.clipboard`,
+   * because Sc13's audit drawer copies a row's stored JSON. That is a
+   * legitimate copy of bytes that are on screen already and has nothing to
+   * do with a credential.
+   *
+   * Strengthened rather than loosened, because the property that actually
+   * matters is not "who says the word clipboard" but "can one process both
+   * WRITE a clipboard and HOLD a token". So the row splits: the minting
+   * vocabulary is banned from the renderer entirely, and the renderer's
+   * clipboard writers are ENUMERATED — one file, the audit copy — so the
+   * settings screen structurally cannot acquire one. A sixth screen that
+   * gained a copy affordance would fail here and have to say why.
+   */
+  it('token material is named in main only, and in exactly one file', () => {
+    const named = archFiles('apps/desktop/src')
+      .filter((rel) => MINTING.test(codeOf(archRead(rel))))
+      .sort();
+    expect(named).toEqual(['apps/desktop/src/main/gateway.ts']);
+    // Non-vacuous: both names are real, and the CLI spells them where it
+    // renders the one block in this product that shows a plaintext token.
+    expect(MINTING.test(codeOf(archRead('packages/cli/src/adapters.ts')))).toBe(
+      true,
+    );
+    // The renderer's clipboard writers, enumerated. `main/gateway.ts` is the
+    // only file that may hold Electron's own `clipboard`, and it is the only
+    // file that ever holds a minted token — so the two capabilities meet in
+    // the process that already has the daemon's bearer, and nowhere else.
+    const rendererCopies = archFiles(RENDERER)
+      .filter((rel) =>
+        /\bnavigator\s*\.\s*clipboard\b/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(rendererCopies).toEqual([`${RENDERER}/main.tsx`]);
+    const mainCopies = archFiles('apps/desktop/src/main')
+      .filter((rel) => /\bclipboard\b/.test(codeOf(archRead(rel))))
+      .sort();
+    expect(mainCopies).toEqual(['apps/desktop/src/main/gateway.ts']);
+  });
+
+  it('PLANTED: a settings pane that copies to the clipboard itself is caught', () => {
+    const rel = sc14Plant(
+      `${SETTINGS}/__s8_sc14_probe__/Copy.tsx`,
+      [
+        'export function Copy(props: { text: string }): unknown {',
+        '  return (',
+        '    <button onClick={() => navigator.clipboard.writeText(props.text)}>',
+        '      COPY',
+        '    </button>',
+        '  );',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const rendererCopies = archFiles(RENDERER).filter((r) =>
+      /\bnavigator\s*\.\s*clipboard\b/.test(codeOf(archRead(r))),
+    );
+    expect(rendererCopies).toContain(rel);
+  });
+
+  it('PLANTED: a settings pane that renders the connect command is caught', () => {
+    const rel = sc14Plant(
+      `${SETTINGS}/__s8_sc14_probe__/Cmd.tsx`,
+      [
+        'export function Cmd(props: { connectCmd: string }): unknown {',
+        '  return <code>{props.connectCmd}</code>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const named = archFiles('apps/desktop/src').filter((r) =>
+      MINTING.test(codeOf(archRead(r))),
+    );
+    expect(named).toContain(rel);
+  });
+
+  it('LEGITIMATE NEAR-MISS: rendering hasToken is not holding a token', () => {
+    const rel = sc14Plant(
+      `${SETTINGS}/__s8_sc14_probe__/Token.tsx`,
+      [
+        '/**',
+        ' * Whether the daemon holds a hash for this adapter. A boolean is the',
+        ' * whole read surface: there is no route that returns stored token',
+        ' * material, only one that replaces it.',
+        ' */',
+        'export function Cell(props: { hasToken: boolean }): unknown {',
+        "  return <span>{props.hasToken ? 'SET' : 'NONE'}</span>;",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(MINTING.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 4: the danger zone cannot brick the daemon, or the log ────── */
+
+  /**
+   * `POST /v1/disconnect` takes `{purge?: boolean}`, and `purge` deletes the
+   * whole config directory — the database with the audit log in it — after
+   * which `server.ts` latches and answers 503 to everything for the rest of
+   * the process's life. There is no in-app route back from that: the window
+   * would be looking at a daemon that cannot answer, forever.
+   *
+   * That is a CONTRADICTION with this scenario's brief rather than a feature
+   * to build. Sc13 pinned that no audit-mutating route exists, at the source
+   * and at the transport surface; purge is not an audit-mutating route (it
+   * removes the file the log lives in, which is a different act), so that
+   * pin still holds — but a GUI button that reaches it would destroy the
+   * evidence this product's whole design is arranged around, from a screen
+   * whose own confirm could not tell the operator how to undo it.
+   *
+   * So the GUI never offers purge, this row says so structurally, and the
+   * confirm's copy says so in words. `DISCONNECT` with no body is the act
+   * the danger zone offers: it stops the watcher, revokes every adapter
+   * token, rotates the daemon's own, and leaves the config directory alone.
+   */
+  it('no settings file offers a purge, and the route it would call is real', () => {
+    const offenders = archFiles(SETTINGS)
+      .filter((rel) => /\bpurge\b/i.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    // Non-vacuous twice: the word is real in the daemon, and the two routes
+    // the danger zone DOES reach are on the ratcheted surface.
+    expect(
+      /\bpurge\b/i.test(
+        codeOf(archRead('packages/daemon/src/routes/connection.ts')),
+      ),
+    ).toBe(true);
+    expect(ROUTE_TABLE).toContain('POST /v1/disconnect');
+    expect(ROUTE_TABLE).toContain('POST /v1/connect');
+  });
+
+  it('PLANTED: a PURGE EVERYTHING button in the danger zone is caught', () => {
+    const rel = sc14Plant(
+      `${SETTINGS}/__s8_sc14_probe__/Purge.tsx`,
+      [
+        'export function Purge(props: { go: () => void }): unknown {',
+        '  return <button onClick={props.go}>PURGE EVERYTHING</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const offenders = archFiles(SETTINGS).filter((r) =>
+      /\bpurge\b/i.test(codeOf(archRead(r))),
+    );
+    expect(offenders).toEqual([rel]);
+  });
+
+  /* ── row 5: the kill switch is a DENY and the source still says so ─── */
+
+  /**
+   * The distinction this scenario exists to keep visible: a DENY binds
+   * everyone including the operator, a CLAMP binds only autonomy. The kill
+   * switch is the first deny in `evaluateGate` — before the mode narrowing
+   * and before the whole else-if clamp chain — so it refuses a HUMAN
+   * approval, not merely an automatic one.
+   *
+   * Asserted as an ORDER in the gate's source, because that is what makes it
+   * true: a kill-switch check moved below the clamp chain would still deny
+   * something, and would deny only the traffic that was already going to be
+   * narrowed. `clampedBy` is the marker the clamp branches carry (Sc3), so
+   * the first mention of the switch preceding the first mention of that
+   * marker is the claim, stated where it can break.
+   */
+  it('the kill switch is evaluated before anything that clamps', () => {
+    const gate = codeOf(archRead(GATE));
+    const deny = gate.indexOf("'kill-switch'");
+    const clamp = gate.indexOf('clampedBy');
+    expect(deny).toBeGreaterThan(-1);
+    expect(clamp).toBeGreaterThan(-1);
+    expect(deny).toBeLessThan(clamp);
+  });
+
+  /* ── row 6: controls, per screen, for the sixth root ───────────────── */
+
+  const INTERACTIVE: readonly (readonly [string, RegExp])[] = [
+    ['<button', /<button\b/],
+    ['<a href', /<a\s[^>]*\bhref\b/],
+    ['<input', /<input\b/],
+    ['<select', /<select\b/],
+    ['onClick', /\bonClick\s*=/],
+    ['tabIndex', /\btabIndex\s*=/],
+  ];
+
+  function controlsIn(root: string): string[] {
+    const out: string[] = [];
+    for (const rel of archFiles(root)) {
+      const code = codeOf(archRead(rel));
+      for (const [name, re] of INTERACTIVE)
+        if (re.test(code)) out.push(`${rel}: ${name}`);
+    }
+    return out.sort();
+  }
+
+  /**
+   * Sixth root, same shape Sc11, Sc12 and Sc13 each kept: separate
+   * expressions over separate roots in ONE row, so widening the settings
+   * line structurally cannot reach the queue line.
+   *
+   * This screen has more controls than any other in the app and is still
+   * not allowed `<a href` — `x-apple.systempreferences:` is opened by MAIN
+   * from a closed allowlist keyed by a NAME (`main/policy.ts`), and an
+   * anchor whose href the renderer chose would be `shell.openExternal` with
+   * the guard removed.
+   */
+  it('the settings screen has real controls; the queue still has none', () => {
+    const settings = controlsIn(SETTINGS);
+    expect(settings.some((c) => c.endsWith(': <button'))).toBe(true);
+    expect(settings.some((c) => c.endsWith(': <input'))).toBe(true);
+    expect(settings.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(settings.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    expect(controlsIn(QUEUE)).toEqual([]);
+    expect(controlsIn(AUDIT).some((c) => c.endsWith(': <button'))).toBe(true);
+  });
+
+  /* ── row 7: locality, with confirms and a reveal in the tree ───────── */
+
+  /**
+   * A settings screen with two typed confirmations and a credential reveal
+   * wants a dialog per surface. It gets none: `TypedConfirm.tsx` still owns
+   * `role="dialog"` for the whole renderer, and the rotate reveal is an
+   * inline disclosure panel rather than a modal — Sc13's non-modal drawer
+   * precedent, for the same reason. A second modal is a second focus trap
+   * and a second Escape handler, and this screen already has the one that
+   * cancels a disconnect.
+   */
+  it('the owned markup still lives in exactly one file each', () => {
+    const withCode = (re: RegExp): string[] =>
+      archFiles(RENDERER)
+        .filter((rel) => re.test(codeOf(archRead(rel))))
+        .sort();
+    expect(withCode(/<textarea\b/)).toEqual([
+      `${RENDERER}/components/Editor.tsx`,
+    ]);
+    expect(withCode(/role="dialog"/)).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withCode(/<a\s[^>]*\bhref\b/)).toEqual([]);
+    for (const role of ['grid', 'row', 'columnheader', 'gridcell'])
+      expect(withCode(new RegExp(`role="${role}"`)), role).toEqual([
+        `${PEOPLE}/Grid.tsx`,
+      ]);
+  });
+
+  /* ── row 8: a horizon on screen, and still no clock and no timer ───── */
+
+  /**
+   * "PAUSED UNTIL 14:30" is the most timer-shaped string in the product,
+   * and a countdown beside it would be the app's second `setInterval`. Sc11
+   * refused a live clock outright and argued it on the record; this screen
+   * keeps that refusal with the horizon actually on screen. The instant is
+   * read once in `main.tsx` and handed down, the horizon is formatted from
+   * the daemon's own `until`, and it moves when the operator asks and at no
+   * other time.
+   */
+  const CLOCK_READ = /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)/;
+
+  it('no file under screens/ or derive/ reads a clock, horizons included', () => {
+    for (const root of [`${RENDERER}/screens`, `${RENDERER}/derive`]) {
+      const offenders = archFiles(root)
+        .filter((rel) => CLOCK_READ.test(codeOf(archRead(rel))))
+        .sort();
+      expect(offenders, root).toEqual([]);
+    }
+  });
+
+  it('the desktop app still schedules nothing, a pause horizon included', () => {
+    const timers = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(timers).toEqual(['apps/desktop/src/main/gateway.ts']);
+  });
+
+  it('PLANTED: a paused-until countdown is caught', () => {
+    const rel = sc14Plant(
+      `${SETTINGS}/__s8_sc14_probe__/Countdown.ts`,
+      [
+        'export function tick(fn: () => void): void {',
+        '  setInterval(fn, 1000);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const timers = archFiles('apps/desktop/src').filter((r) =>
+      /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(r))),
+    );
+    expect(timers).toContain(rel);
+  });
+
+  /* ── row 9: INV-2 at the sixth screen, and the loudest one ─────────── */
+
+  /**
+   * Every other screen's INV-2 row is about a surface that could plausibly
+   * approve something. This one is about a surface that changes the RULES
+   * approval is judged by — the caps, the breaker, the global mode, the
+   * switch itself — and the failure mode is not "the screen approved a
+   * draft" but "turning the switch off replayed what it had halted".
+   *
+   * The daemon says it does not, in as many words (`routes/toggles.ts`:
+   * resume means new work may flow again, not replay whatever was just
+   * halted), and the e2e proves it at the wire. Here: the binding may not
+   * name the approval vocabulary as identifiers, and no file under the
+   * screen may reach the bridge at all.
+   */
+  it('the settings binding names no approval, and the screen names no bridge', () => {
+    const binding = codeOf(archRead(`${STORE_ROOT}/settings.ts`));
+    for (const m of binding.matchAll(/[A-Za-z_$][\w$]*/g))
+      expect(m[0], `${m[0]} in the settings binding`).not.toMatch(
+        /^(approve|approval|draftId|dispatch)$/i,
+      );
+    for (const rel of archFiles(SETTINGS)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+  });
+
+  /* ── row 10: the sixth screen is finally reachable ─────────────────── */
+
+  it('every screen is reachable by a quoted pair, settings on Digit6', () => {
+    const keys = archRead(`${RENDERER}/keys/screens.ts`);
+    const screens = [
+      ...(/SCREENS\s*=\s*\[([^\]]*)\]/.exec(
+        archRead(`${RENDERER}/router.ts`),
+      )?.[1] ?? ''),
+    ]
+      .join('')
+      .match(/'([^']+)'/g);
+    expect(screens).not.toBeNull();
+    for (const quoted of screens ?? []) expect(keys).toContain(quoted);
+    expect(keys).toContain("['settings', 'Digit6']");
+    expect(keys).toContain('two screens claim one navigation stroke');
+    // Every screen now has a surface: the inert branch is gone.
+    const main = codeOf(archRead(`${RENDERER}/main.tsx`));
+    const mounted = /MOUNTED[^=]*=\s*new Set<Screen>\(\[([^\]]*)\]/.exec(main);
+    expect(mounted).not.toBeNull();
+    expect(
+      [...(mounted?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort(),
+    ).toEqual((screens ?? []).map((q) => q.slice(1, -1)).sort());
   });
 });

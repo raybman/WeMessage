@@ -36,6 +36,7 @@ import type {
   SettingsPayload,
 } from '@wemessage/client';
 import type { WmBridge } from '../../preload/api.js';
+import { errorText, refusalBody } from './refusal.js';
 
 /**
  * The ten request channels the editor may reach, sorted.
@@ -234,30 +235,23 @@ function settingsOf(answer: unknown): SettingsPayload {
 /**
  * The daemon's refusal, recovered from the exception it arrived as.
  *
- * An `Error` crossing IPC arrives with its message wrapped twice — once by
- * the client (`daemon request failed (HTTP 400): <body>`) and once by
- * Electron. The BODY is still in there verbatim, so the JSON is cut out
- * between its outermost braces and read as what it is. Nothing here
- * paraphrases: the `message` a field is shown is the validator's own.
+ * The cutting is `refusal.ts`'s, shared with the settings screen since S8
+ * Sc14; what the cut object MEANS is this file's and stays here. A rule is
+ * refused by zod and answers with PROSE, so the `message` a field is shown
+ * is the validator's own and nothing here paraphrases it. A setting is
+ * refused by `planPatch`, which answers with a structure and no sentence at
+ * all — a reader that tried to serve both would have to invent one.
  */
 function refusalOf(error: unknown): {
   issues: readonly RuleIssue[];
   reason: string;
 } {
-  const text = error instanceof Error ? error.message : String(error);
-  const open = text.indexOf('{');
-  const close = text.lastIndexOf('}');
-  if (open === -1 || close <= open) return { issues: [], reason: text };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text.slice(open, close + 1));
-  } catch {
-    return { issues: [], reason: text };
-  }
-  const body = asRecord(parsed);
-  const named = body?.['error'];
+  const text = errorText(error);
+  const body = refusalBody(error);
+  if (body === null) return { issues: [], reason: text };
+  const named = body['error'];
   const reason = typeof named === 'string' ? named : text;
-  const rows = asRecord(body?.['detail'])?.['issues'];
+  const rows = asRecord(body['detail'])?.['issues'];
   if (!Array.isArray(rows)) return { issues: [], reason };
   const issues: RuleIssue[] = [];
   for (const row of rows as readonly unknown[]) {

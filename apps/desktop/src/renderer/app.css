@@ -2128,3 +2128,541 @@ button.people-handle {
   display: flex;
   gap: 6px;
 }
+
+/* ══ the settings screen (s8 Sc14) ═════════════════════════════════════ */
+
+/*
+ * Five panes down one column, in the order they are dangerous in: the kill
+ * switch first because it is what an operator comes here in a hurry to
+ * find, and the danger zone last because a destructive control at the top
+ * of a screen is a destructive control somebody reaches by accident.
+ *
+ * Blue and neutrals, as everywhere. Nothing on this screen carries state in
+ * a hue: every pane says its state as a glyph AND an uppercase word AND a
+ * `data-` attribute, and the two runtime sweeps prove there is no green in
+ * any variant of it — armed, killed, refused, minted or reported.
+ */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+
+.set-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.set-pane-title {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+
+.set-note {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+
+.set-button {
+  padding: 4px 9px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+/*
+ * `aria-disabled`, never `disabled`. A disabled button is one an operator
+ * cannot reach to find out why it is disabled, and it is also one Playwright
+ * will wait on forever. Dimmed, still reachable, and it does nothing when
+ * there is nothing to do.
+ */
+.set-button[aria-disabled='true'] {
+  color: var(--ink-dim);
+  border-color: var(--stroke);
+}
+
+/* ---- the kill switch -------------------------------------------------- */
+
+/*
+ * NO TRANSITION AND NO ANIMATION, in either direction, and this is the
+ * scenario's teeth target.
+ *
+ * A fade on a kill switch is a window in which the screen and the daemon
+ * disagree about whether outbound is dead. It is 120ms of an operator
+ * watching a control that has already flipped still look like it has not,
+ * during exactly the emergency the control exists for. `0s` and `none` are
+ * asserted on all three nodes in three snapshots — before, killed, and back
+ * again — so a "polish" commit that adds a fade fails the suite rather than
+ * shipping a lie that only shows up under stress.
+ */
+#kill-toggle,
+#kill-state,
+#kill-glyph {
+  transition-duration: 0s;
+  animation-name: none;
+}
+
+#kill-banner {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+#kill-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+#kill-glyph {
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+#kill-state[data-kill='killed'] #kill-glyph {
+  color: var(--danger);
+}
+
+#kill-horizon {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+#kill-toggle {
+  align-self: flex-start;
+  padding: 5px 11px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+#kill-toggle[data-next='on'] {
+  border-color: var(--danger);
+}
+
+/* ---- the form --------------------------------------------------------- */
+
+.set-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.set-mode-choice {
+  padding: 4px 9px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 999px;
+  background: var(--layer-2);
+  color: var(--ink-dim);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+/*
+ * Emphasis, not information: the pair publishes `aria-pressed` and the
+ * wrapper publishes `data-mode`, so the chosen mode is readable with the
+ * colour gone entirely.
+ */
+.set-mode-choice[aria-pressed='true'] {
+  border-color: var(--tint);
+  color: var(--ink);
+}
+
+.set-form-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-loaded,
+.set-dirty {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.set-dirty[data-dirty='true'] {
+  color: var(--ink);
+}
+
+.set-failure {
+  margin: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+  border-top: 1px solid var(--stroke);
+}
+
+.set-group-title {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+}
+
+.set-field,
+.set-pointer {
+  display: grid;
+  grid-template-columns: 220px 120px 1fr;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.set-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+}
+
+/*
+ * DIMMED, and said out loud. The wrapper carries `aria-disabled`, which is
+ * what assistive technology reads; the input underneath stays live, because
+ * a daemon that cannot send right now is not a reason to stop an operator
+ * configuring what it will do when it can.
+ */
+.set-field[aria-disabled='true'] .set-label,
+.set-field[aria-disabled='true'] .set-note {
+  color: var(--ink-dim);
+}
+
+.set-input {
+  width: 110px;
+  padding: 3px 5px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.set-input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--tint);
+}
+
+.set-issue {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--danger);
+}
+
+.set-value {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.set-use {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--tint);
+}
+
+.set-field .set-note,
+.set-pointer .set-note {
+  grid-column: 1 / -1;
+}
+
+.set-endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+  border-top: 1px solid var(--stroke);
+}
+
+/* ---- permissions ------------------------------------------------------ */
+
+.perm-card {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--layer-2);
+}
+
+.perm-glyph {
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.perm-card[data-state='FAIL'] .perm-glyph {
+  color: var(--danger);
+}
+
+.perm-card[data-state='WARN'] .perm-glyph {
+  color: var(--warn);
+}
+
+.perm-word,
+.perm-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.perm-detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  color: var(--ink-dim);
+}
+
+.perm-grant {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 4px 9px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+/* ---- adapters --------------------------------------------------------- */
+
+.adp-row {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr max-content max-content;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--layer-2);
+}
+
+.adp-glyph {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.adp-row[data-health='unhealthy'] .adp-glyph,
+.adp-row[data-health='disconnected'] .adp-glyph {
+  color: var(--danger);
+}
+
+.adp-word,
+.adp-name,
+.adp-token {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+}
+
+.adp-token {
+  color: var(--ink-dim);
+}
+
+.adp-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+
+.adp-rotate {
+  padding: 4px 9px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+/*
+ * An inline disclosure, NOT a modal. `role="dialog"` has exactly one owner
+ * in this renderer and a second focus trap on a screen that already has a
+ * typed confirm would be a second Escape handler racing the first.
+ */
+.adp-arm,
+.adp-receipt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--layer-2);
+}
+
+.adp-receipt-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+
+.adp-receipt-label {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+
+.adp-receipt-var,
+.adp-receipt-run {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the danger zone -------------------------------------------------- */
+
+.set-pane-danger {
+  border-color: var(--danger);
+}
+
+.danger-counts {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.danger-bullets,
+.danger-steps,
+.danger-manuals {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.danger-bullet,
+.danger-step,
+.danger-manual {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  color: var(--ink-dim);
+}
+
+.danger-step[data-state='FAILED'] {
+  color: var(--danger);
+}
+
+.danger-button {
+  align-self: flex-start;
+  padding: 5px 11px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--layer-2);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: default;
+}
+
+.danger-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--layer-2);
+}
+
+.danger-report-title {
+  margin: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+}

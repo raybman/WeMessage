@@ -1,12 +1,44 @@
 /**
- * The `rules` screen — a stub at s8 Sc1, rendered in a later scenario.
+ * The rules editor: a list on the left, one rule on the right.
  *
- * It exists now because the closed screen registry (F-113) has to be
- * enforceable before the screens exist: a guard written after the thing it
- * guards is a guard nobody proved. Returning `null` rather than markup is
- * the point — the directory set is real, the registry row is real, and
- * nothing renders until the scenario that owns this screen says it does.
+ * This file is a LAYOUT and nothing else. It holds no state, reaches no
+ * bridge member and derives nothing — every value it renders arrived as a
+ * prop from the composition root, which is the same discipline the queue
+ * screen follows and the reason the arch guard can say "no file under
+ * `screens/rules` names `window.wm`" without that being a coincidence.
+ *
+ * The detail pane is nullable on purpose. Landing on the screen selects
+ * nothing: the first thing an operator sees is the ORDER, because first
+ * match wins and the order is the part of a rule set that is invisible in
+ * any single rule.
  */
-export default function RulesScreen(): null {
-  return null;
+import type { VNode } from 'preact';
+import { RulesList, type RulesListProps } from './List.js';
+import { RuleDetail, type RuleDetailProps } from './Detail.js';
+import { DryRunPanel, type DryRunPanelProps } from './DryRun.js';
+
+export interface RulesScreenProps {
+  /** The binding's own word for where the catalogue reads got to. */
+  readonly status: string;
+  readonly list: RulesListProps;
+  readonly detail: RuleDetailProps | null;
+  readonly dryRun: DryRunPanelProps | null;
+}
+
+export default function RulesScreen(props: RulesScreenProps): VNode {
+  return (
+    <div id="rules" class="rules" data-rules={props.status}>
+      <RulesList {...props.list} />
+      <div class="rules-detail">
+        {props.detail === null ? (
+          <p id="rules-none" class="rule-hint">
+            PICK A RULE, OR WRITE A NEW ONE
+          </p>
+        ) : (
+          <RuleDetail {...props.detail} />
+        )}
+        {props.dryRun === null ? null : <DryRunPanel {...props.dryRun} />}
+      </div>
+    </div>
+  );
 }

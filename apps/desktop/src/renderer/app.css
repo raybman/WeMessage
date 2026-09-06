@@ -667,3 +667,384 @@ body {
   line-height: 1.45;
   resize: none;
 }
+
+/*
+ * The rules editor.
+ *
+ * Every colour here is a token from `theme/tokens.css`, which is the only
+ * place a hue is written down and the file the static sweep reads. Nothing
+ * in this block introduces one, so the two no-green layers have nothing new
+ * to disagree about.
+ *
+ * The one load-bearing rule is the dim on a disabled row. It is the THIRD
+ * carrier of the OFF state, after the uppercase word in `.rule-state` and
+ * the `data-enabled` attribute — never the only one, because an operator who
+ * cannot tell 0.55 from 1 would otherwise be reading a list in which every
+ * rule looks live.
+ */
+.rules {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: 1px;
+  min-height: 0;
+  background: var(--stroke);
+  overflow: hidden;
+}
+
+.rules-pane,
+.rules-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--layer-0);
+  overflow-y: auto;
+}
+
+.rules-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rules-pane-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.rules-listwrap {
+  min-height: 0;
+}
+
+#rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#rules-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+#rules-list li[aria-selected='true'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+#rules-list li[data-active='true'] {
+  border-color: var(--stroke-strong);
+}
+
+/* The dim, one of three carriers of OFF. Never alone: see the block note. */
+#rules-list li[data-enabled='no'] {
+  opacity: 0.55;
+}
+
+.rule-grip {
+  color: var(--ink-dim);
+  cursor: grab;
+  /* A drag that selects the row's text instead of moving it is a drag that
+     looks broken. Not a behaviour change: the grip has no text to want. */
+  user-select: none;
+}
+
+.rule-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-state,
+.rule-today {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+#rules-order-note,
+.rule-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+#rules-new,
+.rule-action,
+.rule-seg,
+.rule-pill {
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-1);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.rule-seg[data-state='ON'] {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+#rules-new:disabled,
+.rule-action:disabled,
+.rule-seg:disabled,
+.rule-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#rule-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.rule-block-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.rule-input,
+.rule-select {
+  padding: 5px 7px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.rule-mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.rule-row,
+.rule-segment,
+.rule-pills,
+.rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-rung {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.rule-rung-label {
+  color: var(--ink-dim);
+  letter-spacing: 0.08em;
+}
+
+#rule-effective {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+#rule-deny,
+#rule-inflight,
+.rule-issue {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--warn);
+}
+
+.rule-issue {
+  color: var(--danger);
+}
+
+#rule-pattern-verdict[data-state='INVALID'] {
+  color: var(--danger);
+}
+
+#rule-pattern-verdict,
+#rule-pattern-server {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* ── the dry run ──────────────────────────────────────────────────────── */
+
+.dryrun {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: var(--layer-1);
+}
+
+.dryrun-count {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+
+.dryrun-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dryrun-row {
+  display: grid;
+  grid-template-columns: 110px 130px 1fr;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--layer-0);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.dryrun-row[data-matched='no'] {
+  opacity: 0.6;
+}
+
+.dryrun-verdict,
+.dryrun-handle,
+.dryrun-where {
+  color: var(--ink-dim);
+  letter-spacing: 0.04em;
+}
+
+.dryrun-preview {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dryrun-preview [data-hit='yes'] {
+  border-radius: 3px;
+  background: var(--tint-soft);
+  color: var(--ink);
+}
+
+/* ── the typed confirm ────────────────────────────────────────────────── */
+
+.confirm-scrim {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--backdrop);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, 90vw);
+  padding: 16px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 10px;
+  background: var(--layer-2);
+  color: var(--ink);
+}
+
+.confirm-title {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.confirm-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
+.confirm-legend {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+}
+
+.confirm-input {
+  padding: 7px 9px;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 6px;
+  background: var(--layer-0);
+  color: var(--ink);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+}
+
+.confirm-go {
+  align-self: flex-end;
+  padding: 6px 12px;
+  border: 1px solid var(--tint);
+  border-radius: 6px;
+  background: var(--tint-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.confirm-go:disabled {
+  border-color: var(--stroke-strong);
+  background: var(--layer-1);
+  color: var(--ink-dim);
+  cursor: not-allowed;
+}

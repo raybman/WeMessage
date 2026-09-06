@@ -35,10 +35,50 @@ import { armingGlance } from './derive/armingGlance.js';
 import { batchOf } from './derive/batch.js';
 import { byAge, cardOf, type CardModel } from './derive/queue.js';
 import { moveTo, type QueueVerb } from './keys/index.js';
-import { DEFAULT_SCREEN } from './router.js';
+import { screenFor } from './keys/screens.js';
+import { DEFAULT_SCREEN, type Screen } from './router.js';
 import QueueScreen from './screens/queue/index.js';
+import RulesScreen from './screens/rules/index.js';
+import type { NamedOption, RuleDetailProps } from './screens/rules/Detail.js';
+import type { ServerVerdict } from './screens/rules/Matcher.js';
+import type { RuleRow } from './screens/rules/List.js';
+import type { DryRunPanelProps } from './screens/rules/DryRun.js';
 import WizardScreen from './screens/wizard/index.js';
+import { TypedConfirm } from './components/TypedConfirm.js';
+import {
+  acceptForm,
+  editForm,
+  formOf,
+  isDirty,
+  issuesByPath,
+  revertForm,
+  type FieldIssue,
+  type Form,
+} from './derive/form.js';
+import {
+  AUTO_EVERYONE,
+  NEW_RULE,
+  formProblems,
+  needsTypedConfirm,
+  regexProblem,
+  rulePatchOf,
+  ruleInputOf,
+  valueOf,
+  type MatcherKind,
+  type OutsideWindowChoice,
+  type RespondChoice,
+  type RuleFormValue,
+} from './derive/ruleForm.js';
+import {
+  dryRunView,
+  mirrorHits,
+  shadowMap,
+  type ShadowReplay,
+} from './derive/dryRun.js';
+import { rulesToday } from './derive/rulesToday.js';
+import { globalModeOf, scopeLadder } from './derive/scopeLadder.js';
 import { bindStore, type StoreBinding } from './store/index.js';
+import { bindRules, REPLAY_LIMIT, type RulesBinding } from './store/rules.js';
 import type { Conversation } from './store/optimistic.js';
 import { applyTheme, asTheme } from './theme/theme.js';
 import type { StreamPayload } from '../main/gateway.js';
@@ -397,6 +437,468 @@ function onEdit(next: string): void {
   schedulePaint();
 }
 
+/* ── the rules editor ──────────────────────────────────────────────────── */
+
+/**
+ * The second binding, and the second screen.
+ *
+ * It is a SEPARATE object from the queue's for the same reason the arch row
+ * insists on it: the queue binding reaches `approve`, `bulk`, `recall`,
+ * `reject` and `retry`, and a rules editor holding that object would be one
+ * autocomplete away from being a second path to a dispatch. `RULES_CHANNELS`
+ * is the whole of what this screen can reach and it contains one write —
+ * `ruleWrite` — which cannot carry a draft id. That is INV-2 expressed as a
+ * key set rather than as a promise.
+ */
+const rules: RulesBinding = bindRules(window.wm);
+
+/**
+ * The screen the ⌘-digit keymap last chose.
+ *
+ * Only `queue` and `rules` have a surface in this slice. A stroke for one of
+ * the other four is INERT rather than navigating to a blank pane: an empty
+ * document with `data-screen="audit"` is a screen that claims to exist, and
+ * the next scenario is the honest place to build it.
+ */
+let screen: Screen = DEFAULT_SCREEN;
+const MOUNTED: ReadonlySet<Screen> = new Set<Screen>(['queue', 'rules']);
+
+/**
+ * The rule being edited: `null` for none, `''` for one that is not stored.
+ *
+ * Three states rather than two because "no rule open" and "a new rule open"
+ * are different screens, and a new rule has no id to ask the daemon about —
+ * which is why DRY RUN is disabled until the first SAVE.
+ */
+let ruleId: string | null = null;
+let ruleForm: Form<RuleFormValue> | null = null;
+/** The daemon's own complaints from the last refused write. */
+let ruleIssues: readonly FieldIssue[] = [];
+let ruleServer: ServerVerdict | null = null;
+let ruleBusy = false;
+/** What has been typed into the confirm, or `null` when it is closed. */
+let confirmTyped: string | null = null;
+let dryRun: DryRunPanelProps | null = null;
+
+/**
+ * Local midnight, as the lower bound for "today".
+ *
+ * F-109: the per-rule count is DERIVED from `rule.matched` audit rows and is
+ * never stored, so the day boundary is the operator's, in their timezone,
+ * computed from the same clock the rest of the renderer reads.
+ */
+function midnightIso(): string {
+  const now = new Date();
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).toISOString();
+}
+
+/** Close the editor without touching the catalogue. */
+function closeRuleForm(): void {
+  ruleId = null;
+  ruleForm = null;
+  ruleIssues = [];
+  ruleServer = null;
+  confirmTyped = null;
+  dryRun = null;
+}
+
+/**
+ * Open a rule from the list.
+ *
+ * Deliberately NO request. The row is already in hand — the list rendered
+ * it — and a `GET /v1/rules/:id` per selection would be a round trip whose
+ * only effect is to redraw the same fields. It would also make arrowing
+ * down a list of forty rules forty requests.
+ */
+function openRule(id: string): void {
+  const row = rules.data().rules.find((rule) => rule.id === id);
+  if (row === undefined) return;
+  closeRuleForm();
+  ruleId = id;
+  ruleForm = formOf(valueOf(row));
+  paint();
+}
+
+/**
+ * A rule that does not exist yet.
+ *
+ * The agent defaults to the FIRST one rather than to empty: the picker has
+ * no empty option, so an empty default would render a select showing agent
+ * one while the form believed nothing was chosen, and SAVE would stay
+ * disabled with the complaint pointing at a field that looks filled in.
+ */
+function newRule(): void {
+  closeRuleForm();
+  ruleId = '';
+  ruleForm = formOf({
+    ...NEW_RULE,
+    adapterId: rules.data().adapters[0]?.id ?? '',
+  });
+  paint();
+}
+
+function editRule<K extends keyof RuleFormValue>(
+  key: K,
+  value: RuleFormValue[K],
+): void {
+  if (ruleForm === null) return;
+  ruleForm = editForm(ruleForm, key, value);
+  // A field the operator changed invalidates the daemon's verdict about the
+  // one before it. Stale is worse than absent here: a green MATCH under a
+  // pattern that has since been retyped is a claim nobody made.
+  ruleServer = null;
+  paint();
+}
+
+function revertRule(): void {
+  if (ruleForm === null) return;
+  ruleForm = revertForm(ruleForm);
+  ruleIssues = [];
+  ruleServer = null;
+  paint();
+}
+
+/**
+ * SAVE.
+ *
+ * `armed` is the second half of the typed confirm: the first call arrives
+ * with it false, opens the modal and returns having written nothing; the
+ * modal's own button calls back with it true. There is no third path, so a
+ * matcher that needs the sentence cannot be saved without it.
+ *
+ * Note what the body CANNOT contain. `rulePatchOf` derives from
+ * `RuleFormValue`, whose every field is a rules column; there is no draft
+ * id, no approval and no dispatch in the shape, and the binding reaches no
+ * channel that would accept one. Editing a rule is not an approval.
+ */
+async function saveRule(armed: boolean): Promise<void> {
+  const form = ruleForm;
+  const id = ruleId;
+  if (form === null || id === null || ruleBusy) return;
+  if (!armed && needsTypedConfirm(form.draft)) {
+    confirmTyped = '';
+    paint();
+    return;
+  }
+  const stored = rules.data().rules.find((rule) => rule.id === id);
+  const body =
+    id === ''
+      ? ruleInputOf(form.draft)
+      : stored === undefined
+        ? null
+        : rulePatchOf(form, stored);
+  if (body === null) return;
+  confirmTyped = null;
+  ruleIssues = [];
+  ruleBusy = true;
+  paint();
+  const answer = await rules.write(id === '' ? null : id, body);
+  if (answer.ok) {
+    ruleId = answer.rule.id;
+    ruleForm = acceptForm(form, valueOf(answer.rule));
+    // The replay described the rule as it WAS. Keeping it on screen next to
+    // a saved change would be a preview of the wrong rule.
+    dryRun = null;
+    await rules.load(midnightIso());
+  } else {
+    ruleIssues =
+      answer.issues.length > 0
+        ? answer.issues
+        : [{ path: 'rule', message: answer.reason }];
+  }
+  ruleBusy = false;
+  paint();
+}
+
+/**
+ * Ask the daemon what it thinks of the text in the pattern box.
+ *
+ * The only v1 route that scores anything is `POST /v1/rules/:id/test`, and
+ * it scores the SAVED rule against a string. So this asks exactly that
+ * question and the panel labels it as exactly that answer: it is not a
+ * preview of the unsaved pattern, and pretending otherwise would be a green
+ * tick over a rule that does not exist yet.
+ *
+ * On BLUR rather than as-you-type. Not a debounce — there is no timer and no
+ * delay — the event simply is the operator finishing with the field.
+ */
+async function probePattern(): Promise<void> {
+  const form = ruleForm;
+  const id = ruleId;
+  if (form === null || id === null || id === '') return;
+  if (form.draft.kind !== 'regex') return;
+  const pattern = form.draft.pattern;
+  if (pattern.length === 0 || regexProblem(pattern) !== null) return;
+  const matched = await rules.probe(id, pattern);
+  ruleServer =
+    matched === null
+      ? { state: 'UNKNOWN', text: 'THE DAEMON DID NOT ANSWER' }
+      : {
+          state: matched ? 'MATCH' : 'NO-MATCH',
+          text: matched
+            ? 'THE RULE AS SAVED MATCHES THIS TEXT'
+            : 'THE RULE AS SAVED DOES NOT MATCH THIS TEXT',
+        };
+  paint();
+}
+
+/**
+ * The dry run, plus as many replays as it takes to explain a shadow.
+ *
+ * §1.7 stops at the first matching rule, so a row a higher-priority rule
+ * takes is a row this rule never sees. Nothing on the wire can say that:
+ * `DryRunRow` carries no rule id and the route scores ONE rule. So the
+ * shadow is a join over guid across one replay per candidate.
+ *
+ * The candidates are filtered by a LOCAL mirror of each matcher first,
+ * which is why the common case is one request rather than N. The mirror
+ * fails open — an unmirrorable matcher is replayed — so it can cost a round
+ * trip and can never hide a shadow.
+ */
+async function runDryRun(): Promise<void> {
+  const form = ruleForm;
+  const id = ruleId;
+  if (form === null || id === null || id === '' || ruleBusy) return;
+  const all = rules.data().rules;
+  const self = all.find((rule) => rule.id === id);
+  if (self === undefined) return;
+  ruleBusy = true;
+  paint();
+  const result = await rules.replay(id);
+  if (result !== null) {
+    const hits = result.rows.filter((row) => row.matched);
+    const replays: ShadowReplay[] = [];
+    const above = all
+      .filter(
+        (rule) =>
+          rule.id !== id &&
+          rule.enabled &&
+          (rule.priority < self.priority ||
+            (rule.priority === self.priority && rule.id < self.id)),
+      )
+      .sort(
+        (a, b) =>
+          a.priority - b.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    if (hits.length > 0)
+      for (const candidate of above) {
+        if (!mirrorHits(hits, valueOf(candidate))) continue;
+        const replay = await rules.replay(candidate.id);
+        if (replay === null) continue;
+        replays.push({
+          id: candidate.id,
+          name: candidate.name,
+          priority: candidate.priority,
+          rows: replay.rows,
+        });
+      }
+    dryRun = {
+      total: result.total,
+      matched: result.matched,
+      limit: REPLAY_LIMIT,
+      rows: dryRunView(result.rows, form.draft, shadowMap(replays)),
+    };
+  }
+  ruleBusy = false;
+  paint();
+}
+
+/**
+ * Move one rule to where another one is.
+ *
+ * The multiset of priorities is PRESERVED and reassigned positionally, so a
+ * reorder touches only the rules whose number actually changed — three
+ * PATCHes for a four-rule move, not four — and cannot invent a priority the
+ * operator never chose.
+ *
+ * Sequential, and the list is NOT painted optimistically. An optimistic
+ * first row would let a harness proceed on the new order while the writes
+ * were still in flight, and the order on screen would be a claim about a
+ * daemon that had not answered yet. The reload at the end is what makes the
+ * order true.
+ */
+async function reorderRules(fromId: string, toId: string): Promise<void> {
+  if (ruleBusy) return;
+  const current = rules.data().rules;
+  const from = current.findIndex((rule) => rule.id === fromId);
+  const to = current.findIndex((rule) => rule.id === toId);
+  const moved = current[from];
+  if (from === -1 || to === -1 || from === to || moved === undefined) return;
+  const next = [...current.slice(0, from), ...current.slice(from + 1)];
+  next.splice(to, 0, moved);
+  const slots = current.map((rule) => rule.priority).sort((a, b) => a - b);
+  ruleBusy = true;
+  paint();
+  for (const [index, rule] of next.entries()) {
+    const priority = slots[index];
+    if (priority === undefined || priority === rule.priority) continue;
+    await rules.write(rule.id, { priority });
+  }
+  await rules.load(midnightIso());
+  ruleBusy = false;
+  paint();
+}
+
+/** The list, with F-109's count attached. */
+function ruleRows(): readonly RuleRow[] {
+  const data = rules.data();
+  const today = rulesToday(data.audit, new Date().toISOString());
+  return data.rules.map((rule) => ({
+    id: rule.id,
+    name: rule.name,
+    enabled: rule.enabled,
+    respond: !rule.enabled
+      ? 'OFF'
+      : rule.respondMode === 'auto'
+        ? 'AUTO'
+        : 'DRAFT-ONLY',
+    today: today.get(rule.id) ?? 0,
+    priority: rule.priority,
+  }));
+}
+
+function namedOptions(
+  rows: readonly { id: string; name?: string; displayName?: string }[],
+): readonly NamedOption[] {
+  return rows.map((row) => ({
+    id: row.id,
+    label: row.displayName ?? row.name ?? row.id,
+  }));
+}
+
+/** Everything the detail pane renders, or `null` when nothing is open. */
+function ruleDetail(): RuleDetailProps | null {
+  const form = ruleForm;
+  const id = ruleId;
+  if (form === null || id === null) return null;
+  const data = rules.data();
+  const problems = formProblems(form.draft);
+  const dirty = isDirty(form);
+  return {
+    ruleId: id,
+    value: form.draft,
+    dirty,
+    // A stored rule with nothing changed has nothing to save. A NEW rule is
+    // clean by construction until the first keystroke and still needs a
+    // reachable SAVE, so only the stored branch consults dirtiness.
+    saveDisabled: ruleBusy || problems.length > 0 || (id !== '' && !dirty),
+    busy: ruleBusy,
+    // The daemon's issues FIRST. `issuesByPath` is first-wins, so a field
+    // the validator refused shows the validator's own sentence and the
+    // renderer's guess about the same field never overwrites it.
+    issues: issuesByPath([...ruleIssues, ...problems]),
+    adapters: namedOptions(data.adapters),
+    schedules: namedOptions(data.schedules),
+    ladder: scopeLadder({
+      global: globalModeOf(data.settings),
+      rule: form.draft.respond === 'AUTO' ? 'auto' : 'draft-only',
+      policies: data.contacts.length,
+    }),
+    // Drafts this rule already minted. Saving does not re-decide them, and
+    // the pane says so: see `#rule-inflight`.
+    inflight:
+      id === '' ? 0 : data.live.filter((draft) => draft.ruleId === id).length,
+    patternProblem:
+      form.draft.kind !== 'regex'
+        ? null
+        : form.draft.pattern.length === 0
+          ? 'A PATTERN IS REQUIRED'
+          : regexProblem(form.draft.pattern),
+    serverVerdict: ruleServer,
+    onName: (next) => {
+      editRule('name', next);
+    },
+    onKind: (kind: MatcherKind) => {
+      editRule('kind', kind);
+    },
+    onKeywords: (next) => {
+      editRule('keywords', next);
+    },
+    onMode: (mode) => {
+      editRule('mode', mode);
+    },
+    onFlag: (flag, next) => {
+      if (flag === 'case') editRule('caseSensitive', next);
+      else if (flag === 'word') editRule('wholeWord', next);
+      else editRule('allowGroupDrafts', next);
+    },
+    onPattern: (next) => {
+      editRule('pattern', next);
+    },
+    onPatternBlur: () => {
+      void probePattern();
+    },
+    onHandles: (next) => {
+      editRule('handles', next);
+    },
+    onAdapter: (adapter) => {
+      editRule('adapterId', adapter);
+    },
+    onRespond: (choice: RespondChoice) => {
+      editRule('respond', choice);
+    },
+    onSchedule: (schedule) => {
+      editRule('scheduleId', schedule);
+    },
+    onOutside: (choice: OutsideWindowChoice) => {
+      editRule('outsideWindow', choice);
+    },
+    onTtl: (minutes) => {
+      editRule('draftTtlMinutes', minutes);
+    },
+    onSave: () => {
+      void saveRule(false);
+    },
+    onRevert: revertRule,
+    onDryRun: () => {
+      void runDryRun();
+    },
+  };
+}
+
+/**
+ * The app's ONE window-level key listener.
+ *
+ * One, and an arch row proves it: a second `addEventListener` anywhere under
+ * `apps/desktop/src` fails the build. Two listeners is how a modal ends up
+ * with a navigation stroke firing underneath it.
+ *
+ * There is no click listener. Every clickable thing in the tree is a real
+ * `<button>` with an `onClick` prop, which is what makes it reachable by
+ * keyboard as well as by pointer; delegating clicks from `window` would put
+ * behaviour on elements that never announce they have any.
+ */
+function onWindowKey(event: KeyboardEvent): void {
+  // ESCAPE and ENTER both CANCEL while the confirm is up. Enter especially:
+  // the whole point of a typed confirm is that the sentence is typed and
+  // then the button is chosen, and an Enter that submitted would put the
+  // most reflexive keystroke on the keyboard in charge of arming autonomy.
+  if (confirmTyped !== null) {
+    if (event.key !== 'Escape' && event.key !== 'Enter') return;
+    event.preventDefault();
+    confirmTyped = null;
+    paint();
+    return;
+  }
+  const next = screenFor(event);
+  if (next === null || !MOUNTED.has(next)) return;
+  event.preventDefault();
+  if (next === screen) return;
+  screen = next;
+  closeRuleForm();
+  // RESET, then load. The catalogue held from a previous visit is a set of
+  // claims about contacts, settings and counts that may all have moved; a
+  // screen that painted `ready` from it would answer a harness's readiness
+  // wait with last visit's facts.
+  rules.reset();
+  if (next === 'rules') void rules.load(midnightIso());
+  paint();
+}
+
 function Shell({
   stream: current,
   view,
@@ -414,6 +916,22 @@ function Shell({
       />
       {current.state === 'down' ? (
         <WizardScreen stream={current} />
+      ) : screen === 'rules' ? (
+        <RulesScreen
+          status={rules.data().status}
+          list={{
+            rows: ruleRows(),
+            selectedId: ruleId,
+            onSelect: openRule,
+            onReorder: (fromId, toId) => {
+              void reorderRules(fromId, toId);
+            },
+            onNew: newRule,
+            busy: ruleBusy,
+          }}
+          detail={ruleDetail()}
+          dryRun={dryRun}
+        />
       ) : (
         <QueueScreen
           cards={view.cards}
@@ -438,6 +956,24 @@ function Shell({
           editing={editing}
           onEdit={onEdit}
           onVerb={onVerb}
+        />
+      )}
+      {/* Outside the screen branch on purpose: the modal belongs to the
+          document, not to the pane underneath it, and mounting it inside
+          the detail pane would put a dialog inside a form. */}
+      {confirmTyped === null ? null : (
+        <TypedConfirm
+          phrase={AUTO_EVERYONE}
+          title="TURN ON AUTO REPLIES"
+          body="THIS RULE WILL ANSWER BY ITSELF, FOR EVERY MESSAGE IT MATCHES, UNTIL SOMEBODY TURNS IT OFF. TYPE THE SENTENCE TO CONFIRM."
+          typed={confirmTyped}
+          onType={(next) => {
+            confirmTyped = next;
+            paint();
+          }}
+          onGo={() => {
+            void saveRule(true);
+          }}
         />
       )}
     </div>
@@ -472,9 +1008,14 @@ function paint(): void {
     html.dataset['screen'] = 'wizard';
     html.dataset['wizardStep'] = 'welcome';
   } else {
-    html.dataset['screen'] = DEFAULT_SCREEN;
+    html.dataset['screen'] = screen;
     delete html.dataset['wizardStep'];
   }
+  // The rules screen's readiness idiom, written in the same paint that
+  // renders the rows it counts, for the same reason `data-store-rows` is.
+  if (screen === 'rules')
+    html.dataset['rulesRows'] = String(rules.data().rules.length);
+  else delete html.dataset['rulesRows'];
   const view = derive();
   // Written back so the cursor SURVIVES the resolution above. A queue whose
   // active card expired keeps re-resolving to the top on every paint; naming
@@ -528,6 +1069,8 @@ function schedulePaint(): void {
 }
 
 binding.store.subscribe(schedulePaint);
+rules.subscribe(schedulePaint);
+window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {
   const next = asStream(payload);

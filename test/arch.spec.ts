@@ -4181,7 +4181,15 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
     it('the store reaches exactly ten request channels and one subscription', () => {
       const files = archFiles(STORE_ROOT);
       expect(files).toContain(WIRING);
-      expect(bridgeReach(files)).toEqual(ALLOWED);
+      // s8 Sc10 scoped this ONE equality from the whole root to the queue's
+      // own binding file. The root grew a second binding (the rules editor
+      // reads nine catalogues and writes one), and a union over two files
+      // cannot say which file reached which channel — so Sc10 replaced the
+      // union with a PARTITION that asserts totality, per-file reach and
+      // per-file `Pick` together. That row is strictly stronger than this
+      // one was; this row keeps the queue's own list honest, and the ban
+      // below still runs over every file under the root.
+      expect(bridgeReach([WIRING])).toEqual(ALLOWED);
       // The runtime list and the type-level `Pick` are the same names, so
       // widening one without the other is a diff somebody has to write on
       // purpose.
@@ -4250,7 +4258,7 @@ describe('S8 extensions (s8-execution Scenario 5: the event-stream store)', () =
       );
       const files = archFiles(STORE_ROOT);
       expect(sendOffenders(files).filter((o) => o.startsWith(rel))).toEqual([]);
-      expect(bridgeReach(files)).toEqual(ALLOWED);
+      expect(bridgeReach([WIRING])).toEqual(ALLOWED);
     });
   });
 
@@ -5186,5 +5194,573 @@ describe('S8 extensions (s8-execution Scenario 9: bulk, and one batch)', () => {
       );
       expect(CLICKABLE.test(codeOf(archRead(rel)))).toBe(false);
     });
+  });
+});
+
+describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
+  const sc10Planted: string[] = [];
+  function sc10Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    sc10Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of sc10Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      'apps/desktop/src/renderer/store/__s8_sc10_probe__',
+      'apps/desktop/src/renderer/screens/rules/__s8_sc10_probe__',
+      'apps/desktop/src/renderer/screens/queue/__s8_sc10_probe__',
+      'apps/desktop/src/renderer/components/__s8_sc10_probe__',
+      'apps/desktop/src/renderer/derive/__s8_sc10_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  const RENDERER = 'apps/desktop/src/renderer';
+  const STORE_ROOT = `${RENDERER}/store`;
+  const RULES = `${RENDERER}/screens/rules`;
+  const QUEUE = `${RENDERER}/screens/queue`;
+
+  /** Every `bridge.<member>` one file's CODE names, sorted and unique. */
+  function reachOf(rel: string): string[] {
+    const out: string[] = [];
+    for (const m of codeOf(archRead(rel)).matchAll(
+      /\bbridge\s*\.\s*([A-Za-z_$][\w$]*)/g,
+    ))
+      out.push(m[1] ?? '');
+    return [...new Set(out)].sort();
+  }
+
+  /** The files under `store/` whose CODE reaches the bridge at all. */
+  function bindingFiles(): string[] {
+    return archFiles(STORE_ROOT)
+      .filter((rel) => reachOf(rel).length > 0)
+      .sort();
+  }
+
+  /** The single-quoted members of `Pick<WmBridge, …>` in one file, sorted. */
+  function pickOf(rel: string): string[] {
+    const m = /Pick<\s*WmBridge,([\s\S]*?)>/.exec(archRead(rel));
+    if (m === null) return [];
+    return [...(m[1] as string).matchAll(/'([^']+)'/g)]
+      .map((x) => x[1] as string)
+      .sort();
+  }
+
+  /** The single-quoted members of a named `const X = [ … ]`, in order. */
+  function constArrayOf(rel: string, name: string): string[] {
+    const m = new RegExp(`${name}\\s*=\\s*\\[([^\\]]*)\\]`).exec(archRead(rel));
+    if (m === null) return [];
+    return [...(m[1] as string).matchAll(/'([^']+)'/g)].map(
+      (x) => x[1] as string,
+    );
+  }
+
+  /* ── row 1: the store's reach is a PARTITION ────────────────────────── */
+
+  /**
+   * Sc5 asserted a FLAT list: the union of every `bridge.<member>` named
+   * anywhere under `store/` had to equal one array. That was exact while the
+   * store was one file, and it stops being exact the moment there are two —
+   * a union cannot say which file reached which channel, so a queue binding
+   * that quietly acquired `ruleWrite` would still satisfy it.
+   *
+   * The rules editor needs a second binding (it reads nine catalogues and
+   * writes one), so the row is replaced by a PARTITION, which is strictly
+   * stronger in three ways and weaker in none:
+   *
+   *  - every file under `store/` that reaches the bridge AT ALL must be a
+   *    declared partition member. A third binding file is a failure until
+   *    somebody writes it down, which is the diff this row exists to force.
+   *  - each file's reach must equal ITS OWN list, so the queue binding and
+   *    the rules binding cannot borrow each other's channels.
+   *  - each file's type-level `Pick` must equal the same list, so widening
+   *    the runtime and the type apart is still impossible.
+   *
+   * Sc5's `/send/i` ban is unchanged and still runs over the whole root:
+   * neither binding may name a send, and adding a binding cannot dilute it.
+   * Sc5's own row now scopes its equality to `index.ts`, which is the one
+   * line of that block this scenario touched.
+   *
+   * Sc11 (schedules), Sc12 (contacts and policies) and Sc14 (settings) each
+   * extend this by one entry and one line. That is the intended shape of
+   * the diff: a new screen's reach is declared here or the screen does not
+   * typecheck past this row.
+   */
+  interface Binding {
+    /** The runtime array the binding invokes through. */
+    readonly constant: string;
+    /** Its members, plus `'on'` when the binding subscribes. */
+    readonly members: readonly string[];
+  }
+  const BINDINGS: Readonly<Record<string, Binding>> = {
+    [`${STORE_ROOT}/index.ts`]: {
+      constant: 'STORE_CHANNELS',
+      members: [
+        'approve',
+        'batch',
+        'bulk',
+        'contacts',
+        'drafts',
+        'on',
+        'recall',
+        'reject',
+        'retry',
+        'rules',
+        'settings',
+      ],
+    },
+    [`${STORE_ROOT}/rules.ts`]: {
+      constant: 'RULES_CHANNELS',
+      // Nine reads and one write, and the write is `ruleWrite`. Deliberately
+      // absent: `on` (the editor is request/response — it refetches rather
+      // than reconciling a stream, so it cannot render a stale rule as a
+      // live one), and `ruleDelete` (the wireframe has no delete affordance
+      // and a rule that is drafting for somebody is not a row to remove
+      // behind a keystroke; OFF is the reversible answer).
+      members: [
+        'adapters',
+        'audit',
+        'contacts',
+        'drafts',
+        'ruleDryRun',
+        'ruleTest',
+        'ruleWrite',
+        'rules',
+        'schedules',
+        'settings',
+      ],
+    },
+  };
+
+  it('every file under store/ that reaches the bridge is a declared binding', () => {
+    expect(bindingFiles()).toEqual(Object.keys(BINDINGS).sort());
+  });
+
+  it('each binding reaches exactly its own declared channels, at both levels', () => {
+    for (const [rel, binding] of Object.entries(BINDINGS)) {
+      const members = [...binding.members].sort();
+      expect(reachOf(rel), `${rel} reach`).toEqual(members);
+      expect(pickOf(rel), `${rel} Pick<WmBridge>`).toEqual(members);
+      // The runtime list is the request channels only: `on` is a
+      // subscription and is not invoked.
+      expect(
+        [...constArrayOf(rel, binding.constant)].sort(),
+        `${rel} ${binding.constant}`,
+      ).toEqual(members.filter((m) => m !== 'on'));
+    }
+  });
+
+  it('the two bindings do not overlap on any WRITE channel', () => {
+    // Reads may be shared — both screens name a rule — but two files that
+    // can both mutate the same resource is two places for one keystroke to
+    // become two requests. Sc7, Sc8 and Sc9 each pinned their write to one
+    // call site; this is the same claim stated over the partition.
+    const WRITES = [
+      'approve',
+      'bulk',
+      'recall',
+      'reject',
+      'retry',
+      'ruleWrite',
+    ];
+    for (const write of WRITES) {
+      const owners = Object.entries(BINDINGS)
+        .filter(([, b]) => b.members.includes(write))
+        .map(([rel]) => rel);
+      expect(owners, `${write} has one owner`).toHaveLength(1);
+    }
+  });
+
+  it('every declared member is a real channel, and none of them is a push', () => {
+    const registry = archRead('apps/desktop/src/main/ipc-channels.ts');
+    const pushes = [
+      ...(/PUSH_KEYS = \[([^\]]*)\]/.exec(registry)?.[1] ?? '').matchAll(
+        /'([^']+)'/g,
+      ),
+    ].map((m) => m[1]);
+    for (const binding of Object.values(BINDINGS))
+      for (const member of binding.members) {
+        if (member === 'on') continue;
+        expect(registry, `${member} is a channel`).toMatch(
+          new RegExp(`^\\s*${member}:`, 'm'),
+        );
+        expect(pushes, `${member} is not a push channel`).not.toContain(member);
+      }
+  });
+
+  it('PLANTED: a third file under store/ that reaches the bridge is caught', () => {
+    const rel = sc10Plant(
+      `${STORE_ROOT}/__s8_sc10_probe__/schedules.ts`,
+      [
+        'export const go = (bridge: { schedules: () => Promise<unknown> }) =>',
+        '  bridge.schedules();',
+        '',
+      ].join('\n'),
+    );
+    expect(bindingFiles()).toContain(rel);
+    expect(bindingFiles()).not.toEqual(Object.keys(BINDINGS).sort());
+  });
+
+  it('LEGITIMATE NEAR-MISS: a store file that only DISCUSSES the bridge is not a binding', () => {
+    const rel = sc10Plant(
+      `${STORE_ROOT}/__s8_sc10_probe__/pure.ts`,
+      [
+        '/**',
+        ' * A pure reducer. It takes rows the binding already fetched over',
+        ' * bridge.rules and bridge.drafts, and reaches nothing itself.',
+        ' */',
+        'export const rows = (all: readonly string[]): number => all.length;',
+        '',
+      ].join('\n'),
+    );
+    expect(reachOf(rel)).toEqual([]);
+    expect(bindingFiles()).toEqual(Object.keys(BINDINGS).sort());
+  });
+
+  /* ── row 2: one call site for the editor's one write ────────────────── */
+
+  /**
+   * The same treatment Sc7, Sc8 and Sc9 gave the channels they opened. A
+   * second `bridge.ruleWrite(` is how a drag-reorder and a form save both
+   * fire for one gesture, and how a typed confirm gets bypassed by a second
+   * path that never learned to ask.
+   *
+   * `ruleDelete` is asserted ABSENT from the renderer entirely. It is a real
+   * channel with a real handler — the CLI uses it — and this GUI does not
+   * offer it, so the absence is a decision rather than an omission.
+   */
+  it('ruleWrite has exactly one call site, and ruleDelete has none', () => {
+    const callers = (needle: string): string[] =>
+      archFiles(RENDERER).filter((rel) =>
+        codeOf(archRead(rel)).includes(needle),
+      );
+    expect(callers('bridge.ruleWrite(')).toEqual([`${STORE_ROOT}/rules.ts`]);
+    const once = codeOf(archRead(`${STORE_ROOT}/rules.ts`)).split(
+      'bridge.ruleWrite(',
+    );
+    expect(once).toHaveLength(2);
+    expect(callers('bridge.ruleDelete(')).toEqual([]);
+    // Non-vacuous: the channel exists and is spelled here.
+    expect(archRead('apps/desktop/src/main/ipc-channels.ts')).toContain(
+      "ruleDelete: 'wm:rule.delete'",
+    );
+  });
+
+  /* ── row 3: controls live where the guard permits them ──────────────── */
+
+  /**
+   * Sc7 banned `<button`, `<a href`, `<input`, `onClick=` and `tabIndex=`
+   * under `screens/queue`, with a planted button as its offender. That ban
+   * is SCOPED to the queue and always was: the queue has one tab stop
+   * because it is a virtualised listbox driven entirely by a keymap, and a
+   * control inside a virtualised option is a focus holder that unmounts.
+   *
+   * A rules editor cannot be built that way. It takes a NAME, a regex, a
+   * list of keywords and a typed confirmation string, and §1.7 requires
+   * "only a click or ⌘↩ on the confirm button with the exact text" — a
+   * button and a text field, in the specification. So the editor gets real
+   * controls and this row states exactly where the line is:
+   *
+   *  - `screens/rules` MAY mint `<input` and `<button`. Asserted to be
+   *    NON-EMPTY so the permission is not theoretical.
+   *  - `screens/queue` still may not. Re-asserted here rather than trusted,
+   *    because the interesting failure is a control migrating INTO the
+   *    queue on the argument that the app now has some.
+   *  - `<a href` is banned across the whole renderer. There is no browser
+   *    here and no document to link to; a link is how a renderer navigates
+   *    away from the app it is.
+   *  - `<textarea` stays out of the editor. Sc8 pinned it to
+   *    `components/Editor.tsx` app-wide; a multi-line regex field is the
+   *    obvious way to break that and it is not needed.
+   *  - the typed confirm's `role="dialog"` lives in ONE component. `alert`
+   *    and `alertdialog` remain banned renderer-wide (Sc7), and `role=
+   *    "status"` remains the queue's.
+   */
+  const INTERACTIVE: readonly (readonly [string, RegExp])[] = [
+    ['<button', /<button\b/],
+    ['<a href', /<a\s[^>]*\bhref\b/],
+    ['<input', /<input\b/],
+    ['onClick', /\bonClick\s*=/],
+    ['tabIndex', /\btabIndex\s*=/],
+  ];
+
+  function controlsIn(root: string): string[] {
+    const out: string[] = [];
+    for (const rel of archFiles(root)) {
+      const code = codeOf(archRead(rel));
+      for (const [name, re] of INTERACTIVE)
+        if (re.test(code)) out.push(`${rel}: ${name}`);
+    }
+    return out.sort();
+  }
+
+  it('the rules editor has real controls and the queue still has none', () => {
+    const rules = controlsIn(RULES);
+    expect(rules.some((c) => c.endsWith(': <input'))).toBe(true);
+    expect(rules.some((c) => c.endsWith(': <button'))).toBe(true);
+    // …and none of them is a link or a hand-rolled tab stop.
+    expect(rules.filter((c) => c.endsWith(': <a href'))).toEqual([]);
+    expect(rules.filter((c) => c.endsWith(': tabIndex'))).toEqual([]);
+    expect(controlsIn(QUEUE)).toEqual([]);
+  });
+
+  it('no file in the renderer contains an anchor with an href', () => {
+    const anchors = (): string[] =>
+      archFiles(RENDERER).filter((rel) =>
+        /<a\s[^>]*\bhref\b/.test(codeOf(archRead(rel))),
+      );
+    expect(anchors()).toEqual([]);
+    // Non-vacuous over an EMPTY result: the same scan, over a planted link
+    // of the kind the schedule field is most likely to grow ("edit in S4
+    // →"), finds it. That affordance is a keystroke here, not a link.
+    const rel = sc10Plant(
+      `${RULES}/__s8_sc10_probe__/Link.tsx`,
+      [
+        'export function ScheduleLink(): unknown {',
+        '  return <a href="#schedule">EDIT IN SCHEDULES</a>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(anchors()).toEqual([rel]);
+  });
+
+  it('the rules editor uses no textarea, which stays the editor component`s', () => {
+    const sites = archFiles(RENDERER).filter((rel) =>
+      /<textarea\b/.test(codeOf(archRead(rel))),
+    );
+    expect(sites).toEqual([`${RENDERER}/components/Editor.tsx`]);
+  });
+
+  it('role="dialog" lives in exactly one component, and alert roles stay banned', () => {
+    const withRole = (role: string): string[] =>
+      archFiles(RENDERER).filter((rel) =>
+        codeOf(archRead(rel)).includes(`role="${role}"`),
+      );
+    expect(withRole('dialog')).toEqual([
+      `${RENDERER}/components/TypedConfirm.tsx`,
+    ]);
+    expect(withRole('alert')).toEqual([]);
+    expect(withRole('alertdialog')).toEqual([]);
+    expect(withRole('status')).toEqual([`${QUEUE}/index.tsx`]);
+  });
+
+  it('PLANTED: a button smuggled into the queue is caught', () => {
+    const rel = sc10Plant(
+      `${QUEUE}/__s8_sc10_probe__/Save.tsx`,
+      [
+        'export function Save(props: { onSave: () => void }): unknown {',
+        '  return <button onClick={props.onSave}>SAVE</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(QUEUE)).toEqual([`${rel}: <button`, `${rel}: onClick`]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: the same button in the rules editor is allowed', () => {
+    const rel = sc10Plant(
+      `${RULES}/__s8_sc10_probe__/Save.tsx`,
+      [
+        'export function Save(props: { onSave: () => void }): unknown {',
+        '  return <button onClick={props.onSave}>SAVE</button>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(controlsIn(RULES)).toContain(`${rel}: <button`);
+    expect(controlsIn(QUEUE)).toEqual([]);
+  });
+
+  /* ── row 4: a form is the classic way to acquire a timer ────────────── */
+
+  /**
+   * Sc5 pinned every `setTimeout`/`setInterval` under `apps/desktop/src` to
+   * the reconnect backoff in `main/gateway.ts`. A form with debounced
+   * validation is the standard way to break that, and it is not needed:
+   * pattern compilation is microseconds, so validity is computed on every
+   * keystroke, and the SERVER-side confirmation (`POST /v1/rules/:id/test`)
+   * fires on `blur` — an event the operator generates, not a delay the app
+   * invents.
+   *
+   * The timer ban alone would not catch the intent, because the usual
+   * helper is written once and imported. So the names are banned too, in
+   * code (comments like this one are stripped before the scan).
+   */
+  const DELAY_HELPERS = /\b(debounce|throttle|requestIdleCallback)\b/i;
+
+  it('the desktop app schedules nothing and imports no delay helper', () => {
+    const offenders = archFiles('apps/desktop/src')
+      .filter((rel) => DELAY_HELPERS.test(codeOf(archRead(rel))))
+      .sort();
+    expect(offenders).toEqual([]);
+    // Non-vacuous: the ONE timer in the app is still exactly where Sc5 left
+    // it, so this row is scanning a tree that really could hold another.
+    const timers = archFiles('apps/desktop/src')
+      .filter((rel) =>
+        /\b(setTimeout|setInterval)\(/.test(codeOf(archRead(rel))),
+      )
+      .sort();
+    expect(timers).toEqual(['apps/desktop/src/main/gateway.ts']);
+  });
+
+  it('PLANTED: a debounced validator is caught', () => {
+    const rel = sc10Plant(
+      `${RULES}/__s8_sc10_probe__/validate.ts`,
+      [
+        'export function debounce(fn: () => void, ms: number): () => void {',
+        '  let t: ReturnType<typeof setTimeout> | null = null;',
+        '  return () => {',
+        '    if (t !== null) clearTimeout(t);',
+        '    t = setTimeout(fn, ms);',
+        '  };',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const code = codeOf(archRead(rel));
+    expect(DELAY_HELPERS.test(code)).toBe(true);
+    expect(/\b(setTimeout|setInterval)\(/.test(code)).toBe(true);
+  });
+
+  it('LEGITIMATE NEAR-MISS: validating on every keystroke, and confirming on blur, is clean', () => {
+    const rel = sc10Plant(
+      `${RULES}/__s8_sc10_probe__/live.ts`,
+      [
+        '/**',
+        ' * No debounce and no throttle: compiling a pattern costs less than',
+        ' * the keystroke that triggered it, and the daemon is asked on blur.',
+        ' */',
+        'export function problem(pattern: string): string | null {',
+        '  try {',
+        "    new RegExp(pattern, 'u');",
+        '    return null;',
+        '  } catch (error) {',
+        '    return error instanceof Error ? error.message : String(error);',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const code = codeOf(archRead(rel));
+    expect(DELAY_HELPERS.test(code)).toBe(false);
+    expect(/\b(setTimeout|setInterval)\(/.test(code)).toBe(false);
+  });
+
+  /* ── row 5: the editor cannot approve, and the screen cannot fetch ──── */
+
+  /**
+   * INV-2, stated where this scenario could break it. Two halves:
+   *
+   *  - the rules BINDING may not name an approval or a draft id. Its whole
+   *    write surface is `PUT`-shaped over a rule, and a rule has no field
+   *    that could authorise a send. The partition row above already pins
+   *    which channels it reaches; this pins the vocabulary, which is what a
+   *    reviewer actually scans for.
+   *  - the rules SCREEN may not reach the bridge at all. Sc6's view-tree row
+   *    already says this for `screens/`; it is re-asserted here over
+   *    `screens/rules` specifically, because that row's non-vacuity list is
+   *    pinned to two roots and a reader of THIS scenario should not have to
+   *    go and check that the new directory was in scope.
+   */
+  it('the rules binding names no approval, and the rules screen names no bridge', () => {
+    const binding = codeOf(archRead(`${STORE_ROOT}/rules.ts`));
+    for (const m of binding.matchAll(/[A-Za-z_$][\w$]*/g))
+      expect(m[0], `${m[0]} in the rules binding`).not.toMatch(
+        /^(approve|approval|draftId|dispatch)$/i,
+      );
+    for (const rel of archFiles(RULES)) {
+      const code = codeOf(archRead(rel));
+      expect(/\bwindow\s*\.\s*wm\b/.test(code), `${rel} names window.wm`).toBe(
+        false,
+      );
+      expect(
+        /\bbridge\s*\.\s*[A-Za-z_$][\w$]*/.test(code),
+        `${rel} names a bridge member`,
+      ).toBe(false);
+    }
+  });
+
+  /* ── row 6: every screen is reachable, by exactly one mechanism ─────── */
+
+  /**
+   * Sc17 runs axe over every `SCREENS` entry, which is impossible while the
+   * shell hard-codes one. The editor is the first screen that has to be
+   * REACHED, so navigation lands here.
+   *
+   * It is a keymap, not a sidebar, and that is forced rather than chosen:
+   * Sc6 asserts the whole window has exactly ONE tab stop while the queue is
+   * up, and a persistent clickable nav rail is six more. §1.7 sanctions it
+   * from the other side — "no key is bound while data-conn !== 'connected'
+   * except navigation" names navigation as a key.
+   *
+   * `verbOf` returns null for any stroke carrying meta, ctrl or alt, so a
+   * ⌘-digit cannot collide with a queue verb, today or later.
+   */
+  const SCREEN_KEYS = `${RENDERER}/keys/screens.ts`;
+
+  it('the screen keymap names every screen in the registry, and nothing else', () => {
+    const registry = [
+      ...(
+        /export const SCREENS\s*=\s*\[([^\]]*)\]/.exec(
+          archRead(`${RENDERER}/router.ts`),
+        )?.[1] ?? ''
+      ).matchAll(/'([^']+)'/g),
+    ].map((m) => m[1] as string);
+    expect(registry).toHaveLength(6);
+    const code = codeOf(archRead(SCREEN_KEYS));
+    for (const screen of registry)
+      expect(code, `${screen} is reachable`).toContain(`'${screen}'`);
+  });
+
+  it('exactly one file in the app adds a window-level key listener', () => {
+    const sites = archFiles('apps/desktop/src')
+      .filter((rel) => /addEventListener\s*\(/.test(codeOf(archRead(rel))))
+      .sort();
+    expect(sites).toEqual([`${RENDERER}/main.tsx`]);
+    // And it is a KEY listener, at the composition root, not a click
+    // delegate standing in for the controls the queue may not have.
+    const code = codeOf(archRead(`${RENDERER}/main.tsx`));
+    expect(code).toContain("addEventListener('keydown'");
+    expect(/addEventListener\(\s*'click'/.test(code)).toBe(false);
+  });
+
+  it('PLANTED: a second window-level listener is caught', () => {
+    const rel = sc10Plant(
+      `${RULES}/__s8_sc10_probe__/nav.ts`,
+      [
+        'export function wire(): void {',
+        "  window.addEventListener('keydown', () => undefined);",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const sites = archFiles('apps/desktop/src').filter((r) =>
+      /addEventListener\s*\(/.test(codeOf(archRead(r))),
+    );
+    expect(sites).toContain(rel);
+  });
+
+  it('LEGITIMATE NEAR-MISS: a pure stroke-to-screen function is clean', () => {
+    const rel = sc10Plant(
+      `${RENDERER}/derive/__s8_sc10_probe__/nav.ts`,
+      [
+        '/**',
+        ' * Pure. The composition root owns the one addEventListener call and',
+        ' * hands strokes here; this decides, it does not subscribe.',
+        ' */',
+        'export const screenFor = (key: string): string | null =>',
+        "  key === '2' ? 'rules' : null;",
+        '',
+      ].join('\n'),
+    );
+    const sites = archFiles('apps/desktop/src').filter((r) =>
+      /addEventListener\s*\(/.test(codeOf(archRead(r))),
+    );
+    expect(sites).not.toContain(rel);
   });
 });

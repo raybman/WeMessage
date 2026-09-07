@@ -318,7 +318,30 @@ export type AuditEvent =
    * stopped between `open` and `write` names nobody, and inventing a pid for
    * that row would put a fact in the audit log that the file never held.
    */
-  | { type: 'daemon.lock.stale_reclaimed'; pid: number | null };
+  | { type: 'daemon.lock.stale_reclaimed'; pid: number | null }
+  /**
+   * s9 Sc3. The LaunchAgent that supervises this daemon was written, or
+   * removed, by `wemessaged service install|uninstall`.
+   *
+   * Two rows rather than one `service.changed`, because they are opposite
+   * instructions to whoever reads the log: one says a file now exists that
+   * will start this daemon at every login, and the other says it does not.
+   * Collapsing them into a single event with a boolean is how "we turned it
+   * off" and "we turned it on" end up looking like the same entry.
+   *
+   * `plistPath` rides on the install and not on the uninstall on purpose.
+   * The install is the row that has to answer "what got written, and where",
+   * because the file it names is the thing that will run at login. The
+   * uninstall's subject is the LABEL — the plist path it happened to remove
+   * is already in the install row, and repeating it would invite a reader to
+   * believe the two are independently sourced facts.
+   *
+   * Both are appended BEFORE the side effect they describe (§1.8): an
+   * install recorded only after it succeeded is missing from exactly the run
+   * somebody needs to explain.
+   */
+  | { type: 'service.installed'; label: string; plistPath: string }
+  | { type: 'service.uninstalled'; label: string };
 
 export type AuditEventType = AuditEvent['type'];
 

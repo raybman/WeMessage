@@ -1,10 +1,8 @@
 /**
  * THE ONLY MODULE IN THIS REPOSITORY THAT MAY SPAWN macOS' SERVICE MANAGER.
  *
- * s9 Sc 1 rows 5 and 6; the type-level half of F-120. Sc 3 gives this file
- * real work (install, load, unload the gateway's LaunchAgent); at Sc 1 it
- * exists so that the guards which pin "exactly one spawner" and "a foreign
- * label is refused before any spawn" have something to be true about.
+ * s9 Sc 1 rows 5 and 6, extended by s9 Sc 3's G1 and G2; the type-level half
+ * of F-120.
  *
  * THE RULE THIS ENCODES, in one sentence: a process that can spawn a service
  * manager must never be able to reach the agent supervising it.
@@ -12,18 +10,11 @@
  * The machine this project is developed on runs other people's launchd
  * agents — an editor's helper, a backup daemon, the operator's own assistant
  * — and every one of them is one mistyped label away from being stopped by
- * this code. `launchctl bootout` does not ask, does not confirm, and does not
+ * this code. `bootout` does not ask, does not confirm, and does not
  * distinguish "the service I wrote" from "the service watching me write it".
  * So the label is not a string. It is a BRAND that only `asLaunchAgentLabel`
- * can mint, minted only for this project's own reverse-DNS namespace.
- *
- * AND THE BRAND IS NOT ENOUGH, which is the whole reason the runtime
- * re-check below exists. A brand is a compile-time fiction: `foo as
- * LaunchAgentLabel` erases it, and the compiler is happy. That cast is not a
- * hypothetical — the shapes that produce one are a label read out of a plist,
- * out of a config file, or out of `process.argv`, all three of which Sc 3
- * will have. So `runLaunchctl` asks again, at runtime, on the near side of
- * `child_process`, and throws before a process is ever created.
+ * can mint, minted only for this project's own reverse-DNS namespace, and the
+ * brand is re-checked at runtime here because a brand is erased by a cast.
  *
  * The throw is SYNCHRONOUS even though the function returns a promise. An
  * `async function` would have made the refusal a rejection, and an unawaited
@@ -31,113 +22,122 @@
  * program. That is not good enough for the last thing standing between this
  * code and somebody else's daemon.
  *
- * WHAT IS ABSENT, ON PURPOSE. The deprecated whole-domain verbs are not in
- * `LAUNCHCTL_OPS`, so no caller can name one without a cast, and the arch
- * spec's launchd sweep makes writing one down anywhere in the tree a failing
- * diff. Every op here is scoped to a target in the CALLER's GUI domain;
- * root's domain is never addressed, and this module never spawns anything
- * whose argv it did not build itself from that closed union.
+ * ─────────────────────────────────────────────────────────────────────────
+ * G1 (s9 Sc 3): THE ARGV IS BOUND TO THE LABEL, NOT MERELY ACCOMPANIED BY IT.
  *
- * The spawn is INJECTED rather than imported. Not for testability as such —
- * for the stronger property that the tests which prove this guard bites have
- * no way to reach a real service manager even by accident.
+ * Sc 1 left a real hole here, and it is worth naming precisely because the
+ * shape of it recurs. Four of the five ops put the label INTO the argv, so
+ * checking the label checks the operation. `bootstrap` does not: its argv is
+ * a domain and a PATH, and Sc 1 validated the label and then never used it.
+ * Two consequences followed, neither hypothetical:
+ *
+ *   - The label guard did not cover `bootstrap` at all. A caller could pass
+ *     a perfectly legitimate label of ours together with a plist declaring
+ *     somebody else's, and the guard would wave it through, because what
+ *     launchd loads is decided by the file's `Label` key and not by the
+ *     argument the guard inspected.
+ *
+ *   - `launchctl bootstrap <domain> <dir>` accepts a DIRECTORY and loads
+ *     every plist in it. `~/Library/LaunchAgents` on a working machine holds
+ *     dozens, including a `.disabled/` subdirectory of agents somebody
+ *     deliberately turned off. One `dirname` used by accident turns them all
+ *     back on.
+ *
+ * So `bootstrap` now requires all three to agree: the path is a FILE, its
+ * basename is `<label>.plist`, and the `Label` inside it is that same label.
+ * The scoped ops get the other half: exactly two arguments, and a target
+ * matching `gui/<digits>/<one of our labels>` — re-checked after the argv is
+ * built, because the argv is the last thing that is still true.
+ *
+ * And the domain is the CALLER's. `uid` was a free parameter in Sc 1, which
+ * meant any caller could address any user's GUI domain; it is now refused
+ * unless it is this process's own.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * G2: the real spawn lives here, in the one file the arch guard lets name the
+ * tool, and it is injected everywhere else. Not for testability as such — for
+ * the stronger property that the tests which prove these guards bite have no
+ * way to reach a real service manager even by accident.
  */
+import { execFile } from 'node:child_process';
+import { basename } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import {
+  LaunchdInvocationRefused,
+  LaunchdLabelRefused,
+  isLaunchAgentLabel,
+  type LaunchAgentLabel,
+  type LaunchctlOp,
+  type ServiceManagerFile,
+  type ServiceManagerInvocation,
+  type ServiceManagerResult,
+  type ServiceManagerSpawn,
+} from './contract.js';
+import { plistDeclaredLabel } from './plist.js';
+
+/*
+ * The vocabulary lives in `contract.ts` and is re-exported here so that Sc 1's
+ * spec keeps reading exactly as it was written, and so that no other module
+ * has to import THIS file — an import specifier is source, and a module that
+ * named this file would become a second module naming the tool.
+ */
+export {
+  asLaunchAgentLabel,
+  isLaunchAgentLabel,
+  LAUNCHCTL_OPS,
+  LAUNCH_AGENT_LABEL_PREFIX,
+  LAUNCH_AGENT_TEST_LABEL_PREFIX,
+  LaunchdInvocationRefused,
+  LaunchdLabelRefused,
+} from './contract.js';
+export type {
+  LaunchAgentLabel,
+  LaunchctlOp,
+  ServiceManagerFile,
+  ServiceManagerInvocation,
+  ServiceManagerResult,
+  ServiceManagerRun,
+  ServiceManagerSpawn,
+} from './contract.js';
 
 /**
- * A launchd label this project owns.
+ * The tool's name, and the only value of its type anywhere.
  *
- * Nominal, not structural: the private symbol means a bare `string` will not
- * satisfy it, so the only supported way to obtain one is `asLaunchAgentLabel`.
+ * `ServiceManagerFile` has no public constructor, so an invocation cannot be
+ * built by a module that has not obtained this constant — which makes the
+ * arch spec's "one module names the tool" a fact the type system agrees with
+ * rather than one it merely tolerates.
  */
-declare const LAUNCH_AGENT_LABEL: unique symbol;
-export type LaunchAgentLabel = string & {
-  readonly [LAUNCH_AGENT_LABEL]: 'launch-agent-label';
-};
+export const SERVICE_MANAGER = 'launchctl' as ServiceManagerFile;
 
-/** This project's reverse-DNS namespace. The one definition of "ours". */
-export const LAUNCH_AGENT_LABEL_PREFIX = 'sh.wemessage.';
-
-/**
- * `sh.wemessage.` followed by at least one dot-separated component of
- * lowercase alphanumerics and hyphens.
- *
- * Anchored at BOTH ends and matched on component boundaries, which is what
- * separates it from the `startsWith` a hurried version of this file would
- * have used: `sh.wemessageX.gateway` starts with neither, and
- * `xsh.wemessage.gateway` starts with the wrong thing entirely.
- */
-const LABEL_RE = /^sh\.wemessage(?:\.[a-z0-9-]+)+$/;
-
-/** Thrown for a label this project does not own. Never carries a spawn. */
-export class LaunchdLabelRefused extends Error {
-  readonly code = 'LAUNCHD_LABEL_REFUSED' as const;
-  readonly label: string;
-  constructor(label: string) {
-    super(
-      `refusing to address launchd label ${JSON.stringify(label)}: ` +
-        `only labels under ${LAUNCH_AGENT_LABEL_PREFIX} belong to this project`,
-    );
-    this.name = 'LaunchdLabelRefused';
-    this.label = label;
-  }
-}
-
-/**
- * The five scoped verbs, in the order the service lifecycle uses them.
- *
- * Frozen and exported so the arch spec can assert the vocabulary rather than
- * trust it, and so Sc 3 cannot quietly grow a sixth.
- */
-export const LAUNCHCTL_OPS = [
-  'bootstrap',
-  'bootout',
-  'enable',
-  'disable',
-  'print',
-] as const;
-export type LaunchctlOp = (typeof LAUNCHCTL_OPS)[number];
-
-/** Exactly what this module would hand to `child_process`, and nothing more. */
-export interface LaunchctlInvocation {
-  readonly file: 'launchctl';
-  readonly args: readonly string[];
-}
-
-export interface LaunchctlResult {
-  readonly code: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
+/** Sc 1's names for the shapes that now live in `contract.ts`. */
+export type LaunchctlInvocation = ServiceManagerInvocation;
+export type LaunchctlResult = ServiceManagerResult;
 
 export interface LaunchctlOptions {
-  /**
-   * The spawn. Injected, and typed to accept only an invocation this module
-   * built — a caller cannot smuggle an argv past the guard by supplying a
-   * spawn that ignores it.
-   */
-  readonly spawn: (i: LaunchctlInvocation) => Promise<LaunchctlResult>;
-  /** The GUI domain's uid. Defaults to this process's. Never a root domain. */
+  /** The spawn. Injected; typed to accept only an invocation we built. */
+  readonly spawn: ServiceManagerSpawn;
+  /** The GUI domain's uid. Defaults to this process's. Never another's. */
   readonly uid?: number;
   /** Required by `bootstrap`, meaningless to every other op. */
   readonly plistPath?: string;
 }
 
 /**
- * Mint a label, or refuse.
+ * `gui/<digits>/<a label we own>`. The only target shape that reaches a spawn.
  *
- * The ONE supported way to obtain a `LaunchAgentLabel`.
+ * The label half is spelled out rather than delegated to the label matcher
+ * because this is a check on the STRING THE PROCESS WILL RECEIVE, and the
+ * value of re-deriving it from the same regex would be zero: the point is
+ * that the assembled argv, not its inputs, is what gets inspected last.
  */
-export function asLaunchAgentLabel(raw: string): LaunchAgentLabel {
-  if (!LABEL_RE.test(raw)) throw new LaunchdLabelRefused(raw);
-  return raw as LaunchAgentLabel;
-}
+const TARGET_RE = /^gui\/\d+\/sh\.wemessage(?:\.[a-z0-9-]+)+$/;
 
 /**
- * Run one scoped `launchctl` op against a label this project owns.
+ * Run one scoped op against a label this project owns.
  *
- * Returns a promise; THROWS synchronously if the label does not survive the
- * re-check, or if `bootstrap` was asked for without a plist. Nothing is
- * spawned on either path.
+ * Returns a promise; THROWS synchronously on every refusal. Nothing is
+ * spawned on any refusing path.
  */
 export function runLaunchctl(
   op: LaunchctlOp,
@@ -148,26 +148,107 @@ export function runLaunchctl(
   // before anything is spawned. `label` arrives branded, and the brand is
   // erased by a cast, so the value is asked the same question a second time
   // at the only moment when the answer can still prevent a process.
-  if (!LABEL_RE.test(label)) throw new LaunchdLabelRefused(label);
+  if (!isLaunchAgentLabel(label)) throw new LaunchdLabelRefused(label);
 
-  const uid = options.uid ?? process.getuid?.() ?? 501;
+  const own = process.getuid?.();
+  const uid = options.uid ?? own ?? 501;
+  if (own !== undefined && uid !== own)
+    throw new LaunchdInvocationRefused(
+      `domain uid ${String(uid)} is not this process's (${String(own)}): ` +
+        `this project only ever addresses the caller's own GUI domain`,
+    );
   const domain = `gui/${String(uid)}`;
 
   let args: readonly string[];
   if (op === 'bootstrap') {
-    // `bootstrap` takes a DOMAIN and a path, not a target. Without the path
-    // the argv would be `bootstrap gui/501`, which launchd reads as a
-    // domain-wide operation — the exact class of accident this file exists
-    // to prevent, so it is refused rather than shipped.
-    if (options.plistPath === undefined || options.plistPath.length === 0)
-      throw new Error(
-        'launchctl bootstrap requires a plistPath: a bootstrap without one ' +
-          'addresses the whole domain rather than this project’s agent',
-      );
-    args = [op, domain, options.plistPath];
+    args = [op, domain, bootstrapPath(label, options.plistPath)];
   } else {
-    args = [op, `${domain}/${label}`];
+    const target = `${domain}/${label}`;
+    // Belt and braces on the assembled string. `label` passed the brand
+    // check above; this asserts that the concatenation which is actually
+    // handed over still has the one shape we mean.
+    if (!TARGET_RE.test(target))
+      throw new LaunchdInvocationRefused(
+        `assembled target ${JSON.stringify(target)} is not gui/<uid>/<our label>`,
+      );
+    args = [op, target];
+    if (args.length !== 2)
+      throw new LaunchdInvocationRefused(
+        `${op} takes exactly one target, built ${String(args.length)} arguments`,
+      );
   }
 
-  return options.spawn({ file: 'launchctl', args });
+  return options.spawn({ file: SERVICE_MANAGER, args });
 }
+
+/**
+ * The plist path `bootstrap` may be given, or a refusal.
+ *
+ * Three questions, each of which the other two do not answer:
+ *   1. is it a FILE (not the directory that would load everything in it);
+ *   2. is it NAMED for the label (launchd's own convention, made binding);
+ *   3. does it DECLARE the label (the only one launchd will actually obey).
+ */
+function bootstrapPath(label: LaunchAgentLabel, plistPath?: string): string {
+  // `bootstrap` takes a DOMAIN and a path, not a target. Without the path
+  // the argv would be `bootstrap gui/501`, which launchd reads as a
+  // domain-wide operation — the exact class of accident this file exists to
+  // prevent, so it is refused rather than shipped.
+  if (plistPath === undefined || plistPath.length === 0)
+    throw new LaunchdInvocationRefused(
+      'bootstrap requires a plistPath: a bootstrap without one addresses the ' +
+        'whole domain rather than this project’s agent',
+    );
+
+  let isFile = false;
+  try {
+    isFile = statSync(plistPath).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (!isFile)
+    throw new LaunchdInvocationRefused(
+      `${JSON.stringify(plistPath)} is not a regular file; bootstrap given a ` +
+        'directory loads every plist inside it',
+    );
+
+  const expected = `${label}.plist`;
+  if (basename(plistPath) !== expected)
+    throw new LaunchdInvocationRefused(
+      `${JSON.stringify(plistPath)} is not named ${JSON.stringify(expected)}: ` +
+        'an agent file is named for its label',
+    );
+
+  let declared: string | null;
+  try {
+    declared = plistDeclaredLabel(readFileSync(plistPath, 'utf8'));
+  } catch (cause) {
+    throw new LaunchdInvocationRefused(
+      `${JSON.stringify(plistPath)} could not be read as a property list: ` +
+        String((cause as Error).message),
+    );
+  }
+  if (declared !== label)
+    throw new LaunchdInvocationRefused(
+      `${JSON.stringify(plistPath)} declares Label ${JSON.stringify(declared)}, ` +
+        `not ${JSON.stringify(label)}: launchd obeys the file, not the argument`,
+    );
+
+  return plistPath;
+}
+
+/**
+ * The real spawn (G2).
+ *
+ * Defined here, called from exactly one place in this package — the
+ * entrypoint that composes the CLI — and from no test. `execFile` rather than
+ * a shell: the argv is an array this module built from a closed union, and
+ * there is no interpreter between it and the process.
+ */
+export const realLaunchctlSpawn: ServiceManagerSpawn = (i) =>
+  new Promise<ServiceManagerResult>((ok) => {
+    execFile(SERVICE_MANAGER, [...i.args], (err, stdout, stderr) => {
+      const code = err === null ? 0 : ((err as { code?: number }).code ?? 1);
+      ok({ code, stdout, stderr });
+    });
+  });

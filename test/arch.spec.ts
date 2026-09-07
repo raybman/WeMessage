@@ -9963,7 +9963,11 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       }
       rmSync(join(repoRoot, rel), { force: true });
     }
-    for (const dir of ['apps/desktop/scripts', 'packages/daemon/src/__s9__'])
+    for (const dir of [
+      'apps/desktop/scripts',
+      'packages/daemon/src/__s9__',
+      'packages/daemon/test/__s9__',
+    ])
       rmSync(join(repoRoot, dir), { recursive: true, force: true });
   });
 
@@ -10361,18 +10365,111 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
    */
   describe('row 5: one runner, and it is the only thing that names the tool', () => {
     const RUNNER = 'packages/daemon/src/launchd/launchctl.ts';
-    function launchctlNamers(): string[] {
+    /**
+     * The one production module that composes the runner with a real spawn.
+     * `bin.ts` is `wemessaged`; a service subcommand has to reach launchd or
+     * the product does not exist.
+     */
+    const ENTRYPOINT = 'packages/daemon/src/bin.ts';
+    /**
+     * The two test-side files permitted to name the tool: the lane every
+     * future launchd spec goes through, and the runner's own spec.
+     */
+    const TEST_NAMERS = [
+      'packages/daemon/test/helpers/launchd-lane.ts',
+      'packages/daemon/test/launchctl.spec.ts',
+    ];
+    /** The lane: the one test-side file allowed to hold a spawn. */
+    const LANE = 'packages/daemon/test/helpers/launchd-lane.ts';
+    /** The one test-side file allowed to write the binary's name out. */
+    const SPELLER = 'packages/daemon/test/launchctl.spec.ts';
+
+    /**
+     * Code with MODULE SPECIFIERS blanked.
+     *
+     * s9 Sc3 sharpened this, and the reason is worth stating because it is
+     * the shape of a guard going wrong rather than a guard being wrong.
+     *
+     * `codeOf` keeps string literals, so `import … from './launchctl.js'`
+     * counted as "naming the tool". That was harmless while nothing imported
+     * the runner and became unsatisfiable the moment something had to: the
+     * installer, the CLI and the entrypoint could not do their jobs without
+     * failing this row. The available fixes were to exempt the legitimate
+     * callers — a guard a legitimate caller must be exempted from is the
+     * wrong guard — or to say what the row always meant. It means the
+     * BINARY, not a filename. So specifiers come out, and a separate leg
+     * pins who is allowed to import the runner, which the old row said
+     * nothing about at all. Net: strictly stronger than what it replaced.
+     */
+    function withoutSpecifiers(code: string): string {
+      return code
+        .replace(/(\bfrom\s*)(['"])(?:[^'"\\]|\\.)*\2/g, '$1$2$2')
+        .replace(/(\bimport\s*\(\s*)(['"])(?:[^'"\\]|\\.)*\2/g, '$1$2$2')
+        .replace(/(\brequire\s*\(\s*)(['"])(?:[^'"\\]|\\.)*\2/g, '$1$2$2');
+    }
+
+    /** Every module specifier a file uses, as written. */
+    function specifiersOf(code: string): string[] {
+      const out: string[] = [];
+      for (const re of [
+        /\bfrom\s*(['"])((?:[^'"\\]|\\.)*)\1/g,
+        /\bimport\s*\(\s*(['"])((?:[^'"\\]|\\.)*)\1/g,
+        /\brequire\s*\(\s*(['"])((?:[^'"\\]|\\.)*)\1/g,
+      ])
+        for (const m of code.matchAll(re))
+          if (m[2] !== undefined) out.push(m[2]);
+      return out;
+    }
+
+    const TOOL = ['launch', 'ctl'].join('');
+
+    /**
+     * Two readings of "names the tool", because they are two different facts.
+     *
+     *  - `spelled`: the BINARY appears outside a module specifier. This is
+     *    the file that could hand a string to `execFile`.
+     *  - `mentions`: the identifier appears anywhere in code, specifiers
+     *    included — so importing the runner counts.
+     *
+     * Production is pinned on `spelled` (plus a separate importer leg);
+     * the test tree is pinned on BOTH, and `mentions` is the stricter of
+     * the two there because it is the reading under which importing the
+     * runner from a spec is already a hit.
+     */
+    function namers(inSrc: boolean, reading: 'spelled' | 'mentions'): string[] {
       const out: string[] = [];
       for (const root of ['packages', 'apps', 'tools'])
         for (const f of archFiles(root)) {
-          if (!f.includes('/src/')) continue;
-          if (codeOf(s9Read(f)).includes('launchctl')) out.push(f);
+          if (f.includes('/src/') !== inSrc) continue;
+          const code = codeOf(s9Read(f));
+          const hay = reading === 'spelled' ? withoutSpecifiers(code) : code;
+          if (hay.includes(TOOL)) out.push(f);
         }
-      return out.sort();
+      return [...new Set(out)].sort();
+    }
+
+    /** Files whose module specifiers point AT the runner module. */
+    function runnerImporters(inSrc: boolean): string[] {
+      const out: string[] = [];
+      for (const root of ['packages', 'apps', 'tools'])
+        for (const f of archFiles(root)) {
+          if (f.includes('/src/') !== inSrc) continue;
+          if (specifiersOf(codeOf(s9Read(f))).some((sp) => sp.includes(TOOL)))
+            out.push(f);
+        }
+      return [...new Set(out)].sort();
     }
 
     it('exactly one production module names the tool', () => {
-      expect(launchctlNamers()).toEqual([RUNNER]);
+      expect(namers(true, 'spelled')).toEqual([RUNNER]);
+    });
+
+    it('and exactly one production module IMPORTS that runner', () => {
+      // The leg the old row did not have. "One file names the binary" says
+      // nothing about who can reach it; this says the composition happens in
+      // the entrypoint and nowhere else, which is the fact that makes the
+      // injected-spawn design hold rather than merely be the current shape.
+      expect(runnerImporters(true)).toEqual([ENTRYPOINT]);
     });
 
     it('PLANTED: a second spawner anywhere under src is a second hit', () => {
@@ -10386,7 +10483,23 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           '',
         ].join('\n'),
       );
-      expect(launchctlNamers()).toEqual([RUNNER, rel].sort());
+      expect(namers(true, 'spelled')).toEqual([RUNNER, rel].sort());
+    });
+
+    it('PLANTED: a second production importer of the runner is a second hit', () => {
+      const rel = s9Plant(
+        'packages/daemon/src/__s9__/importer.ts',
+        [
+          "import { runLaunchctl } from '../launchd/launchctl.js';",
+          'export const go = runLaunchctl;',
+          '',
+        ].join('\n'),
+      );
+      expect(runnerImporters(true)).toEqual([ENTRYPOINT, rel].sort());
+      // …and it is NOT a speller, which is the whole point of blanking
+      // specifiers: importing the runner and spawning the binary are
+      // different facts and get different rows.
+      expect(namers(true, 'spelled')).toEqual([RUNNER]);
     });
 
     it('NEAR-MISS: a module that only TALKS about it is not a spawner', () => {
@@ -10400,7 +10513,105 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           '',
         ].join('\n'),
       );
-      expect(launchctlNamers()).toEqual([RUNNER]);
+      expect(namers(true, 'spelled')).toEqual([RUNNER]);
+      expect(runnerImporters(true)).toEqual([ENTRYPOINT]);
+    });
+
+    /* ── the second leg (s9 Sc3): the TEST tree, which row 5 never read ── */
+
+    describe('row 5, second leg: the test tree has exactly one lane', () => {
+      /*
+       * Everything above sweeps paths containing `/src/`, which meant the
+       * test tree — the half of the repository that is about to start
+       * running a real service manager against a machine that supervises the
+       * operator's own agents — was unguarded. Stage 2 of this scenario makes
+       * that gap load-bearing, so it closes here, before the spawner is
+       * wired to anything.
+       */
+      it('exactly two test-side files mention the tool, and they are the lane', () => {
+        expect(namers(false, 'mentions')).toEqual([...TEST_NAMERS].sort());
+      });
+
+      it('and the lane itself never SPELLS the binary', () => {
+        // Stronger than the equality above, and the reason the helper is
+        // safe to hand to Stage 2: it reaches launchd only through the
+        // runner's exported `SERVICE_MANAGER` brand, so there is no string
+        // in it that could be handed to a child process by mistake. The
+        // runner's own spec spells it because asserting on the argv is its
+        // whole job.
+        expect(namers(false, 'spelled')).toEqual([SPELLER]);
+      });
+
+      it('and only the lane may reach a child process', () => {
+        // The helper is the seam: it is the one test-side file allowed to
+        // hold a spawn. A spec that grew its own `execFile` would satisfy
+        // the equality above and fail here.
+        const others = namers(false, 'mentions').filter((f) => f !== LANE);
+        expect(others.length).toBeGreaterThan(0); // non-vacuity
+        for (const f of others)
+          expect(
+            specifiersOf(codeOf(s9Read(f))).filter((sp) =>
+              sp.includes('child_process'),
+            ),
+            f,
+          ).toEqual([]);
+      });
+
+      it('the pinned files exist and really do mention it', () => {
+        // Non-vacuity for the equality itself: a pinned list of paths that
+        // no longer existed would make the sweep empty and the row would be
+        // asserting that two missing files equal two missing files.
+        for (const f of TEST_NAMERS) {
+          expect(existsSync(join(repoRoot, f)), f).toBe(true);
+          expect(codeOf(s9Read(f)).includes(TOOL), f).toBe(true);
+        }
+      });
+
+      it('PLANTED: a third test file naming the tool is a third hit', () => {
+        const rel = s9Plant(
+          'packages/daemon/test/__s9__/rogue.spec.ts',
+          [
+            "import { execFile } from 'node:child_process';",
+            'export const go = (): void => {',
+            "  execFile('launchctl', ['bootout', 'gui/501/whatever']);",
+            '};',
+            '',
+          ].join('\n'),
+        );
+        expect(namers(false, 'mentions')).toEqual([...TEST_NAMERS, rel].sort());
+        expect(namers(false, 'spelled')).toEqual([SPELLER, rel].sort());
+      });
+
+      it('PLANTED: a spec that imports the runner directly is a hit too', () => {
+        // The case the `spelled` reading alone would miss: no binary name
+        // anywhere, just a spec helping itself to the runner instead of
+        // going through the lane.
+        const rel = s9Plant(
+          'packages/daemon/test/__s9__/direct.spec.ts',
+          [
+            "import { runLaunchctl } from '../../src/launchd/launchctl.js';",
+            'export const go = runLaunchctl;',
+            '',
+          ].join('\n'),
+        );
+        expect(namers(false, 'mentions')).toEqual([...TEST_NAMERS, rel].sort());
+        expect(namers(false, 'spelled')).toEqual([SPELLER]);
+      });
+
+      it('NEAR-MISS: a test that goes through the lane, and one that only talks, are fine', () => {
+        s9Plant(
+          'packages/daemon/test/__s9__/polite.spec.ts',
+          [
+            '// Everything here goes through the lane; nothing shells out to',
+            '// launchctl and nothing imports the runner.',
+            "import { sweepOwnDir } from '../helpers/launchd-lane.js';",
+            'export const sweep = sweepOwnDir;',
+            '',
+          ].join('\n'),
+        );
+        expect(namers(false, 'mentions')).toEqual([...TEST_NAMERS].sort());
+        expect(namers(false, 'spelled')).toEqual([SPELLER]);
+      });
     });
   });
 

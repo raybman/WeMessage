@@ -493,12 +493,21 @@ describe('s9 Sc2: the C-6 error taxonomy is total in both directions', () => {
     expect(DAEMON_ERROR_CODES.length).toBeGreaterThan(0);
   });
 
-  it('the union grew by exactly this scenario’s three codes', () => {
+  it('the union is exactly these six codes', () => {
     expect([...DAEMON_ERROR_CODES].sort()).toEqual([
       'ALREADY_RUNNING',
+      // s9 Sc3: the argv guard. Distinct from the label refusal below
+      // because they are different failures with different fixes — "that
+      // label is not ours" is a caller passing the wrong name, and "that
+      // label is ours and the plist you handed me declares somebody
+      // else's" is a caller who would have loaded a foreign agent under a
+      // legitimate-looking one.
+      'LAUNCHD_INVOCATION_REFUSED',
       // s9 Sc1 minted this one; Sc2 is where it joins a taxonomy rather
       // than being a lone `readonly code` on one class.
       'LAUNCHD_LABEL_REFUSED',
+      // s9 Sc3: the renderer's refusals.
+      'LAUNCHD_PLIST_REFUSED',
       'LOCK_DIR_UNWRITABLE',
       'PORT_IN_USE',
     ]);

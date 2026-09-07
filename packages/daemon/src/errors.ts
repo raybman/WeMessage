@@ -41,7 +41,9 @@
  */
 export const DAEMON_ERROR_CODES = [
   'ALREADY_RUNNING',
+  'LAUNCHD_INVOCATION_REFUSED',
   'LAUNCHD_LABEL_REFUSED',
+  'LAUNCHD_PLIST_REFUSED',
   'LOCK_DIR_UNWRITABLE',
   'PORT_IN_USE',
 ] as const;
@@ -63,9 +65,21 @@ export const DAEMON_ERROR_SPECS: Readonly<
     summary:
       'another daemon holds the instance lock in this directory and is alive',
   },
+  LAUNCHD_INVOCATION_REFUSED: {
+    exitCode: 1,
+    summary:
+      'a service-manager argument vector did not agree with its label, or ' +
+      'addressed a domain that is not the caller’s own',
+  },
   LAUNCHD_LABEL_REFUSED: {
     exitCode: 1,
     summary: 'a launchd label outside this project’s prefix was addressed',
+  },
+  LAUNCHD_PLIST_REFUSED: {
+    exitCode: 1,
+    summary:
+      'a LaunchAgent property list was asked to carry a key or a program ' +
+      'vector this project does not supervise',
   },
   LOCK_DIR_UNWRITABLE: {
     exitCode: 1,

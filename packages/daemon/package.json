@@ -4,6 +4,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "wemessaged": "./dist/bin.js"
+  },
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

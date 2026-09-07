@@ -412,6 +412,8 @@ const AUDIT_EVENT_TYPES = {
   'schedule.deleted': true,
   'schedule.updated': true,
   'send.attempted': true,
+  'service.installed': true,
+  'service.uninstalled': true,
   'setting.changed': true,
   'toggle.changed': true,
 } as const satisfies Record<AuditEventType, true>;
@@ -421,8 +423,9 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
     const pinned = Object.keys(AUDIT_EVENT_TYPES).sort();
     // Non-vacuity: an empty map would satisfy nothing, but a map that had
     // silently lost its contents to a bad merge would still typecheck if the
-    // union had also been emptied. Fifty-one is the count at s9 Sc2.
-    expect(pinned).toHaveLength(51);
+    // union had also been emptied. Fifty-three is the count at s9 Sc3, which
+    // added the two `service.` rows.
+    expect(pinned).toHaveLength(53);
     expect(new Set(pinned).size).toBe(pinned.length);
     // Every key really is a usable AuditEvent discriminant.
     for (const t of pinned) {
@@ -444,7 +447,7 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
     );
     const literals = [...src.matchAll(/type: '([^']+)'/g)].map((m) => m[1]);
     expect(literals.length).toBeGreaterThan(40);
-    // No literal appears twice: fifty-one variants, fifty-one names.
+    // No literal appears twice: fifty-three variants, fifty-three names.
     expect(new Set(literals).size).toBe(literals.length);
     // Equality, not containment, in both directions.
     expect([...literals].sort()).toEqual(Object.keys(AUDIT_EVENT_TYPES).sort());
@@ -474,5 +477,49 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
       type: 'daemon.lock.stale_reclaimed',
       pid: null,
     });
+  });
+
+  it('s9 Sc3 added exactly two variants, and they are the service pair', () => {
+    // Equality over the `service.` namespace, in both directions: the map
+    // cannot have gained a third row type without this failing, and it
+    // cannot have lost one of these two either.
+    const serviceEvents = Object.keys(AUDIT_EVENT_TYPES)
+      .filter((t) => t.startsWith('service.'))
+      .sort();
+    expect(serviceEvents).toEqual(['service.installed', 'service.uninstalled']);
+
+    // Both are real, constructible events with the fields the installer
+    // writes — the install carries WHAT was written and WHERE, the
+    // uninstall carries only the label, and neither carries a boolean that
+    // would let one row stand for both facts.
+    const installed: AuditEvent = {
+      type: 'service.installed',
+      label: 'sh.wemessage.gateway',
+      plistPath: '/somewhere/sh.wemessage.gateway.plist',
+    };
+    const uninstalled: AuditEvent = {
+      type: 'service.uninstalled',
+      label: 'sh.wemessage.gateway',
+    };
+    expect(JSON.parse(JSON.stringify([installed, uninstalled]))).toEqual([
+      {
+        type: 'service.installed',
+        label: 'sh.wemessage.gateway',
+        plistPath: '/somewhere/sh.wemessage.gateway.plist',
+      },
+      { type: 'service.uninstalled', label: 'sh.wemessage.gateway' },
+    ]);
+
+    // The uninstall row carries no plistPath. Excess-property checking
+    // reports at the offending PROPERTY, not at the declaration, so the
+    // directive has to sit on the property or it is itself unused — which
+    // `noUnusedTsExpectError` correctly convicted the first draft of.
+    const wrong: AuditEvent = {
+      type: 'service.uninstalled',
+      label: 'sh.wemessage.gateway',
+      // @ts-expect-error — the uninstall row has no plistPath to carry
+      plistPath: '/somewhere/sh.wemessage.gateway.plist',
+    };
+    void wrong;
   });
 });

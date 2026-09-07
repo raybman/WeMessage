@@ -303,7 +303,22 @@ export type AuditEvent =
       handle: Handle;
       from: ContactMode | null; // null = was unknown (deny-all default)
       to: ContactMode | null; // null = deleted back to unknown
-    };
+    }
+  /**
+   * s9 Sc2. A previous daemon held this directory's instance lock and is
+   * gone; this one took the lock over.
+   *
+   * The row exists because the reclaim is otherwise invisible. Removing a
+   * stale lock file destroys the only trace that another daemon was ever
+   * here, so the record has to be made BEFORE the file comes off disk (§1.8)
+   * — a reclaim written down afterwards is correct in every run that
+   * succeeds and missing from exactly the run somebody needs to explain.
+   *
+   * `pid` is nullable because a lock file written by a process that was
+   * stopped between `open` and `write` names nobody, and inventing a pid for
+   * that row would put a fact in the audit log that the file never held.
+   */
+  | { type: 'daemon.lock.stale_reclaimed'; pid: number | null };
 
 export type AuditEventType = AuditEvent['type'];
 

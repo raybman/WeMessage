@@ -189,9 +189,98 @@ interface CruiseSummary {
   };
 }
 
+/*
+ * s9 Sc2, ratified item 1 — the budget for a row that spawns `depcruise`.
+ *
+ * Measured on this tree at b492282. `packages apps fixtures` is 790 modules;
+ * `pnpm dep:check` adds `tools` for 799 modules and 2388 dependencies. (An
+ * earlier draft of this comment said 782/791/2344. Those numbers were never
+ * on this tree: see the re-measurement below, taken with the same binary and
+ * the same config.)
+ *
+ *   full-tree cruise, `packages apps fixtures`, quiet machine, 5 runs:
+ *       1160  1170  1190  1190  1210 ms   (790 modules every run)
+ *   the same command on an earlier, busier session, 5 isolated runs:
+ *       1367  1369  1376  1394  1422 ms
+ *   the same command under ordinary load (load average 18-35), 13 runs:
+ *       3107 3268 3413 4112 4222 4226 4434 4584 4753 5183 5336 7021 8905 ms
+ *   inside the full suite, worst row observed:
+ *       4890 ms  (`reports zero violations on the scaffold`)
+ *   cheapest cruise in this file, `packages/sendkit` at 38 modules, 5 runs:
+ *        450   450   450   450   450 ms   (629 ms on the busier session)
+ *   a genuine no-op, an empty root, 3 runs:
+ *        400   400   410 ms   (0 modules)
+ *
+ * vitest's per-test default is 5000 ms. It sat 110 ms above the worst
+ * in-suite measurement and 3905 ms below the worst isolated one, which is
+ * why these rows have been green-or-timeout for six slices: nobody chose
+ * that number, it is what you get for not choosing.
+ */
+
+/**
+ * The worst cruise ever measured on this tree. Not a budget: a measurement.
+ * Raising it means pasting the run that justified it into the block above.
+ */
+const CRUISE_WORST_MEASURED_MS = 8_905;
+/** The cheapest cruise in this file, `packages/sendkit` at 38 modules. */
+const CRUISE_CHEAPEST_MEASURED_MS = 450;
+/**
+ * The ratified margin, the same one Sc8 used for its checkpoint and Sc15 for
+ * its keystroke ratchet: a bound is a MEASUREMENT times three, in whichever
+ * direction the bound points. Keeping the factor as a named constant is the
+ * point of the exercise: a later slice cannot widen the budget by editing a
+ * literal, it has to move the measurement the literal is derived from.
+ *
+ * Applying 3x to the QUIET floor instead of to the worst case would give
+ * 3570 ms, below eleven of the thirteen loaded measurements above — that
+ * converts a flake into a certain failure, so the multiplier is applied to
+ * the measurement the row actually has to survive.
+ */
+const CRUISE_RATCHET_FACTOR = 3;
+/** A CEILING, not a cost: the rows still finish in seconds. */
+const CRUISE_BUDGET_MS = CRUISE_WORST_MEASURED_MS * CRUISE_RATCHET_FACTOR;
+/*
+ * And the other end — with a caveat this file is required to state, because
+ * the ratified shape was "assert a lower bound so a run that beats the floor
+ * is read as a broken measurement rather than a win", and for THIS tool a
+ * time bound cannot carry that weight. A genuine no-op (empty root, zero
+ * modules) costs 400 ms of node startup and config load, which is ABOVE any
+ * floor that leaves headroom under the 450 ms cheapest real cruise. There is
+ * no time threshold that separates "did no work" from "did the cheapest
+ * work" here.
+ *
+ * So this floor is the weak half: it catches a cruise that never spawned at
+ * all. The half that actually bites is `minModulesFor` below, which reads
+ * the no-op at 0 modules against a floor of 181 and fails it by 181.
+ */
+const CRUISE_NOOP_FLOOR_MS = Math.floor(
+  CRUISE_CHEAPEST_MEASURED_MS / CRUISE_RATCHET_FACTOR,
+);
+
+/**
+ * Lower bound on the modules a cruise of these roots must visit, derived from
+ * the tracked sources under them rather than pinned. 80% because dependency-
+ * cruiser also reports node_modules edges (which only ever ADD) while the
+ * config may exclude a file or two (which only ever subtract a handful).
+ */
+function minModulesFor(paths: string[]): number {
+  const tracked = execFileSync('git', ['ls-files', '--', ...paths], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\n')
+    .filter(
+      (f) =>
+        /\.tsx?$/.test(f) && !/\.spec\.tsx?$/.test(f) && !/\.d\.ts$/.test(f),
+    );
+  return Math.max(1, Math.ceil(tracked.length * 0.8));
+}
+
 function cruise(paths: string[]): CruiseSummary {
   // --output-type json always exits per violations; capture stdout regardless.
   let stdout: string;
+  const startedAt = Date.now();
   try {
     stdout = execFileSync(
       depcruiseBin,
@@ -209,15 +298,36 @@ function cruise(paths: string[]): CruiseSummary {
     if (!err.stdout) throw e;
     stdout = err.stdout;
   }
-  return JSON.parse(stdout) as CruiseSummary;
+  const elapsed = Date.now() - startedAt;
+  const result = JSON.parse(stdout) as CruiseSummary;
+  // The three ways a cruise can lie about having happened: too fast, too
+  // slow, or too small. Every caller inherits all three.
+  expect(
+    elapsed,
+    `cruise of ${paths.join(' ')} returned in ${elapsed}ms; that is faster ` +
+      'than reading the tree takes, so it did not read the tree',
+  ).toBeGreaterThanOrEqual(CRUISE_NOOP_FLOOR_MS);
+  expect(
+    elapsed,
+    `cruise of ${paths.join(' ')} took ${elapsed}ms, past the measured budget`,
+  ).toBeLessThanOrEqual(CRUISE_BUDGET_MS);
+  expect(
+    result.modules.length,
+    `cruise of ${paths.join(' ')} visited ${result.modules.length} modules`,
+  ).toBeGreaterThanOrEqual(minModulesFor(paths));
+  return result;
 }
 
 describe('arch invariants (dependency-cruiser)', () => {
-  it('reports zero violations on the scaffold (INV-1 + §3.1 arrows)', () => {
-    const result = cruise(['packages', 'apps', 'fixtures']);
-    expect(result.summary.violations).toEqual([]);
-    expect(result.summary.error).toBe(0);
-  });
+  it(
+    'reports zero violations on the scaffold (INV-1 + §3.1 arrows)',
+    () => {
+      const result = cruise(['packages', 'apps', 'fixtures']);
+      expect(result.summary.violations).toEqual([]);
+      expect(result.summary.error).toBe(0);
+    },
+    CRUISE_BUDGET_MS,
+  );
 
   describe('proven teeth', () => {
     const probe = join(repoRoot, 'packages/core/src/__arch_teeth_probe__.ts');
@@ -226,25 +336,33 @@ describe('arch invariants (dependency-cruiser)', () => {
       rmSync(probe, { force: true });
     });
 
-    it('flags a planted core -> store import (core-no-internal-deps)', () => {
-      writeFileSync(
-        probe,
-        // Relative path so resolution cannot silently fail: core has no
-        // package.json dep on store (that is the point of INV-1).
-        "import '../../store/src/index.js';\nexport {};\n",
-      );
-      const result = cruise(['packages/core']);
-      const names = result.summary.violations.map((v) => v.rule.name);
-      expect(names).toContain('core-no-internal-deps');
-      expect(result.summary.error).toBeGreaterThan(0);
-    });
+    it(
+      'flags a planted core -> store import (core-no-internal-deps)',
+      () => {
+        writeFileSync(
+          probe,
+          // Relative path so resolution cannot silently fail: core has no
+          // package.json dep on store (that is the point of INV-1).
+          "import '../../store/src/index.js';\nexport {};\n",
+        );
+        const result = cruise(['packages/core']);
+        const names = result.summary.violations.map((v) => v.rule.name);
+        expect(names).toContain('core-no-internal-deps');
+        expect(result.summary.error).toBeGreaterThan(0);
+      },
+      CRUISE_BUDGET_MS,
+    );
 
-    it('flags a planted core -> node:fs I/O builtin import (core-no-node-io-builtins)', () => {
-      writeFileSync(probe, "import 'node:fs';\nexport {};\n");
-      const result = cruise(['packages/core']);
-      const names = result.summary.violations.map((v) => v.rule.name);
-      expect(names).toContain('core-no-node-io-builtins');
-    });
+    it(
+      'flags a planted core -> node:fs I/O builtin import (core-no-node-io-builtins)',
+      () => {
+        writeFileSync(probe, "import 'node:fs';\nexport {};\n");
+        const result = cruise(['packages/core']);
+        const names = result.summary.violations.map((v) => v.rule.name);
+        expect(names).toContain('core-no-node-io-builtins');
+      },
+      CRUISE_BUDGET_MS,
+    );
   });
 
   /**
@@ -268,13 +386,17 @@ describe('arch invariants (dependency-cruiser)', () => {
    *      tamper harness lives in packages/store/test by design, s2 §3.2 #4).
    */
   describe('S2 extensions (s2-execution Scenario 1)', () => {
-    it('cruises the core rules/audit sources under the INV-1 rules (a)', () => {
-      const result = cruise(['packages', 'apps', 'fixtures']);
-      const sources = result.modules.map((m) => m.source);
-      expect(sources).toContain('packages/core/src/rules/index.ts');
-      expect(sources).toContain('packages/core/src/audit/index.ts');
-      expect(result.summary.violations).toEqual([]);
-    });
+    it(
+      'cruises the core rules/audit sources under the INV-1 rules (a)',
+      () => {
+        const result = cruise(['packages', 'apps', 'fixtures']);
+        const sources = result.modules.map((m) => m.source);
+        expect(sources).toContain('packages/core/src/rules/index.ts');
+        expect(sources).toContain('packages/core/src/audit/index.ts');
+        expect(result.summary.violations).toEqual([]);
+      },
+      CRUISE_BUDGET_MS,
+    );
 
     describe('proven teeth: closed dependency list (b)', () => {
       const probe = join(
@@ -286,21 +408,29 @@ describe('arch invariants (dependency-cruiser)', () => {
         rmSync(probe, { force: true });
       });
 
-      it('flags a planted core -> re2 import (core-no-unresolvable-imports)', () => {
-        writeFileSync(probe, "import 're2';\nexport {};\n");
-        const result = cruise(['packages/core']);
-        const names = result.summary.violations.map((v) => v.rule.name);
-        expect(names).toContain('core-no-unresolvable-imports');
-        expect(result.summary.error).toBeGreaterThan(0);
-      });
+      it(
+        'flags a planted core -> re2 import (core-no-unresolvable-imports)',
+        () => {
+          writeFileSync(probe, "import 're2';\nexport {};\n");
+          const result = cruise(['packages/core']);
+          const names = result.summary.violations.map((v) => v.rule.name);
+          expect(names).toContain('core-no-unresolvable-imports');
+          expect(result.summary.error).toBeGreaterThan(0);
+        },
+        CRUISE_BUDGET_MS,
+      );
 
-      it('flags a planted core -> ulid import (core-no-unresolvable-imports)', () => {
-        writeFileSync(probe, "import 'ulid';\nexport {};\n");
-        const result = cruise(['packages/core']);
-        const names = result.summary.violations.map((v) => v.rule.name);
-        expect(names).toContain('core-no-unresolvable-imports');
-        expect(result.summary.error).toBeGreaterThan(0);
-      });
+      it(
+        'flags a planted core -> ulid import (core-no-unresolvable-imports)',
+        () => {
+          writeFileSync(probe, "import 'ulid';\nexport {};\n");
+          const result = cruise(['packages/core']);
+          const names = result.summary.violations.map((v) => v.rule.name);
+          expect(names).toContain('core-no-unresolvable-imports');
+          expect(result.summary.error).toBeGreaterThan(0);
+        },
+        CRUISE_BUDGET_MS,
+      );
     });
 
     describe('node:crypto is legal in core (c)', () => {
@@ -313,17 +443,21 @@ describe('arch invariants (dependency-cruiser)', () => {
         rmSync(probe, { force: true });
       });
 
-      it('does not flag a core/audit -> node:crypto import', () => {
-        writeFileSync(
-          probe,
-          "import { createHash } from 'node:crypto';\n" +
-            'export const sha256hex = (s: string): string =>\n' +
-            "  createHash('sha256').update(s, 'utf8').digest('hex');\n",
-        );
-        const result = cruise(['packages/core']);
-        expect(result.summary.violations).toEqual([]);
-        expect(result.summary.error).toBe(0);
-      });
+      it(
+        'does not flag a core/audit -> node:crypto import',
+        () => {
+          writeFileSync(
+            probe,
+            "import { createHash } from 'node:crypto';\n" +
+              'export const sha256hex = (s: string): string =>\n' +
+              "  createHash('sha256').update(s, 'utf8').digest('hex');\n",
+          );
+          const result = cruise(['packages/core']);
+          expect(result.summary.violations).toEqual([]);
+          expect(result.summary.error).toBe(0);
+        },
+        CRUISE_BUDGET_MS,
+      );
     });
 
     it('append-only audit_log by construction: no UPDATE/DELETE anywhere outside test dirs (d)', () => {
@@ -459,23 +593,34 @@ describe('arch invariants (dependency-cruiser)', () => {
         rmSync(coreProbe, { force: true });
       });
 
-      it('sendkit -> node:child_process cruises clean', () => {
-        writeFileSync(
-          sendkitProbe,
-          "import 'node:child_process';\nexport {};\n",
-        );
-        const result = cruise(['packages/sendkit']);
-        expect(result.summary.violations).toEqual([]);
-        expect(result.summary.error).toBe(0);
-      });
+      it(
+        'sendkit -> node:child_process cruises clean',
+        () => {
+          writeFileSync(
+            sendkitProbe,
+            "import 'node:child_process';\nexport {};\n",
+          );
+          const result = cruise(['packages/sendkit']);
+          expect(result.summary.violations).toEqual([]);
+          expect(result.summary.error).toBe(0);
+        },
+        CRUISE_BUDGET_MS,
+      );
 
-      it('the identical import from core is flagged (core-no-node-io-builtins)', () => {
-        writeFileSync(coreProbe, "import 'node:child_process';\nexport {};\n");
-        const result = cruise(['packages/core']);
-        const names = result.summary.violations.map((v) => v.rule.name);
-        expect(names).toContain('core-no-node-io-builtins');
-        expect(result.summary.error).toBeGreaterThan(0);
-      });
+      it(
+        'the identical import from core is flagged (core-no-node-io-builtins)',
+        () => {
+          writeFileSync(
+            coreProbe,
+            "import 'node:child_process';\nexport {};\n",
+          );
+          const result = cruise(['packages/core']);
+          const names = result.summary.violations.map((v) => v.rule.name);
+          expect(names).toContain('core-no-node-io-builtins');
+          expect(result.summary.error).toBeGreaterThan(0);
+        },
+        CRUISE_BUDGET_MS,
+      );
     });
 
     it('(d) public-repo sweep: no brand strings, no +1 numbers outside the +1555 fiction block', () => {
@@ -844,28 +989,36 @@ describe('arch invariants (dependency-cruiser)', () => {
       expect(sendishExportedTypeNames()).toEqual([]);
     });
 
-    it('(b) adapters are thin clients: protocol + client only', () => {
-      const result = cruise(['packages', 'apps', 'fixtures']);
-      expect(
-        result.summary.violations.filter(
-          (v) => v.rule.name === 'adapters-thin-clients',
-        ),
-      ).toEqual([]);
-      // The rule must EXIST, not merely find nothing: an absent rule and a
-      // satisfied rule look identical in a violations list.
-      const config = readFileSync(
-        join(repoRoot, '.dependency-cruiser.cjs'),
-        'utf8',
-      );
-      expect(config).toContain("name: 'adapters-thin-clients'");
-    });
+    it(
+      '(b) adapters are thin clients: protocol + client only',
+      () => {
+        const result = cruise(['packages', 'apps', 'fixtures']);
+        expect(
+          result.summary.violations.filter(
+            (v) => v.rule.name === 'adapters-thin-clients',
+          ),
+        ).toEqual([]);
+        // The rule must EXIST, not merely find nothing: an absent rule and a
+        // satisfied rule look identical in a violations list.
+        const config = readFileSync(
+          join(repoRoot, '.dependency-cruiser.cjs'),
+          'utf8',
+        );
+        expect(config).toContain("name: 'adapters-thin-clients'");
+      },
+      CRUISE_BUDGET_MS,
+    );
 
-    it('(c) protocol keeps zero runtime deps and type-only core reach', () => {
-      const result = cruise(['packages', 'apps', 'fixtures']);
-      const names = result.summary.violations.map((v) => v.rule.name);
-      expect(names).not.toContain('protocol-zero-runtime-deps');
-      expect(names).not.toContain('protocol-core-type-only');
-    });
+    it(
+      '(c) protocol keeps zero runtime deps and type-only core reach',
+      () => {
+        const result = cruise(['packages', 'apps', 'fixtures']);
+        const names = result.summary.violations.map((v) => v.rule.name);
+        expect(names).not.toContain('protocol-zero-runtime-deps');
+        expect(names).not.toContain('protocol-core-type-only');
+      },
+      CRUISE_BUDGET_MS,
+    );
 
     it('(d) no real WS_SECRET value is committed anywhere', () => {
       expect(realSecretAssignments()).toEqual([]);
@@ -2587,22 +2740,26 @@ describe('arch invariants (dependency-cruiser)', () => {
     });
   });
 
-  it('does not flag violations planted outside the cruised tree (sandbox sanity)', () => {
-    // Sanity check that the teeth tests above are attributable to the probe
-    // file, not ambient noise: an identical import in a temp dir outside the
-    // repo tree is invisible to the cruise.
-    const sandbox = mkdtempSync(join(tmpdir(), 'wemessage-arch-'));
-    try {
-      writeFileSync(
-        join(sandbox, 'probe.ts'),
-        "import 'node:fs';\nexport {};\n",
-      );
-      const result = cruise(['packages', 'apps', 'fixtures']);
-      expect(result.summary.violations).toEqual([]);
-    } finally {
-      rmSync(sandbox, { recursive: true, force: true });
-    }
-  });
+  it(
+    'does not flag violations planted outside the cruised tree (sandbox sanity)',
+    () => {
+      // Sanity check that the teeth tests above are attributable to the probe
+      // file, not ambient noise: an identical import in a temp dir outside the
+      // repo tree is invisible to the cruise.
+      const sandbox = mkdtempSync(join(tmpdir(), 'wemessage-arch-'));
+      try {
+        writeFileSync(
+          join(sandbox, 'probe.ts'),
+          "import 'node:fs';\nexport {};\n",
+        );
+        const result = cruise(['packages', 'apps', 'fixtures']);
+        expect(result.summary.violations).toEqual([]);
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    },
+    CRUISE_BUDGET_MS,
+  );
 });
 
 /**
@@ -3016,7 +3173,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         existsSync(join(repoRoot, rel)),
       );
       violations = cruise(['packages', 'apps']).summary.violations;
-    });
+    }, CRUISE_BUDGET_MS);
     afterAll(() => {
       for (const [rel] of PROBES) rmSync(join(repoRoot, rel), { force: true });
       rmSync(join(repoRoot, 'apps/desktop/src/__s8_probe__'), {
@@ -10290,7 +10447,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       const result = cruise(['packages', 'apps', 'tools']);
       violations = result.summary.violations;
       cruisedSources = result.modules.map((m) => m.source);
-    });
+    }, CRUISE_BUDGET_MS);
     afterAll(() => {
       for (const [rel] of PROBES) rmSync(join(repoRoot, rel), { force: true });
     });
@@ -10820,5 +10977,402 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
     // fact about the index rather than a fact about the filesystem.
     expect(existsSync(join(repoRoot, 'docs'))).toBe(true);
     expect(s9Read('.gitignore')).toMatch(/^docs\/$/m);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* s9 Sc2 — the two forward items the S8 close deferred to this slice.       */
+/*                                                                           */
+/* Neither is about the daemon lock. Both are about guards that have been    */
+/* quietly not-guarding: a licence gate that scans three of eighteen roots,  */
+/* and a dependency-cruise whose budget is vitest's default rather than a    */
+/* measurement. Sc2 owns them because Sc10 is the scenario that makes the    */
+/* first one bite.                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The globs under the `packages:` key of `pnpm-workspace.yaml`, in file
+ * order. Sectioned rather than line-swept: pnpm 10 manifests carry other
+ * list-valued keys (`onlyBuiltDependencies:`, `catalog:`) and a sweep would
+ * read their entries as workspace globs.
+ */
+function workspaceGlobs(): string[] {
+  const yaml = readFileSync(join(repoRoot, 'pnpm-workspace.yaml'), 'utf8');
+  const globs: string[] = [];
+  let inPackages = false;
+  for (const line of yaml.split('\n')) {
+    if (/^\S/.test(line)) {
+      inPackages = /^packages:\s*(?:#.*)?$/.test(line);
+      continue;
+    }
+    if (!inPackages) continue;
+    const m = /^\s*-\s*['"]?([^'"#\s]+)['"]?\s*(?:#.*)?$/.exec(line);
+    if (m?.[1] !== undefined) globs.push(m[1]);
+  }
+  return globs;
+}
+
+/**
+ * The only two glob shapes the derivation below understands: a literal
+ * directory, or one level of `*` at the end. Everything pnpm also accepts —
+ * `**`, a `!` exclusion, a brace set, a `*` in the middle — would be read as
+ * a literal directory that does not exist and dropped in silence, and a
+ * dropped glob is a member the licence gate never learns about. So the shape
+ * is asserted rather than assumed, and an unhandled shape fails loudly.
+ */
+const SUPPORTED_WORKSPACE_GLOB =
+  /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*(?:\/\*)?$/;
+
+/** Every workspace member directory, derived from `pnpm-workspace.yaml`. */
+function workspacePackageDirs(): string[] {
+  const globs = workspaceGlobs();
+  for (const glob of globs) {
+    if (!SUPPORTED_WORKSPACE_GLOB.test(glob))
+      throw new Error(
+        `pnpm-workspace.yaml declares '${glob}', a glob shape this ` +
+          'derivation cannot expand. Teach workspacePackageDirs() the shape ' +
+          'rather than letting its members skip the licence gate.',
+      );
+  }
+  const dirs: string[] = [];
+  for (const glob of globs) {
+    if (glob.endsWith('/*')) {
+      const base = glob.slice(0, -2);
+      const baseAbs = join(repoRoot, base);
+      if (!existsSync(baseAbs)) continue;
+      for (const entry of readdirSync(baseAbs)) {
+        const rel = `${base}/${entry}`;
+        if (existsSync(join(repoRoot, rel, 'package.json'))) dirs.push(rel);
+      }
+    } else if (existsSync(join(repoRoot, glob, 'package.json'))) {
+      dirs.push(glob);
+    }
+  }
+  return dirs.sort();
+}
+
+describe('S9 extensions (s9-execution Scenario 2: the two deferred guards)', () => {
+  /* ── ratified item 2: the licence gate reaches every root ──────────────── */
+
+  describe('licenses:check scans a root set derived from the workspace', () => {
+    /**
+     * `license-checker-rseidelsohn` resolves from ONE `--start` root and pnpm
+     * does not hoist, so the set of licences it sees is exactly the set
+     * declared by the manifests reachable from that root. Three `--start`
+     * roots therefore checked three manifests' worth of dependencies and
+     * called it a repository-wide GPL gate.
+     *
+     * Two existing rows already assert single roots by name
+     * (`packages/adapter-testkit/test/pack.spec.ts` derives them from the
+     * PUBLISH set; `row 10` above names `apps/desktop`). Both are true and
+     * both are narrower than the tree: the publish set does not contain
+     * `packages/daemon`, which is where `fastify`, `zod` and `better-sqlite3`
+     * are declared, and it does not contain `tools/release`, which Sc1 gave
+     * permission to import `yaml` and Sc10 will.
+     *
+     * This row derives the required set from `pnpm-workspace.yaml` instead,
+     * so a nineteenth member added by a later scenario fails HERE rather
+     * than silently inheriting an unchecked licence.
+     */
+    const licensesScript = (): string =>
+      String(
+        (
+          JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+            scripts?: Record<string, string>;
+          }
+        ).scripts?.['licenses:check'] ?? '',
+      );
+
+    it('every workspace glob is a shape the derivation can expand', () => {
+      /*
+       * The derivation above is the only thing standing between a new
+       * workspace member and an unscanned licence. It handles a literal
+       * directory and a single trailing `*`. pnpm accepts more than that,
+       * and the shapes it also accepts are exactly the ones that would be
+       * dropped without a word: `packages/**` resolves to no directory named
+       * `**`, so it contributes nothing and every member under it becomes
+       * invisible to the row below.
+       */
+      const globs = workspaceGlobs();
+      // Non-vacuity: the sectioned read really found the packages list.
+      expect(globs.length).toBeGreaterThanOrEqual(4);
+      expect(globs).toContain('packages/*');
+      expect(globs).toContain('fixtures');
+      for (const glob of globs) expect(glob).toMatch(SUPPORTED_WORKSPACE_GLOB);
+      // Both branches of the derivation are exercised by the real file, so
+      // neither is dead code that could rot unnoticed.
+      expect(globs.some((g) => g.endsWith('/*'))).toBe(true);
+      expect(globs.some((g) => !g.endsWith('/*'))).toBe(true);
+      // And the guard is real: the shapes pnpm allows and this cannot expand
+      // are rejected, not quietly dropped.
+      for (const bad of [
+        'packages/**',
+        '!packages/legacy',
+        'packages/{core,cli}',
+        'packages/*/src',
+        'apps/*-web',
+      ])
+        expect(SUPPORTED_WORKSPACE_GLOB.test(bad)).toBe(false);
+    });
+
+    it('the derived root set is the workspace root plus every member', () => {
+      const members = workspacePackageDirs();
+      // Non-vacuity: an empty derivation would make every assertion below
+      // pass without scanning anything.
+      expect(members.length).toBeGreaterThan(10);
+      expect(members).toContain('tools/release');
+      expect(members).toContain('packages/daemon');
+      expect(members).toContain('apps/desktop');
+      // Every derived directory really is a package on disk.
+      for (const dir of members)
+        expect(existsSync(join(repoRoot, dir, 'package.json'))).toBe(true);
+    });
+
+    it('the script starts at every derived root and at the repo root', () => {
+      const script = licensesScript();
+      expect(script).not.toBe('');
+      const starts = [...script.matchAll(/--start\s+(\S+)/g)].map((m) => m[1]);
+      const expected = ['.', ...workspacePackageDirs()];
+      expect(expected.length).toBeGreaterThan(10);
+      expect([...starts].sort()).toEqual([...expected].sort());
+    });
+
+    it('every pass fails on the same GPL/AGPL family', () => {
+      // A root added without the `--failOn` clause would be a pass that
+      // scans and then approves whatever it finds.
+      const script = licensesScript();
+      const passes = script
+        .split('&&')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(passes.length).toBe(workspacePackageDirs().length + 1);
+      for (const pass of passes) {
+        expect(pass).toMatch(/^license-checker-rseidelsohn\b/);
+        expect(pass).toContain("--failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0'");
+      }
+    });
+  });
+
+  /* ── ratified item 1: the dependency-cruise budget is measured ─────────── */
+
+  describe('the dependency-cruise budget is derived from a measurement', () => {
+    /**
+     * These rows spawn `depcruise` as a child process. vitest's per-test
+     * default is 5000 ms and nobody ever chose it; the cruise grew from 776
+     * to 791 modules over six slices and the rows became green-or-timeout
+     * depending on what else the machine was doing. The fix is not a bigger
+     * magic number, it is a budget with a recorded derivation, a lower bound
+     * so that a suspiciously fast cruise is read as a broken measurement
+     * rather than a win, and an enumeration so no cruising row escapes it.
+     *
+     * The enumeration is the part that has to be derived: a hand-kept list of
+     * "rows that cruise" is a list that goes stale the first time somebody
+     * adds a row. This row reads THIS file and asks which `it`/`beforeAll`
+     * blocks contain a `cruise(` call, then asserts each of them carries the
+     * budget as its explicit timeout.
+     */
+    const ownSource = (): string[] =>
+      readFileSync(join(repoRoot, 'test', 'arch.spec.ts'), 'utf8').split('\n');
+
+    /**
+     * The same lines with comments and string/template literals blanked out,
+     * line count preserved so every index below still names the real line.
+     *
+     * Written after a self-trip: the first draft scanned raw text, so a row
+     * whose NAME or whose comment mentioned `cruise([...])` was counted as a
+     * row that spawns depcruise. Worse, a mention on the `it(` line itself
+     * was attributed to the block ABOVE it, because an opener is not less
+     * than itself. A prose mention is a legitimate near-miss and flagging it
+     * would be a guard a legitimate caller has to be exempted from, which is
+     * the wrong guard. This is a precision fix, not a relaxation: a real
+     * `cruise(` call is never inside a comment or a string, so nothing that
+     * used to be caught escapes — the row below asserts the count is
+     * unchanged.
+     */
+    const codeOnly = (lines: string[]): string[] => {
+      const out: string[] = [];
+      let inBlockComment = false;
+      for (const line of lines) {
+        let kept = '';
+        let quote: string | null = null;
+        for (let i = 0; i < line.length; i += 1) {
+          const c = line[i] ?? '';
+          const next = line[i + 1] ?? '';
+          if (inBlockComment) {
+            if (c === '*' && next === '/') {
+              inBlockComment = false;
+              i += 1;
+            }
+            continue;
+          }
+          if (quote !== null) {
+            if (c === '\\') i += 1;
+            else if (c === quote) quote = null;
+            continue;
+          }
+          if (c === '/' && next === '*') {
+            inBlockComment = true;
+            i += 1;
+            continue;
+          }
+          if (c === '/' && next === '/') break;
+          if (c === "'" || c === '"' || c === '`') {
+            quote = c;
+            continue;
+          }
+          kept += c;
+        }
+        out.push(kept);
+      }
+      return out;
+    };
+
+    /** Line indexes (0-based) of every `it(`/`beforeAll(` opener. */
+    const openerLines = (lines: string[]): number[] => {
+      const out: number[] = [];
+      lines.forEach((line, i) => {
+        if (/^\s*(it|it\.\w+|beforeAll)\(/.test(line)) out.push(i);
+      });
+      return out;
+    };
+
+    /**
+     * The opener a given line belongs to: the nearest one at or above it.
+     * `<=`, not `<`, so a one-line `beforeAll(() => cruise([...]))` belongs
+     * to itself rather than to whatever block happens to precede it.
+     */
+    const ownerOf = (openers: number[], line: number): number => {
+      let owner = -1;
+      for (const o of openers) if (o <= line) owner = o;
+      return owner;
+    };
+
+    it('derives both bounds from a measurement times the ratified factor', () => {
+      const src = readFileSync(join(repoRoot, 'test', 'arch.spec.ts'), 'utf8');
+      /*
+       * The point of this row is that neither bound is a literal. A later
+       * slice that wants a bigger budget has to move the MEASUREMENT, which
+       * means pasting the run that justified it into the comment block. A
+       * bare `const CRUISE_BUDGET_MS = 60_000;` fails here.
+       */
+      expect(src).toMatch(
+        /const CRUISE_BUDGET_MS =\s*\n?\s*CRUISE_WORST_MEASURED_MS \* CRUISE_RATCHET_FACTOR;/,
+      );
+      expect(src).toMatch(
+        /const CRUISE_NOOP_FLOOR_MS = Math\.floor\(\s*\n?\s*CRUISE_CHEAPEST_MEASURED_MS \/ CRUISE_RATCHET_FACTOR,?\s*\n?\s*\);/,
+      );
+      // The two measurements are literals, because measurements are.
+      expect(src).toMatch(/const CRUISE_WORST_MEASURED_MS = [\d_]+;/);
+      expect(src).toMatch(/const CRUISE_CHEAPEST_MEASURED_MS = [\d_]+;/);
+      // The factor is the ratified one and is not a free parameter.
+      expect(CRUISE_RATCHET_FACTOR).toBe(3);
+      expect(CRUISE_BUDGET_MS).toBe(
+        CRUISE_WORST_MEASURED_MS * CRUISE_RATCHET_FACTOR,
+      );
+      expect(CRUISE_NOOP_FLOOR_MS).toBe(
+        Math.floor(CRUISE_CHEAPEST_MEASURED_MS / CRUISE_RATCHET_FACTOR),
+      );
+      expect(CRUISE_NOOP_FLOOR_MS).toBeGreaterThan(0);
+      expect(CRUISE_BUDGET_MS).toBeGreaterThan(CRUISE_NOOP_FLOOR_MS);
+      // The default this replaces. A budget at or below it would leave the
+      // rows exactly where six slices of flake found them.
+      expect(CRUISE_BUDGET_MS).toBeGreaterThan(5000);
+      // The floor leaves headroom under the cheapest cruise ever measured,
+      // so a slow machine cannot trip it.
+      expect(CRUISE_NOOP_FLOOR_MS).toBeLessThan(CRUISE_CHEAPEST_MEASURED_MS);
+      // The derivations are in the file, in prose, next to the numbers.
+      expect(src).toMatch(/quiet machine/i);
+      expect(src).toMatch(/a genuine no-op/i);
+    });
+
+    it('the module-count bound is the no-op detector, and it is not vacuous', () => {
+      /*
+       * Stated in the comment above and asserted here, because it is the
+       * claim the whole budget block rests on: the TIME floor cannot tell a
+       * no-op from work (a zero-module cruise costs 400 ms of startup, only
+       * 50 ms under the cheapest real cruise), so the bound that catches a
+       * cruise which silently read nothing is the module count.
+       */
+      const floor = minModulesFor(['packages', 'apps', 'fixtures']);
+      // Non-vacuous: the derivation finds real sources, not an empty list.
+      expect(floor).toBeGreaterThan(100);
+      // A no-op returns zero modules, and zero is nowhere near the floor.
+      expect(0).toBeLessThan(floor);
+      // And it is derived, not pinned: it moves with the tracked tree.
+      expect(minModulesFor(['packages/sendkit'])).toBeLessThan(floor);
+      expect(minModulesFor(['packages/sendkit'])).toBeGreaterThan(0);
+      // The measured no-op cost sits ABOVE the time floor, which is exactly
+      // why the time floor cannot be the detector.
+      expect(CRUISE_NOOP_FLOOR_MS).toBeLessThan(400);
+    });
+
+    it('every block that cruises carries the budget as its timeout', () => {
+      const lines = ownSource();
+      const code = codeOnly(lines);
+      const openers = openerLines(lines);
+      expect(openers.length).toBeGreaterThan(100);
+
+      const cruising = new Set<number>();
+      code.forEach((line, i) => {
+        // The call sites, not the declaration, not a method of the same name,
+        // and not this file's prose about them.
+        if (!/(?:^|[^.\w])cruise\(\[/.test(line)) return;
+        const owner = ownerOf(openers, i);
+        expect(
+          owner,
+          `cruise() at line ${i + 1} is outside any block`,
+        ).toBeGreaterThanOrEqual(0);
+        cruising.add(owner);
+      });
+
+      /*
+       * Two shapes, because Prettier renders the SAME argument two ways
+       * depending on whether the call fits a line: `}, CRUISE_BUDGET_MS);`
+       * when it does, and `CRUISE_BUDGET_MS,` on a line of its own between
+       * `},` and `);` when it does not. This row is about the argument being
+       * passed, not about how the formatter chose to lay it out, so it reads
+       * both. Neither shape can match anything else in this file: the only
+       * other mentions of the constant are its declaration, a comparison
+       * inside `cruise()`, and the source-literal assertions above, and none
+       * of those is a bare trailing argument.
+       */
+      const TIMEOUT_ARG =
+        /^\s*(?:\},\s*CRUISE_BUDGET_MS\);|CRUISE_BUDGET_MS,)\s*$/;
+      const budgeted = new Set<number>();
+      code.forEach((line, i) => {
+        if (!TIMEOUT_ARG.test(line)) return;
+        budgeted.add(ownerOf(openers, i));
+      });
+
+      // Non-vacuity: this file really does cruise, in more than one block.
+      expect(cruising.size).toBeGreaterThanOrEqual(8);
+      /*
+       * And the blanking did not blank away a call site. Every `cruise([`
+       * that survives comment/string removal is a real call, and the count
+       * of real calls is asserted against the raw count minus the mentions,
+       * so a future prose mention cannot quietly reduce the enumeration.
+       */
+      const rawHits = lines.filter((l) =>
+        /(?:^|[^.\w])cruise\(\[/.test(l),
+      ).length;
+      const codeHits = code.filter((l) =>
+        /(?:^|[^.\w])cruise\(\[/.test(l),
+      ).length;
+      expect(codeHits).toBeGreaterThanOrEqual(14);
+      expect(rawHits).toBeGreaterThanOrEqual(codeHits);
+      const missing = [...cruising]
+        .filter((o) => !budgeted.has(o))
+        .map((o) => `${o + 1}: ${lines[o]?.trim() ?? ''}`);
+      expect(
+        missing,
+        'these blocks spawn depcruise on vitest’s default timeout',
+      ).toEqual([]);
+      // And nothing carries the budget without earning it: a stray timeout
+      // on a cheap row is a 30-second hang waiting to be misdiagnosed.
+      const unearned = [...budgeted]
+        .filter((o) => !cruising.has(o))
+        .map((o) => `${o + 1}: ${lines[o]?.trim() ?? ''}`);
+      expect(unearned).toEqual([]);
+    });
   });
 });

@@ -16,6 +16,9 @@
  * F-16 (coordinator-confirmed): additive Actor system-reason extension
  *   'recovery' | 'ingest' | 'rule-engine' — no existing variant touched.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type {
   Actor,
@@ -326,5 +329,150 @@ describe('AuditEvent union (S2 vocabulary, §2.4.4 subset) + F-16 Actor extensio
     // @ts-expect-error — arbitrary reasons still rejected
     const bogus: Actor = { kind: 'system', reason: 'reboot-detected' };
     void bogus;
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* C-7 — the audit taxonomy pin.                                             */
+/*                                                                           */
+/* s9 Sc2 wrote this because it went looking for the C-7 pin before adding   */
+/* `daemon.lock.stale_reclaimed` to the union and found that there wasn't    */
+/* one. `AuditEvent` had grown to fifty variants across eight slices with    */
+/* nothing asserting its membership in either direction: the only thing in   */
+/* the tree called an audit taxonomy check was a prose comparison of the     */
+/* gate-reason table in `audit/events.ts`'s header. A union anyone can       */
+/* extend by adding a line, with no row that notices, is not a taxonomy.     */
+/*                                                                           */
+/* Both directions are enforced, and by the compiler rather than by a count: */
+/* `satisfies Record<AuditEventType, true>` fails to build if a variant is   */
+/* missing from the map (the map is not assignable) AND if the map names a   */
+/* type the union does not have (excess property check on an object          */
+/* literal). The runtime rows below add what the compiler cannot see: that   */
+/* the map is not empty, that it matches the source, and that this           */
+/* scenario's variant is really in it.                                       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/** `packages/core/test` -> the repository root. */
+const REPO_ROOT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+);
+
+type AuditEventType = AuditEvent['type'];
+
+const AUDIT_EVENT_TYPES = {
+  'adapter.auth-failed': true,
+  'adapter.connected': true,
+  'adapter.created': true,
+  'adapter.deleted': true,
+  'adapter.disconnected': true,
+  'adapter.feedback-dropped': true,
+  'adapter.no-send-frame': true,
+  'adapter.protocol-violation': true,
+  'adapter.token-rotated': true,
+  'adapter.unreachable': true,
+  'adapter.updated': true,
+  'arming.changed': true,
+  'arming.mode-changed': true,
+  'arming.paused': true,
+  'arming.resumed': true,
+  'auto.approved': true,
+  'connection.state-changed': true,
+  'contact.policy-changed': true,
+  'daemon.lock.stale_reclaimed': true,
+  'draft.approved': true,
+  'draft.created': true,
+  'draft.declined': true,
+  'draft.edited': true,
+  'draft.expired': true,
+  'draft.failed': true,
+  'draft.illegal-transition': true,
+  'draft.recalled': true,
+  'draft.redrafted': true,
+  'draft.rejected': true,
+  'draft.requeued': true,
+  'draft.sent': true,
+  'draft.superseded': true,
+  'gate.denied': true,
+  'gateway.disconnected': true,
+  'ingest.decode-failed': true,
+  'message.edited': true,
+  'message.unsent': true,
+  'recovery.cursor': true,
+  'recovery.draft': true,
+  'rule.created': true,
+  'rule.deleted': true,
+  'rule.disabled': true,
+  'rule.enabled': true,
+  'rule.matched': true,
+  'rule.updated': true,
+  'schedule.created': true,
+  'schedule.deleted': true,
+  'schedule.updated': true,
+  'send.attempted': true,
+  'setting.changed': true,
+  'toggle.changed': true,
+} as const satisfies Record<AuditEventType, true>;
+
+describe('C-7: the AuditEvent union is pinned in both directions', () => {
+  it('the pin is total, and the compiler is what makes it total', () => {
+    const pinned = Object.keys(AUDIT_EVENT_TYPES).sort();
+    // Non-vacuity: an empty map would satisfy nothing, but a map that had
+    // silently lost its contents to a bad merge would still typecheck if the
+    // union had also been emptied. Fifty-one is the count at s9 Sc2.
+    expect(pinned).toHaveLength(51);
+    expect(new Set(pinned).size).toBe(pinned.length);
+    // Every key really is a usable AuditEvent discriminant.
+    for (const t of pinned) {
+      const asType: AuditEventType = t as AuditEventType;
+      expect(typeof asType).toBe('string');
+    }
+  });
+
+  it('the pin equals the union as written in the source', () => {
+    /*
+     * The compiler pins the map to the TYPE. This pins the type to the
+     * FILE, which catches the one thing the compiler cannot: a variant added
+     * with a `type` literal that duplicates an existing one, which collapses
+     * two events into one in the union and leaves the map still total.
+     */
+    const src = readFileSync(
+      join(REPO_ROOT, 'packages', 'core', 'src', 'audit', 'events.ts'),
+      'utf8',
+    );
+    const literals = [...src.matchAll(/type: '([^']+)'/g)].map((m) => m[1]);
+    expect(literals.length).toBeGreaterThan(40);
+    // No literal appears twice: fifty-one variants, fifty-one names.
+    expect(new Set(literals).size).toBe(literals.length);
+    // Equality, not containment, in both directions.
+    expect([...literals].sort()).toEqual(Object.keys(AUDIT_EVENT_TYPES).sort());
+  });
+
+  it('s9 Sc2 added exactly one variant, and it is the lock reclaim', () => {
+    expect(AUDIT_EVENT_TYPES).toHaveProperty('daemon.lock.stale_reclaimed');
+    // It is the only `daemon.` event in the taxonomy: this scenario adds one
+    // row type, not a namespace.
+    const daemonEvents = Object.keys(AUDIT_EVENT_TYPES).filter((t) =>
+      t.startsWith('daemon.'),
+    );
+    expect(daemonEvents).toEqual(['daemon.lock.stale_reclaimed']);
+    // And it is a real, constructible event, not a name in a map.
+    const event: AuditEvent = {
+      type: 'daemon.lock.stale_reclaimed',
+      pid: 4242,
+    };
+    expect(event.type).toBe('daemon.lock.stale_reclaimed');
+    // `pid: number | null` — null is the "the file named nobody" case, and
+    // it has to survive the JSON round trip the chain hashes.
+    const noPid: AuditEvent = {
+      type: 'daemon.lock.stale_reclaimed',
+      pid: null,
+    };
+    expect(JSON.parse(JSON.stringify(noPid))).toEqual({
+      type: 'daemon.lock.stale_reclaimed',
+      pid: null,
+    });
   });
 });

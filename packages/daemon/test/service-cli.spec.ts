@@ -44,6 +44,7 @@ import { createChatDb } from '@wemessage/fixtures';
 import type { AuditEvent, Clock } from '@wemessage/core';
 import { LaunchdLabelRefused } from '../src/launchd/contract.js';
 import { runServiceCli, type CliOverrides } from '../src/launchd/cli.js';
+import { parseLaunchAgentPlist } from '../src/launchd/plist.js';
 import { SERVICE_STATE_FILENAME } from '../src/launchd/service.js';
 import { laneRun, recordingSpawner } from './helpers/launchd-lane.js';
 
@@ -446,6 +447,114 @@ describe('s9 Sc3 row 6: install writes the plist, audits, then prints', () => {
 
 /* ── row 7: idempotence ───────────────────────────────────────────────── */
 
+describe('s9 Sc3 stage 2: the two environment values the plist must carry', () => {
+  /*
+   * Both of these are read from `baseEnv` in exact parallel with the
+   * existing `WEMESSAGE_DIR` fallback, because that is the seam the CLI
+   * already has for "a value the caller set in the environment belongs in
+   * the plist". Neither gets a flag: a flag is a promise to support it
+   * forever on the command line, and the only callers today are this
+   * scenario's lifecycle rows and a developer debugging a real install.
+   */
+
+  function envOf(plistPath: string): Record<string, string> {
+    const parsed = parseLaunchAgentPlist(readFileSync(plistPath, 'utf8'));
+    return parsed['EnvironmentVariables'] as Record<string, string>;
+  }
+
+  it('WEMESSAGE_CHATDB reaches the plist, so a supervised daemon never defaults to the real one', async () => {
+    const b = bed();
+    const chatDb = join(b.dir, 'fixture-chat.db');
+    const r = await cli(installArgs(b, '--no-load'), {
+      run: laneRun(fakeServiceManager().rec.spawn),
+      env: { WEMESSAGE_LAUNCHD_LABEL: PINNED, WEMESSAGE_CHATDB: chatDb },
+    });
+    expect(r.code).toBe(0);
+    expect(envOf(r.json<InstallJson>().plistPath)['WEMESSAGE_CHATDB']).toBe(
+      chatDb,
+    );
+  });
+
+  it('NEAR-MISS: with WEMESSAGE_CHATDB unset the key is ABSENT, not empty', async () => {
+    // The legitimate near-miss for the row above. An empty string here
+    // would be worse than an absent key: `main.ts` treats the variable as
+    // optional-with-a-default, and `z.string().min(1)` would reject ''
+    // outright, so a daemon installed on a machine that merely lacks the
+    // variable must get a plist that does not mention it.
+    const b = bed();
+    const r = await cli(installArgs(b, '--no-load'), {
+      run: laneRun(fakeServiceManager().rec.spawn),
+      env: { WEMESSAGE_LAUNCHD_LABEL: PINNED },
+    });
+    expect(r.code).toBe(0);
+    const env = envOf(r.json<InstallJson>().plistPath);
+    expect('WEMESSAGE_CHATDB' in env).toBe(false);
+  });
+
+  it('WEMESSAGE_LAUNCHD_THROTTLE_INTERVAL reaches the plist, and is 10 without it', async () => {
+    // Row 9 needs 1: launchd will not restart a KeepAlive job sooner than
+    // ThrottleInterval seconds after it died, and a 10-second floor turns
+    // "the daemon came back" into a test that spends its budget waiting.
+    const b1 = bed();
+    const d = await cli(installArgs(b1, '--no-load'), {
+      run: laneRun(fakeServiceManager().rec.spawn),
+      env: { WEMESSAGE_LAUNCHD_LABEL: PINNED },
+    });
+    expect(
+      parseLaunchAgentPlist(
+        readFileSync(d.json<InstallJson>().plistPath, 'utf8'),
+      )['ThrottleInterval'],
+    ).toBe(10);
+
+    const b2 = bed();
+    const t = await cli(installArgs(b2, '--no-load'), {
+      run: laneRun(fakeServiceManager().rec.spawn),
+      env: {
+        WEMESSAGE_LAUNCHD_LABEL: PINNED,
+        WEMESSAGE_LAUNCHD_THROTTLE_INTERVAL: '1',
+      },
+    });
+    expect(
+      parseLaunchAgentPlist(
+        readFileSync(t.json<InstallJson>().plistPath, 'utf8'),
+      )['ThrottleInterval'],
+    ).toBe(1);
+  });
+
+  it('PLANTED: a throttle interval that is not a positive integer is refused, not coerced', async () => {
+    /*
+     * `Number('')` is 0 and `Number('abc')` is NaN; both would render a
+     * plist launchd reads as "restart immediately, forever" or ignores.
+     * The command refuses instead, and refuses BEFORE it writes.
+     *
+     * SELF-TRIP. This row was first written as `.rejects.toThrow(...)`,
+     * which is what a helper that throws does — and it is not what this
+     * command does. `runServiceCli` catches the taxonomy error and returns
+     * exit code 2 with an empty stdout, which is the whole point of having
+     * a taxonomy: a refusal a caller planned for is a status, not a stack
+     * trace. The row was wrong about the product, so the row changed, and
+     * it is stronger for it: it now pins the exit code, the silence on
+     * stdout, the variable being named on stderr, and the empty directory,
+     * where before it pinned only that something was thrown.
+     */
+    for (const bad of ['', 'abc', '0', '-1', '1.5', '1e3', ' 1', '01']) {
+      const b = bed();
+      const r = await cli(installArgs(b, '--no-load'), {
+        run: laneRun(fakeServiceManager().rec.spawn),
+        env: {
+          WEMESSAGE_LAUNCHD_LABEL: PINNED,
+          WEMESSAGE_LAUNCHD_THROTTLE_INTERVAL: bad,
+        },
+      });
+      expect(r.code).toBe(2);
+      expect(r.out).toBe('');
+      expect(r.err).toContain('THROTTLE_INTERVAL');
+      // Refused BEFORE it wrote: G4's property, restated for this value.
+      expect(readdirSync(b.la)).toEqual([]);
+    }
+  });
+});
+
 describe('s9 Sc3 row 7: a second install with the same content changes nothing', () => {
   it('identical content → changed:false, no rewrite, no bootout/bootstrap', async () => {
     const b = bed();
@@ -457,7 +566,7 @@ describe('s9 Sc3 row 7: a second install with the same content changes nothing',
     });
     expect(first.json<InstallJson>().changed).toBe(true);
     const plistPath = first.json<InstallJson>().plistPath;
-    const bytes = readFileSync(plistPath);
+    const bytes = readFileSync(plistPath, 'utf8');
 
     fake.rec.calls.length = 0;
     const second = await cli(installArgs(b), {
@@ -465,7 +574,7 @@ describe('s9 Sc3 row 7: a second install with the same content changes nothing',
       env,
     });
     expect(second.json<InstallJson>().changed).toBe(false);
-    expect(readFileSync(plistPath)).toEqual(bytes);
+    expect(readFileSync(plistPath, 'utf8')).toEqual(bytes);
     // The agent is already loaded, so the second install ASKS and does
     // nothing else. One read-only verb; no bootout, no bootstrap.
     expect(fake.rec.argvs()).toEqual([['print', `gui/${U}/${PINNED}`]]);

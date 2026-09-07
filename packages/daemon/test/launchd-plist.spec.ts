@@ -195,6 +195,47 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     expect(p['StandardErrorPath']).toBe(s.stderrPath);
   });
 
+  it('chatDb is emitted exactly like dir and port, and is ABSENT by default', () => {
+    /*
+     * s9 Sc3 stage 2. WHY THIS KEY EXISTS AT ALL.
+     *
+     * A launchd job's environment is the plist's `EnvironmentVariables` and
+     * nothing else — there is no shell, no profile, no inherited PATH. So a
+     * supervised daemon with no `WEMESSAGE_CHATDB` does not fall back to a
+     * test fixture. It falls back to the default in `main.ts`, which is the
+     * operator's real message database. That is a latent hazard in the
+     * product, not merely an inconvenience in a test: `service install` on
+     * a developer machine would point a background agent at real messages
+     * with nothing in the plist saying so.
+     *
+     * THAT DEFAULT PATH IS DESCRIBED HERE, NEVER SPELLED. Arch gate (b)
+     * forbids any test file from naming it, and this comment is the third
+     * time in this scenario that a file has convicted itself by writing out
+     * the literal it was explaining that it must not write out. The fix is
+     * always to reword or to assemble, and never to add a carrier to the
+     * guard: a guard with an exemption for the file most likely to leak is
+     * not a guard. Read `main.ts` if you need the value.
+     *
+     * Emitted EXACTLY like `dir` and `port`: an absent override is an
+     * absent key (F-80), which is why the ten-key rows above still hold.
+     */
+    const bare = parseLaunchAgentPlist(renderLaunchAgentPlist(spec()));
+    const bareEnv = bare['EnvironmentVariables'] as Record<string, string>;
+    expect('WEMESSAGE_CHATDB' in bareEnv).toBe(false);
+    expect(Object.keys(bare).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
+
+    const set = parseLaunchAgentPlist(
+      renderLaunchAgentPlist(spec({ chatDb: '/tmp/wm/chat.db' })),
+    );
+    const setEnv = set['EnvironmentVariables'] as Record<string, string>;
+    expect(setEnv['WEMESSAGE_CHATDB']).toBe('/tmp/wm/chat.db');
+    // Non-vacuity: adding it changed the env dict and NOTHING else.
+    expect(Object.keys(set).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
+    expect(Object.keys(setEnv).sort()).toEqual(
+      [...Object.keys(bareEnv), 'WEMESSAGE_CHATDB'].sort(),
+    );
+  });
+
   it('ThrottleInterval defaults to 10 and is overridable to 1 for tests', () => {
     const d = parseLaunchAgentPlist(renderLaunchAgentPlist(spec()));
     expect(d['ThrottleInterval']).toBe(10);

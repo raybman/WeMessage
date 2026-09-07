@@ -76,7 +76,12 @@ import {
   mintTestLabel,
   readOnly,
   recordingSpawner,
+  setLaneSentinelLabel,
   setLaneSentinelPid,
+  laneSentinelLabel,
+  laneJournal,
+  resetLaneJournal,
+  launchAgentsTripwire,
   sweepOrphans,
   sweepOwnDir,
   termOwnedDaemon,
@@ -120,11 +125,15 @@ function plantPlist(dir: string, name: string): string {
 beforeEach(() => {
   installLaneSpawner(null);
   setLaneSentinelPid(null);
+  setLaneSentinelLabel(null);
+  resetLaneJournal();
 });
 
 afterEach(() => {
   installLaneSpawner(null);
   setLaneSentinelPid(null);
+  setLaneSentinelLabel(null);
+  resetLaneJournal();
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -822,5 +831,155 @@ describe('s9 Sc3 G3: laneRun is the runner, not a second implementation', () => 
       ),
     ).toThrow();
     expect(rec.calls).toEqual([]);
+  });
+});
+
+/* ── stage 2: the registered sentinel, the journal, the tripwire ──────── */
+
+describe('s9 Sc3 stage 2: the one foreign agent this lane can see', () => {
+  /*
+   * F-120's runtime half needs the lane to READ one label it does not own —
+   * the agent supervising the run — so that `afterAll` can prove the run
+   * left it exactly as it found it. The obvious ways to get that are both
+   * wrong: a second test-side module doing a raw print is refused by
+   * arch row 5's pinned namer list, and widening the read-only guard to
+   * "any label" leaves a guard that says nothing.
+   *
+   * So it is a SET OF ONE. Exactly one foreign label may be registered, it
+   * may only be read, and registering it is also what arms the pid refusal
+   * in `termOwnedDaemon`. The property, in the words it should be checked
+   * against: THE ONE FOREIGN AGENT THIS LANE CAN SEE IS PRECISELY THE ONE
+   * FOREIGN AGENT IT CAN NEVER TOUCH.
+   */
+  const FOREIGN = 'com.example.not-the-sentinel';
+
+  it('the one foreign agent this lane can see is precisely the one it can never touch', async () => {
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    setLaneSentinelLabel(OPERATORS_OWN_LABEL);
+    expect(laneSentinelLabel()).toBe(OPERATORS_OWN_LABEL);
+
+    // SEEN: a read-only verb aimed at it is delegated.
+    await testScopedSpawn(
+      laneInvocation([
+        'print',
+        `gui/${String(laneUid())}/${OPERATORS_OWN_LABEL}`,
+      ]),
+    );
+    expect(rec.calls.length).toBe(1);
+
+    // NEVER TOUCHED: every mutating verb aimed at the same label refuses,
+    // and refuses before the delegate is consulted.
+    for (const verb of LANE_MUTATING_OPS) {
+      await expect(
+        testScopedSpawn(
+          laneInvocation([
+            verb,
+            `gui/${String(laneUid())}/${OPERATORS_OWN_LABEL}`,
+          ]),
+        ),
+      ).rejects.toBeInstanceOf(LaneRefused);
+    }
+    // Non-vacuity on the count: the read got through, the mutations did not.
+    expect(rec.calls.length).toBe(1);
+    expect(LANE_MUTATING_OPS.length).toBeGreaterThan(0);
+  });
+
+  it('PLANTED: a DIFFERENT foreign label is still refused, even read-only', async () => {
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    setLaneSentinelLabel(OPERATORS_OWN_LABEL);
+    for (const verb of LANE_READ_ONLY_OPS) {
+      if (verb === 'list') continue; // takes a domain, not a label
+      await expect(
+        testScopedSpawn(
+          laneInvocation([verb, `gui/${String(laneUid())}/${FOREIGN}`]),
+        ),
+      ).rejects.toBeInstanceOf(LaneRefused);
+    }
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('PLANTED: with NOTHING registered, even the sentinel label is refused', async () => {
+    // The allowance is the registration, not the string. A run that forgot
+    // to resolve a sentinel gets the ordinary refusal.
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    expect(laneSentinelLabel()).toBe(null);
+    await expect(
+      testScopedSpawn(
+        laneInvocation([
+          'print',
+          `gui/${String(laneUid())}/${OPERATORS_OWN_LABEL}`,
+        ]),
+      ),
+    ).rejects.toBeInstanceOf(LaneRefused);
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('NEAR-MISS: registering a sentinel does not widen what the lane may own', async () => {
+    // The registration is a read allowance, nothing more. `isTestScoped` is
+    // untouched, so an ordinary foreign mutation is refused exactly as it
+    // was before any sentinel existed.
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    setLaneSentinelLabel(OPERATORS_OWN_LABEL);
+    await expect(
+      testScopedSpawn(
+        laneInvocation(['bootout', `gui/${String(laneUid())}/${FOREIGN}`]),
+      ),
+    ).rejects.toBeInstanceOf(LaneRefused);
+    // …while a label we DO own still passes, so the row is not vacuous.
+    await testScopedSpawn(
+      laneInvocation([
+        'bootout',
+        `gui/${String(laneUid())}/${mintTestLabel()}`,
+      ]),
+    );
+    expect(rec.calls.length).toBe(1);
+  });
+});
+
+describe('s9 Sc3 stage 2: the journal records what actually ran', () => {
+  it('only invocations that survived every refusal are journalled', async () => {
+    /*
+     * The journal exists so a report can state the exact argv this run
+     * handed to the machine, rather than the argv it meant to. It is
+     * written on the last line before the delegate, so a refused
+     * invocation — which never reaches a delegate — is never recorded as
+     * having run. That ordering is the whole value of the thing.
+     */
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    const label = mintTestLabel();
+    const good = ['bootout', `gui/${String(laneUid())}/${label}`];
+
+    await expect(
+      testScopedSpawn(laneInvocation(['bootout', `gui/${String(laneUid())}`])),
+    ).rejects.toBeInstanceOf(LaneRefused);
+    expect(laneJournal()).toEqual([]);
+
+    await testScopedSpawn(laneInvocation(good));
+    expect(laneJournal()).toEqual([good]);
+    // The journal is a COPY: a caller cannot edit the record of what ran.
+    const snapshot = laneJournal();
+    (snapshot as unknown as string[][])[0]?.splice(0);
+    expect(laneJournal()).toEqual([good]);
+  });
+});
+
+describe('s9 Sc3 stage 2 / F-120: the tripwire returns a hash, never the names', () => {
+  it('the return type is the guard, and the value is stable across two reads', () => {
+    /*
+     * The only permitted contact with the operator's real LaunchAgents
+     * directory in this entire scenario is a listing folded to a digest.
+     * THE RETURN TYPE IS THE GUARD: a helper that returned the names would
+     * be a helper somebody iterates, and iterating that directory is one
+     * short step from bootstrapping it — which loads all 40-odd plists in
+     * it. A 40-character hex string cannot be iterated into a mistake.
+     */
+    const a = launchAgentsTripwire();
+    expect(a).toMatch(/^[0-9a-f]{40}$/);
+    expect(launchAgentsTripwire()).toBe(a);
   });
 });

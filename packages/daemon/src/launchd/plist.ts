@@ -136,6 +136,17 @@ export interface LaunchAgentSpec {
   /** Only emitted when set: an absent override is an ABSENT key (F-80). */
   readonly dir?: string;
   readonly port?: number;
+  /**
+   * The chat database the supervised daemon tails. Only emitted when set,
+   * exactly like `dir` and `port`.
+   *
+   * A launchd job has no shell, no profile and no inherited environment —
+   * this dict IS its environment. Absent, the daemon falls back to
+   * `~/Library/Messages/chat.db`, the operator's real one, with nothing in
+   * the plist saying so. That is why it is a first-class spec field rather
+   * than something a caller is trusted to remember.
+   */
+  readonly chatDb?: string;
   /** §1.7 default 10; tests use 1 so a restart is observable in a deadline. */
   readonly throttleInterval?: number;
   readonly extraKeys?: PlistDict;
@@ -167,6 +178,7 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
   if (shape === 'bundle') env['ELECTRON_RUN_AS_NODE'] = '1';
   if (spec.dir !== undefined) env['WEMESSAGE_DIR'] = spec.dir;
   if (spec.port !== undefined) env['WEMESSAGE_PORT'] = String(spec.port);
+  if (spec.chatDb !== undefined) env['WEMESSAGE_CHATDB'] = spec.chatDb;
 
   const core: Record<string, PlistValue> = {
     EnvironmentVariables: env,

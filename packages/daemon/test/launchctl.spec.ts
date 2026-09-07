@@ -603,21 +603,34 @@ describe('s9 Sc3 G2: the real spawner is defined here and called nowhere', () =>
     expect((fn as (i: unknown) => unknown).length).toBe(1);
   });
 
-  it('NO TEST IN THIS PACKAGE NAMES IT', () => {
+  it('EXACTLY ONE TEST NAMES IT, AND IT IS THE LANE', () => {
     /*
-     * SELF-TRIP, and the row is stronger for it.
+     * SELF-TRIP, TWICE, and the row is stronger for each of them.
      *
-     * This began as "exactly one file names it, and it is the runner",
-     * which is what the dispatch asks for and which the product cannot
-     * satisfy: `bin.ts` has to reference the real spawn to compose the CLI,
-     * or `wemessaged service install` has no way to reach launchd and the
+     * It began as "exactly one file names it, and it is the runner", which
+     * is what the dispatch asks for and which the product cannot satisfy:
+     * `bin.ts` has to reference the real spawn to compose the CLI, or
+     * `wemessaged service install` has no way to reach launchd and the
      * product does not exist. A guard a legitimate caller must be exempted
      * from is the wrong guard, so the guard was rewritten rather than the
-     * caller exempted — and the property that actually matters was never
-     * "one file" but "no TEST", which this row now states directly and
-     * which the original wording only implied.
+     * caller exempted, and it became "no TEST names it".
+     *
+     * Stage 2 tripped that second wording, because Stage 2's entire mandate
+     * is to let ONE test-side module reach the machine's service manager.
+     * The same reasoning applies a second time: the lane is a legitimate
+     * caller, so the answer is not to exempt it but to say what is actually
+     * true. The property that matters was never "no test" either — it was
+     * "the test tree has exactly one composer, and it is the guarded one".
+     *
+     * NOTE THE EQUALITY. `toContain` would let a second test-side composer
+     * in, and a second composer is a second path to a real `bootout` that
+     * does not run the lane's four refusals. That is the whole risk this
+     * scenario exists to contain, so the assertion is a set equality and
+     * the set has one member. Widening it is not a maintenance edit.
      */
-    expect(filesNaming(SPAWNER, ['test'])).toEqual([]);
+    expect(filesNaming(SPAWNER, ['test'])).toEqual([
+      'test/helpers/launchd-lane.ts',
+    ]);
   });
 
   it('exactly two source files name it: the runner, and the entrypoint', () => {

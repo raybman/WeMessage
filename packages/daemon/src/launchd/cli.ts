@@ -188,6 +188,25 @@ function storeAppender(dir: string): (event: AuditEvent) => void {
  * the process: the caller decides, which is what lets every row in
  * `service-cli.spec.ts` run in-process against a fake.
  */
+/**
+ * `ThrottleInterval` from the environment, or a refusal.
+ *
+ * Not `Number(...)`: `Number('')` is 0 and `Number('abc')` is NaN, and both
+ * of those render a plist launchd either reads as "no restart delay at all"
+ * or silently ignores. A value somebody set and this command misread is
+ * worse than a value nobody set, so an unparseable one is a refusal before
+ * anything is written rather than a default applied quietly.
+ */
+function parseThrottleInterval(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  if (!/^[1-9][0-9]*$/.test(raw))
+    throw new LaunchdInvocationRefused(
+      `WEMESSAGE_LAUNCHD_THROTTLE_INTERVAL ${JSON.stringify(raw)} is not a ` +
+        'positive integer number of seconds',
+    );
+  return Number(raw);
+}
+
 export async function runServiceCli(
   argv: readonly string[],
   io: CliIo,
@@ -244,6 +263,14 @@ async function dispatch(
     flags.dir ??
     baseEnv['WEMESSAGE_DIR'] ??
     join(home, 'Library', 'Application Support', 'WeMessage');
+  // s9 Sc3 stage 2. Read here, beside `dir`, because these are the same
+  // kind of value: something the environment says that has to end up in
+  // the plist, since a launchd job's environment is the plist and nothing
+  // else. Neither gets a flag — see the spec rows for why.
+  const chatDb = baseEnv['WEMESSAGE_CHATDB'];
+  const throttleInterval = parseThrottleInterval(
+    baseEnv['WEMESSAGE_LAUNCHD_THROTTLE_INTERVAL'],
+  );
 
   // G4. Decided from the RESOLVED STRINGS, before anything is created and
   // before anything is read: a refused path is never touched, not even to
@@ -279,6 +306,8 @@ async function dispatch(
       stderrPath: paths.stderrPath,
       dir,
       ...(flags.port === undefined ? {} : { port: flags.port }),
+      ...(chatDb === undefined ? {} : { chatDb }),
+      ...(throttleInterval === undefined ? {} : { throttleInterval }),
     });
     const result = await installService(
       {

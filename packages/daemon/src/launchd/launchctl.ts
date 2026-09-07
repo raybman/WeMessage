@@ -238,17 +238,50 @@ function bootstrapPath(label: LaunchAgentLabel, plistPath?: string): string {
 }
 
 /**
+ * How long the service manager gets before this process stops waiting on it.
+ *
+ * BOUNDED for the same reason the lane's ancestry walk is (s9 Sc3 stage 1b):
+ * every one of these subcommands answers in milliseconds on a healthy
+ * machine, and the case this covers is not a slow answer but no answer at
+ * all — a wedged `bootstrap` inside a test run is a suite that hangs until
+ * something outside it gives up, and a hang is the failure mode that gets
+ * diagnosed as "flaky" and then ignored. `execFile`'s timeout signals the
+ * SERVICE MANAGER, which is a short-lived client of launchd; it does not
+ * reach any job launchd is supervising.
+ */
+export const SERVICE_MANAGER_TIMEOUT_MS = 30_000;
+
+/**
  * The real spawn (G2).
  *
  * Defined here, called from exactly one place in this package — the
- * entrypoint that composes the CLI — and from no test. `execFile` rather than
- * a shell: the argv is an array this module built from a closed union, and
- * there is no interpreter between it and the process.
+ * entrypoint that composes the CLI — and handed to the test lane as a VALUE,
+ * so no second module ever names the tool. `execFile` rather than a shell:
+ * the argv is an array this module built from a closed union, and there is
+ * no interpreter between it and the process.
+ *
+ * A NON-ZERO EXIT IS A RESULT, NOT A THROW. `print` answering 113 for a job
+ * that is not loaded is the single most-used fact in the lifecycle rows, and
+ * a spawn that rejected on it would make "absent" indistinguishable from
+ * "the tool is missing" at every call site. Only the callback's own error
+ * shape decides the code, and a timeout or a missing binary arrives with no
+ * numeric `code` and lands on 1.
  */
 export const realLaunchctlSpawn: ServiceManagerSpawn = (i) =>
   new Promise<ServiceManagerResult>((ok) => {
-    execFile(SERVICE_MANAGER, [...i.args], (err, stdout, stderr) => {
-      const code = err === null ? 0 : ((err as { code?: number }).code ?? 1);
-      ok({ code, stdout, stderr });
-    });
+    execFile(
+      SERVICE_MANAGER,
+      [...i.args],
+      {
+        timeout: SERVICE_MANAGER_TIMEOUT_MS,
+        // `list` on a working machine is hundreds of lines and `print` is
+        // dozens; the ceiling is generous and exists so a pathological
+        // answer is an error rather than this process's memory.
+        maxBuffer: 8 * 1024 * 1024,
+      },
+      (err, stdout, stderr) => {
+        const code = err === null ? 0 : ((err as { code?: number }).code ?? 1);
+        ok({ code, stdout, stderr });
+      },
+    );
   });

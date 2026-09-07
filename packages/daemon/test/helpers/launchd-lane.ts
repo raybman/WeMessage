@@ -61,9 +61,15 @@
  */
 import { basename, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { ulid } from 'ulid';
-import { SERVICE_MANAGER, runLaunchctl } from '../../src/launchd/launchctl.js';
+import {
+  SERVICE_MANAGER,
+  realLaunchctlSpawn,
+  runLaunchctl,
+} from '../../src/launchd/launchctl.js';
 import {
   LAUNCH_AGENT_LABEL_PREFIX,
   LAUNCH_AGENT_TEST_LABEL_PREFIX,
@@ -148,9 +154,30 @@ export function mintTestLabel(): string {
 
 let delegate: ServiceManagerSpawn | null = null;
 let sentinelPid: number | null = null;
+let sentinelLabel: string | null = null;
 
 export function installLaneSpawner(spawn: ServiceManagerSpawn | null): void {
   delegate = spawn;
+}
+
+/**
+ * STAGE 2: install the REAL spawner (G2).
+ *
+ * A separate, named function rather than a value a spec could pass to
+ * `installLaneSpawner`, so that "this run can reach the machine's service
+ * manager" is a call somebody has to write out and a reviewer can grep for.
+ * The spawner itself still lives in the runner — the one module permitted to
+ * name the tool — and arrives here as a value, so this file gains a real
+ * process and still gains no string.
+ *
+ * Nothing about the four refusals changes when this is called, and that is
+ * the property stage 2 rests on: every one of them is decided from the argv
+ * BEFORE the delegate is consulted, so wiring a real spawn behind them adds
+ * a consequence to the paths that were already permitted and adds nothing at
+ * all to the paths that were already refused.
+ */
+export function installRealLaneSpawner(): void {
+  installLaneSpawner(realLaunchctlSpawn);
 }
 
 /**
@@ -162,6 +189,41 @@ export function installLaneSpawner(spawn: ServiceManagerSpawn | null): void {
  */
 export function setLaneSentinelPid(pid: number | null): void {
   sentinelPid = pid;
+}
+
+/**
+ * Register the ONE foreign label this lane may READ, and only read (stage 2).
+ *
+ * THIS IS AN ALLOWANCE AND IT IS WORTH ARGUING FOR RATHER THAN ASSUMING.
+ *
+ * Stage 1's read-only rule was "a label this project owns", and F-120's
+ * runtime half cannot be satisfied under it: the whole content of that row is
+ * that an agent which is NOT ours is in exactly the state it was in before
+ * the run — same print exit code, same `pid`, same `runs`. A row that can
+ * only look at our own labels cannot state that, and the two ways of getting
+ * around it are both worse than this. Printing it outside the lane means a
+ * second test-side file naming the tool, which `test/arch.spec.ts` row 5
+ * refuses, correctly. Widening the read-only rule to "any label" means the
+ * guard no longer says anything.
+ *
+ * So the allowance is a SET OF ONE, registered by name, and it is the same
+ * registration that arms the refusal on the other side: `termOwnedDaemon`
+ * will not signal `sentinelPid`, and nothing may address `sentinelLabel` with
+ * a mutating verb, because `isTestScoped` is unchanged and the sentinel is
+ * not under the test prefix. The net effect is that the one foreign agent
+ * this lane can see is precisely the one foreign agent it can never touch.
+ *
+ * THE LABEL IS NEVER A LITERAL IN THIS REPOSITORY. It arrives from the
+ * environment at run time (`WEMESSAGE_F120_SENTINEL_LABEL`) or from what the
+ * service manager itself reports; see `resolveSentinel`.
+ */
+export function setLaneSentinelLabel(label: string | null): void {
+  sentinelLabel = label;
+}
+
+/** What is currently registered, for a row that asserts non-vacuity. */
+export function laneSentinelLabel(): string | null {
+  return sentinelLabel;
 }
 
 export interface RecordingSpawner {
@@ -273,10 +335,13 @@ export async function testScopedSpawn(
         `${verb} would affect ${JSON.stringify(label)}, which is not under ` +
           `${TEST_LABEL_PREFIX}`,
       );
-    if (readOnlyVerb && !isOurs(label))
+    // The registered sentinel is the ONE exception, and only here: a
+    // mutating verb aimed at it has already been refused two lines up,
+    // because it is not under the test prefix and never can be.
+    if (readOnlyVerb && !isOurs(label) && label !== sentinelLabel)
       throw new LaneRefused(
-        `${verb} would read ${JSON.stringify(label)}, which is not a label ` +
-          'this project owns',
+        `${verb} would read ${JSON.stringify(label)}, which is neither a ` +
+          'label this project owns nor the registered F-120 sentinel',
       );
   }
   /*
@@ -322,7 +387,25 @@ export async function testScopedSpawn(
     throw new Error(
       'no spawner is installed in the launchd test lane (stage 1 installs none)',
     );
+  // THE JOURNAL RECORDS ONLY WHAT SURVIVED. Appended here, one line below
+  // the last refusal, so it is a list of the argvs that really did reach a
+  // process — not a list of the argvs somebody tried. A row that asserts on
+  // it is asserting what ran.
+  journal.push(args);
   return await delegate(i);
+}
+
+/* ── the journal: exactly what reached a process, in order ────────────── */
+
+const journal: string[][] = [];
+
+/** Every argv this lane has permitted since the last reset, in order. */
+export function laneJournal(): readonly (readonly string[])[] {
+  return journal.map((a) => [...a]);
+}
+
+export function resetLaneJournal(): void {
+  journal.length = 0;
 }
 
 /** The two inert subcommands, and the only way this lane asks a question. */
@@ -333,7 +416,163 @@ export const readOnly = {
     await testScopedSpawn(
       laneInvocation(['print', `gui/${String(laneUid())}/${label}`]),
     ),
+  /**
+   * Print the registered sentinel, or refuse.
+   *
+   * A NAMED OPERATION rather than a widened parameter on `print`. `print`
+   * keeps its branded `LaunchAgentLabel`, so there is still no way to ask
+   * this lane about an arbitrary foreign agent by passing a string; the one
+   * foreign read the F-120 row needs has its own verb, and calling it without
+   * a registration is a refusal rather than a no-op.
+   */
+  printSentinel: async (): Promise<ServiceManagerResult> => {
+    if (sentinelLabel === null)
+      throw new LaneRefused(
+        'no F-120 sentinel is registered: the one foreign label this lane ' +
+          'may read has to be named before it can be read',
+      );
+    return await testScopedSpawn(
+      laneInvocation(['print', `gui/${String(laneUid())}/${sentinelLabel}`]),
+    );
+  },
 };
+
+/**
+ * One `key = value` field out of a `print`, as a string, or `null`.
+ *
+ * `null` for "the job is not loaded" and `null` for "loaded but has no pid"
+ * are deliberately the same answer, because the row that uses this compares
+ * a BEFORE against an AFTER and both of those are states the sentinel could
+ * legitimately be in for the whole run. What the row must catch is a CHANGE,
+ * and a change between the two is a change either way round.
+ */
+export function printField(stdout: string, key: string): string | null {
+  const re = new RegExp(
+    `^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(.+)$`,
+    'm',
+  );
+  return re.exec(stdout)?.[1]?.trim() ?? null;
+}
+
+/** The three facts row 13 compares, as one value. */
+export interface SentinelReading {
+  readonly code: number;
+  readonly pid: string | null;
+  readonly runs: string | null;
+}
+
+export async function readSentinel(): Promise<SentinelReading> {
+  const r = await readOnly.printSentinel();
+  return {
+    code: r.code,
+    pid: printField(r.stdout, 'pid'),
+    runs: printField(r.stdout, 'runs'),
+  };
+}
+
+/**
+ * Find the agent this run must leave alone, and register it.
+ *
+ * TWO SOURCES, in this order, and neither of them is a string in this
+ * repository:
+ *
+ *  1. `WEMESSAGE_F120_SENTINEL_LABEL`. On the machine this project is
+ *     developed on the honest subject is the agent supervising the session
+ *     the tests are running inside — the one whose loss would take the run,
+ *     the editor and the operator's login with it. That label is the single
+ *     most dangerous string this project could contain, so it is not
+ *     contained: it is passed in.
+ *
+ *  2. Failing that, the lowest-pid RUNNING label the service manager reports
+ *     that is not one of ours. CI has no supervising assistant, and a row
+ *     whose subject is absent is a row that passes because it did nothing.
+ *     Lowest pid rather than first line, because `list` is not ordered and a
+ *     subject chosen by ordering changes between runs.
+ *
+ * Registers both halves: the label (the one foreign thing that may be read)
+ * and the pid (the one pid that may never be signalled).
+ */
+export async function resolveSentinel(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<{ readonly label: string; readonly pid: number | null }> {
+  const named = env['WEMESSAGE_F120_SENTINEL_LABEL'];
+  let label = named !== undefined && named.length > 0 ? named : null;
+  let pid: number | null = null;
+
+  if (label === null) {
+    const listed = await readOnly.list();
+    if (listed.code !== 0)
+      throw new Error(
+        `the service manager's list subcommand failed (exit ` +
+          `${String(listed.code)}): ${listed.stderr.trim()}`,
+      );
+    let best: { label: string; pid: number } | null = null;
+    for (const line of listed.stdout.split('\n')) {
+      const cols = line.split('\t');
+      const rawPid = (cols[0] ?? '').trim();
+      const candidate = (cols[cols.length - 1] ?? '').trim();
+      if (!/^\d+$/.test(rawPid)) continue; // '-' means loaded, not running
+      if (candidate.length === 0 || isOurs(candidate)) continue;
+      const n = Number(rawPid);
+      if (best === null || n < best.pid) best = { label: candidate, pid: n };
+    }
+    if (best === null)
+      throw new Error(
+        'no running foreign launchd label was reported, so the F-120 row ' +
+          'would have had no subject: refusing to run it vacuously',
+      );
+    label = best.label;
+    pid = best.pid;
+  }
+
+  setLaneSentinelLabel(label);
+  if (pid === null) {
+    const printed = await readOnly.printSentinel();
+    const raw = printField(printed.stdout, 'pid');
+    pid = raw === null ? null : Number(raw);
+  }
+  setLaneSentinelPid(pid);
+  return { label, pid };
+}
+
+/* ── the tripwire: the only contact this repository has with the real dir ─ */
+
+/**
+ * `ls -1 ~/Library/LaunchAgents | shasum`, and nothing else, ever.
+ *
+ * THE RETURN TYPE IS THE GUARD. This function enumerates the operator's real
+ * agents directory exactly once per call and returns a HASH — never the
+ * names, never a handle, never a path. There is therefore no way for a
+ * caller to turn "prove nothing was written here" into "act on what is
+ * here", which is the only reason it is safe for this file to look at that
+ * directory at all.
+ *
+ * Computed with the same bytes `ls -1` prints and the same digest `shasum`
+ * defaults to, so the value a human records at a terminal and the value a
+ * row asserts are the same string.
+ */
+export function launchAgentsTripwire(): string {
+  const dir = join(homedir(), 'Library', 'LaunchAgents');
+  // A MISSING DIRECTORY IS A LISTING, AND IT IS THE EMPTY ONE.
+  //
+  // A fresh CI runner need not have this directory at all, and a tripwire
+  // that THREW there would turn "there was nothing here to protect" into a
+  // failed run. The empty listing hashes to a perfectly good value and the
+  // property the row actually wants -- before equals after -- holds for it
+  // exactly as well.
+  //
+  // Only absence is tolerated. Any other error still raises, because a
+  // tripwire that swallowed a permissions error would be a tripwire that
+  // reports success precisely when it has been blinded.
+  let listing: string;
+  try {
+    listing = execFileSync('/bin/ls', ['-1', dir], { encoding: 'utf8' });
+  } catch (e) {
+    if (existsSync(dir)) throw e;
+    listing = '';
+  }
+  return createHash('sha1').update(listing).digest('hex');
+}
 
 /** The runner, bound to a spawn. Not a second implementation of the guard. */
 export function laneRun(spawn: ServiceManagerSpawn): ServiceManagerRun {

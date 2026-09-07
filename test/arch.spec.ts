@@ -93,7 +93,12 @@ const depcruiseBin = join(repoRoot, 'node_modules', '.bin', 'depcruise');
  * has to spell the banned words out in order to grep for them.
  */
 function trackedTextFiles(): string[] {
-  const notText = /\.(bin|blob|db|png|ico|svg|jpg|jpeg|gif|pdf|zip|woff2?)$/;
+  // s9 Sc 1 row 1: `.svg` is OFF this list. It was put on it in s7 as a "not
+  // text" extension, which is wrong twice — an SVG is XML, and the ship era
+  // commits more of them than the GUI era did. A repository that bans
+  // operator identity in every file except the ones shaped like pictures
+  // has a hole exactly the shape of a picture.
+  const notText = /\.(bin|blob|db|png|ico|jpg|jpeg|gif|pdf|zip|woff2?)$/;
   return execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
     .split('\n')
     .filter((f) => f.length > 0)
@@ -2403,6 +2408,15 @@ describe('arch invariants (dependency-cruiser)', () => {
       // Pinned deliberately. The next top-level directory somebody adds
       // fails this row, and the failure is the prompt to answer the same
       // six questions this scenario had to answer for `skills/`.
+      //
+      // `tools` arrives in s9 Sc 1 and this row did exactly its job: it was
+      // the first thing to fail when the release lane was committed, and
+      // the six questions were answered in the S9 block below (`row 7
+      // (blind spot)`) before this list was touched. Unlike `skills/`,
+      // `tools/` carries COMPILED CODE, so the answers to (c) and (d) come
+      // out the other way: it needs a tsconfig, a project reference, a
+      // place in the cruise and a cruiser rule of its own, and it has all
+      // four.
       expect(topLevelTrackedDirs()).toEqual([
         '.github',
         'apps',
@@ -2411,6 +2425,7 @@ describe('arch invariants (dependency-cruiser)', () => {
         'site',
         'skills',
         'test',
+        'tools',
       ]);
     });
 
@@ -3433,11 +3448,24 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         '@wemessage/protocol',
         'preact',
       ]);
+      //
+      // s9 Sc 1 row 9 GROWS this list by exactly four build-time packages
+      // (`@electron/fuses`, `electron-builder`, `esbuild`, `gifenc`) and
+      // states that growth as its own equality. This row is updated in
+      // place rather than weakened to a subset: two independent exact
+      // equalities over the same manifest is the strong shape — a
+      // thirteenth devDependency has to be written down in two files
+      // before it is legal, and a drift between the two lists fails
+      // loudly here rather than being absorbed by a `toContain`.
       expect(Object.keys(pkg().devDependencies ?? {}).sort()).toEqual([
+        '@electron/fuses',
         '@preact/preset-vite',
         '@types/pngjs',
         'axe-core',
         'electron',
+        'electron-builder',
+        'esbuild',
+        'gifenc',
         'pixelmatch',
         'playwright-core',
         'pngjs',
@@ -3454,12 +3482,17 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       // The failure this catches is a package.json that names a dependency
       // the lockfile does not carry — a list that reads correctly and buys
       // nothing. Enumeration asserted, then each member checked.
+      //
+      // Eleven at s8, fifteen from s9 Sc 1 row 9: three dependencies plus
+      // twelve devDependencies. The count is restated rather than derived
+      // from the lists above so that a member deleted from BOTH equalities
+      // in the same careless edit still fails something.
       const p = pkg();
       const names = [
         ...Object.keys(p.dependencies ?? {}),
         ...Object.keys(p.devDependencies ?? {}),
       ];
-      expect(names.length).toBe(11);
+      expect(names.length).toBe(15);
       expect(
         names.filter(
           (n) =>
@@ -9713,5 +9746,1079 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
       for (const phone of raw.match(/\+1\d{10}/g) ?? [])
         expect(phone.startsWith('+1555'), `${rel}: ${phone}`).toBe(true);
     }
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════ */
+/* s9 Sc1 — the ship-era guards (s9-execution Scenario 1).                   */
+/* ════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * S9 turns this repository into something a stranger downloads and a machine
+ * signs. Both of those change what the guards have to be about.
+ *
+ * Until now every sweep in this file has been about the SOURCE: what imports
+ * what, what mints what, what colour the app paints. The ship era adds two
+ * new failure modes that no source rule can see. The first is that the
+ * artefacts an operator actually meets — a landing page, a README, a cask, a
+ * DMG background — are outside every root the guards walk, so the product can
+ * say one thing and the page in front of the download button can say the
+ * opposite. The second is that the release machinery is the first code in
+ * this tree with the ability to stop a service on the machine it runs on,
+ * and the operator's own machine runs services that are not ours.
+ *
+ * So the rows below extend three existing sweeps outward (public strings to
+ * every tracked text file including SVG, plus an operator-identity arm; the
+ * no-green sweep to every ship surface; the raster ban to an enumerated,
+ * DECODED allowlist) and add one that is new: no tracked file anywhere near
+ * the product may name a process-killing launchd verb, and the one file that
+ * is allowed to spawn `launchctl` may only ever hand it a label this project
+ * owns.
+ *
+ * Divergences from the plan text are argued at each row. The tree wins.
+ */
+describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
+  const s9Read = (rel: string): string => archRead(rel);
+
+  /** Plant, index, and un-index — the s7 Sc7 shape, scoped to this block. */
+  const s9Planted: string[] = [];
+  function s9Plant(rel: string, body: string, intentToAdd = false): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    s9Planted.push(rel);
+    if (intentToAdd)
+      execFileSync('git', ['add', '--intent-to-add', '--', rel], {
+        cwd: repoRoot,
+      });
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of s9Planted.splice(0)) {
+      try {
+        execFileSync(
+          'git',
+          ['rm', '--cached', '--quiet', '--force', '--', rel],
+          { cwd: repoRoot, stdio: 'ignore' },
+        );
+      } catch {
+        // never indexed; the unlink is the whole cleanup
+      }
+      rmSync(join(repoRoot, rel), { force: true });
+    }
+    for (const dir of ['apps/desktop/scripts', 'packages/daemon/src/__s9__'])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  /* ── row 1: the public sweep reads more of the tree, and more shapes ── */
+
+  /**
+   * The plan says the extension filter "becomes"
+   * `/\.(ts|tsx|js|mjs|cjs|json|md|html|css|rb|plist|yml|yaml|sh)$/`.
+   *
+   * That is stale, and adopting it would be a REGRESSION. s7 Sc7 already
+   * replaced the allowlist the plan is describing with a DENYLIST — every
+   * tracked file except a handful of binary extensions — which is strictly
+   * wider than the fifteen extensions above and does not have to be edited
+   * when somebody commits a `.toml` or a `.txt`. The plan was written
+   * against the s6-era filter. So the two plants it prescribes tell us
+   * something different from what it expected: the `+1` number in a `.md`
+   * ALREADY fails, and it fails at HEAD, because `.md` is not in the
+   * denylist.
+   *
+   * Two things are genuinely missing, and both of them are what this row is.
+   *
+   * `.svg` is IN the denylist. It was put there in s7 as a "not text"
+   * extension, which is wrong twice: an SVG is XML, and the ship era commits
+   * more of them (the site mark, the tray glyphs) than the GUI era did. A
+   * repository that bans operator identity in every file except the ones
+   * shaped like pictures has a hole exactly the shape of a picture.
+   *
+   * And there is no identity arm at all. `publicStringOffenders` refuses
+   * brands, real `+1` numbers, adapter tokens, bearer tokens and absolute
+   * home paths — every one of which is a string a MACHINE would leave
+   * behind. None of them is the operator's name. The plan's own probe (an
+   * `eric@` local-part) cannot fail today for that reason.
+   */
+  describe('row 1: every tracked text file, and one more thing to look for', () => {
+    it('SVG is swept: it is XML, and the ship era commits more of it', () => {
+      const svgs = execFileSync('git', ['ls-files', '--', '*.svg'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0)
+        .sort();
+      // Non-vacuity first: a subset row over an empty set is a row that
+      // passes because it read nothing.
+      expect(svgs.length).toBeGreaterThan(0);
+      const swept = new Set(trackedTextFiles());
+      expect(svgs.filter((f) => !swept.has(f))).toEqual([]);
+      expect(publicRepoOffenders()).toEqual([]);
+    });
+
+    it('PLANTED: an operator handle in an .svg trips the public sweep', () => {
+      // Assembled at runtime. This file is the one the sweep skips, and a
+      // probe that only works because its enforcer is exempt is not a probe
+      // — but it is also a PUBLIC repository, and the point of the arm
+      // being added is that the operator's handle never appears in it.
+      const handle = `wind${'seeker'}`;
+      const rel = s9Plant(
+        'apps/desktop/assets/__s9_probe__.svg',
+        `<svg xmlns="http://www.w3.org/2000/svg"><title>${handle}</title></svg>\n`,
+        true,
+      );
+      expect(trackedTextFiles()).toContain(rel);
+      expect(publicRepoOffenders()).toContain(`${rel}: operator identity`);
+    });
+
+    it('PLANTED: an operator local-part in a .yml under .github trips it', () => {
+      const local = `${'eri'}c@`;
+      const rel = s9Plant(
+        '.github/__s9_probe__.yml',
+        `on: push\njobs:\n  x:\n    env:\n      NOTIFY: "${local}example.com"\n`,
+        true,
+      );
+      expect(publicRepoOffenders()).toContain(`${rel}: operator identity`);
+    });
+
+    it('NEAR-MISS: the fixture mailboxes the tree already carries are fine', () => {
+      // `Eric.Test@Example.COM` and `eric.test@example.com` are real tracked
+      // fixture data — case-folding evidence for the store's contact
+      // matching. An identity arm that convicted them would be an arm
+      // somebody had to add an exemption for, and a guard a legitimate
+      // caller must be exempted from is the wrong guard. The arm therefore
+      // asks for the handle followed IMMEDIATELY by `@` or `+`, which is
+      // what an actual mailbox looks like and what a first-name-shaped
+      // fixture never is.
+      const near = [
+        `${'Eri'}c.Test@Example.COM`,
+        `${'eri'}c.test@example.com`,
+        'a generic mailbox',
+        `${'eri'}csson`,
+      ];
+      for (const text of near)
+        expect(
+          publicStringOffenders(text).map((o) => o.detail),
+          text,
+        ).not.toContain('operator identity');
+      // and the arm is not asleep:
+      expect(
+        publicStringOffenders(`${'eri'}c@example.com`).map((o) => o.detail),
+      ).toContain('operator identity');
+    });
+  });
+
+  /* ── row 4: the launchd verbs, banned across the whole product ─────── */
+
+  /**
+   * F-120's mechanical half, and the most important row in the scenario.
+   *
+   * The operator's machine runs launchd agents that are not ours. Sc 3 gives
+   * this project the ability to spawn `launchctl`, and from that commit
+   * onward every one of the verbs below is one typo away from stopping
+   * somebody else's daemon. The rule is therefore not "be careful with
+   * launchctl", it is that these ten strings do not appear in the product at
+   * all — not in code, not in a comment, not in a workflow, not in a fixture.
+   * A verb nobody has written down is a verb nobody can run by accident.
+   *
+   * `kickstart` and `pkill` and `killall` are the process killers.
+   * `launchctl load`/`unload`/`remove`/`kill` are the deprecated,
+   * whole-domain spellings whose modern replacements (`bootstrap`,
+   * `bootout`, `enable`, `disable`) are scoped to a target and are what the
+   * runner uses. `sol-agent` and `com.user.` are the operator's own labels,
+   * named because they are the specific services on the specific machine
+   * this code is written on, and `/Library/LaunchDaemons` is root's domain,
+   * which this project never enters.
+   *
+   * THE SELF-REFERENCE. A guard that greps for ten strings has to spell all
+   * ten, so its own source is the one file that must be exempt. That is not
+   * a hole invented here: `trackedTextFiles()` has excluded
+   * `test/arch.spec.ts` since s7 Sc7 for exactly this reason, and the
+   * settled resolution — used for the `/Users/` sweep in s8 — is that the
+   * exemption is proved to be a set of size one and the exempt file's own
+   * hits are ENUMERATED rather than counted. Both legs are below.
+   */
+  describe('row 4: no tracked file names a launchd verb that kills', () => {
+    const LAUNCHD_BANNED: readonly string[] = [
+      'kickstart',
+      'pkill',
+      'killall',
+      'launchctl kill',
+      'launchctl remove',
+      'launchctl unload',
+      'launchctl load',
+      'sol-agent',
+      'com.user.',
+      '/Library/LaunchDaemons',
+    ];
+    const LAUNCHD_ROOTS: readonly string[] = [
+      'packages/',
+      'apps/',
+      'tools/',
+      'fixtures/',
+      'test/',
+      '.github/',
+      'homebrew/',
+    ];
+    const sweptForLaunchd = (): string[] =>
+      trackedTextFiles().filter((f) =>
+        LAUNCHD_ROOTS.some((r) => f.startsWith(r)),
+      );
+    function launchdOffenders(): string[] {
+      const out: string[] = [];
+      for (const f of sweptForLaunchd()) {
+        const lines = readFileSync(join(repoRoot, f), 'utf8').split('\n');
+        for (let i = 0; i < lines.length; i += 1)
+          for (const verb of LAUNCHD_BANNED)
+            if ((lines[i] ?? '').includes(verb))
+              out.push(`${f}:${String(i + 1)}: ${verb}`);
+      }
+      return out.sort();
+    }
+
+    it('the ban list is the plan\u2019s ten, in the plan\u2019s order', () => {
+      // Pinned against a SECOND, fragment-assembled spelling so that the
+      // cheapest way to make a failing file pass — deleting the verb from
+      // the list — is itself a failing diff. Assembled rather than copied
+      // because a find-and-replace that reworded the guard would otherwise
+      // reword the assertion that forbids rewording the guard.
+      expect([...LAUNCHD_BANNED]).toEqual([
+        `kick${'start'}`,
+        `p${'kill'}`,
+        `kill${'all'}`,
+        `launchctl ${'kill'}`,
+        `launchctl ${'remove'}`,
+        `launchctl ${'unload'}`,
+        `launchctl ${'load'}`,
+        `sol${'-agent'}`,
+        `com.${'user.'}`,
+        `/Library/${'LaunchDaemons'}`,
+      ]);
+    });
+
+    /**
+     * The one place in the tree that is allowed to say `sol` + `-agent`, and
+     * a SELF-TRIP paid in full rather than papered over.
+     *
+     * This row was written expecting an empty tree and got five hits. Three
+     * were in `packages/daemon/test/launchctl.spec.ts` — this scenario's own
+     * new file, whose header quoted the literals it was explaining — and
+     * those were not exempted. That file was rewritten to describe them, the
+     * same resolution `packages/cli/test/helpers/transcript-lint.ts` took
+     * for the operator-identity arm an hour earlier. A guard's documentation
+     * is inside the guard's scan, and the fix is to stop quoting, never to
+     * stop scanning.
+     *
+     * The other two are real and pre-date the ban by three slices. s5 Sc 12
+     * shipped `@wemessage/adapter-sol`, a bridge to the operator's own agent,
+     * and its whole documented promise is that not one line of that agent's
+     * repository changes. A package that exists to talk to a thing has to be
+     * able to name the thing. Deleting the ban would give up the row; adding
+     * `packages/adapters/sol/` to `LAUNCHD_ROOTS`' complement would blind the
+     * sweep to an entire package. So the carriers are ENUMERATED, and each
+     * one is constrained twice over:
+     *
+     *  - it may spell exactly ONE of the ten (`sol` + `-agent`, the agent's
+     *    name), never `com.` + `user.`, never a killing verb, never the
+     *    system daemons directory; and
+     *  - every hit must be inside a COMMENT. `codeOf` strips comments and
+     *    keeps string literals, so a hit that survives `codeOf` is a hit in
+     *    a value — an argument, a label, a path — and that is exactly the
+     *    shape the ban exists to prevent. The adapter may TALK about the
+     *    operator's agent. It may not ADDRESS it.
+     *
+     * Both legs are asserted non-vacuously: the carrier list is proved
+     * non-empty and proved to be exactly what the sweep finds, so a third
+     * carrier appearing anywhere is a failing diff rather than a silent
+     * addition.
+     */
+    const LAUNCHD_CARRIERS: ReadonlyArray<
+      readonly [string, readonly string[]]
+    > = [
+      ['packages/adapters/sol/src/index.ts', [`sol${'-agent'}`]],
+      [
+        'packages/adapters/sol/test/sol-adapter.contract.spec.ts',
+        [`sol${'-agent'}`],
+      ],
+    ];
+
+    it('no tracked file under the product roots names one, except two', () => {
+      const carriers = LAUNCHD_CARRIERS.map(([f]) => f);
+      expect(
+        launchdOffenders().filter(
+          (o) => !carriers.some((c) => o.startsWith(`${c}:`)),
+        ),
+      ).toEqual([]);
+    });
+
+    it('the two carriers are enumerated, and each is doubly constrained', () => {
+      // Non-vacuity: the exemption is a list of files that really do carry a
+      // hit, not a list somebody could pad.
+      expect(LAUNCHD_CARRIERS.length).toBeGreaterThan(0);
+      const hit = new Map<string, Set<string>>();
+      for (const o of launchdOffenders()) {
+        const file = o.slice(0, o.indexOf(':'));
+        const verb = o.slice(o.lastIndexOf(': ') + 2);
+        let set = hit.get(file);
+        if (set === undefined) {
+          set = new Set<string>();
+          hit.set(file, set);
+        }
+        set.add(verb);
+      }
+      // Equality, not containment: exactly these files, exactly these verbs.
+      expect([...hit.keys()].sort()).toEqual(
+        LAUNCHD_CARRIERS.map(([f]) => f).sort(),
+      );
+      for (const [file, permitted] of LAUNCHD_CARRIERS) {
+        expect([...(hit.get(file) ?? [])].sort(), file).toEqual(
+          [...permitted].sort(),
+        );
+        // …and every hit is in a comment. `codeOf` keeps string literals,
+        // so surviving it means the literal is in a VALUE.
+        const code = codeOf(readFileSync(join(repoRoot, file), 'utf8'));
+        for (const verb of permitted)
+          expect(code.includes(verb), file).toBe(false);
+      }
+    });
+
+    it('the sweep is not vacuous: every root that exists contributed', () => {
+      const swept = sweptForLaunchd();
+      expect(swept.length).toBeGreaterThan(300);
+      // Which roots actually have tracked files is a fact about the tree,
+      // and pinning it is what stops this row from silently becoming a
+      // sweep of two directories. `homebrew/` is Sc 11's and correctly
+      // absent; `tools/` arrives in THIS scenario, which is half of why
+      // this row is red at HEAD.
+      //
+      // SELF-TRIP: this list was authored with `test/` in it, and `test/`
+      // cannot contribute — its ONLY tracked file is `test/arch.spec.ts`,
+      // which is the sweep's one exemption. The root is deliberately KEPT
+      // in `LAUNCHD_ROOTS` rather than deleted, because the day a second
+      // file lands under `test/` it must be swept from its first commit;
+      // the fact that makes the root empty today is asserted below instead,
+      // so that day is also the day this row fails and is looked at.
+      const contributing = LAUNCHD_ROOTS.filter((r) =>
+        swept.some((f) => f.startsWith(r)),
+      );
+      expect(contributing).toEqual([
+        'packages/',
+        'apps/',
+        'tools/',
+        'fixtures/',
+        '.github/',
+      ]);
+      expect(
+        execFileSync('git', ['ls-files', '--', 'test/'], {
+          cwd: repoRoot,
+          encoding: 'utf8',
+        })
+          .split('\n')
+          .filter((f) => f.length > 0),
+      ).toEqual(['test/arch.spec.ts']);
+    });
+
+    it('PLANTED: a .sh under apps/desktop/scripts naming the verb fails', () => {
+      const rel = s9Plant(
+        'apps/desktop/scripts/__s9_probe__.sh',
+        `#!/bin/sh\nlaunchctl kick${'start'} gui/501/sh.wemessage.gateway\n`,
+        true,
+      );
+      expect(sweptForLaunchd()).toContain(rel);
+      expect(launchdOffenders()).toContain(`${rel}:2: kickstart`);
+    });
+
+    it('PLANTED: a comment, not code, is enough to fail it', () => {
+      // The sweep reads BYTES, deliberately. `codeOf` exists two hundred
+      // lines up and is the right tool for "what does this file do"; it is
+      // the wrong tool here, because the danger is a maintainer reading a
+      // comment that suggests the verb, then typing it.
+      const rel = s9Plant(
+        'apps/desktop/scripts/__s9_probe__note.ts',
+        `// a note that mentions p${'kill'} in passing\nexport const x = 1;\n`,
+        true,
+      );
+      expect(launchdOffenders()).toContain(`${rel}:1: pkill`);
+    });
+
+    it('NEAR-MISS: the verbs the product actually uses do not trip it', () => {
+      // `bootout`, `bootstrap`, `enable`, `disable` and a label in this
+      // project's own reverse-DNS namespace are the entire vocabulary the
+      // runner needs, and none of them is on the list. A ban that also
+      // caught the legitimate replacement would be a ban somebody widened.
+      const rel = s9Plant(
+        'apps/desktop/scripts/__s9_probe__ok.sh',
+        [
+          '#!/bin/sh',
+          'launchctl bootout gui/501/sh.wemessage.gateway || true',
+          'launchctl bootstrap gui/501 "$PLIST"',
+          'launchctl enable gui/501/sh.wemessage.gateway',
+          'launchctl print gui/501/sh.wemessage.gateway',
+          '',
+        ].join('\n'),
+        true,
+      );
+      expect(sweptForLaunchd()).toContain(rel);
+      expect(launchdOffenders().filter((o) => o.startsWith(rel))).toEqual([]);
+    });
+
+    it('the arch spec is the sweep\u2019s ONLY exemption', () => {
+      const notText = /\.(bin|blob|db|png|ico|jpg|jpeg|gif|pdf|zip|woff2?)$/;
+      const all = execFileSync('git', ['ls-files'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0)
+        .filter((f) => !notText.test(f));
+      const swept = new Set(trackedTextFiles());
+      expect(all.filter((f) => !swept.has(f))).toEqual(['test/arch.spec.ts']);
+    });
+
+    it('and the exempt file\u2019s own hits are enumerated, not counted', () => {
+      // An exact expected LIST, not a count: a count goes green the moment
+      // somebody deletes a verb from the guard and adds a use of it
+      // somewhere else in this file, which is the one edit the exemption
+      // makes possible. The read is "every banned literal is spelled here,
+      // and nothing else in the tree spells any of them".
+      const self = readFileSync(join(repoRoot, 'test/arch.spec.ts'), 'utf8');
+      expect(LAUNCHD_BANNED.filter((v) => self.includes(v))).toEqual([
+        ...LAUNCHD_BANNED,
+      ]);
+    });
+  });
+
+  /* ── row 5: exactly one file may spawn launchctl ───────────────────── */
+
+  /**
+   * The plan says to grep for `'launchctl'` string literals across the `src`
+   * trees and assert the runner is the only hit. Kept as written, with one
+   * sharpening: the grep runs over `codeOf`, not raw bytes.
+   *
+   * That is the opposite of the choice row 4 makes one row up, and the two
+   * are not in tension. Row 4 is about a word a maintainer might COPY, so it
+   * reads comments. This row is about what a module DOES, so it reads code —
+   * and a prose sweep here would convict the most careful file in the tree,
+   * which is the self-trip s8 Sc 14 was warned about and hit.
+   */
+  describe('row 5: one runner, and it is the only thing that names the tool', () => {
+    const RUNNER = 'packages/daemon/src/launchd/launchctl.ts';
+    function launchctlNamers(): string[] {
+      const out: string[] = [];
+      for (const root of ['packages', 'apps', 'tools'])
+        for (const f of archFiles(root)) {
+          if (!f.includes('/src/')) continue;
+          if (codeOf(s9Read(f)).includes('launchctl')) out.push(f);
+        }
+      return out.sort();
+    }
+
+    it('exactly one production module names the tool', () => {
+      expect(launchctlNamers()).toEqual([RUNNER]);
+    });
+
+    it('PLANTED: a second spawner anywhere under src is a second hit', () => {
+      const rel = s9Plant(
+        'packages/daemon/src/__s9__/second.ts',
+        [
+          "import { execFile } from 'node:child_process';",
+          'export const go = (): void => {',
+          "  execFile('launchctl', ['print', 'gui/501']);",
+          '};',
+          '',
+        ].join('\n'),
+      );
+      expect(launchctlNamers()).toEqual([RUNNER, rel].sort());
+    });
+
+    it('NEAR-MISS: a module that only TALKS about it is not a spawner', () => {
+      s9Plant(
+        'packages/daemon/src/__s9__/prose.ts',
+        [
+          '/**',
+          ' * The supervisor never shells out to launchctl; it asks the runner.',
+          ' */',
+          "export const NOTE = 'see the launchd runner';",
+          '',
+        ].join('\n'),
+      );
+      expect(launchctlNamers()).toEqual([RUNNER]);
+    });
+  });
+
+  /* ── row 7 + row 8: the tools workspace, and the arrows that hold ──── */
+
+  describe('rows 7 and 8: tools/ is wired in, and the old arrows still bite', () => {
+    const PROBES: ReadonlyArray<readonly [string, string]> = [
+      [
+        'tools/release/src/__s9_probe__reach.ts',
+        [
+          "import { auditChainHead } from '@wemessage/core';",
+          'export const x = auditChainHead;',
+          '',
+        ].join('\n'),
+      ],
+      [
+        'tools/release/src/__s9_probe__ok.ts',
+        [
+          "import { readFileSync } from 'node:fs';",
+          "import { join } from 'node:path';",
+          'export const read = (d: string, f: string): string =>',
+          "  readFileSync(join(d, f), 'utf8');",
+          '',
+        ].join('\n'),
+      ],
+      [
+        'apps/desktop/src/__s9_probe__daemon.ts',
+        [
+          "import { createDaemon } from '@wemessage/daemon';",
+          'export const d = createDaemon;',
+          '',
+        ].join('\n'),
+      ],
+    ];
+    let violations: CruiseSummary['summary']['violations'] = [];
+    let cruisedSources: string[] = [];
+
+    beforeAll(() => {
+      for (const [rel, body] of PROBES) {
+        const abs = join(repoRoot, rel);
+        mkdirSync(join(abs, '..'), { recursive: true });
+        writeFileSync(abs, body);
+      }
+      const result = cruise(['packages', 'apps', 'tools']);
+      violations = result.summary.violations;
+      cruisedSources = result.modules.map((m) => m.source);
+    });
+    afterAll(() => {
+      for (const [rel] of PROBES) rmSync(join(repoRoot, rel), { force: true });
+    });
+    const flaggedBy = (rule: string): string[] =>
+      violations.filter((v) => v.rule.name === rule).map((v) => v.from);
+
+    it('row 7: pnpm, tsc and depcruise all know tools/ exists', () => {
+      expect(s9Read('pnpm-workspace.yaml')).toMatch(/^\s+-\s+'tools\/\*'$/m);
+      const refs = (
+        JSON.parse(s9Read('tsconfig.json')) as {
+          references: Array<{ path: string }>;
+        }
+      ).references.map((r) => r.path);
+      expect(refs).toContain('tools/release');
+      const pkg = JSON.parse(s9Read('package.json')) as {
+        scripts: Record<string, string>;
+      };
+      expect(pkg.scripts['dep:check']).toContain('tools');
+    });
+
+    it('row 7: the rule exists by name', () => {
+      // Rule names are binding (s1-execution §1.6).
+      expect(s9Read('.dependency-cruiser.cjs')).toContain(
+        "name: 'tools-import-runtime-nothing'",
+      );
+    });
+
+    /**
+     * s7 Sc 11 (a) pins the top-level directory list precisely so that a new
+     * one cannot arrive without somebody answering its six questions out
+     * loud. `tools/` is the first new one since `skills/`, and this row is
+     * the answer. The list in (a) was extended only after these passed.
+     *
+     * Where `skills/` answered "no compiled code, so `tsc` and `dep:check`
+     * correctly do not reach it", `tools/` answers the opposite on every
+     * one of those, which is why row 7 is a wiring row rather than a note.
+     */
+    it('row 7 (blind spot): tools/ answers the six questions skills/ had to', () => {
+      const trackedTools = execFileSync('git', ['ls-files', '--', 'tools/'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .split('\n')
+        .filter((f) => f.length > 0);
+      // (1) Non-vacuity, then the public sweep reaches every one of them.
+      expect(trackedTools.length).toBeGreaterThan(0);
+      const swept = new Set(trackedTextFiles());
+      expect(trackedTools.filter((f) => !swept.has(f))).toEqual([]);
+
+      // (2) Neither formatter nor linter is configured to skip it. An
+      // ignore entry is the cheapest way to lose a directory.
+      const ignored = readFileSync(join(repoRoot, '.prettierignore'), 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith('#'));
+      expect(ignored.filter((l) => l.startsWith('tools'))).toEqual([]);
+      const ignores =
+        /ignores:\s*\[([^\]]*)\]/.exec(
+          readFileSync(join(repoRoot, 'eslint.config.js'), 'utf8'),
+        )?.[1] ?? '';
+      expect(ignores).not.toContain('tools');
+
+      // (3) It DOES carry compiled code — the opposite of `skills/` — so
+      // the answer to "does tsc need to reach it" is yes, and the project
+      // reference asserted above is what makes that true.
+      expect(
+        trackedTools.filter((f) => f.endsWith('.ts')).length,
+      ).toBeGreaterThan(0);
+
+      // (4) The launchd sweep reaches it. This is the root that matters
+      // most for row 4: the release lane is the first code in this tree
+      // with a reason to write a launchd verb down.
+      expect(swept.has('tools/release/src/index.ts')).toBe(true);
+    });
+
+    it('row 7 PLANTED: a release tool reaching a workspace package violates', () => {
+      expect(
+        flaggedBy('tools-import-runtime-nothing'),
+        `violations seen: ${JSON.stringify(violations)}`,
+      ).toContain('tools/release/src/__s9_probe__reach.ts');
+    });
+
+    it('row 7 NEAR-MISS: node builtins and relative paths are the point', () => {
+      // The rule's whole reason for existing is that a broken daemon build
+      // must not be able to block a cask render — so the tools may read the
+      // filesystem, parse YAML, and import each other, and nothing else.
+      expect(
+        violations.filter(
+          (v) => v.from === 'tools/release/src/__s9_probe__ok.ts',
+        ),
+      ).toEqual([]);
+    });
+
+    it('row 8: the thin-client rule texts are byte-identical to s8', () => {
+      const config = s9Read('.dependency-cruiser.cjs');
+      expect(config).toContain("name: 'cli-thin-client'");
+      expect(config).toContain("name: 'desktop-thin-client'");
+      expect(config).toContain("'^@wemessage/(?!client$|protocol$)'");
+      expect(config).toContain("pathNot: '^apps/desktop/test/'");
+      expect(config).not.toContain(`cli-desktop-${'thin'}-clients`);
+    });
+
+    it('row 8 PLANTED: the supervisor must spawn the daemon, not import it', () => {
+      // Sc 7's supervisor is the reason this is re-proved here rather than
+      // taken on trust from s8: the scenario that adds a supervisor is the
+      // scenario most tempted to reach for the daemon's factory directly.
+      expect(flaggedBy('nobody-imports-daemon')).toContain(
+        'apps/desktop/src/__s9_probe__daemon.ts',
+      );
+    });
+
+    it('the cruise is not vacuous: it saw all three probes and the tree', () => {
+      expect(
+        PROBES.map(([rel]) => rel).filter(
+          (rel) => !cruisedSources.includes(rel),
+        ),
+      ).toEqual([]);
+      expect(cruisedSources.length).toBeGreaterThan(200);
+    });
+  });
+
+  /* ── row 9: the desktop dependency list, extended for packaging ────── */
+
+  describe('row 9: the §1.2 list grows by exactly the ship-era four', () => {
+    interface DesktopPkg {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    }
+    const pkg = (): DesktopPkg =>
+      JSON.parse(s9Read('apps/desktop/package.json')) as DesktopPkg;
+    const SHIP_DEV_ADDITIONS: readonly string[] = [
+      '@electron/fuses',
+      'electron-builder',
+      'esbuild',
+      'gifenc',
+    ];
+
+    it('devDependencies are the s8 eight plus the ship-era four', () => {
+      expect(Object.keys(pkg().devDependencies ?? {}).sort()).toEqual(
+        [
+          '@preact/preset-vite',
+          '@types/pngjs',
+          'axe-core',
+          'electron',
+          'pixelmatch',
+          'playwright-core',
+          'pngjs',
+          'vite',
+          ...SHIP_DEV_ADDITIONS,
+        ].sort(),
+      );
+    });
+
+    it('dependencies did NOT grow: the renderer ships what it shipped', () => {
+      // The four additions are all build-time. A packaging scenario that
+      // quietly put something in `dependencies` would put it in the
+      // renderer bundle, and INV-1's desktop half is that the renderer's
+      // import inventory is closed.
+      expect(Object.keys(pkg().dependencies ?? {}).sort()).toEqual([
+        '@wemessage/client',
+        '@wemessage/protocol',
+        'preact',
+      ]);
+    });
+
+    it('the list is not decorative: every entry is actually installed', () => {
+      const p = pkg();
+      const names = [
+        ...Object.keys(p.dependencies ?? {}),
+        ...Object.keys(p.devDependencies ?? {}),
+      ];
+      expect(names.length).toBe(15);
+      expect(
+        names.filter(
+          (n) =>
+            !existsSync(
+              join(repoRoot, 'apps/desktop/node_modules', n, 'package.json'),
+            ),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  /* ── row 10: the release scripts are declared and land somewhere ───── */
+
+  describe('row 10: seven release scripts, each resolving to a real file', () => {
+    const RELEASE_SCRIPTS: readonly string[] = [
+      'release:notarize',
+      'release:cask',
+      'release:check-versions',
+      'release:cut-tag',
+      'pack:adhoc',
+      'pack:release',
+      'smoke:automated',
+    ];
+    const scripts = (): Record<string, string> =>
+      (
+        JSON.parse(s9Read('package.json')) as {
+          scripts: Record<string, string>;
+        }
+      ).scripts;
+
+    it('all seven are declared', () => {
+      const have = scripts();
+      expect(RELEASE_SCRIPTS.filter((s) => !(s in have))).toEqual([]);
+    });
+
+    it('every one of them points at a file that exists', () => {
+      // A script naming a path that is not there is a script that fails at
+      // 3am with `MODULE_NOT_FOUND` instead of at review time. The stubs
+      // exist now and exit 2; the scenarios that own them fill them in.
+      const have = scripts();
+      const missing: string[] = [];
+      for (const name of RELEASE_SCRIPTS) {
+        const cmd = have[name] ?? '';
+        const path = /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(cmd)?.[1] ?? '';
+        if (path.length === 0) missing.push(`${name}: no file in ${cmd}`);
+        else if (!existsSync(join(repoRoot, path)))
+          missing.push(`${name}: ${path} does not exist`);
+      }
+      expect(missing).toEqual([]);
+    });
+
+    it('the stubs refuse loudly rather than succeeding by doing nothing', () => {
+      // Exit 2, not 0. A release script that is a no-op is the single most
+      // dangerous shape in this list: `pnpm release:notarize && ship` would
+      // ship an unnotarised app and report success.
+      const have = scripts();
+      for (const name of RELEASE_SCRIPTS) {
+        const path = /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(
+          have[name] ?? '',
+        )?.[1];
+        expect(path, name).toBeDefined();
+        const body = s9Read(path ?? '');
+        expect(body, `${name} (${path ?? ''})`).toContain('process.exit(2)');
+      }
+    });
+  });
+
+  /* ── row 11: no secret shapes, and the digests that ARE here ───────── */
+
+  /**
+   * Three of the plan's four regexes are kept exactly. The fourth is wrong
+   * and the third needed a boundary.
+   *
+   * "a 40-hex `sha256`" is not a thing: sha256 is 64 hex, and 40 hex is
+   * sha1. The tree contains ZERO 40-hex runs, so the row as written passes
+   * against every possible tree and guards nothing. What the tree does
+   * contain is 64-hex, in exactly three files, all of them legitimate: pip's
+   * `--hash=sha256:` pins, and two audit-chain specs that assert a known
+   * digest. A ban with three exemptions is the wrong guard, so the shape is
+   * inverted — the row ENUMERATES which files may carry a digest and asserts
+   * the set is exactly those three. A fourth carrier is then a diff somebody
+   * has to argue, which is what the plan wanted and could not get from a ban.
+   *
+   * `/[0-9A-Z]{10}\b.*issuer/i` needed the `i` split off the key-id class
+   * and a `(?![a-z])` after `issuer`. As written it matches
+   * `deps.issueRequest` — `issueR` is `issuer` case-insensitively — and the
+   * daemon has six of those. It survives at HEAD only because none of them
+   * happens to have ten alphanumerics in front of it on the same line, which
+   * is a guard held up by luck.
+   */
+  describe('row 11: nothing shaped like a signing credential', () => {
+    const SECRET_SHAPES: ReadonlyArray<{
+      readonly name: string;
+      readonly re: RegExp;
+    }> = [
+      { name: 'PEM block', re: /-----BEGIN / },
+      {
+        name: 'App Store Connect key file',
+        re: new RegExp(`Auth${'Key'}_[A-Z0-9]{10}\\.p8`),
+      },
+      {
+        name: 'key id beside an issuer',
+        re: /\b[0-9A-Z]{10}\b.*\b[Ii]ssuer(?![a-z])/,
+      },
+    ];
+    const DIGEST_CARRIERS: readonly string[] = [
+      'packages/adapters/hermes/plugin/requirements.txt',
+      'packages/core/test/audit-chain-core.spec.ts',
+      'packages/store/test/audit-chain.spec.ts',
+    ];
+    const HEX64 = /\b[0-9a-f]{64}\b/;
+
+    function secretOffenders(): string[] {
+      const out: string[] = [];
+      for (const f of trackedTextFiles()) {
+        const text = readFileSync(join(repoRoot, f), 'utf8');
+        for (const shape of SECRET_SHAPES)
+          if (shape.re.test(text)) out.push(`${f}: ${shape.name}`);
+      }
+      return out.sort();
+    }
+
+    it('no tracked file carries a signing-credential shape', () => {
+      expect(secretOffenders()).toEqual([]);
+    });
+
+    it('PLANTED: a .p8 key, a PEM block and an issuer line all fail', () => {
+      const probes: ReadonlyArray<readonly [string, string, string]> = [
+        [
+          'tools/release/__s9_probe__key.txt',
+          `Auth${'Key'}_ABC1234567.p8\n`,
+          'App Store Connect key file',
+        ],
+        [
+          'tools/release/__s9_probe__pem.txt',
+          `-----${'BEGIN'} PRIVATE KEY-----\n`,
+          'PEM block',
+        ],
+        [
+          'tools/release/__s9_probe__asc.txt',
+          'KEY_ID=ABCD123456 issuer_id=00000000-0000-0000-0000-000000000000\n',
+          'key id beside an issuer',
+        ],
+      ];
+      for (const [rel, body, name] of probes) {
+        s9Plant(rel, body, true);
+        expect(secretOffenders(), rel).toContain(`${rel}: ${name}`);
+      }
+    });
+
+    it('NEAR-MISS: `deps.issueRequest` is not a signing credential', () => {
+      // The exact false positive the plan's regex has, written out so the
+      // fix cannot be reverted by somebody restoring the plan's text.
+      const rel = s9Plant(
+        'tools/release/__s9_probe__near.ts',
+        [
+          'const somethingLong = { issueRequest: (r: string): string => r };',
+          'export const go = somethingLong.issueRequest;',
+          '',
+        ].join('\n'),
+        true,
+      );
+      expect(secretOffenders().filter((o) => o.startsWith(rel))).toEqual([]);
+      // and the sweep DID read it, so the emptiness is a verdict:
+      expect(trackedTextFiles()).toContain(rel);
+    });
+
+    it('a 64-hex digest lives in exactly three files, all of them earned', () => {
+      const carriers = trackedTextFiles()
+        .filter((f) => HEX64.test(readFileSync(join(repoRoot, f), 'utf8')))
+        .sort();
+      expect(carriers).toEqual([...DIGEST_CARRIERS].sort());
+    });
+
+    /**
+     * SELF-TRIP, recorded rather than quietly fixed.
+     *
+     * This row was written as "the tree contains no 40-hex run at all", and
+     * that was TRUE when it was written and FALSE by the time row 3 landed
+     * four hours later. Row 3's decoders are proved against real PNG and GIF
+     * bytes pasted as hex, and `prettier` wraps those literals at eighty
+     * columns — which, for a quoted hex string indented four levels, is a
+     * chunk of exactly forty characters. The row convicted its own slice's
+     * fixtures, and it convicted them for a formatting reason.
+     *
+     * The two cheap ways out are both wrong. Re-wrapping the fixture into
+     * 38-character chunks makes the guard pass by editing the thing it is
+     * pointed at, which is the definition of dodging a ban. Deleting the row
+     * gives up a real question — a signing digest pasted into the tree is
+     * exactly the kind of thing a ship slice leaks.
+     *
+     * So the row is STRENGTHENED into the shape the 64-hex arm above already
+     * uses, plus one property the 64-hex arm cannot state: a permitted
+     * 40-hex run must be a SLICE of a longer raster byte blob that this
+     * project decodes, never a standalone value. A pasted sha1 digest is a
+     * standalone value and still fails, in the one file that is allowed to
+     * contain forty hex characters at all.
+     */
+    const HEX40_CARRIERS: readonly string[] = [
+      'apps/desktop/test/tokens.spec.ts',
+    ];
+    /** `Buffer.from('..' + '..', 'hex')` — the chunks, re-joined. */
+    function hexBlobs(text: string): string[] {
+      const out: string[] = [];
+      for (const m of text.matchAll(
+        /Buffer\.from\(\s*((?:'[0-9a-f]*'\s*\+?\s*)+),\s*'hex'/g,
+      ))
+        out.push(
+          [...(m[1] ?? '').matchAll(/'([0-9a-f]*)'/g)]
+            .map((q) => q[1] ?? '')
+            .join(''),
+        );
+      return out;
+    }
+    /** PNG, GIF87a/89a, ICNS — the three the decoders read. */
+    const RASTER_MAGIC = [
+      '89504e47',
+      '474946383961',
+      '474946383761',
+      '69636e73',
+    ];
+
+    it('a 40-hex run appears only as a slice of a decodable raster', () => {
+      // NOT a `/g` regex reused across the filter: `RegExp.test` on a global
+      // regex advances `lastIndex` and would skip every other file.
+      const carriers = trackedTextFiles()
+        .filter((f) =>
+          /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
+        )
+        .sort();
+      expect(carriers).toEqual([...HEX40_CARRIERS].sort());
+      // Non-vacuity: the carrier really does hold runs, and they really are
+      // inside blobs this project can decode.
+      for (const rel of HEX40_CARRIERS) {
+        const text = readFileSync(join(repoRoot, rel), 'utf8');
+        const runs = [...text.matchAll(/\b[0-9a-f]{40}\b/g)].map((m) => m[0]);
+        expect(runs.length, rel).toBeGreaterThan(0);
+        const blobs = hexBlobs(text);
+        expect(blobs.length, rel).toBeGreaterThan(0);
+        // Every blob is a raster, and every blob is LONGER than a digest —
+        // so no blob is a digest wearing a `Buffer.from` costume.
+        for (const blob of blobs) {
+          expect(
+            RASTER_MAGIC.some((magic) => blob.startsWith(magic)),
+            `${rel}: blob starts ${blob.slice(0, 16)}`,
+          ).toBe(true);
+          expect(blob.length, `${rel}: blob length`).toBeGreaterThan(40);
+        }
+        // …and every 40-run in the file is a slice of one of them.
+        for (const run of runs)
+          expect(
+            blobs.some((b) => b.includes(run)),
+            `${rel}: ${run.slice(0, 12)}… is not inside a raster blob`,
+          ).toBe(true);
+      }
+    });
+
+    it('PLANTED: a bare sha1-shaped digest is an offender even in the carrier', () => {
+      // The property the enumeration buys: being on the carrier list is not
+      // a licence to hold a digest, because the list admits SLICES OF A
+      // BLOB and a digest is not one.
+      const digest = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
+      const blobs = hexBlobs(
+        `const X = Buffer.from('89504e470d0a1a0a' + '0000000d49484452', 'hex');`,
+      );
+      expect(blobs).toEqual(['89504e470d0a1a0a0000000d49484452']);
+      expect(blobs.some((b) => b.includes(digest))).toBe(false);
+      // …and a file that is not on the carrier list fails on sight.
+      const rel = s9Plant(
+        'tools/release/__s9_probe__sums.txt',
+        `${digest}  WeMessage.dmg\n`,
+        true,
+      );
+      expect(
+        trackedTextFiles()
+          .filter((f) =>
+            /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
+          )
+          .filter((f) => !HEX40_CARRIERS.includes(f)),
+      ).toEqual([rel]);
+    });
+  });
+
+  /* ── row 12: the transport surface did not move ────────────────────── */
+
+  /**
+   * The plan says the last-update comment is `#23`. It is `#24`, minted in
+   * s8 Sc 3 when the four `draft.*` lifecycle emit sites were wired and
+   * `UNEMITTED_WS_EVENTS` was forced back to `[]`. The plan was written
+   * before Sc 3 landed. `#25` has never existed and this scenario must not
+   * mint one: S9 ships the product, it does not extend the wire.
+   */
+  describe('row 12: the ratchet reads #24, and S9 does not bump it', () => {
+    const RATCHET = 'packages/daemon/test/transport-surface.snapshot.ts';
+    /** Every deliberate-update number, in either spelling the file uses. */
+    function deliberateUpdates(text: string): number[] {
+      const out: number[] = [];
+      for (const m of text.matchAll(
+        /(?:#(\d+)\s+deliberate|deliberate\s+update\s+#(\d+))/gi,
+      ))
+        out.push(Number(m[1] ?? m[2]));
+      return [...new Set(out)].sort((a, b) => a - b);
+    }
+
+    it('the S8-close counts are unchanged', () => {
+      expect(ROUTE_TABLE.length).toBe(67);
+      expect(WS_EVENT_VOCABULARY.length).toBe(21);
+      expect(GATEWAY_EVENT_NAMES.length).toBe(21);
+      expect(EMITTED_WS_EVENTS.length).toBe(21);
+      expect(UNEMITTED_WS_EVENTS).toEqual([]);
+      expect(PORT_IMPORTER_ALLOWLIST.length).toBe(15);
+      // `Object.keys`, not `.length`: `FRAME_SPECS` is a KEY TABLE, not an
+      // array, and `.length` on it is `undefined` — an assertion that would
+      // have failed for a reason that has nothing to do with the wire.
+      expect(Object.keys(FRAME_SPECS).length).toBe(9);
+    });
+
+    it('the highest deliberate update is #24 and #25 was never minted', () => {
+      const seen = deliberateUpdates(s9Read(RATCHET));
+      expect(Math.max(...seen)).toBe(24);
+      expect(seen).not.toContain(25);
+    });
+
+    it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {
+      // A regex that matched nothing would make both assertions above pass
+      // for the wrong reason — the "filter predicate that matches nothing"
+      // shape. Proved against the real file and against a synthetic bump.
+      const seen = deliberateUpdates(s9Read(RATCHET));
+      expect(seen.length).toBeGreaterThan(5);
+      expect(seen).toContain(23);
+      expect(
+        deliberateUpdates('// #25 deliberate (s9 Scenario 1): a new route.'),
+      ).toEqual([25]);
+      expect(
+        deliberateUpdates(' * Deliberate update #25, s9 Scenario 1.'),
+      ).toEqual([25]);
+    });
+  });
+
+  /* ── row 13: docs/ is never staged ─────────────────────────────────── */
+
+  it('row 13: git tracks nothing under docs/', () => {
+    // S8 gate 14, promoted from a close-of-slice check to a row so that it
+    // runs on every `pnpm test` rather than once a slice. `docs/` is the
+    // planning tree: it names the operator, the machine, and every decision
+    // that has not been made yet, and this repository is public.
+    const tracked = execFileSync('git', ['ls-files', '--', 'docs/'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => f.length > 0);
+    expect(tracked).toEqual([]);
+    // Non-vacuity: the tree HAS a docs/ directory, so an empty result is a
+    // fact about the index rather than a fact about the filesystem.
+    expect(existsSync(join(repoRoot, 'docs'))).toBe(true);
+    expect(s9Read('.gitignore')).toMatch(/^docs\/$/m);
   });
 });

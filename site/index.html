@@ -20,7 +20,6 @@
     --tint:#0A84FF;          /* the blue bubble. the only brand color */
     --tint-soft:rgba(10,132,255,.14);
     --tint-2:#4AA9FF;
-    --go:#30D158;            /* semantic only: the green light, go states */
     --danger:#FF453A;        /* kill switch only */
     --warn:#FF9F0A;
     --text-1:rgba(255,255,255,.92);
@@ -92,7 +91,7 @@
   @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
   @media (prefers-reduced-motion: reduce){.devbadge .dot{animation:none}}
   h1{font-size:52px;line-height:1.06;letter-spacing:-.03em;font-weight:700;max-width:17ch;margin:0 auto 20px}
-  h1 .green{color:var(--go)}
+  h1 .gate{color:var(--tint-2)}
   .hero .sub{font-size:18px;color:var(--text-2);max-width:52ch;margin:0 auto 34px}
   .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
   .cta-note{font-size:12px;color:var(--text-3)}
@@ -159,7 +158,7 @@
     max-width:88%;margin-left:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#fff}
   .bubble-out .tag{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.75;margin-bottom:4px;font-family:-apple-system,system-ui,sans-serif;font-weight:600}
   .draft-actions{display:flex;gap:10px;margin-top:14px;align-items:center}
-  .draft-actions .approve{background:var(--go);color:#04180a;font-weight:600;font-size:13px;border:none;border-radius:9px;padding:8px 16px}
+  .draft-actions .approve{background:var(--tint);color:#fff;font-weight:600;font-size:13px;border:none;border-radius:9px;padding:8px 16px}
   .draft-actions .reject{background:transparent;color:var(--text-2);font-size:13px;border:1px solid var(--stroke-strong);border-radius:9px;padding:8px 16px}
   .draft-actions .grace{margin-left:auto;font-size:11.5px;color:var(--text-3);font-family:var(--mono)}
 
@@ -205,7 +204,7 @@
   .term .chrome b{margin-left:8px;font-size:11px;color:var(--text-3);font-weight:500;font-family:var(--mono)}
   .term pre{padding:18px;font-family:var(--mono);font-size:12.5px;line-height:1.75;color:var(--text-2);overflow-x:auto}
   .term .p{color:var(--tint-2)}
-  .term .ok{color:var(--go)}
+  .term .ok{color:var(--tint-2)}
   .term .red{color:var(--danger)}
   .term .dim{color:var(--text-3)}
   .cli-note{font-size:12px;color:var(--text-3);margin-top:12px;font-family:var(--mono)}
@@ -298,7 +297,7 @@
   <header class="hero wrap">
     <svg class="mark" viewBox="0 0 96 96" role="img" aria-label="WeMessage logo: WM inside a blue message bubble"><use href="#wm-mark"/></svg>
     <div class="devbadge"><span class="dot"></span>In development — watch the repo for v1</div>
-    <h1>Your AI can answer your texts. Nothing sends without your <span class="green">green&nbsp;light</span>.</h1>
+    <h1>Your AI can answer your texts. Nothing sends without your <span class="gate">green&nbsp;light</span>.</h1>
     <p class="sub">WeMessage is an open-source macOS gateway that lets AI agents draft replies to your iMessages. Every draft waits for your approval. Local-only. No cloud. Kill switch always on top.</p>
     <div class="cta">
       <a class="btn btn-tint" href="https://github.com/raybman/WeMessage">Star on GitHub</a>

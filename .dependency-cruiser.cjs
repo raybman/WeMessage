@@ -110,6 +110,19 @@ module.exports = {
     // the SHIPPED app reaches neither the daemon nor anything else. A rule
     // with one reviewed exception plus a positive assertion is stronger than
     // the rule it replaces, which had no exception because nothing had tried.
+    //
+    // s9 Sc 1 row 8 STRENGTHENS the `to` to two shapes, for the reason
+    // `desktop-thin-client` and `adapters-thin-clients` already carry two.
+    // The single resolved-path shape had a hole exactly the size of the
+    // sloppiest possible reach: pnpm does not hoist, so `import
+    // '@wemessage/daemon'` from `apps/desktop/src` does not RESOLVE — the
+    // module comes back `couldNotResolve` with no resolved path to match,
+    // and the rule that exists to forbid that import said nothing about
+    // it. The row planted precisely that import and the cruise reported
+    // zero violations. Nothing exploited the hole because nothing under
+    // `apps/desktop/src` has ever needed the daemon; s9 Sc 7 adds a
+    // supervisor, which is the first code with a reason to want it, and a
+    // hole is only theoretical until somebody needs a process.
     {
       severity: 'error',
       name: 'nobody-imports-daemon',
@@ -117,7 +130,7 @@ module.exports = {
         path: '^(packages/(?!daemon)|apps|fixtures)',
         pathNot: '^apps/desktop/test/',
       },
-      to: { path: '^packages/daemon' },
+      to: { path: ['^packages/daemon', '^@wemessage/daemon$'] },
     },
 
     // s5 §3.1: an adapter is a thin client. It speaks the wire protocol and
@@ -181,6 +194,35 @@ module.exports = {
       name: 'no-fixtures-in-prod-path',
       from: { path: '^(packages|apps)/[^/]+/src' },
       to: { path: '^fixtures' },
+    },
+
+    // s9 Sc 1 row 7. The release tools import NOTHING from this monorepo.
+    //
+    // Not a style rule. The release lane's job is to render a cask, check
+    // versions, cut a tag and drive notarisation, and every one of those has
+    // to work on the day the daemon does not compile — which is precisely
+    // the day somebody is trying to ship a fix. A `tools/release` that
+    // imported `@wemessage/core` would put the entire package graph on the
+    // critical path of `pnpm release:cask`, so that a broken daemon build
+    // could block a cask render for no reason connected to casks.
+    //
+    // The permitted set is therefore tiny and stated positively in the
+    // prose: `node:*` builtins, `yaml`, and relative paths (the tools may
+    // import each other). Everything else — workspace packages by path,
+    // workspace packages by bare unresolvable specifier, and any other
+    // third-party runtime dependency — is an error. Both specifier shapes
+    // are matched for the same reason `adapters-thin-clients` matches both:
+    // a tool that never declared the dependency still imports it in source,
+    // and matching only the resolved path would let the sloppiest possible
+    // reach through.
+    {
+      severity: 'error',
+      name: 'tools-import-runtime-nothing',
+      from: { path: '^tools/' },
+      to: {
+        pathNot: ['^tools/', '^node_modules/yaml/'],
+        path: ['^(packages|apps|fixtures)/', '^@wemessage/', '^node_modules/'],
+      },
     },
   ],
   options: {

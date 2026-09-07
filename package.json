@@ -13,7 +13,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . && prettier --check .",
-    "dep:check": "depcruise packages apps fixtures --config .dependency-cruiser.cjs",
+    "dep:check": "depcruise packages apps fixtures tools --config .dependency-cruiser.cjs",
+    "release:notarize": "node tools/release/bin/notarize.mjs",
+    "release:cask": "node tools/release/bin/cask.mjs",
+    "release:check-versions": "node tools/release/bin/check-versions.mjs",
+    "release:cut-tag": "node tools/release/bin/cut-tag.mjs",
+    "pack:adhoc": "node tools/release/bin/pack.mjs --adhoc",
+    "pack:release": "node tools/release/bin/pack.mjs --release",
+    "smoke:automated": "node tools/release/bin/smoke.mjs",
     "licenses:check": "license-checker-rseidelsohn --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0' && license-checker-rseidelsohn --start packages/adapter-testkit --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0' && license-checker-rseidelsohn --start apps/desktop --failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0'"
   },
   "devDependencies": {

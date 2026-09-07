@@ -26,7 +26,7 @@
  * rather than to keep one. This file is the FILE WALK and the POLICY; the
  * tokenizer and the hue maths are shared.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -47,6 +47,63 @@ export const TOKENS_FILE = 'apps/desktop/src/renderer/theme/tokens.css';
 
 /** Everything under a swept root that could carry a colour as text. */
 const SWEPT_EXTENSIONS = ['.ts', '.tsx', '.css', '.html', '.svg', '.json'];
+
+/**
+ * The two lists s9 Sc 1 adds, and the reason they are SEPARATE from the two
+ * above rather than a widening of them.
+ *
+ * S8's rule 1 is LOCALITY: outside `tokens.css` no colour literal of any
+ * form. That is the right rule for the application and the wrong rule for
+ * everything else the operator will look at, because the marketing page is a
+ * single self-contained document with its own `:root` block and no token
+ * sheet to defer to. Widening S8's roots would therefore have meant either
+ * deleting the locality rule or exempting `site/` from it, and both of those
+ * are how a guard becomes decoration.
+ *
+ * So the ship-era sweep asks a DIFFERENT and weaker question of a WIDER set
+ * of files: not "is colour written down here" but "is any of it green".
+ * §3.10 put state on the glyph so that hue never carries it, and F-104's
+ * point was never that the app is monochrome — it is that this product does
+ * not have a green light. A landing page that paints APPROVE green is the
+ * same decision the app refuses, made where more people see it.
+ */
+export const SHIP_ROOTS: readonly string[] = [
+  'apps/desktop/src',
+  // NOT in the plan's Sc 1 list, deliberately kept. The plan says the roots
+  // "become" its seven; taking `assets` out would drop the tray glyphs —
+  // the one place in the product where a hue is baked into a shipped file —
+  // out of the only sweep that reads them. A ship-era row that is narrower
+  // than the GUI-era row it replaces is not an extension.
+  'apps/desktop/assets',
+  // Does not exist until Sc 5 (icon, DMG background). Named now so that the
+  // commit that creates it is swept by the commit that created it.
+  'apps/desktop/build',
+  'site',
+  // Sc 11's cask lives here; Sc 9's workflow copies it.
+  'homebrew',
+  'README.md',
+  // Sc 14 writes it; SECURITY.md is not in the tree yet either.
+  'CHANGELOG.md',
+  'SECURITY.md',
+];
+
+/**
+ * What the ship sweep reads as text. Wider than `SWEPT_EXTENSIONS` because
+ * the ship era writes Ruby (the cask), plists (the LaunchAgent), YAML (the
+ * workflows) and shell (the packaging scripts), and every one of them can
+ * carry a hex.
+ */
+const SHIP_EXTENSIONS = [
+  ...SWEPT_EXTENSIONS,
+  '.md',
+  '.rb',
+  '.plist',
+  '.yml',
+  '.yaml',
+  '.sh',
+  '.mjs',
+  '.js',
+];
 
 const RASTER_EXTENSIONS = [
   '.png',
@@ -79,6 +136,12 @@ export const RASTER_ALLOWLIST: readonly string[] = [];
 
 function walk(absRoot: string): string[] {
   if (!existsSync(absRoot)) return [];
+  // s9 Sc 1: a root may be a FILE. `README.md` is a swept surface and it is
+  // not a directory, and `readdirSync` on it throws ENOTDIR rather than
+  // returning nothing — which would have been a sweep that crashed instead
+  // of a sweep with a hole, but only because the first ship root that is a
+  // file happened to exist. Both spellings are handled here.
+  if (statSync(absRoot).isFile()) return [absRoot];
   const out: string[] = [];
   const rec = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -109,10 +172,54 @@ export function filesUnderSweptRoots(
 /** The subset rule 1 reads as text. */
 export function sweptTextFiles(
   roots: readonly string[] = SWEPT_ROOTS,
+  extensions: readonly string[] = SWEPT_EXTENSIONS,
 ): string[] {
   return filesUnderSweptRoots(roots).filter((f) =>
-    SWEPT_EXTENSIONS.some((e) => f.endsWith(e)),
+    extensions.some((e) => f.endsWith(e)),
   );
+}
+
+/** The ship-era surface list, read as text. Row 2's enumeration. */
+export function shipTextFiles(roots: readonly string[] = SHIP_ROOTS): string[] {
+  return sweptTextFiles(roots, SHIP_EXTENSIONS);
+}
+
+/**
+ * Rule 4 (s9 Sc 1, row 2). Every GREEN colour literal on a ship surface.
+ *
+ * Deliberately not the locality rule: a literal that is not green is not an
+ * offender here, and a literal this parser cannot resolve is not one either.
+ * `greenVerdict` returns `null` for `oklch()` and for a CSS named colour,
+ * and treating `null` as an offender — which `tokenSheetOffenders` correctly
+ * does, because a token sheet has no business holding an unparseable colour
+ * — would make every `#faq` anchor and every sentence containing the word
+ * `color` a finding on a README. A guard that cries wolf on prose is a guard
+ * somebody turns off.
+ */
+export function shipGreenOffenders(
+  roots: readonly string[] = SHIP_ROOTS,
+): string[] {
+  const out: string[] = [];
+  for (const rel of shipTextFiles(roots)) {
+    const text = readFileSync(join(REPO_ROOT, rel), 'utf8');
+    for (const lit of colourLiterals(text, {
+      shortHex: true,
+      // The ship surfaces include prose. `#482` in `audit #482 appended to
+      // hash chain` expands to an olive green and is a sequence number; a
+      // colour is written as a VALUE in every language this sweep reads.
+      // See the option's own comment for why neither the page nor
+      // `shortHex` was the thing that moved.
+      shortHexValuesOnly: true,
+      namedInContext: true,
+    })) {
+      const verdict = greenVerdict(lit.text);
+      if (verdict === null || !verdict.green) continue;
+      out.push(
+        `${rel}:${String(lineOf(text, lit.index))}: ${lit.text} — ${verdict.why}`,
+      );
+    }
+  }
+  return out.sort();
 }
 
 function lineOf(text: string, index: number): number {

@@ -2,4 +2,8 @@ packages:
   - 'packages/*'
   - 'packages/adapters/*'
   - 'apps/*'
+  # s9 Sc 1 row 7: the release lane. Its own workspace root so that
+  # `tools-import-runtime-nothing` has something to be a rule about, and so
+  # a broken daemon build cannot block a cask render.
+  - 'tools/*'
   - 'fixtures'

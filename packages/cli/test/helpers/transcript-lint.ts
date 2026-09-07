@@ -197,6 +197,43 @@ const PHONE_RE = /\+1\d{10}/g;
 const USER_PATH_RE = new RegExp(`/${'User'}s/[A-Za-z0-9._-]+`, 'g');
 /** A bearer wearing 64 hex: an operator token, which Sc 6 never redacts. */
 const BEARER_RE = /\b(?:Bearer|authorization:\s*Bearer)\s+[0-9a-f]{64}\b/gi;
+/**
+ * WHO runs this repository, as opposed to WHAT they run (s9 Sc 1 row 1).
+ *
+ * Every arm above refuses a string a MACHINE would leave behind: a brand, a
+ * real phone number, a token, an absolute home path. None of them is the
+ * operator's name, so the plan's own probe for this row — the operator's
+ * mailbox local-part in a workflow file — could not have failed before this
+ * arm existed.
+ *
+ * The mailbox arm is deliberately NOT a bare first-name match. The tree
+ * carries the same first name, dotted, as real fixture data in
+ * `packages/store` — case-folding evidence for contact matching, in both
+ * `Title.Case@Example.COM` and lowercase forms — and an arm that convicted
+ * those would be an arm somebody had to write an exemption for. A guard a
+ * legitimate caller must be exempted from is the wrong guard, so the arm
+ * asks for the handle followed IMMEDIATELY by `@` or `+`, which is what a
+ * real mailbox looks like and what a first-name-shaped fixture never is.
+ * A surname that merely STARTS with the handle, and the dotted fixtures,
+ * are both silent; the bare mailbox and its plus-aliases are not.
+ *
+ * Assembled from fragments so this file is not itself an offender, exactly
+ * as `BRAND_RE` and `USER_PATH_RE` above are.
+ *
+ * SELF-TRIP, recorded rather than quietly fixed. The first version of this
+ * comment gave those examples LITERALLY — the four spellings the arm does
+ * and does not match, written out — and the tree-wide sweep promptly
+ * convicted this file in eight rows at once. The fragment assembly below
+ * had been done correctly and the PROSE had not, which is the more
+ * interesting half of the lesson: a guard's documentation is inside the
+ * guard's scan. The examples are therefore described rather than spelled.
+ * Rewording the ARM to stop seeing them would have been the dodge; the
+ * arm is untouched and the sentence around it moved.
+ */
+const OPERATOR_RE = new RegExp(
+  [`${'wind'}seeker`, `\\b${'eri'}c(?=[@+])`].join('|'),
+  'i',
+);
 
 export interface PublicOffender {
   readonly rule: string;
@@ -212,10 +249,13 @@ export interface PublicOffender {
 /**
  * Everything in a blob of text that a PUBLIC repository must not carry.
  *
- * Four arms. Two are Sc 7's, unchanged in wording. Two are new in Sc 11
+ * Five arms. Two are Sc 7's, unchanged in wording. Two are new in Sc 11
  * and were verified against every tracked file at the commit that added
  * them, so nothing is grandfathered: the tree was already clean of adapter
  * tokens and of absolute home paths, and this is what keeps it that way.
+ * The fifth is s9 Sc 1's operator-identity arm, verified the same way — at
+ * the commit that added it, no tracked file matched it, including the two
+ * `.svg` files the same row brought into the sweep for the first time.
  */
 export function publicStringOffenders(text: string): PublicOffender[] {
   const out: PublicOffender[] = [];
@@ -233,6 +273,11 @@ export function publicStringOffenders(text: string): PublicOffender[] {
     out.push({ rule: 'token-shaped', detail: 'bearer token' });
   for (const p of text.match(USER_PATH_RE) ?? [])
     out.push({ rule: 'absolute-user-path', detail: p });
+  // Count-free and VALUE-free, like the bearer arm: the finding says that an
+  // operator identity is present, and never echoes it into a report that
+  // gets pasted into an issue.
+  if (OPERATOR_RE.test(text))
+    out.push({ rule: 'operator-identity', detail: 'operator identity' });
   return out;
 }
 
@@ -276,12 +321,58 @@ export interface ColourScanOptions {
    */
   readonly shortHex?: boolean;
   /**
+   * With `shortHex` on, require the SHORT forms to sit in a value position
+   * — immediately after `:`, `=`, `(`, `,`, `>` or a quote, whitespace
+   * allowed. The long forms are never conditioned on anything.
+   *
+   * s9 Sc 1, and a self-trip of the row that added it. `shortHex` was
+   * written for stylesheet-shaped text, and the ship-era hue sweep reads
+   * PROSE — a landing page, a README, a changelog. `site/index.html` says
+   * `audit #482 appended to hash chain` inside a terminal mock, and `#482`
+   * expands to `#448822`, which is an olive green. The sweep was right
+   * about the pixels and wrong about the tree: there is no green on that
+   * page, there is a sequence number.
+   *
+   * The two cheap outs were both refused. Editing the page to say
+   * something other than `#482` is exempting a legitimate caller by
+   * mutilating it, and the next `#abc`-shaped token in a README brings the
+   * problem straight back. Turning `shortHex` off for the ship sweep would
+   * have let `--go:#3d5` through, which is the exact defect the scenario
+   * exists to delete.
+   *
+   * So the ambiguity is resolved by POSITION, which is what actually
+   * distinguishes the two: a colour is written as a VALUE in every language
+   * the ship era uses (`--go:#3d5`, `fill="#3d5"`, `TINT=#3d5`,
+   * `<string>#3d5</string>`, `badge "#3d5"`), and a sequence number in a
+   * sentence never is. Off by default, so the locality sweep — which reads
+   * only code and stylesheets, and where any hex-shaped token outside the
+   * token sheet is a finding by design — is unchanged.
+   */
+  readonly shortHexValuesOnly?: boolean;
+  /**
    * Also match a CSS named colour sitting in a colour-valued position
    * (`fill="lime"`, `color: white`). Off by default for the same reason:
    * the CSS Color 4 list is 148 ordinary English words and most of a
    * README would light up.
    */
   readonly namedInContext?: boolean;
+}
+
+/**
+ * What introduces a value in CSS, SVG, XML/plist, Ruby, YAML and shell.
+ *
+ * `{` and `;` are deliberately absent: they open and close declarations
+ * rather than introduce values, and admitting them would let a hex-shaped
+ * token anywhere in a minified line count as a colour.
+ */
+const VALUE_INTRODUCERS = new Set([':', '=', '(', ',', '"', "'", '>']);
+
+/** Is the literal at `index` sitting where a value goes? */
+function inValuePosition(text: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && (text[i] === ' ' || text[i] === '\t')) i -= 1;
+  if (i < 0) return false;
+  return VALUE_INTRODUCERS.has(text[i] as string);
 }
 
 /** Longest-first so `#0A84FF` is one six-digit hex, never a three plus junk. */
@@ -347,8 +438,18 @@ export function colourLiterals(
 ): ColourLiteral[] {
   const out: ColourLiteral[] = [];
   const hexRe = options.shortHex === true ? HEX_ANY_RE : HEX_LONG_RE;
-  for (const m of text.matchAll(hexRe))
+  for (const m of text.matchAll(hexRe)) {
+    // `#` plus three or four digits. The long forms are unconditional in
+    // every caller: `#30D158` in a sentence is a colour somebody typed.
+    const short = m[0].length <= 5;
+    if (
+      short &&
+      options.shortHexValuesOnly === true &&
+      !inValuePosition(text, m.index)
+    )
+      continue;
     out.push({ text: m[0], index: m.index, form: 'hex' });
+  }
   for (const m of text.matchAll(FUNCTIONAL_COLOUR_RE))
     out.push({ text: m[0], index: m.index, form: 'functional' });
   if (options.namedInContext === true) {

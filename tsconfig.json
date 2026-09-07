@@ -16,6 +16,7 @@
     { "path": "packages/adapters/openclaw" },
     { "path": "packages/adapters/echo" },
     { "path": "apps/desktop" },
-    { "path": "fixtures" }
+    { "path": "fixtures" },
+    { "path": "tools/release" }
   ]
 }

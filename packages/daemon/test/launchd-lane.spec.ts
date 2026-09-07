@@ -26,8 +26,20 @@
  *   3. `sweepOrphans` refuses to widen: it boots out only labels the service
  *      manager itself reported under our test prefix.
  *   4. `termOwnedDaemon` refuses to signal a pid that is not the pid in our
- *      own lock file, and refuses this process, its parent, anything <= 1,
- *      and the recorded sentinel.
+ *      own lock file, and refuses this process, anything in its ancestry,
+ *      anything <= 1, and the recorded sentinel.
+ *
+ * STAGE 1b ADDED TWO GROUPS OF ROWS, both for holes found by reading the
+ * guard rather than by it failing, and both closed while the delegate is
+ * still `null`:
+ *
+ *   - the argv that referenced NOTHING. Every check in refusal 1 was
+ *     per-argument, and `['bootout', 'gui/<uid>']` has no argument that
+ *     references a label — so nothing refused it, and a domain with no
+ *     service is not a smaller operation than one agent but the whole GUI
+ *     domain.
+ *   - ANCESTRY, not parentage. `process.ppid` is one hop; under vitest the
+ *     process it would be worst to signal is three or four.
  *
  * ONE DIVERGENCE FROM THE DISPATCH, argued at the row: the dispatch describes
  * the read-only allowance as `args[0] === 'print'`. `list` is allowed too,
@@ -35,6 +47,7 @@
  * `sweepOrphans` is specified to obtain its labels from `list`. The allowance
  * is an explicit, asserted two-element allowlist rather than a prefix test.
  */
+import { spawn } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -51,8 +64,10 @@ import { resolveBundlePaths } from '../src/launchd/paths.js';
 import { isUnderTempRoot } from '../src/launchd/service.js';
 import type { ServiceManagerInvocation } from '../src/launchd/contract.js';
 import {
+  LANE_MUTATING_OPS,
   LANE_READ_ONLY_OPS,
   LaneRefused,
+  laneAncestry,
   laneInvocation,
   TEST_LABEL_PREFIX,
   installLaneSpawner,
@@ -228,6 +243,133 @@ describe('s9 Sc3 G3 refusal 1: the lane refuses before it delegates', () => {
       ).rejects.toThrow(LaneRefused);
     }
     expect(rec.calls).toEqual([]);
+  });
+
+  /* ── stage 1b: the argv that referenced nothing, and so refused nothing ── */
+
+  it('PLANTED: a mutating verb aimed at a BARE DOMAIN is refused, undelegated', async () => {
+    // THE ROW THIS FIX EXISTS FOR. Before stage 1b every check in the guard
+    // was per-argument, and `gui/<uid>` is an argument that references no
+    // label — so the loop found nothing to object to and the argv reached
+    // the delegate. It is not a narrower operation than booting out one
+    // agent. A domain with no service IS the whole domain, and removing the
+    // operator's GUI domain logs them out of the machine they are working
+    // on. Inert in stage 1 (the delegate is a recording fake); wired to a
+    // real spawner in stage 2, which is why it closes now.
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    const uid = String(laneUid());
+    await expect(
+      testScopedSpawn(invocation('bootout', `gui/${uid}`)),
+    ).rejects.toThrow(LaneRefused);
+    // …and the refusal SAYS what it is refusing, because the next person to
+    // read it will be reading it at the moment they wrote the argv.
+    await expect(
+      testScopedSpawn(invocation('bootout', `gui/${uid}`)),
+    ).rejects.toThrow(/whole GUI domain/);
+    // The trailing-slash spelling, which is the one the manual's own example
+    // for a domain target uses, and therefore the one an interpolated
+    // `gui/${uid}/${label}` collapses to when `label` comes back empty.
+    await expect(
+      testScopedSpawn(invocation('bootout', `gui/${uid}/`)),
+    ).rejects.toThrow(LaneRefused);
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('PLANTED: a mutating verb with NO arguments at all is refused', async () => {
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    for (const verb of LANE_MUTATING_OPS)
+      await expect(testScopedSpawn(invocation(verb)), verb).rejects.toThrow(
+        LaneRefused,
+      );
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('PLANTED: a mutating verb whose only arguments are FLAGS is refused', async () => {
+    // `referencedLabel` answers null for anything starting with `-`, which
+    // is correct on its own terms and was the second way to reach the
+    // delegate having referenced nothing.
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    for (const argv of [
+      ['bootout', '-w'],
+      ['enable', '--force'],
+      ['disable', '-'],
+      ['bootstrap', '-w', '--force'],
+    ])
+      await expect(
+        testScopedSpawn(invocation(...argv)),
+        argv.join(' '),
+      ).rejects.toThrow(LaneRefused);
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('EVERY no-label argument form is refused for EVERY mutating verb', async () => {
+    // The enumeration as a row rather than as a claim in a report. These are
+    // the three shapes `referencedLabel` maps to null — a bare domain, a
+    // flag, and an argument that is not there — crossed with the whole
+    // mutating class, because the rule is about the verb class and not about
+    // the one verb whose domain-wide form is most expensive.
+    expect([...LANE_MUTATING_OPS]).toEqual([
+      'bootstrap',
+      'bootout',
+      'enable',
+      'disable',
+    ]);
+    const uid = String(laneUid());
+    const NO_LABEL_FORMS: readonly string[][] = [
+      [], // not there at all
+      [`gui/${uid}`], // a domain, not a target
+      ['-w'], // a short flag
+      ['--force'], // a long flag
+      ['-'], // a lone dash
+      ['-w', `gui/${uid}`], // both, together, still nothing
+    ];
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    let refusals = 0;
+    for (const verb of LANE_MUTATING_OPS)
+      for (const form of NO_LABEL_FORMS) {
+        await expect(
+          testScopedSpawn(invocation(verb, ...form)),
+          [verb, ...form].join(' '),
+        ).rejects.toThrow(LaneRefused);
+        refusals += 1;
+      }
+    // NON-VACUITY: the loops ran, and none of the 24 reached the delegate.
+    expect(refusals).toBe(LANE_MUTATING_OPS.length * NO_LABEL_FORMS.length);
+    expect(refusals).toBe(24);
+    expect(rec.calls).toEqual([]);
+  });
+
+  it('NEAR-MISS: the legitimate bootstrap shape, with a REAL temp plist, passes', async () => {
+    // THE ROW THAT PAYS FOR THE RULE BEING THE RIGHT RULE. `bootstrap` is
+    // the one legitimate shape whose first argument is a bare domain, and it
+    // is not exempted from anything: it references exactly one label, from
+    // the plist's basename, and that label is test-scoped. If this row had
+    // gone red the answer would have been to fix the rule, never to carve
+    // `bootstrap` out of it.
+    const d = tempDir();
+    const label = `${TEST_LABEL_PREFIX}x`;
+    const plist = plantPlist(d, `${label}.plist`);
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    const domain = `gui/${String(laneUid())}`;
+    await testScopedSpawn(invocation('bootstrap', domain, plist));
+    expect(rec.argvs()).toEqual([['bootstrap', domain, plist]]);
+  });
+
+  it('NEAR-MISS: the read-only verbs keep their old rule, target or not', async () => {
+    // `list` legitimately has no target, and a question with no target
+    // changes nothing — so the non-empty rule is scoped to mutating verbs
+    // and this row is what says so.
+    const rec = recordingSpawner();
+    installLaneSpawner(rec.spawn);
+    const target = `gui/${String(laneUid())}/${TEST_LABEL_PREFIX}x`;
+    await testScopedSpawn(invocation('list'));
+    await testScopedSpawn(invocation('print', target));
+    expect(rec.argvs()).toEqual([['list'], ['print', target]]);
   });
 
   it('NEAR-MISS: the legitimate mutating calls DO delegate', async () => {
@@ -495,6 +637,164 @@ describe('s9 Sc3 G3 refusal 4: the only real signal in any launchd spec', () => 
       }),
     ).toBe('signalled');
     expect(sent).toEqual([[4242, 'SIGTERM']]);
+  });
+
+  /* ── stage 1b: ancestry, not merely parentage ────────────────────────── */
+
+  it('the ancestry walk is bounded, and answers "unknown" in four ways', () => {
+    // Proved against tables this row wrote, so the shape of whatever tree
+    // the run happens to be inside cannot make it pass or fail.
+    expect(
+      laneAncestry(
+        100,
+        new Map([
+          [100, 90],
+          [90, 80],
+          [80, 1],
+        ]),
+      ),
+    ).toEqual([100, 90, 80, 1]);
+    // a link we cannot see
+    expect(laneAncestry(100, new Map([[100, 90]]))).toBeNull();
+    // no table at all (the `ps` snapshot failed)
+    expect(laneAncestry(100, null)).toBeNull();
+    // a cycle, which cannot happen and is therefore a table to disbelieve
+    expect(
+      laneAncestry(
+        100,
+        new Map([
+          [100, 90],
+          [90, 100],
+        ]),
+      ),
+    ).toBeNull();
+    // deeper than the ceiling: unknown, not "far enough"
+    const deep = new Map<number, number>();
+    for (let p = 1000; p > 800; p -= 1) deep.set(p, p - 1);
+    expect(laneAncestry(1000, deep)).toBeNull();
+  });
+
+  it('the real chain above this process is LONGER than one hop', () => {
+    // NON-VACUITY for every row below: if the chain were `[self, ppid]` the
+    // ancestry rule would add nothing the parent check did not already have.
+    const chain = laneAncestry();
+    expect(
+      chain,
+      'this machine must be able to answer the ancestry question',
+    ).not.toBeNull();
+    const c = chain ?? [];
+    expect(c[0]).toBe(process.pid);
+    expect(c[1]).toBe(process.ppid);
+    expect(c.length).toBeGreaterThan(2);
+    expect(c[c.length - 1]).toBeLessThanOrEqual(1);
+  });
+
+  it('PLANTED: an ancestor TWO OR MORE hops up is refused, lock agreement and all', async () => {
+    // THE ROW. Constructed against a REAL ancestor of this very process,
+    // read out of the real process table rather than reasoned about: `c[2]`
+    // is the process that started the process that started this one, which
+    // under vitest is the runner's own parent. Every pre-existing check is
+    // stepped around deliberately — the pid is above 1, is not this process
+    // and is not its parent, the lock file agrees with `print`, and no
+    // sentinel is set — so a green row here can only be the new rule biting.
+    //
+    // THE SIGNAL IS INJECTED, and in this row that is not a convenience. The
+    // target is a live process that supervises this test run. If the guard
+    // were broken, an injected signal makes the failure a red row; a real
+    // one would make it an ended session.
+    const chain = laneAncestry();
+    expect(chain).not.toBeNull();
+    const c = chain ?? [];
+    const target = c
+      .slice(2)
+      .find((p) => p > 1 && p !== process.pid && p !== process.ppid);
+    expect(
+      target,
+      `ancestry ${c.join(' < ')} has no grandparent above pid 1`,
+    ).toBeDefined();
+    const pid = target ?? 0;
+    installLaneSpawner(printing(pid).spawn);
+    const sent: Array<[number, NodeJS.Signals]> = [];
+    await expect(
+      termOwnedDaemon(lockedDir(pid), LABEL, {
+        signal: (p, s) => sent.push([p, s]),
+      }),
+    ).rejects.toThrow(/ancestor/);
+    expect(sent).toEqual([]);
+  });
+
+  it('PLANTED: an ancestry that cannot be read is a refusal, not a shrug', async () => {
+    // The `lock.ts:22` rule, aimed the other way. There an unrecognised
+    // errno resolves towards "alive" because leaving a lock alone is the
+    // recoverable failure. Here an unreadable chain resolves towards "do not
+    // signal", because failing to stop a test daemon is the recoverable one.
+    installLaneSpawner(printing(4242).spawn);
+    const sent: Array<[number, NodeJS.Signals]> = [];
+    await expect(
+      termOwnedDaemon(lockedDir(4242), LABEL, {
+        ancestry: () => null,
+        signal: (p, s) => sent.push([p, s]),
+      }),
+    ).rejects.toThrow(/could not be read/);
+    expect(sent).toEqual([]);
+  });
+
+  it('NEAR-MISS: containment, not proximity — a pid beside the chain passes', async () => {
+    // A guard that refused anything NEAR an ancestor would refuse half the
+    // pids on the machine and stage 2 would be unable to stop its own
+    // daemon. The chain is injected so this row asserts the rule rather
+    // than the shape of the tree it is running in.
+    const chain: readonly number[] = [4240, 4241, 4242];
+    installLaneSpawner(printing(4243).spawn);
+    const sent: Array<[number, NodeJS.Signals]> = [];
+    expect(
+      await termOwnedDaemon(lockedDir(4243), LABEL, {
+        ancestry: () => chain,
+        signal: (p, s) => sent.push([p, s]),
+      }),
+    ).toBe('signalled');
+    expect(sent).toEqual([[4243, 'SIGTERM']]);
+    // …and the member one below it, which differs by a single digit, is not.
+    installLaneSpawner(printing(4242).spawn);
+    await expect(
+      termOwnedDaemon(lockedDir(4242), LABEL, {
+        ancestry: () => chain,
+        signal: (p, s) => sent.push([p, s]),
+      }),
+    ).rejects.toThrow(/ancestor/);
+    expect(sent).toEqual([[4243, 'SIGTERM']]); // nothing further was sent
+  });
+
+  it('NEAR-MISS: a GENUINE child daemon whose lock names it is really signalled', async () => {
+    // The only real signal in this file, and it goes to a process spawned
+    // four lines above it — a descendant, never an ancestor, and one this
+    // task owns end to end. Every other row proves the DECISION through an
+    // injected signal; this one proves the whole path, ancestry walk
+    // included, against a pid that actually exists.
+    const child = spawn(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000);'],
+      { stdio: 'ignore' },
+    );
+    const exited = new Promise<NodeJS.Signals | null>((ok) => {
+      child.once('exit', (_code, sig) => ok(sig));
+    });
+    await new Promise<void>((ok) => {
+      child.once('spawn', () => ok());
+    });
+    const pid = child.pid ?? 0;
+    expect(pid).toBeGreaterThan(1);
+    try {
+      // Non-vacuity: the thing we are about to signal is NOT an ancestor,
+      // so the near-miss is a near-miss and not a different case entirely.
+      expect((laneAncestry() ?? []).includes(pid)).toBe(false);
+      installLaneSpawner(printing(pid).spawn);
+      expect(await termOwnedDaemon(lockedDir(pid), LABEL)).toBe('signalled');
+      expect(await exited).toBe('SIGTERM');
+    } finally {
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL');
+    }
   });
 
   it('a foreign label cannot even be asked about', async () => {

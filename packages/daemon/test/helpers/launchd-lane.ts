@@ -18,22 +18,49 @@
  *
  *   1. `testScopedSpawn` reads the argv it was handed — not the arguments
  *      that produced it — and refuses any mutating verb that references
- *      anything outside `sh.wemessage.test.`, any verb outside the union at
- *      all, and any read-only verb aimed outside this project's namespace.
+ *      anything outside `sh.wemessage.test.`, any mutating verb that
+ *      references NO label at all, any verb outside the union at all, and
+ *      any read-only verb aimed outside this project's namespace.
  *   2. `sweepOwnDir` refuses a directory that is not inside the temp root,
  *      comparing realpaths, and refuses to delete a plist it did not name.
  *   3. `sweepOrphans` takes its labels from what the service manager itself
  *      reports and filters them through the same guard, so it cannot widen.
  *   4. `termOwnedDaemon` will not signal a pid unless launchd and our own
- *      lock file agree on it, and never signals this process, its parent,
- *      anything at or below pid 1, or the recorded sentinel.
+ *      lock file agree on it, and never signals this process, anything in
+ *      its ANCESTRY, anything at or below pid 1, or the recorded sentinel.
  *
  * STAGE 1 INSTALLS NO REAL SPAWNER. The module-level delegate starts as
  * `null` and every spec here installs a recording fake, so the refusals are
  * proved against argv strings and not one of them can reach a process even
  * if every guard in this file were deleted.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * STAGE 1b CLOSED TWO HOLES IN THE ABOVE, both found by reading the guard
+ * rather than by it failing, and both closed while the delegate is still
+ * `null` — which is the only time closing them is cheap.
+ *
+ *   A. A MUTATING VERB THAT REFERENCED NOTHING WAS NOT REFUSED BY ANYTHING.
+ *      The per-argument loop skipped every argument that names no label, so
+ *      an argv whose arguments ALL name no label ran the loop to completion
+ *      with nothing to object to. `['bootout', 'gui/501']` is that shape: a
+ *      domain with no service, which is not a smaller operation than booting
+ *      out one agent but a much larger one — it removes the whole GUI domain
+ *      and logs the operator out. The manual's own example spells the domain
+ *      target with a trailing slash, so the empty-label form is one string
+ *      concatenation away from any test that builds a target by interpolating
+ *      a label that turned out to be empty. The rule is now about the VERB
+ *      CLASS and not about `bootout`: a mutating verb must reference at least
+ *      one label, and every label it references must be test-scoped.
+ *
+ *   B. `process.ppid` IS ONE HOP. Under vitest the chain above this process
+ *      is worker → runner → package manager → whatever started the run, so
+ *      the process it would be worst to signal is typically three or four
+ *      hops up and was invisible to a parent check. `termOwnedDaemon` now
+ *      walks the parent chain and refuses anything in it — and refuses when
+ *      the chain cannot be read at all.
  */
 import { basename, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, rmSync } from 'node:fs';
 import { ulid } from 'ulid';
 import { SERVICE_MANAGER, runLaunchctl } from '../../src/launchd/launchctl.js';
@@ -64,8 +91,15 @@ export const TEST_LABEL_PREFIX = LAUNCH_AGENT_TEST_LABEL_PREFIX;
  */
 export const LANE_READ_ONLY_OPS = ['list', 'print'] as const;
 
-/** The verbs that change something, and may only ever be test-scoped. */
-const LANE_MUTATING_OPS = [
+/**
+ * The verbs that change something, and may only ever be test-scoped.
+ *
+ * Exported since stage 1b so the rule that follows from membership — a
+ * mutating verb must reference at least one label — can be asserted over the
+ * whole class by a row, rather than spot-checked on the one verb somebody
+ * happened to worry about.
+ */
+export const LANE_MUTATING_OPS = [
   'bootstrap',
   'bootout',
   'enable',
@@ -165,6 +199,19 @@ export function recordingSpawner(
  * the one that matters is always the one they did not. The rule is an
  * allowlist over OUR namespace, so every other label on the machine —
  * present, future, and unknown to us — is outside it by construction.
+ *
+ * THE THREE FORMS THAT ANSWER `null`, enumerated because the answer is
+ * "this argument constrains nothing" and an unconstrained argument is only
+ * safe while some OTHER rule is doing the constraining:
+ *
+ *   1. `gui/<digits>` — a domain, not a target.
+ *   2. anything beginning with `-` — a flag.
+ *   3. (vacuously) an argument that is not present at all.
+ *
+ * Each of the three is now covered for mutating verbs by the non-empty rule
+ * in `testScopedSpawn`, which is where it belongs: whether an argv is safe
+ * is a property of the whole argv, and this function only ever sees one
+ * argument at a time.
  */
 function referencedLabel(arg: string): string | null {
   if (/^gui\/\d+$/.test(arg)) return null; // a domain, not a target
@@ -211,6 +258,7 @@ export async function testScopedSpawn(
       `${JSON.stringify(verb)} is not a verb this lane runs: the allowlist is ` +
         `${JSON.stringify([...LANE_READ_ONLY_OPS, ...LANE_MUTATING_OPS])}`,
     );
+  const referenced = new Set<string>();
   for (const arg of args.slice(1)) {
     if (arg.includes('system/'))
       throw new LaneRefused(
@@ -219,6 +267,7 @@ export async function testScopedSpawn(
       );
     const label = referencedLabel(arg);
     if (label === null) continue;
+    referenced.add(label);
     if (mutatingVerb && !isTestScoped(label))
       throw new LaneRefused(
         `${verb} would affect ${JSON.stringify(label)}, which is not under ` +
@@ -230,6 +279,42 @@ export async function testScopedSpawn(
           'this project owns',
       );
   }
+  /*
+   * STAGE 1b: A MUTATING VERB MUST REFERENCE SOMETHING (an ADDITIONAL
+   * condition, not a replacement for the loop above).
+   *
+   * The loop is a per-argument rule, and every per-argument rule has the same
+   * blind spot: it says nothing about an argv with no arguments it applies
+   * to. `referencedLabel` answers `null` for a bare domain, for a flag and
+   * for an argument that is not there at all, and `null` was `continue`. So
+   * `['bootout', 'gui/501']` walked the loop, found nothing to object to, and
+   * reached the delegate — and that argv is not a narrower operation than
+   * booting out one agent, it is the widest one available: launchd reads a
+   * domain with no service as the WHOLE DOMAIN, and removing a user's GUI
+   * domain logs them out of the machine.
+   *
+   * Stated over the verb class rather than over `bootout`, because `bootout`
+   * is not special — it is merely the member of the class whose domain-wide
+   * form is the most expensive. A rule written as "if the verb is bootout"
+   * is a rule that has to be re-derived for the fifth verb somebody adds.
+   *
+   * The legitimate shapes are unaffected, and that is the test of whether
+   * this rule is the right one: `['bootstrap', 'gui/<uid>', '<tmp>/
+   * sh.wemessage.test.x.plist']` references exactly one label, from the
+   * plist's basename, so it still passes without being exempted from
+   * anything. A guard a legitimate caller must be exempted from is the
+   * wrong guard.
+   *
+   * Read-only verbs keep their old rule: `list` legitimately takes no target
+   * and asking launchd a question with no target changes nothing.
+   */
+  if (mutatingVerb && referenced.size === 0)
+    throw new LaneRefused(
+      `${verb} references no label at all (argv ${JSON.stringify(args)}): a ` +
+        'mutating verb whose arguments name no service addresses the whole ' +
+        'GUI domain, which is every agent the operator is running and not ' +
+        'one of ours',
+    );
   // ONLY NOW. Everything above is decided without consulting the delegate,
   // so a lane with a real spawner behind it still creates no process on any
   // refusing path, and "refused" stays distinguishable from "not wired".
@@ -331,11 +416,100 @@ export async function sweepOrphans(): Promise<string[]> {
 
 /* ── refusal 4: the only real signal in any launchd spec ──────────────── */
 
+/**
+ * How far up the process tree the ancestry walk goes before it gives up.
+ *
+ * BOUNDED, and not because the tree is deep — on this platform it is single
+ * digits. An unbounded walk over a table this code did not build is a hang,
+ * and a guard that can hang is a guard somebody deletes on a Friday. Running
+ * off the end of the ceiling is treated as "unknown", not as "far enough".
+ */
+const ANCESTRY_MAX_HOPS = 64;
+
+/**
+ * Every visible process's parent, or `null` if the question went unanswered.
+ *
+ * ONE SPAWN, AND IT IS NOT THE SERVICE MANAGER. This platform has no `/proc`
+ * and node exposes only `process.ppid` — the IMMEDIATE parent — so there is
+ * no in-process route to a chain. The cost is one `ps` per `termOwnedDaemon`
+ * call that gets far enough to need it, and it buys a single consistent
+ * snapshot: walked hop by hop with one query each, the tree can change
+ * underneath the walk and the chain that comes back never existed.
+ *
+ * Deliberately not a process-name matcher of any kind. A matcher that
+ * searches for a name finds itself, which is a class of bug this project has
+ * already paid for once. This asks for pids and parents and matches nothing.
+ */
+function processParentTable(): ReadonlyMap<number, number> | null {
+  let out: string;
+  try {
+    out = execFileSync('ps', ['-Ao', 'pid=,ppid='], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  const table = new Map<number, number>();
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    const pid = m?.[1];
+    const ppid = m?.[2];
+    if (pid === undefined || ppid === undefined) continue;
+    table.set(Number(pid), Number(ppid));
+  }
+  return table.size === 0 ? null : table;
+}
+
+/**
+ * The pids from `from` up to the root of its process tree, or `null`.
+ *
+ * `null` IS THE IMPORTANT RETURN VALUE, and the caller refuses on it.
+ *
+ * This is the same reasoning `pidLiveness` applies at
+ * `packages/daemon/src/lock.ts:22`, run in the opposite direction, and the
+ * two only look contradictory until the question is stated properly. That
+ * comment resolves an unknown towards ALIVE, because leaving a lock alone
+ * costs an operator one command while deleting a live process's lock
+ * corrupts an audit chain nobody notices for a week. This resolves an
+ * unknown towards DO NOT SIGNAL, because failing to stop a test daemon costs
+ * a sweep while signalling a process we cannot place stops whatever is
+ * supervising the machine. Both rules are the same rule: choose the outcome
+ * whose failure is recoverable. They point different ways because which
+ * outcome is recoverable is different.
+ *
+ * Both parameters are injectable so a row can prove the walk against a table
+ * it wrote, rather than against whatever tree the run happens to have.
+ */
+export function laneAncestry(
+  from: number = process.pid,
+  table: ReadonlyMap<number, number> | null = processParentTable(),
+): readonly number[] | null {
+  if (table === null) return null;
+  const chain: number[] = [from];
+  let cur = from;
+  for (let hop = 0; hop < ANCESTRY_MAX_HOPS; hop += 1) {
+    if (cur <= 1) return chain;
+    const parent = table.get(cur);
+    if (parent === undefined) return null; // a link we cannot see
+    if (chain.includes(parent)) return null; // a cycle: the table is wrong
+    chain.push(parent);
+    cur = parent;
+  }
+  return null; // deeper than the ceiling, which is unknown and not "fine"
+}
+
 export type TermOutcome = 'absent' | 'signalled';
 
 export interface TermOptions {
   /** Injected so stage 1 proves the DECISION without sending anything. */
   readonly signal?: (pid: number, sig: NodeJS.Signals) => void;
+  /**
+   * Injected so a row can prove the ancestry refusal without depending on
+   * the shape of the process tree it happens to be running inside.
+   */
+  readonly ancestry?: () => readonly number[] | null;
 }
 
 /**
@@ -381,6 +555,31 @@ export async function termOwnedDaemon(
     throw new LaneRefused(
       `pid ${String(pid)} is the recorded supervisor sentinel: a lock file ` +
         'naming it is a lock file to disbelieve, not to act on',
+    );
+
+  /*
+   * STAGE 1b: ANCESTRY, NOT PARENTAGE.
+   *
+   * Every check above this line is satisfied by a pid two hops up. Under
+   * vitest the chain is worker → runner → package manager → whatever started
+   * the run, so `process.ppid` excludes the least interesting member of it
+   * and none of the rest. An unknown chain is refused rather than walked
+   * past; see `laneAncestry` for why that is the safe direction here and the
+   * unsafe one in `src/lock.ts:22`.
+   */
+  const chain = (options.ancestry ?? laneAncestry)();
+  if (chain === null)
+    throw new LaneRefused(
+      `the parent chain above pid ${String(process.pid)} could not be read, ` +
+        `so there is no way to know whether pid ${String(pid)} is supervising ` +
+        'this test run: an ancestry we cannot determine is refused, not ' +
+        'assumed clear',
+    );
+  if (chain.includes(pid))
+    throw new LaneRefused(
+      `pid ${String(pid)} is an ancestor of this process (chain ` +
+        `${chain.join(' < ')}): a lock file naming a process this one is ` +
+        'descended from is a lock file to disbelieve, not to act on',
     );
 
   const send =

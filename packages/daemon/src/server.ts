@@ -56,6 +56,7 @@ import { registerContactRoutes } from './routes/contacts.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
+import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
 import { closeReasonFor, parseEventFilter } from './events-filter.js';
 import { readConnectionState, type DoctorProbes } from './doctor.js';
@@ -82,6 +83,21 @@ export interface DaemonOptions {
    * `rules` when the real daemon passes both (daemon.ts always does); a
    * standalone test may pass `send` alone and get its own sink instead.
    */
+  /**
+   * s9 Sc4: WHO SUPERVISES THIS DAEMON, stated ONCE for the whole server.
+   *
+   * This lives at the top level rather than inside `connection` because
+   * three different surfaces need the answer -- the disconnect engine (to
+   * decide whether there is a job to unload), `GET /v1/doctor`, and the
+   * re-probe inside `POST /v1/send` -- and a server that could tell the
+   * doctor one thing and the disconnect engine another would eventually
+   * do exactly that. One field, one default, no way for two consumers to
+   * disagree about a fact neither of them measured.
+   *
+   * Optional, and the default is the one that cannot act: `'none'`, no
+   * label, no runner. See `SupervisionDeps`.
+   */
+  supervision?: SupervisionDeps;
   send?: {
     store: Store;
     reader: ChatDbReader;
@@ -110,6 +126,8 @@ export interface DaemonOptions {
     rotateToken: () => string | null;
     purge: () => void;
     rearmWatcher: () => Promise<void>;
+    /** Where a deferred unload's failure goes. Defaults to a no-op sink. */
+    onUnloadError?: (e: unknown) => void;
   };
 
   /**
@@ -381,6 +399,17 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     registerScheduleRoutes(app, { store: opts.rules.store, sink });
   }
 
+  /*
+   * The single resolution point. Every reader below takes THIS, so
+   * "unsupervised" is decided in one place instead of at each use site.
+   */
+  const supervision: SupervisionDeps = opts.supervision ?? {
+    supervisor: 'none',
+    label: null,
+    run: null,
+    serviceDir: '',
+  };
+
   if (opts.send && sink) {
     // §1.6 route: GET /v1/doctor (s3-execution Scenario 8), reusing the
     // Scenario 7 engine on-demand.
@@ -389,6 +418,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       store: opts.send.store,
       sink,
       clock: opts.send.clock,
+      supervisor: supervision.supervisor,
     });
     // §1.6 route: POST /v1/send (s3-execution Scenario 8), the human-direct
     // mint-then-dispatch path.
@@ -401,6 +431,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       delay: opts.send.delay,
       doctorProbes: opts.send.doctorProbes,
       sink,
+      supervisor: supervision.supervisor,
     });
   }
 
@@ -547,12 +578,21 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
         closeEventClients: connection.closeEventClients,
         rotateToken: connection.rotateToken,
         purge,
+        supervision,
+        onUnloadError:
+          connection.onUnloadError ??
+          ((): void => {
+            /* nothing supervises us, so nothing can fail here */
+          }),
       },
       connect: {
         store: connection.store,
         sink,
         clock: connection.clock,
         probes: connection.probes,
+        // Same resolved value the disconnect engine and the doctor route
+        // read, so a reconnect's report cannot contradict them.
+        supervisor: supervision.supervisor,
         rearmWatcher: connection.rearmWatcher,
       },
     });

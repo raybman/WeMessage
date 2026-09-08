@@ -41,6 +41,7 @@ import {
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
 import { runDoctor, type DoctorProbes } from '../doctor.js';
+import type { Supervisor } from '../launchd/contract.js';
 
 /**
  * s3-execution Scenario 11 (§2.2.3 row 2, "send capability lost mid-run"):
@@ -65,6 +66,13 @@ export interface SendRouteDeps {
   /** s3-execution Scenario 11: re-probe trigger for the row-2 counter above. */
   doctorProbes: DoctorProbes;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
+  /**
+   * s9 Sc4: threaded through solely so the re-probe below produces a doctor
+   * report that says the same thing `GET /v1/doctor` would. A report that
+   * disagreed with itself depending on which route triggered it would be
+   * worse than no field at all.
+   */
+  supervisor: Supervisor;
 }
 
 /** F-22: the reserved, permanently-disabled adapter row humans send under. */
@@ -87,6 +95,7 @@ export function registerSendRoutes(
     clock,
     delay,
     doctorProbes,
+    supervisor,
     sink,
   } = deps;
   // s3-execution Scenario 11 row 2: in-process counter, reset on any `sent`
@@ -223,7 +232,13 @@ export function registerSendRoutes(
       consecutiveNotRunning += 1;
       if (consecutiveNotRunning >= NOT_RUNNING_REPROBE_THRESHOLD) {
         consecutiveNotRunning = 0;
-        await runDoctor({ probes: doctorProbes, store, sink, clock });
+        await runDoctor({
+          probes: doctorProbes,
+          store,
+          sink,
+          clock,
+          supervisor,
+        });
       }
     } else {
       consecutiveNotRunning = 0;

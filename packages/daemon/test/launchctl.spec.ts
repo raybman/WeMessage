@@ -633,11 +633,29 @@ describe('s9 Sc3 G2: the real spawner is defined here and called nowhere', () =>
     ]);
   });
 
-  it('exactly two source files name it: the runner, and the entrypoint', () => {
-    // Defined in the one module permitted to name the tool, referenced in
-    // the one module permitted to compose a program. Equality, so a third
-    // importer — a route, a helper, a convenience wrapper — fails here.
-    expect(filesNaming(SPAWNER, ['src'])).toEqual(['src/bin.ts', RUNNER_REL]);
+  it('exactly ONE source file names it: the runner, which composes it', () => {
+    /*
+     * NARROWED IN S9 Sc 4, FROM TWO FILES TO ONE.
+     *
+     * This row used to read `['src/bin.ts', RUNNER_REL]`, because the
+     * entrypoint composed the runner itself: it named the spawn and handed
+     * it to `runLaunchctl`. Sc 4 needs the DAEMON to run one op too, and the
+     * daemon is a different program. Composing a second time there would
+     * have made this list grow to three, and a guard whose list grows every
+     * time a caller appears is a guard that has stopped saying anything.
+     *
+     * So the composition moved INTO the runner as `realServiceManagerRun`,
+     * and the programs import that value instead. The set of files naming
+     * the spawn shrank to one, and it is the one file the arch guard already
+     * lets name the tool at all. That is the only direction this row is
+     * permitted to move: a fix that made it LONGER would have been the
+     * allowlist-widening this scenario exists to refuse.
+     *
+     * Equality, still. A route, a helper, or a convenience wrapper that
+     * reached for the spawn fails here, and so does a second composition in
+     * a program root.
+     */
+    expect(filesNaming(SPAWNER, ['src'])).toEqual([RUNNER_REL]);
   });
 
   it('and the only test that starts the entrypoint starts it with no argv', () => {

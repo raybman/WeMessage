@@ -423,6 +423,16 @@ export interface DoctorReportPayload {
   state: ConnectionState;
   checks: DoctorCheckPayload[];
   probedAt: string;
+  /**
+   * s9 Sc4: who is supervising the daemon that answered.
+   *
+   * REQUIRED here, mirroring the server. An optional field would let a
+   * client silently treat "the daemon did not say" and "the daemon said
+   * nobody supervises it" as the same answer, and those have opposite
+   * consequences: the first means ask again, the second means there is no
+   * background job to stop.
+   */
+  supervisor: 'launchd' | 'app' | 'none';
 }
 
 export interface SendInput {
@@ -448,13 +458,27 @@ export type DisconnectStepId =
   | 'state'
   | 'adapter-tokens'
   | 'token-rotation'
-  | 'launchd'
+  /**
+   * s9 Sc4: RENAMED from `'launchd'`. The old name said which subsystem the
+   * step involved; this one says what the step DOES, which matters now that
+   * it does something. Before Sc4 it was a permanent skip.
+   */
+  | 'launchd-unload'
   | 'purge';
 
 export interface DisconnectStepPayload {
   id: DisconnectStepId;
-  status: 'done' | 'skipped' | 'failed';
+  /**
+   * s9 Sc4 adds `'scheduled'`: the daemon accepted the unload and armed it
+   * to run AFTER this very response is on the wire. It is not `'done'`,
+   * because it has not happened yet, and it is not `'failed'`. A client
+   * that collapsed it into either would be reporting something nobody
+   * observed -- the daemon cannot witness its own unload.
+   */
+  status: 'done' | 'skipped' | 'failed' | 'scheduled';
   detail?: string;
+  /** Present only on `launchd-unload`, and only when a purge removed it. */
+  plistRemoved?: boolean;
 }
 
 export interface DisconnectReportPayload {

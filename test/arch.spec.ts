@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 // s7 Sc9: the verification ledger reads BUILT modules, so it needs a file URL.
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -10366,11 +10366,57 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
   describe('row 5: one runner, and it is the only thing that names the tool', () => {
     const RUNNER = 'packages/daemon/src/launchd/launchctl.ts';
     /**
-     * The one production module that composes the runner with a real spawn.
-     * `bin.ts` is `wemessaged`; a service subcommand has to reach launchd or
-     * the product does not exist.
+     * The production modules allowed to compose the runner with a real spawn:
+     * the PROGRAM ROOTS, DERIVED rather than listed.
+     *
+     * WHY THIS STOPPED BEING ONE HARDCODED PATH IN S9 Sc 4. Until Sc4 the
+     * only program that needed to reach launchd was `wemessaged`, so this
+     * was the string `packages/daemon/src/bin.ts` and the row was an
+     * equality against it. Sc4 gives the DAEMON a reason to run one op --
+     * `bootout` of its own label, when the operator disconnects -- and the
+     * daemon is a different program with a different root.
+     *
+     * Appending a second string would have been the allowlist-widening this
+     * file exists to refuse: the next program would append a third, and a
+     * list that grows whenever a caller appears has stopped asserting
+     * anything. So the row now asks a QUESTION instead of holding a list --
+     * "is this file something the operating system actually executes?" --
+     * and both answers come from artifacts outside this test:
+     *
+     *   1. `packages/daemon/package.json#bin`, which is what `pnpm` puts on
+     *      PATH. Rename or drop `wemessaged` and this set changes with it.
+     *   2. `DEV_DAEMON_MAIN_SUFFIX` in `packages/daemon/src/launchd/plist.ts`,
+     *      which is the script the generated LaunchAgent plist executes.
+     *      That constant is not decoration: `plist.ts` validates real
+     *      `ProgramArguments` against it, so a daemon entrypoint that moved
+     *      would break installation long before it reached this row.
+     *
+     * A file that is neither on PATH nor named by a plist is not a program
+     * root, and importing the runner from it is still exactly as forbidden
+     * as it was before this scenario.
      */
-    const ENTRYPOINT = 'packages/daemon/src/bin.ts';
+    const PROGRAM_ROOTS: string[] = (() => {
+      const distToSrc = (dist: string): string =>
+        `packages/daemon/src/${basename(dist).replace(/\.js$/, '.ts')}`;
+
+      const pkg = JSON.parse(
+        readFileSync(
+          join(repoRoot, 'packages', 'daemon', 'package.json'),
+          'utf8',
+        ),
+      ) as { bin?: Record<string, string> };
+      const binTargets = Object.values(pkg.bin ?? {});
+
+      const plistSrc = s9Read('packages/daemon/src/launchd/plist.ts');
+      const suffix = /DEV_DAEMON_MAIN_SUFFIX = '([^']+)'/.exec(plistSrc);
+      // No `expect` in here on purpose: this runs at COLLECTION time, where
+      // a failed assertion is a file-level crash with no row name on it.
+      // The non-vacuity checks are a row of their own, one down.
+      if (suffix === null)
+        throw new Error('DEV_DAEMON_MAIN_SUFFIX not found in plist.ts');
+
+      return [...binTargets.map(distToSrc), distToSrc(suffix[1] ?? '')].sort();
+    })();
     /**
      * The two test-side files permitted to name the tool: the lane every
      * future launchd spec goes through, and the runner's own spec.
@@ -10464,12 +10510,34 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(namers(true, 'spelled')).toEqual([RUNNER]);
     });
 
-    it('and exactly one production module IMPORTS that runner', () => {
+    it('the derived program-root set is neither empty nor a wildcard', () => {
+      /*
+       * A derived list has a failure mode a hardcoded one does not: if the
+       * derivation silently yields nothing, the equality below becomes
+       * "nobody imports the runner", which PASSES while asserting nothing.
+       * So the derivation is pinned from the other side too.
+       */
+      expect(PROGRAM_ROOTS.length).toBeGreaterThan(0);
+      // Every derived entry is a real file, not a path that stopped existing.
+      for (const root of PROGRAM_ROOTS)
+        expect(existsSync(join(repoRoot, root))).toBe(true);
+      // And it is a SET of program roots, not "every file under src".
+      expect(PROGRAM_ROOTS.length).toBeLessThan(
+        archFiles('packages').filter((f) => f.includes('/src/')).length,
+      );
+    });
+
+    it('only PROGRAM ROOTS import that runner', () => {
       // The leg the old row did not have. "One file names the binary" says
-      // nothing about who can reach it; this says the composition happens in
-      // the entrypoint and nowhere else, which is the fact that makes the
-      // injected-spawn design hold rather than merely be the current shape.
-      expect(runnerImporters(true)).toEqual([ENTRYPOINT]);
+      // nothing about who can REACH it; this says the composition happens
+      // only in files the operating system actually executes, which is the
+      // fact that makes the injected-spawn design hold rather than merely
+      // be the current shape.
+      //
+      // Still an EQUALITY, and that is what keeps it a guard after S9 Sc4
+      // widened the set from one file to two: a third importer fails this
+      // row unless it also became something launchd or PATH runs.
+      expect(runnerImporters(true)).toEqual(PROGRAM_ROOTS);
     });
 
     it('PLANTED: a second spawner anywhere under src is a second hit', () => {
@@ -10495,7 +10563,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           '',
         ].join('\n'),
       );
-      expect(runnerImporters(true)).toEqual([ENTRYPOINT, rel].sort());
+      expect(runnerImporters(true)).toEqual([...PROGRAM_ROOTS, rel].sort());
       // …and it is NOT a speller, which is the whole point of blanking
       // specifiers: importing the runner and spawning the binary are
       // different facts and get different rows.
@@ -10514,7 +10582,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         ].join('\n'),
       );
       expect(namers(true, 'spelled')).toEqual([RUNNER]);
-      expect(runnerImporters(true)).toEqual([ENTRYPOINT]);
+      expect(runnerImporters(true)).toEqual(PROGRAM_ROOTS);
     });
 
     /* ── the second leg (s9 Sc3): the TEST tree, which row 5 never read ── */

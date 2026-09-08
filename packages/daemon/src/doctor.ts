@@ -33,6 +33,7 @@ import {
   systemActor,
 } from '@wemessage/core';
 import type { AuditSink } from './audit-sink.js';
+import type { Supervisor } from './launchd/contract.js';
 
 /** Daemon-local capability probe seam (NOT a @wemessage/core port — C-5). */
 export interface DoctorProbes {
@@ -62,6 +63,23 @@ export interface DoctorReport {
   state: ConnectionState;
   checks: DoctorCheck[];
   probedAt: string;
+  /**
+   * s9 Sc4: who is supervising the daemon this report describes.
+   *
+   * REQUIRED, WITH NO DEFAULT, and that is deliberate. Every other field
+   * here is derived from a probe that actually ran; a `supervisor` that
+   * defaulted to `'none'` when the caller forgot to pass one would be the
+   * single field in this report asserting something nobody measured, and it
+   * would assert it most confidently in exactly the case that matters -- a
+   * launchd-supervised daemon whose wiring was dropped would report itself
+   * unsupervised, and the operator would be told there is no job to unload
+   * when there is one running.
+   *
+   * The remediation copy below already turns on this distinction: the fix
+   * for a permission failure is different for a background item launchd
+   * restarts than for a binary someone ran in a terminal.
+   */
+  supervisor: Supervisor;
 }
 
 // Exact remediation/detail copy (Fable design consult point 4) — asserted
@@ -80,7 +98,7 @@ const MESSAGES_FAIL_3B =
 export const AUTOMATION_DENIED =
   'Automation permission denied; run tccutil reset AppleEvents sh.wemessage.gateway and approve the prompt on the next send. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 export const FDA_EPERM =
-  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to wemessaged in System Settings > Privacy & Security, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
+  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 const FDA_ENOENT =
   'No Messages history found at the chat.db path; this is not a permission failure. Sign in to Messages and send or receive a message to create it.';
 const UNSUPPORTED_OS =
@@ -214,6 +232,12 @@ export interface RunDoctorDeps {
   store: Pick<Store, 'getSetting' | 'setSetting'>;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   clock: Clock;
+  /**
+   * s9 Sc4. Required for the reason `DoctorReport.supervisor` is: this is
+   * the only place the value can enter, so an optional one here would put
+   * the unmeasured default back in by another door.
+   */
+  supervisor: Supervisor;
 }
 
 /**
@@ -278,6 +302,10 @@ export async function runDoctor(deps: RunDoctorDeps): Promise<DoctorReport> {
     state: derived.state,
     checks: derived.checks,
     probedAt: clock.now(),
+    // Passed straight through, never probed. The daemon cannot discover its
+    // own supervisor honestly -- a ppid of 1 means launchd OR an orphan --
+    // so this reports what the supervisor itself put in the environment.
+    supervisor: deps.supervisor,
   };
 }
 

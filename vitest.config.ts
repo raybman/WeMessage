@@ -7,6 +7,12 @@ export default defineConfig({
   test: {
     projects: [
       'packages/*/vitest.config.ts',
+      // The launch-agent lifecycle project. It is a SECOND config inside the
+      // daemon package, so the glob above structurally cannot see it; it is
+      // listed by hand because its `sequence.groupOrder` is the whole point,
+      // sequencing one spec after the entire rest of the suite without
+      // changing how any other daemon spec runs.
+      'packages/daemon/vitest.lifecycle.config.ts',
       'packages/adapters/*/vitest.config.ts',
       // s8 Sc1: `apps/desktop` grows its first tests. The glob is `apps/*`
       // rather than the one path, for the same reason the enumerations in

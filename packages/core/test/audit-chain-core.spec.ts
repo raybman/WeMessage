@@ -414,6 +414,7 @@ const AUDIT_EVENT_TYPES = {
   'send.attempted': true,
   'service.installed': true,
   'service.uninstalled': true,
+  'service.unload_requested': true,
   'setting.changed': true,
   'toggle.changed': true,
 } as const satisfies Record<AuditEventType, true>;
@@ -423,9 +424,9 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
     const pinned = Object.keys(AUDIT_EVENT_TYPES).sort();
     // Non-vacuity: an empty map would satisfy nothing, but a map that had
     // silently lost its contents to a bad merge would still typecheck if the
-    // union had also been emptied. Fifty-three is the count at s9 Sc3, which
-    // added the two `service.` rows.
-    expect(pinned).toHaveLength(53);
+    // union had also been emptied. Fifty-four is the count at s9 Sc4, which
+    // added `service.unload_requested` to the two `service.` rows Sc3 added.
+    expect(pinned).toHaveLength(54);
     expect(new Set(pinned).size).toBe(pinned.length);
     // Every key really is a usable AuditEvent discriminant.
     for (const t of pinned) {
@@ -479,19 +480,37 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
     });
   });
 
-  it('s9 Sc3 added exactly two variants, and they are the service pair', () => {
-    // Equality over the `service.` namespace, in both directions: the map
-    // cannot have gained a third row type without this failing, and it
-    // cannot have lost one of these two either.
+  it('the `service.` namespace is exactly three variants', () => {
+    /*
+     * WIDENED IN S9 Sc 4, FROM TWO TO THREE, AND STILL AN EQUALITY.
+     *
+     * This row was written in Sc3 as "exactly two, and they are the service
+     * pair". Sc4 gives the daemon a reason to write a third: on a disconnect
+     * that runs under launchd, it asks launchd to unload the job that is
+     * running it, and that request has to be in the log BEFORE the request
+     * is made, because the daemon cannot survive to write it afterward.
+     *
+     * Growing the expected list is only legitimate because the assertion
+     * stays an EQUALITY over the whole namespace. It cannot silently gain a
+     * fourth, and it cannot lose any of these three. A guard that had been
+     * loosened to `toContain` or to a subset check would have bought the
+     * same green for none of the safety, and that is the move this file
+     * exists to refuse.
+     */
     const serviceEvents = Object.keys(AUDIT_EVENT_TYPES)
       .filter((t) => t.startsWith('service.'))
       .sort();
-    expect(serviceEvents).toEqual(['service.installed', 'service.uninstalled']);
+    expect(serviceEvents).toEqual([
+      'service.installed',
+      'service.uninstalled',
+      'service.unload_requested',
+    ]);
 
-    // Both are real, constructible events with the fields the installer
-    // writes — the install carries WHAT was written and WHERE, the
-    // uninstall carries only the label, and neither carries a boolean that
-    // would let one row stand for both facts.
+    // All three are real, constructible events with the fields their writer
+    // has — the install carries WHAT was written and WHERE, the uninstall
+    // carries only the label, the unload request carries only the label it
+    // asked about, and none carries a boolean that would let one row stand
+    // for two different facts.
     const installed: AuditEvent = {
       type: 'service.installed',
       label: 'sh.wemessage.gateway',
@@ -501,14 +520,36 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
       type: 'service.uninstalled',
       label: 'sh.wemessage.gateway',
     };
-    expect(JSON.parse(JSON.stringify([installed, uninstalled]))).toEqual([
+    const unloadRequested: AuditEvent = {
+      type: 'service.unload_requested',
+      label: 'sh.wemessage.gateway',
+    };
+    expect(
+      JSON.parse(JSON.stringify([installed, uninstalled, unloadRequested])),
+    ).toEqual([
       {
         type: 'service.installed',
         label: 'sh.wemessage.gateway',
         plistPath: '/somewhere/sh.wemessage.gateway.plist',
       },
       { type: 'service.uninstalled', label: 'sh.wemessage.gateway' },
+      { type: 'service.unload_requested', label: 'sh.wemessage.gateway' },
     ]);
+
+    /*
+     * The unload request is a REQUEST, not an outcome, and its shape says so:
+     * there is no `ok`, no `exitCode`, no `unloaded` boolean for a later
+     * reader to mistake for proof that launchd complied. The daemon writes
+     * this row and then asks to be unloaded; it is not around to observe the
+     * answer, so the row must not have a field that could carry one.
+     */
+    const claimsAnOutcome: AuditEvent = {
+      type: 'service.unload_requested',
+      label: 'sh.wemessage.gateway',
+      // @ts-expect-error — a request row has no outcome to carry
+      ok: true,
+    };
+    void claimsAnOutcome;
 
     // The uninstall row carries no plistPath. Excess-property checking
     // reports at the offending PROPERTY, not at the declaration, so the

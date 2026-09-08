@@ -341,7 +341,18 @@ export type AuditEvent =
    * somebody needs to explain.
    */
   | { type: 'service.installed'; label: string; plistPath: string }
-  | { type: 'service.uninstalled'; label: string };
+  | { type: 'service.uninstalled'; label: string }
+  /**
+   * S9 Sc 4: the daemon is about to ask launchd to unload the job that is
+   * running it. Appended in the disconnect handler BEFORE the response is
+   * sent, and therefore before the `bootout` it describes -- which is the
+   * only order that can work, because a successful `bootout` ends this
+   * process and no row written after it would survive to be read.
+   *
+   * REQUESTED, not "unloaded". The daemon cannot observe its own successful
+   * unload, so the row claims only the thing it knows: that a human asked.
+   */
+  | { type: 'service.unload_requested'; label: string };
 
 export type AuditEventType = AuditEvent['type'];
 

@@ -8,14 +8,21 @@
  * login is the thing a developer runs by hand, not a second, subtly
  * different entrypoint that happens to work today.
  *
- * THE ONE PRODUCTION IMPORTER OF THE RUNNER. Everything else in this package
- * takes an injected `ServiceManagerRun`, so this file is the only place where
- * the guarded runner meets the real spawn. `test/arch.spec.ts` pins that set
- * to exactly this file, and the reason it can is that the vocabulary lives in
- * `contract.ts`: a module that imported the runner merely to name its types
- * would have become a second module naming the tool.
+ * A PROGRAM ROOT, AND SO ONE OF THE TWO FILES ALLOWED TO IMPORT THE RUNNER.
+ * Everything else in this package takes an injected `ServiceManagerRun`.
+ * Until S9 Sc 4 this file was the ONLY importer, because it was the only
+ * program that ran an op; Sc 4 gives `main.js` one too (`bootout` of its own
+ * label, on disconnect), and `main.js` is a different program, not a helper
+ * reaching for a capability. `test/arch.spec.ts` therefore pins the importer
+ * set to the package's PROGRAM ROOTS, derived from `package.json#bin` plus
+ * the plist's dev-daemon target, rather than to a hand-written list a fourth
+ * file could be appended to.
+ *
+ * This file no longer names the spawn at all: the composition moved into
+ * `launchctl.ts` as `realServiceManagerRun`, which NARROWED the set of files
+ * naming it from two to one.
  */
-import { realLaunchctlSpawn, runLaunchctl } from './launchd/launchctl.js';
+import { realServiceManagerRun } from './launchd/launchctl.js';
 import { runServiceCli } from './launchd/cli.js';
 
 const argv = process.argv.slice(2);
@@ -31,10 +38,7 @@ if (argv.length === 0) {
       out: (s) => process.stdout.write(s),
       err: (s) => process.stderr.write(s),
     },
-    {
-      run: (op, label, options) =>
-        runLaunchctl(op, label, { ...options, spawn: realLaunchctlSpawn }),
-    },
+    { run: realServiceManagerRun },
   );
   if (code !== 0) process.exit(code);
 }

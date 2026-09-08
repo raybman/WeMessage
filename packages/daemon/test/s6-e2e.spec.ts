@@ -1170,5 +1170,22 @@ describe('s6 Scenario 14: arming and autonomy, end to end', () => {
     // Zero writes outside the temp dir, sqlite's own sidecars excepted.
     const added = readdirSync(dir).filter((e) => !before.has(e));
     expect(added.filter((e) => !/-(wal|shm|journal)$/.test(e))).toEqual([]);
-  });
+    /*
+     * s9 Sc4: an EXPLICIT timeout, replacing the runner's 5 000 ms default.
+     *
+     * Nobody chose 5 000 for this row; it is what vitest hands any row that
+     * says nothing. This one drives twelve phases of a real gateway against a
+     * real sqlite file and takes about 1.8 s alone, so the default gave it
+     * under three times headroom, and under the full parallel suite it timed
+     * out at exactly that ceiling while passing in isolation. That is not a
+     * deadline this scenario asserts, it is a default nobody wrote down.
+     *
+     * This is NOT the launch-agent case and must not be read as a precedent
+     * for it: the budgets in `launchd-lifecycle.spec.ts` are deliberate
+     * statements about a supervised service and were sequenced, not raised.
+     * Here the number is arbitrary in both directions, so it is stated out
+     * loud with enough room to survive a busy machine while still failing a
+     * genuine hang in well under a minute.
+     */
+  }, 30_000);
 });

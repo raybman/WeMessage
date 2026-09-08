@@ -10,12 +10,15 @@ import type { FastifyInstance } from 'fastify';
 import type { Clock, Store } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
 import { runDoctor, type DoctorProbes } from '../doctor.js';
+import type { Supervisor } from '../launchd/contract.js';
 
 export interface DoctorRouteDeps {
   probes: DoctorProbes;
   store: Store;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
   clock: Clock;
+  /** s9 Sc4: reported verbatim in the doctor payload. */
+  supervisor: Supervisor;
 }
 
 export function registerDoctorRoutes(

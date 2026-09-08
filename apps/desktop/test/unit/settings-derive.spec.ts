@@ -437,7 +437,10 @@ describe('permissionCards', () => {
     checks: DoctorReportPayload['checks'],
     state: DoctorReportPayload['state'] = 'fully-connected',
   ): DoctorReportPayload {
-    return { state, checks, probedAt: PROBED_AT };
+    // s9 Sc4: `supervisor` became REQUIRED on the doctor DTO, so every
+    // builder in this file had to say who supervises. `'none'` is the honest
+    // answer for a hand-built report: nothing supervises a literal.
+    return { state, checks, probedAt: PROBED_AT, supervisor: 'none' };
   }
 
   it('has four states and a distinct glyph for each', () => {
@@ -588,6 +591,7 @@ describe('the remedy a card offers', () => {
         { id: 'automation', status: 'fail', remediation: 'approve it' },
       ],
       probedAt: '2026-09-06T14:00:00.000Z',
+      supervisor: 'none',
     });
     expect(cards.find((c) => c.id === 'automation')?.pane).toBe('automation');
     expect(cards.find((c) => c.id === 'os')?.pane).toBeNull();

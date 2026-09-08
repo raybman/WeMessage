@@ -247,7 +247,12 @@ async function renderDivergence(
     'divergence: this shell can read chat.db but the daemon cannot',
     'This is the macOS 26 FDA propagation landmine: Full Disk Access',
     'granted to your terminal/shell does not propagate to the background',
-    'wemessaged process. Grant Full Disk Access to wemessaged itself.',
+    // F-122: name what the operator actually sees in System Settings. The
+    // daemon binary is `wemessaged`, but the row in the Full Disk Access
+    // list is the APP, and telling someone to grant access to a name that
+    // does not appear in the list they are staring at is worse than saying
+    // nothing.
+    'wemessaged process. Grant Full Disk Access to WeMessage itself.',
   ].join('\n');
 }
 
@@ -261,8 +266,32 @@ function renderSend(result: SendResult): string {
   return lines.join('\n');
 }
 
-function disconnectStepGlyph(status: 'done' | 'skipped' | 'failed'): string {
-  return status === 'done' ? '✓' : status === 'skipped' ? '-' : '✗';
+/*
+ * s9 Sc4 ADDS `'scheduled'`. The parameter is typed as the DTO's own union
+ * rather than a hand-copied list, so the next status the daemon learns to
+ * report breaks this function at COMPILE time instead of silently falling
+ * through to the failure glyph. That fall-through is exactly what the old
+ * two-armed ternary would have done: anything not `done` and not `skipped`
+ * rendered as `✗`, so a step that had merely been ARMED would have been drawn
+ * to the operator as one that FAILED. A disconnect report that overstates
+ * failure is not a safe error: it invites a second, redundant teardown.
+ *
+ * Monochrome by rule (roadmap §0.2: nothing green in the product). `·` reads
+ * as "pending, nothing has gone wrong" without borrowing any colour.
+ */
+function disconnectStepGlyph(
+  status: DisconnectReportPayload['steps'][number]['status'],
+): string {
+  switch (status) {
+    case 'done':
+      return '✓';
+    case 'skipped':
+      return '-';
+    case 'scheduled':
+      return '·';
+    case 'failed':
+      return '✗';
+  }
 }
 
 function renderDisconnect(report: DisconnectReportPayload): string {

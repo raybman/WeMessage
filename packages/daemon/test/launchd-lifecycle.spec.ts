@@ -223,6 +223,73 @@ function lockPid(): number | null {
   }
 }
 
+/**
+ * The last of whatever the supervised daemon wrote, for a failure message.
+ *
+ * `bed.logs` is inside the temp root `afterAll` removes, so this is only ever
+ * readable from inside the row that failed. Bounded to the tail because the
+ * point is the last thing the process said, and an unbounded dump into a test
+ * reporter is a different kind of unreadable.
+ */
+function daemonLogTails(): string {
+  const tail = (name: string): string => {
+    try {
+      const raw = readFileSync(join(bed.logs, name), 'utf8');
+      const lines = raw.split('\n').filter((l) => l !== '');
+      return lines.length === 0
+        ? `${name}: (empty)`
+        : `${name}:\n${lines.slice(-12).join('\n')}`;
+    } catch {
+      return `${name}: (not written)`;
+    }
+  };
+  return [tail('daemon.out.log'), tail('daemon.err.log')].join('\n');
+}
+
+/**
+ * The subject rows 9 and 10 inherit from row 8, or a named refusal.
+ *
+ * Rows 9 and 10 do not install anything. Their subject is the agent row 8
+ * left running, so when row 8 goes red they do not test a different thing,
+ * they test NOTHING, and the two extra reds they produce are noise on top of
+ * the one real failure. Worse, row 10 would still spawn a real daemon and sit
+ * on it for its full thirty-second timeout before reporting a `code` of 0 it
+ * was never going to see, which is thirty seconds of a stray process nobody
+ * asked for.
+ *
+ * So the precondition is stated once and THROWN, with a sentence naming which
+ * witness disagreed. A throw and not `ctx.skip()`: a skip would let a row 8
+ * that quietly stopped installing anything turn rows 9 and 10 green-by-
+ * absence, which is the failure mode this whole file exists to catch. A
+ * thrown row is still a red row. It just says why, and it says it in a second
+ * instead of thirty.
+ */
+async function subjectPidOf(row: string): Promise<number> {
+  const refuse = (why: string): never => {
+    throw new Error(`${row} has no subject: ${why}`);
+  };
+  if (typeof label !== 'string' || label === '') {
+    return refuse('row 8 never named a label');
+  }
+  const printed = await printLabel();
+  if (printed.code !== 0) {
+    return refuse(
+      `row 8 left no loaded job (print exited ${String(printed.code)})`,
+    );
+  }
+  const supervised = Number(printField(printed.stdout, 'pid'));
+  if (!Number.isInteger(supervised)) {
+    return refuse('the job is loaded but the service manager reports no pid');
+  }
+  const locked = lockPid();
+  if (locked !== supervised) {
+    return refuse(
+      `the lock names ${String(locked)} and the service manager names ${String(supervised)}, so the daemon row 8 started is not the one running now`,
+    );
+  }
+  return supervised;
+}
+
 async function cli(argv: readonly string[]): Promise<{
   code: number;
   out: string;
@@ -411,11 +478,25 @@ describe.skipIf(!darwin)(
       expect(printed.stdout).toMatch(/WEMESSAGE_SUPERVISOR\s*=>\s*launchd/);
 
       // LIVENESS: /v1/health, which has no capability probe in it.
-      const status = await until(
-        'the daemon to serve /v1/health',
-        HTTP_BUDGET_MS,
-        () => health(bed.port).then((s) => (s === 200 ? s : null)),
-      );
+      //
+      // Wrapped because `afterAll` deletes the bed, logs and all, so a
+      // timeout here used to be the least diagnosable failure in the repo:
+      // the one artefact that would say WHY the daemon never served was
+      // removed microseconds after the message that asked. The rethrow keeps
+      // the original deadline sentence, and appends what the daemon itself
+      // wrote before it stopped. It does not widen the budget or retry.
+      let status: number;
+      try {
+        status = await until(
+          'the daemon to serve /v1/health',
+          HTTP_BUDGET_MS,
+          () => health(bed.port).then((s) => (s === 200 ? s : null)),
+        );
+      } catch (e) {
+        throw new Error(
+          `${e instanceof Error ? e.message : String(e)}\n${daemonLogTails()}`,
+        );
+      }
       expect(status).toBe(200);
 
       // PID IDENTITY, two witnesses. launchd's `pid =` is what the
@@ -431,9 +512,10 @@ describe.skipIf(!darwin)(
     }, 90_000);
 
     it('row 9 — KeepAlive brings it back after a SIGTERM through the lane', async () => {
-      const before = await printLabel();
-      const pidBefore = Number(printField(before.stdout, 'pid'));
-      expect(pidBefore).toBe(lockPid());
+      // The two witnesses must already agree before this row sends a signal;
+      // see `subjectPidOf`. It throws rather than asserting because a row 8
+      // failure is not a row 9 finding.
+      const pidBefore = await subjectPidOf('row 9');
 
       // THE ONLY REAL SIGNAL THIS SCENARIO SENDS. `termOwnedDaemon` requires
       // launchd and our own lock file to name the same pid, refuses this
@@ -474,9 +556,11 @@ describe.skipIf(!darwin)(
     }, 90_000);
 
     it('row 10 — a manual daemon in the same dir exits 1 with the launchd pid', async () => {
-      const printed = await printLabel();
-      const supervised = Number(printField(printed.stdout, 'pid'));
-      expect(Number.isInteger(supervised)).toBe(true);
+      // Checked BEFORE a second daemon is spawned, not after. Without this
+      // the child below would run for its full thirty-second timeout against
+      // a lock nobody holds, and report a `code` of 0 that says nothing about
+      // the behaviour this row is named for.
+      const supervised = await subjectPidOf('row 10');
 
       // Resolved BEFORE the promise, because a promise executor is not an
       // async function and cannot await. A second free port, not the

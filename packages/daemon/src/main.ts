@@ -17,6 +17,7 @@ import { AppleScriptSendBackend, type ExecFn } from '@wemessage/sendkit';
 import { createAuditSink } from './audit-sink.js';
 import { startDaemon } from './daemon.js';
 import { createRealDoctorProbes } from './doctor.js';
+import { realServiceManagerRun } from './launchd/launchctl.js';
 import { DAEMON_ERROR_SPECS, isDaemonError } from './errors.js';
 import { acquireInstanceLock, staleReclaimEvent } from './lock.js';
 
@@ -47,6 +48,34 @@ const Env = z.object({
   WEMESSAGE_PORT: z.coerce.number().int().min(1).max(65535).default(47100),
   // Live tail target; overridable for demos against a fixture DB.
   WEMESSAGE_CHATDB: z.string().min(1).optional(),
+  /*
+   * WHO IS SUPERVISING THIS PROCESS (s9 Sc4).
+   *
+   * Written into the plist by `wemessaged service install`, and by the app
+   * when it spawns the daemon itself. Absent means nobody is: a developer
+   * ran `node dist/main.js` by hand, and a disconnect has no job to unload.
+   * Absent is therefore the SAFE reading, which is why there is no default
+   * here that would make an unsupervised process claim supervision.
+   */
+  WEMESSAGE_SUPERVISOR: z.enum(['launchd', 'app']).optional(),
+  /*
+   * The label of the job launchd is running us as.
+   *
+   * DELIBERATELY UNVALIDATED AT BOOT, and this is the whole reason it is a
+   * bare `string` next to an `enum` that is not. The plist that carries
+   * this variable also carries `KeepAlive`, so a process that exits on a
+   * malformed label does not fail once: launchd restarts it, it reads the
+   * same bad label, and it exits again, forever. A boot-time `refine` here
+   * would convert a typo in one plist string into a throttled crash loop
+   * that survives reboots and takes a `bootout` to stop.
+   *
+   * The label is needed at exactly one moment -- a disconnect that wants to
+   * unload the job -- and that moment already has somewhere to put a
+   * refusal: a FAILED STEP in the disconnect report, which the operator
+   * reads. So validation happens there, where being wrong is a sentence on
+   * a screen instead of a loop in the supervisor.
+   */
+  WEMESSAGE_LAUNCHD_LABEL: z.string().optional(),
 });
 
 const env = Env.parse(process.env);
@@ -130,6 +159,32 @@ const daemon = await startDaemon({
   // packages/sendkit/src per test/arch.spec.ts's gate (a)).
   backend: new AppleScriptSendBackend({ exec: realExec }),
   backendName: 'applescript',
+  /*
+   * s9 Sc4: WHO IS SUPERVISING US, read from the environment the supervisor
+   * itself set. `WEMESSAGE_SUPERVISOR` is written into the plist by
+   * `wemessaged service install`, so a daemon that launchd started says
+   * `launchd` because launchd told it to, not because it guessed from its
+   * own ppid or argv.
+   *
+   * The runner is attached ONLY under `launchd`. Under `app` or absent
+   * there is no job to unload, and handing the disconnect a working
+   * launchctl runner it has no legal reason to call would be arming
+   * something for no purpose.
+   */
+  supervision: {
+    supervisor: env.WEMESSAGE_SUPERVISOR ?? 'none',
+    label: env.WEMESSAGE_LAUNCHD_LABEL ?? null,
+    run: env.WEMESSAGE_SUPERVISOR === 'launchd' ? realServiceManagerRun : null,
+    // The same directory the lock, the store and the audit chain live in;
+    // `service install` wrote `service.json` here, and phase A reads it
+    // BEFORE a purge can delete it.
+    serviceDir: configDir,
+  },
+  onUnloadError: (e: unknown) => {
+    // After the response. No reply to fail, no store to append to: the
+    // process log is the only reader left.
+    console.error('wemessage daemon: unload request failed:', e);
+  },
   onError: (error) => {
     console.error('wemessage daemon: pipeline error (loop continues):', error);
   },
@@ -141,15 +196,24 @@ const daemon = await startDaemon({
   throw err;
 });
 
-if (daemon.server.token === null) {
-  console.error(
-    `wemessage daemon: NO AUTH TOKEN (could not read or create ${configDir}); serving 503 on all routes (fail closed)`,
-  );
-} else {
-  console.log(`wemessage daemon: listening on 127.0.0.1:${daemon.port}`);
-  console.log(`wemessage daemon: tailing ${chatDbPath} (read-only)`);
-}
-
+/*
+ * BEFORE THE READINESS LINE, NOT AFTER IT.
+ *
+ * This used to sit below the `listening on …` log, and under a saturated
+ * machine `main-lock.spec.ts` row 7 caught what that costs: the test waits
+ * for that exact line on stdout, sends SIGTERM, and got back an exit code of
+ * `null` with the lock still on disk. `null` means the default disposition
+ * killed the process, which means the signal landed in the window between
+ * announcing readiness and being able to act on it. Node runs those
+ * statements back to back, so the window is normally microseconds wide; a
+ * descheduled process widens it, and launchd under `KeepAlive` will
+ * eventually find it.
+ *
+ * The ordering rule is the general one, not a test accommodation: a process
+ * must not tell the world it is up until it can be told to stop. Everything
+ * `shutdown` closes over (`wake`, `daemon`, `lock`) already exists here, so
+ * there is nothing to trade for it.
+ */
 const shutdown = async (): Promise<void> => {
   wake.stop();
   await daemon.stop();
@@ -161,3 +225,12 @@ const shutdown = async (): Promise<void> => {
 };
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
+
+if (daemon.server.token === null) {
+  console.error(
+    `wemessage daemon: NO AUTH TOKEN (could not read or create ${configDir}); serving 503 on all routes (fail closed)`,
+  );
+} else {
+  console.log(`wemessage daemon: listening on 127.0.0.1:${daemon.port}`);
+  console.log(`wemessage daemon: tailing ${chatDbPath} (read-only)`);
+}

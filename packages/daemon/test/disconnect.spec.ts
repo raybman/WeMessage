@@ -115,6 +115,13 @@ describe('disconnectDaemon — ordering (§1.3.7)', () => {
         return 'wm_' + 'a'.repeat(64);
       },
       purge: () => order.push('purge'),
+      supervision: {
+        supervisor: 'none',
+        label: null,
+        run: null,
+        serviceDir: '',
+      },
+      onUnloadError: () => {},
     };
 
     disconnectDaemon(deps, { purge: false });
@@ -146,6 +153,13 @@ describe('disconnectDaemon — ordering (§1.3.7)', () => {
         closeEventClients: () => order.push('close-clients'),
         rotateToken: () => 'wm_' + 'b'.repeat(64),
         purge: () => {},
+        supervision: {
+          supervisor: 'none',
+          label: null,
+          run: null,
+          serviceDir: '',
+        },
+        onUnloadError: () => {},
       },
       { purge: false },
     );
@@ -157,7 +171,7 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
   it('returns 6 steps + manualRevocation, verbatim-pinned to doctor.ts remediation copy', () => {
     const store = fakeStore({ [SETTING_CONNECTION_STATE]: 'read-only' });
     const sink = fakeSink();
-    const report = disconnectDaemon(
+    const { report } = disconnectDaemon(
       {
         store,
         sink,
@@ -165,6 +179,13 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
         closeEventClients: () => {},
         rotateToken: () => 'wm_' + 'c'.repeat(64),
         purge: () => {},
+        supervision: {
+          supervisor: 'none',
+          label: null,
+          run: null,
+          serviceDir: '',
+        },
+        onUnloadError: () => {},
       },
       { purge: false },
     );
@@ -180,9 +201,9 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
       },
       { id: 'token-rotation', status: 'done' },
       {
-        id: 'launchd',
+        id: 'launchd-unload',
         status: 'skipped',
-        detail: 'not running under launchd (dev mode)',
+        detail: 'not supervised by launchd (supervisor: none)',
       },
       { id: 'purge', status: 'skipped', detail: 'purge not requested' },
     ]);
@@ -215,7 +236,7 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
     const store = fakeStore();
     const sink = fakeSink();
     let purged = false;
-    const report = disconnectDaemon(
+    const { report } = disconnectDaemon(
       {
         store,
         sink,
@@ -225,6 +246,13 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
         purge: () => {
           purged = true;
         },
+        supervision: {
+          supervisor: 'none',
+          label: null,
+          run: null,
+          serviceDir: '',
+        },
+        onUnloadError: () => {},
       },
       { purge: true },
     );
@@ -239,7 +267,7 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
   it('a failed token rewrite records token-rotation as "failed", not thrown', () => {
     const store = fakeStore();
     const sink = fakeSink();
-    const report = disconnectDaemon(
+    const { report } = disconnectDaemon(
       {
         store,
         sink,
@@ -247,6 +275,13 @@ describe('disconnectDaemon — response shape (§1.3.7)', () => {
         closeEventClients: () => {},
         rotateToken: () => null,
         purge: () => {},
+        supervision: {
+          supervisor: 'none',
+          label: null,
+          run: null,
+          serviceDir: '',
+        },
+        onUnloadError: () => {},
       },
       { purge: false },
     );
@@ -579,10 +614,10 @@ describe('POST /v1/disconnect — rows 5+6: launchd honesty + manual revocation 
       steps: { id: string; status: string; detail?: string }[];
       manualRevocation: string[];
     };
-    expect(body.steps.find((s) => s.id === 'launchd')).toEqual({
-      id: 'launchd',
+    expect(body.steps.find((s) => s.id === 'launchd-unload')).toEqual({
+      id: 'launchd-unload',
       status: 'skipped',
-      detail: 'not running under launchd (dev mode)',
+      detail: 'not supervised by launchd (supervisor: none)',
     });
     expect(body.manualRevocation).toEqual([AUTOMATION_DENIED, FDA_EPERM]);
     for (const s of body.manualRevocation) {

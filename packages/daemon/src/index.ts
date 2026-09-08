@@ -56,6 +56,10 @@ export {
   type DisconnectReport,
   type DisconnectStep,
   type DisconnectStepId,
+  type DisconnectStepStatus,
+  type DisconnectOutcome,
+  type Supervisor,
+  type SupervisionDeps,
 } from './connection.js';
 export { sanitizeInbound, stripControlChars } from './sanitize.js';
 export {

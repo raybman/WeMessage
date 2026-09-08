@@ -58,6 +58,7 @@ import { createScheduler } from './scheduler.js';
 import { resolveArming } from './arming.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
+import type { SupervisionDeps } from './connection.js';
 import { rotateToken as rotateTokenOnDisk } from './auth.js';
 
 export interface StartDaemonOptions {
@@ -101,6 +102,31 @@ export interface StartDaemonOptions {
   backend: SendBackend;
   /** Named alongside backend (audit `send.attempted` rows record it). */
   backendName: string;
+  /**
+   * s9 Sc4: who supervises this process, and how to ask them to stop it.
+   *
+   * OPTIONAL, AND THE DEFAULT IS THE ONE THAT DOES NOTHING. Omitted means
+   * `supervisor: 'none'`, and a disconnect under `'none'` records a SKIPPED
+   * step naming the reason rather than performing an unload. That is the
+   * difference between this field and `doctorProbes` or `backend`, which
+   * are required precisely because their only plausible default would shell
+   * out to the real AppleScript runner: here the default cannot act, it can
+   * only decline to, and it says so in the report the operator reads.
+   *
+   * Twenty-nine call sites construct a daemon; requiring a field whose safe
+   * value is a fixed literal would have bought a compile error at every one
+   * of them and no behaviour that `'none'` does not already give.
+   */
+  supervision?: SupervisionDeps;
+  /**
+   * Where an unload that failed AFTER the response was sent goes.
+   *
+   * By then there is no reply left to carry an error and no store left to
+   * append to, so the only honest destination is the process's own log.
+   * Injected rather than hardcoded so a test can watch it without a spy on
+   * `console`.
+   */
+  onUnloadError?: (e: unknown) => void;
   /** Injected sleep for dispatchApproved's verify-poll; defaults to real setTimeout. */
   delay?: (ms: number) => Promise<void>;
   /**
@@ -303,6 +329,7 @@ export async function startDaemon(
       store,
       sink,
       clock: options.clock,
+      supervisor: options.supervision?.supervisor ?? 'none',
     });
   }
 
@@ -407,6 +434,7 @@ export async function startDaemon(
       if (code === 'EPERM' || code === 'EACCES') {
         const report = await runDoctor({
           probes: options.doctorProbes,
+          supervisor: options.supervision?.supervisor ?? 'none',
           store,
           sink,
           clock: options.clock,
@@ -498,6 +526,12 @@ export async function startDaemon(
       doctorProbes: options.doctorProbes,
       sink,
     },
+    // s9 Sc4: stated once for the whole server (see `supervision` on the
+    // server options), so the doctor and the disconnect engine cannot
+    // disagree about who is running us.
+    ...(options.supervision === undefined
+      ? {}
+      : { supervision: options.supervision }),
     // s3-execution Scenario 9: connect/disconnect routes, same shared sink.
     connection: {
       store,
@@ -507,6 +541,12 @@ export async function startDaemon(
       stopWatcher,
       closeEventClients,
       rotateToken: () => rotateTokenOnDisk(options.configDir),
+      // s9 Sc4. Both forwarded as-is: `server.ts` owns the safe defaults,
+      // so there is exactly ONE place in the tree that decides what an
+      // absent supervisor means, rather than two that must agree.
+      ...(options.onUnloadError === undefined
+        ? {}
+        : { onUnloadError: options.onUnloadError }),
       purge: () => {
         store.close();
         rmSync(options.configDir, { recursive: true, force: true });

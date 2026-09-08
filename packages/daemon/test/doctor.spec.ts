@@ -60,7 +60,7 @@ const UNSUPPORTED_OS =
 const CHATDB_SCHEMA_HONESTY =
   'chat.db schema verified stable through macOS 26; newer releases may change it without notice.';
 const FDA_EPERM =
-  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to wemessaged in System Settings > Privacy & Security, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
+  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 const FDA_ENOENT =
   'No Messages history found at the chat.db path; this is not a permission failure. Sign in to Messages and send or receive a message to create it.';
 const AUTOMATION_DENIED =
@@ -275,12 +275,75 @@ function fakeProbes(overrides: Partial<DoctorSnapshot> = {}): DoctorProbes & {
 }
 
 describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', () => {
+  it('s9 Sc4: the report says who supervises, and says it because it was told', async () => {
+    /*
+     * The supervisor is PASSED THROUGH, never probed, and this row is what
+     * makes that a claim rather than an implementation detail.
+     *
+     * A daemon cannot discover its own supervisor honestly: under launchd
+     * its parent is pid 1, but so is an orphan whose parent already exited,
+     * and `getppid()` cannot tell those apart. So the value comes from the
+     * environment the supervisor itself wrote into the plist, and the only
+     * thing `runDoctor` is allowed to do with it is repeat it.
+     *
+     * Three distinct inputs, three distinct outputs. A pass-through that
+     * had been quietly hardcoded to `'none'` would survive a one-value
+     * test and die here.
+     */
+    for (const supervisor of ['launchd', 'app', 'none'] as const) {
+      const report = await runDoctor({
+        probes: fakeProbes(),
+        store: fakeStore(),
+        sink: fakeSink(),
+        clock: fixedClock,
+        supervisor,
+      });
+      expect(report.supervisor).toBe(supervisor);
+    }
+  });
+
+  it('s9 Sc4: the supervisor does not leak into the connection state', async () => {
+    /*
+     * Two facts that must stay independent. `state` is derived from the
+     * capability probes; `supervisor` is who started the process. A daemon
+     * launchd runs with Full Disk Access denied is still degraded, and a
+     * daemon a developer started by hand with every permission granted is
+     * still fully connected. Deriving one from the other would let a
+     * successful install look like a working install.
+     */
+    const underLaunchd = await runDoctor({
+      probes: fakeProbes({ automation: 'denied' }),
+      store: fakeStore(),
+      sink: fakeSink(),
+      clock: fixedClock,
+      supervisor: 'launchd',
+    });
+    const byHand = await runDoctor({
+      probes: fakeProbes({ automation: 'denied' }),
+      store: fakeStore(),
+      sink: fakeSink(),
+      clock: fixedClock,
+      supervisor: 'none',
+    });
+    expect(underLaunchd.supervisor).toBe('launchd');
+    expect(byHand.supervisor).toBe('none');
+    // Same probes, so the same state, regardless of who started it.
+    expect(underLaunchd.state).toBe(byHand.state);
+    expect(underLaunchd.checks).toEqual(byHand.checks);
+  });
+
   it('first-ever probe (null -> X): persists, appends with from:null, broadcasts, returns a report', async () => {
     const store = fakeStore();
     const sink = fakeSink();
     const probes = fakeProbes();
 
-    const report = await runDoctor({ probes, store, sink, clock: fixedClock });
+    const report = await runDoctor({
+      probes,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
 
     expect(report.state).toBe('fully-connected');
     expect(report.probedAt).toBe('2026-09-01T00:00:00.000Z');
@@ -305,8 +368,20 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
     const sink = fakeSink();
     const probes = fakeProbes();
 
-    await runDoctor({ probes, store, sink, clock: fixedClock });
-    await runDoctor({ probes, store, sink, clock: fixedClock });
+    await runDoctor({
+      probes,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
+    await runDoctor({
+      probes,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
 
     expect(sink.appends).toHaveLength(1);
     expect(sink.broadcasts).toHaveLength(1);
@@ -316,13 +391,20 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
     const store = fakeStore();
     const sink = fakeSink();
     const good = fakeProbes();
-    await runDoctor({ probes: good, store, sink, clock: fixedClock });
+    await runDoctor({
+      probes: good,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
 
     const degraded = fakeProbes({ automation: 'denied' });
     const report = await runDoctor({
       probes: degraded,
       store,
       sink,
+      supervisor: 'none',
       clock: fixedClock,
     });
 
@@ -344,7 +426,13 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
     const sink = fakeSink();
     const probes = fakeProbes({ osMajor: 12 });
 
-    const report = await runDoctor({ probes, store, sink, clock: fixedClock });
+    const report = await runDoctor({
+      probes,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
 
     expect(report.state).toBe('unsupported');
     expect(probes.calls).toEqual({ fda: 0, automation: 0, messagesRunning: 0 });
@@ -355,7 +443,13 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
     const sink = fakeSink();
     const probes = fakeProbes({ messagesRunning: false });
 
-    const report = await runDoctor({ probes, store, sink, clock: fixedClock });
+    const report = await runDoctor({
+      probes,
+      store,
+      sink,
+      clock: fixedClock,
+      supervisor: 'none',
+    });
 
     expect(report.state).toBe('read-only');
     expect(report.checks.find((c) => c.id === 'messages')).toMatchObject({

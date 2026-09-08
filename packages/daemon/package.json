@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run && vitest run --config vitest.lifecycle.config.ts"
   },
   "dependencies": {
     "@wemessage/core": "workspace:*",

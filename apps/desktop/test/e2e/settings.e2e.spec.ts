@@ -1062,7 +1062,7 @@ describe('s8 Sc14 row 8: disconnect is typed, counted and irreversible', () => {
       'state',
       'adapter-tokens',
       'token-rotation',
-      'launchd',
+      'launchd-unload',
       'purge',
     ]);
     const purge = report.steps.find((s) => s.step === 'purge');

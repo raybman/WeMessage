@@ -181,3 +181,18 @@ export function asLaunchAgentLabel(raw: string): LaunchAgentLabel {
   if (!isLaunchAgentLabel(raw)) throw new LaunchdLabelRefused(raw);
   return raw as LaunchAgentLabel;
 }
+
+/**
+ * Who is supervising the daemon process.
+ *
+ * DEFINED HERE, not in `connection.ts` where s9 Sc4 first needed it. The
+ * disconnect engine and the doctor both have to name this type, and
+ * `connection.ts` already imports `doctor.ts`, so leaving the definition
+ * there would have made the doctor import its own importer. A shared
+ * vocabulary type belongs in the module both sides already depend on.
+ *
+ * `'none'` is a real answer, not a missing one: a developer running
+ * `node dist/main.js` by hand is unsupervised, and that is a fact worth
+ * reporting rather than an absence worth defaulting.
+ */
+export type Supervisor = 'launchd' | 'app' | 'none';

@@ -71,6 +71,7 @@ import {
   type ServiceManagerFile,
   type ServiceManagerInvocation,
   type ServiceManagerResult,
+  type ServiceManagerRun,
   type ServiceManagerSpawn,
 } from './contract.js';
 import { plistDeclaredLabel } from './plist.js';
@@ -285,3 +286,28 @@ export const realLaunchctlSpawn: ServiceManagerSpawn = (i) =>
       },
     );
   });
+
+/**
+ * The real runner: the guarded run, closed over the real spawn.
+ *
+ * WHY THIS MOVED HERE FROM THE ENTRYPOINT. Until S9 Sc 4 the only production
+ * program that needed a runner was `bin.ts`, so composing it there cost
+ * nothing and the arch guard could pin the composition to a single file.
+ * Sc 4 gives the DAEMON a reason to run one op — `bootout` of its own label,
+ * on disconnect — and the daemon is `main.ts`, a different program. Composing
+ * it a second time in `main.ts` would have made two modules name the spawn
+ * and widened the guard that says only one may.
+ *
+ * So the composition itself becomes the shared value. `bin.ts` and `main.ts`
+ * both import THIS, and neither names the spawn; the set of files naming it
+ * NARROWS to this one. That is the direction a guard is allowed to move. A
+ * route, a helper, or a convenience wrapper still cannot obtain a runner
+ * without importing this module, which the arch row continues to forbid for
+ * everything that is not a program root.
+ *
+ * The guard is not weakened by being reachable from two programs: every
+ * refusal in `runLaunchctl` — the label prefix, the uid, the assembled
+ * target — runs before any spawn, and this value adds none of its own.
+ */
+export const realServiceManagerRun: ServiceManagerRun = (op, label, options) =>
+  runLaunchctl(op, label, { ...options, spawn: realLaunchctlSpawn });

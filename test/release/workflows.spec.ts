@@ -413,7 +413,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 7: the release itself ──────────────────────────────────────── */
 
-  it('row 7: the release is a draft, prereleased on the ad-hoc lane', () => {
+  it('row 7: the release is a draft, prereleased by version not by lane', () => {
     const wf = load(RELEASE);
     const rel = stepsOf(wf, 'pack-macos').find((s) =>
       (s.uses ?? '').startsWith('softprops/action-gh-release@'),
@@ -423,9 +423,20 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     // A draft, because the last human check on a release is a human looking
     // at it. Nothing here publishes on its own.
     expect(w['draft']).toBe(true);
-    expect(w['prerelease']).toBe(
-      `\${{ steps.signing.outputs.mode == 'adhoc' }}`,
-    );
+    // Keyed on the TAG, not on `steps.signing.outputs.mode`. The lane version
+    // of this assertion was green and wrong: this project ships unsigned by
+    // decision, so `mode == 'adhoc'` is a constant true, every release would
+    // be flagged a prerelease, and `/releases/latest` excludes prereleases.
+    // The README's download link points at `/releases/latest`, so the pair of
+    // them guaranteed a dead button. Asserting the tag shape instead means a
+    // GA tag produces a GA release on the unsigned lane, which is the whole
+    // point of the unsigned lane.
+    expect(w['prerelease']).toBe(`\${{ contains(github.ref_name, '-') }}`);
+    // Not vacuous in the direction that matters: the expression must actually
+    // discriminate, so pin both answers it is required to give.
+    const isPre = (tag: string): boolean => tag.includes('-');
+    expect(isPre('v1.0.0-rc.1')).toBe(true);
+    expect(isPre('v1.0.0')).toBe(false);
     expect(w['body_path']).toBe('dist-pack/RELEASE_NOTES.md');
     const files = String(w['files'] ?? '')
       .split('\n')

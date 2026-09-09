@@ -7,7 +7,8 @@ safely. It watches incoming texts against rules you define (keywords, regex,
 LLM-classified themes), routes matches to the agent of your choice (OpenClaw,
 Hermes, Sol, Luna, or your own), and puts **every draft behind a human approval
 gate**. Approve individually or in bulk, arm time windows, flip the kill switch,
-or disconnect entirely. Local only: your messages never leave your Mac.
+or disconnect entirely. WeMessage itself uploads nothing, and the only text that
+ever leaves your Mac is what you route to an agent.
 
 ## Install
 
@@ -19,7 +20,7 @@ brew install --cask wemessage
 ```
 
 Or download the DMG from the
-[latest release](https://github.com/raybman/WeMessage/releases/latest).
+[releases page](https://github.com/raybman/WeMessage/releases).
 
 **The builds are unsigned, on purpose.** Shipping a signed build requires a paid
 Apple Developer membership, and putting a yearly fee between you and a working
@@ -114,6 +115,19 @@ stating plainly what has and has not been verified against a running system.
 Every outbound message passes through one approval gate, and the gate is
 structural rather than configured. Loopback only, no telemetry, no account.
 
+**What leaves your Mac, precisely.** WeMessage sends nothing anywhere. Your
+message database, your drafts and the audit log are read and written locally and
+are never uploaded. The one exception is the agent you attach, and it is not
+really an exception: an agent has to read a message before it can draft a reply.
+Point WeMessage at an agent running on this machine and no message text leaves
+it at all. Point it at a hosted one and that service receives the text you route
+to it, exactly as it would from any other client you gave that access to. Which
+of those you want is your decision, and the rules you write are where you make
+it.
+
+Adapter tokens are stored only as a scrypt hash, so a token cannot be read back
+out of the database, by you or by anything that gets hold of the file.
+
 Found something? See [SECURITY.md](SECURITY.md). Please do not open a public
 issue for a vulnerability.
 
@@ -153,7 +167,7 @@ Release history is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and, for the dependencies that ship inside the app,
+Apache 2.0. See [LICENSE](LICENSE) and, for the dependencies that ship inside the app,
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Not affiliated with Apple. iMessage is a trademark of Apple Inc.

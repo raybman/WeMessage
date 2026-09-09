@@ -201,7 +201,17 @@ jobs:
           # A draft, because the last check on a release is a human looking at
           # it. Nothing in this file publishes on its own.
           draft: true
-          prerelease: ${{ steps.signing.outputs.mode == 'adhoc' }}
+          # Prerelease is a fact about the VERSION, not about the signing lane.
+          # This read `mode == 'adhoc'`, which was defensible while signing was
+          # imminent and is wrong now that shipping unsigned is the decision:
+          # it is true of every build this project will ever cut, so every
+          # release would be marked a prerelease forever, and GitHub excludes
+          # prereleases from `/releases/latest`, which is the link the README
+          # hands people to download the app. A permanently broken download
+          # button is a strange thing to guarantee in a workflow file.
+          # A semver prerelease is exactly a version with a hyphen after the
+          # core: `v1.0.0-rc.1` is one, `v1.0.0` is not.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: dist-pack/RELEASE_NOTES.md
           files: |
             dist-pack/*.dmg

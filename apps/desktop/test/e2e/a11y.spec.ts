@@ -976,10 +976,13 @@ describe('s8 Sc17 — the surface is enumerated from the product, not from a lis
   });
 
   it('the wizard walk covers every step in the registry', () => {
-    expect(WIZARD_STEPS).toHaveLength(5);
-    // `welcome` is where the wizard opens; the other four are reached by
+    expect(WIZARD_STEPS).toHaveLength(6);
+    // `welcome` is where the wizard opens; the other five are reached by
     // CONTINUE. The walk below asserts it landed on each in turn, so this
     // row only has to state that the registry is the thing being walked.
+    // Six since the s9 Sc7 amendment added `keep-running`. The length is
+    // spelled out rather than derived so that a step vanishing from the
+    // registry cannot quietly shorten the walk this row is here to police.
     expect(WIZARD_STEPS[0]).toBe('welcome');
   });
 });

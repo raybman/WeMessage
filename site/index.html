@@ -494,7 +494,7 @@ sent ✓ · audit #482 appended to hash chain
     <h2>Built like it handles your texts. Because it does.</h2>
     <div class="priv-grid">
       <div class="priv glass rev"><h3>Local daemon only</h3><p>Binds 127.0.0.1 with token auth and fails closed. No listening on your network, ever.</p></div>
-      <div class="priv glass rev"><h3>Keychain-held secrets</h3><p>Adapter tokens and LLM keys live in the macOS Keychain, not in config files.</p></div>
+      <div class="priv glass rev"><h3>Tokens stored as hashes</h3><p>Adapter tokens are kept only as a scrypt hash, so no one can read a token back out of the database.</p></div>
       <div class="priv glass rev"><h3>Hash-chained audit log</h3><p>Every draft, approval, edit, and send is appended to a tamper-evident chain you can verify.</p></div>
       <div class="priv glass rev"><h3>Injection-hardened</h3><p>Inbound text is sanitized before any agent sees it, and agents structurally cannot send.</p></div>
     </div>

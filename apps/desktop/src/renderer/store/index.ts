@@ -349,6 +349,14 @@ export function bindStore(
   const inflight = new Set<Promise<unknown>>();
   let lastSeq: number | null = null;
   let refetching = false;
+  /**
+   * A refetch that was asked for while one was already in flight.
+   *
+   * Remembered rather than dropped. See `refetch` below for what dropping it
+   * costs; the flag is the trailing edge of a leading-plus-trailing coalesce,
+   * and it is the same flag `main/tray.ts` has carried since s8.
+   */
+  let refetchAgain = false;
 
   /**
    * Remember a request until it finishes, so `settled()` can be a real wait
@@ -372,17 +380,66 @@ export function bindStore(
    *
    * One at a time: two unknown ids in the same tick are one hole in one map,
    * and a refetch per event would turn a reconnect burst into a stampede.
+   * That was the original rule and it is still the rule. What changed is
+   * what happens to the request that arrives DURING a flight.
+   *
+   * s9 F-144. It used to be dropped, and dropping it loses rows. Nothing in
+   * this module inserts a draft from an event: `draft.created` carries a
+   * `DraftSummary`, which is four fields short of a `DraftPayload`, so the
+   * reducer marks the map stale and waits for the row it can actually have
+   * (`optimistic.ts`, `case 'draft.created'`). The refetch IS the insert. So
+   * the sequence below, all of it ordinary, lost one:
+   *
+   *   draft.created #19  -> stale -> refetch starts, daemon answers 19
+   *   draft.created #20  -> stale -> refetch DROPPED, no request is made
+   *   the 19-row answer lands -> `snapshot()` sets `stale = false`
+   *   nothing ever asks again
+   *
+   * leaving the queue permanently one row short while reporting itself in
+   * sync. `draft.redrafted` is worse than short: it `drop()`s the old card
+   * first and depends entirely on this refetch to deliver the replacement,
+   * so a dropped request there removes a card the operator was looking at
+   * and puts nothing in its place. For a product whose whole promise is that
+   * a human sees every message before it sends, a silently missing row is
+   * the one defect that must not ship.
+   *
+   * The fix is the trailing edge, and it is not new machinery: this is
+   * `main/tray.ts`'s `inFlight`/`again`/`finish()` shape, verbatim. Still one
+   * request at a time, still never one per event — a burst of any length
+   * costs two requests, not N — and the last asker is always answered.
+   *
+   * The trailing call is deliberately UNCONDITIONAL rather than guarded by
+   * `needsSnapshot()`. Two of the four callers do not refetch because the
+   * map is stale: the `unknown-draft` refusal, and the bulk approve, whose
+   * refetch is the only source of the undo ring's `sendNotBefore`. Guarding
+   * on staleness would reinstate the drop for exactly those two.
    */
   function refetch(): void {
-    if (refetching) return;
+    if (refetching) {
+      refetchAgain = true;
+      return;
+    }
     refetching = true;
+    refetchAgain = false;
+    /*
+     * When the answer was ASKED for, not when it arrived, which is what
+     * `main/event-stream.ts` already does for main's own resync. Stamping at
+     * response time makes `syncedAt` claim a freshness the answer cannot
+     * have, and `snapshot()` keeps a pending hypothesis only while
+     * `pending.at > at` — so an operator who hits approve while this request
+     * is in flight would have their keystroke discarded by an answer that
+     * could not possibly have known about it. Request time errs the other
+     * way, keeping a hypothesis the daemon already knew, which the next ack
+     * supersedes anyway. Keeping is recoverable; dropping is not.
+     */
+    const at = options.now();
     void track(
       bridge
         .drafts()
         .then((answer) => {
           if (Array.isArray(answer))
             store.snapshot(answer as readonly DraftPayload[], {
-              at: options.now(),
+              at,
               missed: 0,
             });
         })
@@ -393,9 +450,27 @@ export function bindStore(
           // the daemon is unreachable.
         })
         .finally(() => {
-          refetching = false;
+          finishRefetch();
         }),
     );
+  }
+
+  /**
+   * The way out of a refetch, and the only place `refetching` is cleared.
+   *
+   * Cannot spin. `refetchAgain` is set only by a caller of `refetch`, and
+   * the self-call below takes the request branch (`refetching` is false by
+   * then), which clears the flag before issuing. One remembered request
+   * costs exactly one GET; a daemon that is down rejects, nothing re-arms
+   * the flag, and the loop stops. Not recursion either: `.finally` runs as a
+   * microtask, so even a synchronously-resolving bridge trampolines.
+   */
+  function finishRefetch(): void {
+    refetching = false;
+    if (refetchAgain) {
+      refetchAgain = false;
+      refetch();
+    }
   }
 
   /** How many batch reads have been asked for, and the newest applied. */

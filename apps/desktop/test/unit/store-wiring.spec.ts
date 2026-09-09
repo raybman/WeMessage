@@ -397,23 +397,78 @@ describe('s8 Sc5 wiring: a hole in the frame sequence is a gap', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('an unknown draft id refetches exactly once, not once per event', async () => {
+  /**
+   * s9 F-144. This row used to assert ONE request for a burst, and one
+   * request is the bug: the second event's ask was dropped on the floor, so
+   * whatever it was about never arrived. The property that actually matters
+   * has two halves and neither is a count of one.
+   *
+   * The stampede half is unchanged and is now proved at a length where a
+   * regression would be obvious: twenty events, not two. The lost-update
+   * half is the row below this one.
+   */
+  it('a burst of stale-making events costs two requests, never one per event', async () => {
     const fake = fakeBridge();
     const binding = bindStore(fake.bridge, { now: () => AT });
     fake.push('event', snapshotFrame(1, ['d1']));
+    fake.nextDrafts([draft('d1')]);
+    for (let i = 0; i < 20; i += 1)
+      fake.push('event', {
+        kind: 'event',
+        seq: 2 + i,
+        event: { event: 'draft.expired', draftId: `ghost${String(i)}` },
+      } satisfies StreamFrame);
+    await binding.settled();
+    // Two: the one that went out immediately, and the one that carries
+    // everything asked for while it was in flight. Twenty would be the
+    // stampede the original comment refused; one would be the drop.
+    expect(fake.calls.map((c) => c.channel)).toEqual(['drafts', 'drafts']);
+  });
+
+  it('the ask that arrives mid-flight is answered, not dropped', async () => {
+    /*
+     * s9 F-144, and the reason it is a product bug rather than a test flake.
+     *
+     * Nothing in the store inserts a draft from an event frame, so a refetch
+     * IS the insert. `draft.redrafted` is the sharpest case: it DROPS the
+     * old card and depends entirely on the refetch to bring the replacement.
+     *
+     * Sequenced here exactly as CI hit it. The first event starts a request;
+     * the daemon's answer to it is a list from BEFORE the redraft. The
+     * redraft lands while that request is in flight. Under the old code its
+     * ask was swallowed, the pre-redraft answer arrived, `snapshot()` set
+     * `stale = false`, and nothing ever asked again — leaving the operator
+     * looking at `d1`, a card that no longer exists, with the replacement
+     * nowhere and the window reporting itself in sync.
+     */
+    const fake = fakeBridge();
+    const binding = bindStore(fake.bridge, { now: () => AT });
+    fake.push('event', snapshotFrame(1, ['d1']));
+
+    // The answer to the FIRST request: the world before the redraft.
     fake.nextDrafts([draft('d1')]);
     fake.push('event', {
       kind: 'event',
       seq: 2,
       event: { event: 'draft.expired', draftId: 'ghost' },
     } satisfies StreamFrame);
+
+    // Mid-flight: the card the operator is looking at is replaced.
     fake.push('event', {
       kind: 'event',
       seq: 3,
-      event: { event: 'draft.requeued', draftId: 'ghost' },
+      event: { event: 'draft.redrafted', draftId: 'd1', newDraftId: 'd2' },
     } satisfies StreamFrame);
+
+    // The answer to the request that ask is owed. Set after both pushes on
+    // purpose: the first call has already read the stale list, so this is
+    // reachable only by a request issued after the redraft.
+    fake.nextDrafts([draft('d2')]);
     await binding.settled();
-    expect(fake.calls.map((c) => c.channel)).toEqual(['drafts']);
+
+    expect(binding.store.rows().map((r) => r.server.id)).toEqual(['d2']);
+    // And the window must not be claiming freshness it does not have.
+    expect(binding.store.needsSnapshot()).toBe(false);
   });
 });
 

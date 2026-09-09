@@ -73,14 +73,17 @@ export {
   macOsMajorFromRelease,
   readConnectionState,
   runDoctor,
+  describeRuntime,
   createRealDoctorProbes,
   AUTOMATION_DENIED,
   FDA_EPERM,
   type DoctorCheck,
   type DoctorProbes,
   type DoctorReport,
+  type DoctorRuntime,
   type DoctorSnapshot,
   type RunDoctorDeps,
+  type RuntimeVersions,
 } from './doctor.js';
 export {
   createAgentFeedback,

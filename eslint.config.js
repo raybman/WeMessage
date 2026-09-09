@@ -6,6 +6,9 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      // s9 Sc5: `apps/desktop/dist-bundle/` is esbuild output, gitignored at
+      // `.gitignore:39`. `**/dist/**` does not match it; the name is not `dist`.
+      '**/dist-bundle/**',
       '**/node_modules/**',
       '**/coverage/**',
       '**/*.tsbuildinfo',

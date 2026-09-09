@@ -4250,6 +4250,15 @@ describe('S8 extensions (s8-execution Scenario 4: the Electron shell)', () => {
 const ARCH_SKIP = new Set([
   'node_modules',
   'dist',
+  // s9 Sc5. `dist-bundle` is the daemon bundle the desktop app now emits, and
+  // it is build output in exactly the sense `dist` is: gitignored, rebuilt from
+  // source, and full of code this repository did not write. Leaving it in the
+  // walk did not make the sweeps stronger, it made them read esbuild's output:
+  // the bundled `daemon/main.mjs` inlines the launchd runner, so row 5 convicted
+  // a build artifact of spawning a child process. A row that a `pnpm build`
+  // can flip is not a guard. The row below pins this set against .gitignore so
+  // the entry cannot quietly become a place to hide a real file.
+  'dist-bundle',
   '.git',
   'coverage',
   '.turbo',
@@ -9990,10 +9999,26 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
    * created and stops there. Without it, the sweep deletes a tracked file out
    * of the working tree on every row in this block, and the failure looks like
    * the file was never written.
+   *
+   * Sc 5 amended the row, and the amendment is the whole reason it existed.
+   * When it was written, `apps/desktop/scripts` was still empty, so it could
+   * carry both halves of the claim at once: a keeper survives, and the empty
+   * shell is then removed. Sc 5 put a permanent file in that directory, which
+   * makes the second half FALSE of it forever — the shell is never empty
+   * again. So the halves split. Survival is now asserted against the shipped
+   * file by name, which is strictly stronger than a synthetic keeper because
+   * it is the file the cleanup would actually have destroyed. Removal moves to
+   * `packages/daemon/src/__s9__`, a namespaced path that can never become a
+   * real one, so the row cannot be invalidated a second time the same way.
    */
   it('cleanup removes the planted directory shells, but never a real file', () => {
     const scripts = join(repoRoot, 'apps/desktop/scripts');
+    const shipped = join(scripts, 'bundle-daemon.mjs');
     const keeper = join(scripts, '__s9_keeper__.mjs');
+
+    // The half that matters: the bundler Sc 5 shipped is sitting in one of the
+    // three directories this helper sweeps, and it has to still be there after.
+    expect(existsSync(shipped), 'Sc 5 ships apps/desktop/scripts').toBe(true);
     mkdirSync(scripts, { recursive: true });
     writeFileSync(keeper, 'export const shipped = true;\n');
     try {
@@ -10006,7 +10031,68 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       rmSync(keeper, { force: true });
     }
     s9RemovePlantedDirs();
-    expect(existsSync(scripts), 'the empty shell is still removed').toBe(false);
+    expect(existsSync(shipped), 'the shipped bundler survives cleanup').toBe(
+      true,
+    );
+
+    // The other half, on a path that is namespaced out of collision range.
+    const shell = join(repoRoot, 'packages/daemon/src/__s9__');
+    mkdirSync(shell, { recursive: true });
+    s9RemovePlantedDirs();
+    expect(existsSync(shell), 'the empty shell is still removed').toBe(false);
+  });
+
+  /**
+   * s9 Sc5: the file walker's skip set, pinned.
+   *
+   * `archFiles` walks the filesystem rather than the index, deliberately: the
+   * planted probes above are never committed, and a `git ls-files` walk would
+   * be blind to every one of them. The price is that build output is visible,
+   * and Sc 5 collected it — `dist-bundle/daemon/main.mjs` is esbuild's inlined
+   * copy of the daemon, launchd runner and all, and row 5 duly convicted it of
+   * spawning a child process. A guard a `pnpm build` can flip is not a guard.
+   *
+   * The fix is an entry in ARCH_SKIP, and an entry in a skip set is a hole
+   * unless something outside the set decides what may go in it. So: every name
+   * is either dot-prefixed tooling metadata, which cannot hold a module the
+   * product imports, or a directory git itself refuses to track. Neither limb
+   * admits `src`, `test`, `scripts` or any other place source actually lives.
+   */
+  it('the walker skips only tooling metadata and gitignored build output', () => {
+    const ignored = (name: string): boolean => {
+      try {
+        execFileSync(
+          'git',
+          ['check-ignore', '-q', '--', `apps/desktop/${name}/`],
+          {
+            cwd: repoRoot,
+            stdio: 'ignore',
+          },
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const admissible = (name: string): boolean =>
+      name.startsWith('.') || ignored(name);
+
+    expect([...ARCH_SKIP].sort()).toEqual([
+      '.git',
+      '.turbo',
+      'coverage',
+      'dist',
+      'dist-bundle',
+      'node_modules',
+    ]);
+    for (const name of ARCH_SKIP) expect(admissible(name), name).toBe(true);
+
+    // Non-vacuity, both limbs. `src` is neither dot-prefixed nor ignored, and
+    // it is the exact name a future edit would reach for to make a stubborn
+    // row go quiet.
+    for (const name of ['src', 'test', 'scripts', 'packages'])
+      expect(admissible(name), name).toBe(false);
+    expect(ignored('dist-bundle')).toBe(true);
   });
 
   /* ── row 1: the public sweep reads more of the tree, and more shapes ── */

@@ -25,8 +25,9 @@
  * subcommands, and the argument that decides whether a directory is written
  * to should not arrive through a dependency's coercion rules.
  */
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Actor, AuditEvent, Clock } from '@wemessage/core';
 import { openDaemonStore } from '../open-store.js';
@@ -41,6 +42,7 @@ import {
 import {
   asInstallableLabelPrefix,
   resolveBundlePaths,
+  resolveDaemonMain,
   resolveProgramArguments,
   type PathEnv,
 } from './paths.js';
@@ -55,16 +57,6 @@ import {
 import { mintServiceLabel } from './label.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/**
- * The built entrypoint the agent will run.
- *
- * Resolved from the PACKAGE ROOT rather than from `process.argv[1]`, so it is
- * the same path whether this module is loaded from `src/` by a test runner or
- * from `dist/` for real. Deriving it from the running script produced
- * `<pkg>/src/main.js` under vitest, which is not a file and not the dev shape
- * the renderer accepts.
- */
-const DAEMON_MAIN = join(resolve(HERE, '..', '..'), 'dist', 'main.js');
 
 const SUBCOMMANDS = ['install', 'uninstall', 'status'] as const;
 
@@ -77,6 +69,13 @@ export interface CliOverrides {
   readonly env?: PathEnv;
   readonly home?: string;
   readonly execPath?: string;
+  /**
+   * s9 Sc5 row 6. The daemon entry to write into the plist, when the caller
+   * would rather say than be discovered. Derived from this file's own
+   * location otherwise, which is the whole point of row 6, so the override
+   * exists for the tests that need to render BOTH layouts from one machine.
+   */
+  readonly daemonMain?: string;
   /** The runner, already bound to a spawn. Injected; never built here. */
   readonly run?: ServiceManagerRun;
   /**
@@ -299,7 +298,7 @@ async function dispatch(
       label,
       programArguments: resolveProgramArguments(
         env,
-        DAEMON_MAIN,
+        over.daemonMain ?? resolveDaemonMain(HERE, existsSync),
         over.execPath ?? process.execPath,
       ),
       stdoutPath: paths.stdoutPath,

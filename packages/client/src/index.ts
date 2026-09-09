@@ -433,6 +433,26 @@ export interface DoctorReportPayload {
    * background job to stop.
    */
   supervisor: 'launchd' | 'app' | 'none';
+  /**
+   * s9 Sc5: present iff the daemon that answered is running under Electron,
+   * which for a shipped install means it is `WeMessage.app` re-entered with
+   * ELECTRON_RUN_AS_NODE=1 (F-121).
+   *
+   * OPTIONAL here, unlike `supervisor` above, because the two absences mean
+   * different things. A missing `supervisor` would mean the daemon declined
+   * to say; a missing `runtime` means the daemon said "not Electron", which
+   * is exactly what a developer running from a checkout should see. That is
+   * the same distinction the FDA and Automation remediation copy already
+   * draws when it warns that unpackaged grants attach to your terminal.
+   */
+  runtime?: DoctorRuntimePayload;
+}
+
+/** Mirrors the daemon's `DoctorRuntime`. */
+export interface DoctorRuntimePayload {
+  electron: string;
+  node: string;
+  abi: number;
 }
 
 export interface SendInput {

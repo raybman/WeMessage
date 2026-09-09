@@ -24,7 +24,7 @@
  * every sweep, which is the definition of an orphan nobody cleans up.
  */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   INSTALLABLE_LABEL_PREFIXES,
   LAUNCH_AGENT_LABEL_PREFIX,
@@ -133,4 +133,37 @@ export function resolveProgramArguments(
   // resolved from the package root (so it is the same path whether the CLI
   // is running from `src/` under a test runner or from `dist/` for real).
   return [execPath, daemonMain];
+}
+
+/**
+ * WHICH `main.js` THIS `wemessaged` IS THE COMMAND-LINE FOR (s9 Sc5 row 6).
+ *
+ * `service install` writes a path into a plist that launchd will obey at
+ * every login, so the question "which daemon entry" has to be answered from
+ * where this executable actually sits, never from a flag and never from a
+ * constant baked at build time.
+ *
+ * Two layouts, and they are told apart by one probe:
+ *
+ *   bundle: <root>/daemon/wemessaged.mjs -> <root>/daemon/main.mjs
+ *   dev:    packages/daemon/{src,dist}/launchd/cli.js -> packages/daemon/dist/main.js
+ *
+ * The bundle branch is what makes the shipped plist correct without anyone
+ * configuring anything: inside the app that sibling is
+ * `…/Contents/Resources/daemon/main.mjs`, which is the exact string
+ * `resolveProgramArguments` recognises as the packaged layout, so the app
+ * path falls out of the file's own location rather than being asserted.
+ *
+ * `exists` IS A PARAMETER because this module does not touch a filesystem
+ * (see the header). The caller passes `existsSync`; the tests pass a set.
+ */
+export function resolveDaemonMain(
+  here: string,
+  exists: (path: string) => boolean,
+): string {
+  const sibling = resolve(here, '..', 'daemon', 'main.mjs');
+  if (exists(sibling)) return sibling;
+  // The package root, not `process.argv[1]`: the same answer whether this
+  // module was loaded from `src/` by a test runner or from `dist/` for real.
+  return join(resolve(here, '..', '..'), 'dist', 'main.js');
 }

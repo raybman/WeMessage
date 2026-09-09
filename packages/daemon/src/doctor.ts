@@ -59,6 +59,52 @@ export interface DoctorCheck {
   remediation?: string;
 }
 
+/**
+ * s9 Sc5: which JavaScript runtime answered this report.
+ *
+ * The shipped daemon is `WeMessage.app` re-entered with
+ * `ELECTRON_RUN_AS_NODE=1` (F-121), so "am I Electron" is the difference
+ * between a daemon whose TCC grants attach to the signed app and one whose
+ * grants attach to whatever terminal launched it. That distinction is
+ * already the subject of two remediation strings above ("Running unpackaged:
+ * grants attach to your terminal/node binary"), and until now the report
+ * asserted it nowhere.
+ */
+export interface DoctorRuntime {
+  /** Electron's own version, e.g. "44.2.0". */
+  electron: string;
+  /** The Node bundled inside that Electron, which is NOT the host's Node. */
+  node: string;
+  /**
+   * `process.versions.modules`, the native ABI. This is the number a
+   * mismatched prebuild would disagree with, so it is reported as the number
+   * it is rather than as a boolean somebody would have to trust.
+   */
+  abi: number;
+}
+
+/** Exactly the three `process.versions` keys `describeRuntime` reads. */
+export interface RuntimeVersions {
+  electron?: string | undefined;
+  node: string;
+  modules: string;
+}
+
+/**
+ * UNLIKE `supervisor`, THIS ONE IS HONESTLY SELF-MEASURABLE.
+ *
+ * Sc4 refused to default `supervisor` because a process cannot see its own
+ * supervisor: a ppid of 1 means launchd or an orphan, indistinguishably. The
+ * runtime is the opposite case. `process.versions.electron` exists if and
+ * only if this process is Electron, so absence here is a measurement and not
+ * a shrug, and the field is genuinely omitted rather than set to a null that
+ * a client would have to decide how to read.
+ */
+export function describeRuntime(v: RuntimeVersions): DoctorRuntime | undefined {
+  if (!v.electron) return undefined;
+  return { electron: v.electron, node: v.node, abi: Number(v.modules) };
+}
+
 export interface DoctorReport {
   state: ConnectionState;
   checks: DoctorCheck[];
@@ -80,6 +126,13 @@ export interface DoctorReport {
    * restarts than for a binary someone ran in a terminal.
    */
   supervisor: Supervisor;
+  /**
+   * Present iff the daemon is running under Electron. The key is ABSENT, not
+   * null, when it is not: a client reading this over the wire and a caller
+   * reading it in process then see the same thing, and neither has to learn
+   * that one of them spells "plain Node" differently.
+   */
+  runtime?: DoctorRuntime;
 }
 
 // Exact remediation/detail copy (Fable design consult point 4) — asserted
@@ -238,6 +291,14 @@ export interface RunDoctorDeps {
    * the unmeasured default back in by another door.
    */
   supervisor: Supervisor;
+  /**
+   * s9 Sc5. OPTIONAL, and the asymmetry with `supervisor` directly above is
+   * the point: this one has a correct answer available in-process, so the
+   * default is a measurement rather than an assumption. Same idiom as
+   * `acquireInstanceLock`'s `opts.pid ?? process.pid`. Tests pass a literal
+   * to exercise both branches without needing a second runtime.
+   */
+  versions?: RuntimeVersions;
 }
 
 /**
@@ -255,6 +316,7 @@ export interface RunDoctorDeps {
  */
 export async function runDoctor(deps: RunDoctorDeps): Promise<DoctorReport> {
   const { probes, store, sink, clock } = deps;
+  const runtime = describeRuntime(deps.versions ?? process.versions);
 
   const osMajor = probes.osMajor();
   let derived: { state: ConnectionState; checks: DoctorCheck[] };
@@ -306,6 +368,11 @@ export async function runDoctor(deps: RunDoctorDeps): Promise<DoctorReport> {
     // own supervisor honestly -- a ppid of 1 means launchd OR an orphan --
     // so this reports what the supervisor itself put in the environment.
     supervisor: deps.supervisor,
+    // Spread, not `runtime: maybeUndefined`. Under exactOptionalPropertyTypes
+    // the second is a type error, and it would also put a key on the object
+    // that JSON.stringify silently drops, so the in-process report and the
+    // wire report would disagree about their own shape.
+    ...(runtime ? { runtime } : {}),
   };
 }
 

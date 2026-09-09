@@ -2925,9 +2925,18 @@ describe('arch invariants (dependency-cruiser)', () => {
  * ask about frames and events together.
  */
 describe('s7-execution Scenario 12 — the public document set', () => {
-  /** The docs this repo publishes beside its code. `skills/` is Sc 11's. */
+  /**
+   * The docs this repo publishes beside its code. `skills/` is Sc 11's.
+   *
+   * RELEASING.md joined this set when it was written, rather than sitting
+   * beside it as an unchecked file. It is a public document, so the rows
+   * below are exactly the rows it needs: the leak sweep is the reason a
+   * release procedure full of local commands does not carry somebody's home
+   * directory into a public repository, and the route row is the reason the
+   * endpoint it tells a releaser to poll has to be one the daemon serves.
+   */
   const DOC_RE =
-    /^(README\.md|CONTRIBUTING\.md|packages\/.*\/(README|PROTOCOL)\.md)$/;
+    /^(README\.md|CONTRIBUTING\.md|RELEASING\.md|packages\/.*\/(README|PROTOCOL)\.md)$/;
   const ADAPTER_DOC_RE = /^packages\/adapters\/[^/]+\/README\.md$/;
 
   function shippedDocs(): string[] {
@@ -2944,6 +2953,9 @@ describe('s7-execution Scenario 12 — the public document set', () => {
     expect(shippedDocs()).toEqual([
       'CONTRIBUTING.md',
       'README.md',
+      // The unsigned lane's procedure, and the checklist the manual leg of
+      // the release smoke is copied from.
+      'RELEASING.md',
       // The quickstart. A stranger's first three commands live here because
       // there is nowhere else public they could live (F-79).
       'packages/adapter-testkit/README.md',

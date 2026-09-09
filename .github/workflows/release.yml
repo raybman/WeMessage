@@ -156,7 +156,7 @@ jobs:
 
       - name: verify-signed-bundle
         if: steps.signing.outputs.mode == 'release'
-        run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app release
+        run: sh apps/desktop/scripts/verify-bundle.sh apps/desktop/dist-pack/mac-arm64/WeMessage.app release
 
       - name: notarize
         if: steps.signing.outputs.mode == 'release'
@@ -168,8 +168,8 @@ jobs:
           set -euo pipefail
           printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/asc.p8"
           pnpm release:notarize \
-            --zip "$(ls dist-pack/*.zip)" \
-            --dmg "$(ls dist-pack/*.dmg)" \
+            --zip "$(ls apps/desktop/dist-pack/*.zip)" \
+            --dmg "$(ls apps/desktop/dist-pack/*.dmg)" \
             --key "$RUNNER_TEMP/asc.p8" \
             --key-id "$ASC_KEY_ID" \
             --issuer "$ASC_ISSUER_ID"
@@ -181,19 +181,19 @@ jobs:
 
       - name: verify-unsigned-bundle
         if: steps.signing.outputs.mode == 'adhoc'
-        run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app adhoc
+        run: sh apps/desktop/scripts/verify-bundle.sh apps/desktop/dist-pack/mac-arm64/WeMessage.app adhoc
 
       # For an unsigned build this file is the ONLY thing a user can check
       # their download against, because Gatekeeper will tell them nothing.
       - name: checksums
         run: |
           set -euo pipefail
-          cd dist-pack
+          cd apps/desktop/dist-pack
           shasum -a 256 ./*.dmg ./*.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: release-notes
-        run: pnpm release:notes --out dist-pack/RELEASE_NOTES.md
+        run: pnpm release:notes --out apps/desktop/dist-pack/RELEASE_NOTES.md
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
@@ -212,11 +212,11 @@ jobs:
           # A semver prerelease is exactly a version with a hyphen after the
           # core: `v1.0.0-rc.1` is one, `v1.0.0` is not.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          body_path: dist-pack/RELEASE_NOTES.md
+          body_path: apps/desktop/dist-pack/RELEASE_NOTES.md
           files: |
-            dist-pack/*.dmg
-            dist-pack/*.zip
-            dist-pack/SHA256SUMS
+            apps/desktop/dist-pack/*.dmg
+            apps/desktop/dist-pack/*.zip
+            apps/desktop/dist-pack/SHA256SUMS
 
       # Doubly gated: a cask that points at an unsigned build would tell
       # Homebrew users the app is installable when Gatekeeper will refuse it.
@@ -226,7 +226,7 @@ jobs:
           GH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
         run: |
           set -euo pipefail
-          pnpm release:cask --dmg "$(ls dist-pack/*.dmg)"
+          pnpm release:cask --dmg "$(ls apps/desktop/dist-pack/*.dmg)"
           # Opens a review, never writes to the tap's default branch. A wrong
           # sha256 pushed straight to main breaks `brew install` for everyone
           # until somebody notices.

@@ -95,6 +95,65 @@ interface Workflow {
 
 const load = (rel: string): Workflow => parse(read(rel)) as Workflow;
 
+/* ── where the pack actually lands ───────────────────────────────────── */
+
+/**
+ * The one path in this file that is DERIVED rather than typed, and the
+ * reason it had to be.
+ *
+ * Every `dist-pack/...` in both workflow files was written relative to the
+ * repository root, and electron-builder does not write there. It resolves
+ * `directories.output` against the PROJECT directory, and `pack.mjs` invokes
+ * it as `pnpm --filter @wemessage/desktop exec electron-builder`, which runs
+ * in that package's own directory. So the artefacts land in
+ * `apps/desktop/dist-pack` and the workflows were all looking one level too
+ * high, at a directory that has never existed in this repo.
+ *
+ * Nothing caught it. `pack-adhoc` in `ci-macos.yml` `needs` the gate job, the
+ * gate job has been red, and a needed job that never runs is reported as
+ * `skipped` rather than as failed — a green-looking tick attached to a step
+ * that would have exited 2 on its first line ("verify-bundle: no such app
+ * bundle"). The release workflow has the same fault in nine more places and
+ * is triggered by a tag nobody has pushed yet, so its first run would have
+ * been the release itself.
+ *
+ * Hence a derivation and not a constant. Both halves are read:
+ *
+ *   `apps/desktop/package.json` name === the filter `pack.mjs` passes, which
+ *   is what makes `apps/desktop` the project directory rather than a guess;
+ *   `apps/desktop/electron-builder.yml` `directories.output`, which is the
+ *   only place the leaf name is decided.
+ *
+ * Change either one and row 9c fails naming the workflow line that drifted,
+ * which is the failure this whole comment exists to make impossible to have
+ * silently again.
+ */
+const DESKTOP_DIR = 'apps/desktop';
+
+const packDir = (): string => {
+  const pkg = JSON.parse(read(`${DESKTOP_DIR}/package.json`)) as {
+    readonly name?: string;
+  };
+  // The link between the filter in `pack.mjs` and this directory. If the
+  // package were renamed, `--filter @wemessage/desktop` would resolve
+  // somewhere else (or nowhere) and the whole derivation below would be
+  // about the wrong tree.
+  expect(pkg.name).toBe('@wemessage/desktop');
+  const packer = read('tools/release/bin/pack.mjs');
+  for (const token of ['--filter', '@wemessage/desktop', 'electron-builder'])
+    expect([token, packer.includes(token)]).toEqual([token, true]);
+  const builder = parse(read(`${DESKTOP_DIR}/electron-builder.yml`)) as {
+    readonly directories?: { readonly output?: unknown };
+  };
+  const out = builder.directories?.output;
+  expect(typeof out).toBe('string');
+  const leaf = String(out);
+  // A relative output. An absolute one would not be under the project dir at
+  // all and this derivation would be a lie rather than a mistake.
+  expect(leaf.startsWith('/')).toBe(false);
+  return `${DESKTOP_DIR}/${leaf}`;
+};
+
 /**
  * Read the `on:` key without tripping over the oldest trap in this format.
  *
@@ -437,15 +496,16 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     const isPre = (tag: string): boolean => tag.includes('-');
     expect(isPre('v1.0.0-rc.1')).toBe(true);
     expect(isPre('v1.0.0')).toBe(false);
-    expect(w['body_path']).toBe('dist-pack/RELEASE_NOTES.md');
+    const dir = packDir();
+    expect(w['body_path']).toBe(`${dir}/RELEASE_NOTES.md`);
     const files = String(w['files'] ?? '')
       .split('\n')
       .map((f) => f.trim())
       .filter((f) => f.length > 0);
     expect(files).toEqual([
-      'dist-pack/*.dmg',
-      'dist-pack/*.zip',
-      'dist-pack/SHA256SUMS',
+      `${dir}/*.dmg`,
+      `${dir}/*.zip`,
+      `${dir}/SHA256SUMS`,
     ]);
     // The checksums file is not decoration. It is the only thing a user of an
     // UNSIGNED build has to check what they downloaded against, because
@@ -522,6 +582,45 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       norm(runsOf(linux, linuxGate)),
     );
     expect(runsOf(macos, macosGate)).toContain('pnpm test');
+  });
+
+  it('row 9c: every workflow reads the pack where electron-builder writes it', () => {
+    const dir = packDir();
+    // The derivation must actually have moved somewhere. If `directories.output`
+    // were ever set to a path that already began with `apps/desktop`, the
+    // sweep below would pass by tautology.
+    expect(dir).toBe('apps/desktop/dist-pack');
+    const leaf = dir.slice(DESKTOP_DIR.length + 1);
+
+    /*
+     * Every line of both workflows, not just `run:` and not just `with:`.
+     * The thirteen references this row was written for were spread across
+     * six different YAML shapes — a bare `run:`, a heredoc inside one, a
+     * multi-line `run:` with a `cd`, `with.path`, `with.body_path` and a
+     * block-scalar `with.files` list — and a sweep that understood the
+     * schema would have had to know all six. The file is text and the
+     * mistake is textual, so it is read as text.
+     */
+    const offenders: string[] = [];
+    let seen = 0;
+    for (const rel of SWEPT)
+      read(rel)
+        .split('\n')
+        .forEach((line, i) => {
+          for (const m of line.matchAll(new RegExp(`\\S*${leaf}\\S*`, 'g'))) {
+            const ref = m[0];
+            seen += 1;
+            // `apps/desktop/dist-pack…` is right. A bare `dist-pack…`, or one
+            // reached through any other prefix, is a path that does not exist
+            // on the runner and would fail at the first command to touch it.
+            if (!ref.startsWith(dir))
+              offenders.push(`${rel}:${String(i + 1)}: ${ref}`);
+          }
+        });
+    expect(offenders).toEqual([]);
+    // Non-vacuity: a sweep over a term that had been renamed would report no
+    // offenders because it found nothing at all.
+    expect(seen).toBeGreaterThanOrEqual(12);
   });
 
   /* ── row 10: the tap push is doubly gated and never force-pushed ────── */

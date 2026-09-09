@@ -108,11 +108,11 @@ jobs:
       # The verifier is the point of the job. Packing that produced a broken
       # bundle and exited 0 would be a green tick attached to nothing, which
       # is the exact failure the header above refuses.
-      - run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app adhoc
+      - run: sh apps/desktop/scripts/verify-bundle.sh apps/desktop/dist-pack/mac-arm64/WeMessage.app adhoc
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wemessage-unsigned-${{ github.sha }}
-          path: dist-pack/*-UNSIGNED.zip
+          path: apps/desktop/dist-pack/*-UNSIGNED.zip
           # Seven days. These are per-push builds on a public repo and the
           # storage is finite; raising this is a reviewed diff, not a drift.
           retention-days: 7

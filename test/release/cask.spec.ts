@@ -407,10 +407,31 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
         spawnSync('brew', ['untap', tapQualified], { encoding: 'utf8', env });
       }
     },
-    // tap-new + style + audit + untap, all real Ruby process spin-up, run
-    // past vitest's 5s default on this machine; 30s leaves headroom
-    // without letting a genuinely hung `brew` invocation stall the suite.
-    30_000,
+    /*
+     * FOUR COLD RUBY BOOTS, and the budget is measured rather than guessed.
+     *
+     * The first number here was 30s, chosen from 11s observed on a developer
+     * laptop with a warm Homebrew. It timed out on the first hosted macOS
+     * runner that reached it, at 47s, and that is not a surprise once the
+     * work is named: `brew style` boots RuboCop over the whole tap and
+     * `brew audit --strict` boots Homebrew's Ruby stack again, on a runner
+     * whose Homebrew has never been used in this job. Ruby start-up on a
+     * cold hosted runner is a different order of magnitude from a laptop
+     * that ran `brew` an hour ago.
+     *
+     * C-11 is not in tension with this. C-11 forbids padding a deadline the
+     * PRODUCT has to meet, and there is no product deadline in this row: its
+     * subject is whether brew accepts the committed cask, never how fast it
+     * answers. Three minutes is four times the slowest observation, which
+     * leaves room for a slower runner while still failing a genuinely hung
+     * `brew` well inside the job's own limit.
+     *
+     * No network is involved: `HOMEBREW_NO_AUTO_UPDATE` is set, the tap is
+     * created `--no-git`, and `--online` is deliberately not passed (the
+     * README check forbids it, because an audit that fetches would make this
+     * row fail on GitHub's availability rather than on the cask).
+     */
+    180_000,
   );
 
   // row 8: install from a local file:// url via `brew install --cask`,

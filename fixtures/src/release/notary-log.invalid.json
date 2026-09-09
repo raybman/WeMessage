@@ -1,0 +1,29 @@
+{
+  "logFormatVersion": 1,
+  "jobId": "7f3b1c28-0000-4a11-9c5e-2b6ad0e41f90",
+  "status": "Invalid",
+  "statusSummary": "Archive contains critical validation errors",
+  "statusCode": 4000,
+  "archiveFilename": "placeholder.zip",
+  "uploadDate": "2026-09-09T00:00:00.000Z",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "ticketContents": null,
+  "issues": [
+    {
+      "severity": "error",
+      "code": null,
+      "path": "placeholder.zip/WeMessage.app/Contents/MacOS/WeMessage",
+      "message": "The binary is not signed with a valid Developer ID certificate.",
+      "docUrl": "https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution/resolving_common_notarization_issues",
+      "architecture": "arm64"
+    },
+    {
+      "severity": "error",
+      "code": null,
+      "path": "placeholder.zip/WeMessage.app/Contents/MacOS/WeMessage",
+      "message": "The signature does not include a secure timestamp.",
+      "docUrl": "https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution/resolving_common_notarization_issues",
+      "architecture": "arm64"
+    }
+  ]
+}

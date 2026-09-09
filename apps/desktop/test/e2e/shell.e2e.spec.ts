@@ -433,21 +433,52 @@ describe('s8 Sc4: the shell, the bridge and the token', () => {
     });
 
     it('prefers-color-scheme flips the layer tokens', async () => {
+      // The starting state this row assumes, ESTABLISHED rather than
+      // inherited. Whether the window starts translucent is the operator's OS
+      // setting and not ours: `main/theme.ts` seeds it from
+      // `nativeTheme.prefersReducedTransparency`. On a machine where that
+      // reads true, `--layer-1` is the opaque `#1c1c1e` rather than an
+      // `rgba()`, and `rgbaOf` answers `[]` for a hex -- which is exactly how
+      // this arrived from the macOS CI runner, whose accessibility state is
+      // not ours to choose. The rows below that are ABOUT reduced
+      // transparency push it on for themselves; this one is about the
+      // translucent tokens, so it says so. `afterAll` already restores it.
+      //
+      // In the row and not a `beforeAll` because `expect.poll` refuses to run
+      // outside a test, and a second hand-rolled poller next to
+      // `waitForTransparency` would be two answers to one question.
+      await pushTheme(app, { reducedTransparency: false });
+      await waitForTransparency('off');
+
       // Compared as NUMBERS, not as text. A custom property's value survives
       // the cascade verbatim, and "verbatim" includes whatever the CSS
       // minifier decided: `0.72` ships as `.72` and `220ms` as `.22s`. The
       // sheet's meaning is the assertion; its spelling after minification is
       // the build tool's business.
-      expect(rgbaOf(await readToken('--layer-1'))).toEqual([44, 44, 46, 0.72]);
+      //
+      // The raw text rides along in the message because `rgbaOf` answers `[]`
+      // for everything it cannot parse: an empty diff names neither the value
+      // it got nor the reason, and a CI failure that says `[]` is a failure
+      // that has to be reproduced before it can be read.
+      const layer1 = async (want: number[]): Promise<void> => {
+        const raw = await readToken('--layer-1');
+        expect(rgbaOf(raw), `--layer-1 = ${JSON.stringify(raw)}`).toEqual(want);
+      };
+      await layer1([44, 44, 46, 0.72]);
       await app.page.emulateMedia({ colorScheme: 'light' });
-      expect(rgbaOf(await readToken('--layer-1'))).toEqual([
-        255, 255, 255, 0.78,
-      ]);
+      await layer1([255, 255, 255, 0.78]);
       await app.page.emulateMedia({ colorScheme: 'dark' });
-      expect(rgbaOf(await readToken('--layer-1'))).toEqual([44, 44, 46, 0.72]);
+      await layer1([44, 44, 46, 0.72]);
     });
 
     it('prefers-reduced-motion zeroes the durations', async () => {
+      // Pinned for the same reason the row above pins transparency: this
+      // one's baseline is "no preference", and until something says so that
+      // is whatever the machine happens to prefer. `--dur-base` answers only
+      // to `@media (prefers-reduced-motion: reduce)` (tokens.css:98), never to
+      // main's attribute, so `emulateMedia` is the whole lever and one call
+      // makes the row independent of the runner.
+      await app.page.emulateMedia({ reducedMotion: 'no-preference' });
       expect(msOf(await readToken('--dur-base'))).toBe(220);
       await app.page.emulateMedia({ reducedMotion: 'reduce' });
       expect(msOf(await readToken('--dur-base'))).toBe(0);

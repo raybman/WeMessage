@@ -32,6 +32,20 @@ export default defineConfig({
     // into a named failure.
     testTimeout: 30_000,
     hookTimeout: 120_000,
+    // s9: one Electron at a time, in THIS project only.
+    //
+    // The sibling tray/a11y configs each carry `singleFork` with a comment
+    // saying it is a no-op there, and it is: a project holding one file has
+    // nothing to serialise, and `groupOrder` is what actually bought those
+    // two their isolation. Here it is not a no-op. This project holds eleven
+    // files, every one of which launches its own Electron, and the comment on
+    // `exclude` above already names the consequence. One fork runs them in
+    // sequence while the other forks keep draining the rest of the suite.
+    //
+    // Known cost, accepted: a crashed Electron takes the shared fork and
+    // every later desktop file with it. The harness's SIGKILL try/catch is
+    // the mitigation, and a crash is a failure we want loud anyway.
+    poolOptions: { forks: { singleFork: true } },
     // s7 Sc1 (F-80), obeyed by the newest package in the tree: every package
     // with a test/ directory typechecks its tests. `test/arch.spec.ts` row
     // (a) keys off structure, so `apps/desktop` gaining a test/ directory

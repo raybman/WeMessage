@@ -12,6 +12,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:fast": "vitest run --project '!desktop'",
     "lint": "eslint . && prettier --check .",
     "dep:check": "depcruise packages apps fixtures tools --config .dependency-cruiser.cjs",
     "release:notarize": "node tools/release/bin/notarize.mjs",

@@ -57,6 +57,31 @@ const OUT = join(DESKTOP, 'dist-bundle');
 /** Generous; this only ever converts a hang into a named failure. */
 const BOOT_BUDGET_MS = 20_000;
 
+/**
+ * WHETHER THIS HOST CAN EXECUTE THE ARTEFACT, WHICH IS NOT THE SAME QUESTION
+ * AS WHETHER THE SUITE CAN RUN.
+ *
+ * The bundle ships ONE native binary, `prebuilds/darwin-arm64.node`, and row 1
+ * deep-equals the listing to keep it that way (F-135). On any other host,
+ * `better-sqlite3/lib/binding.js` finds no prebuild for `${platform}-${arch}`
+ * and falls through to the node-gyp path, `build/Release/better_sqlite3.node`,
+ * which this bundle deliberately does not ship. The daemon then dies inside
+ * its first require, before it can listen, and the row that was going to
+ * assert something about the daemon instead asserts something about
+ * `better-sqlite3`'s resolution order.
+ *
+ * So this is not "skip on CI". Three rows in this file assert the behaviour of
+ * a darwin-arm64 artefact, and off darwin-arm64 there is no such artefact to
+ * assert about. Every row that READS the bundle still runs everywhere, which
+ * is most of the file: the listing, the metafile, the closed external set, the
+ * migration hashes, the shim, the sizes, and the refusal under plain Node.
+ * Linux CI therefore keeps its teeth on everything a Linux host can know.
+ *
+ * The gate is checked against the listing rather than trusted, in row 1.
+ */
+const RUNS_THE_BUNDLE =
+  process.platform === 'darwin' && process.arch === 'arm64';
+
 const temps: string[] = [];
 function tempDir(prefix = 'wemessage-bundle-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -251,6 +276,24 @@ describe('s9 Sc5 row 1: the bundle is an exact listing, not a directory that gre
     ]);
   });
 
+  /*
+   * The teeth on `RUNS_THE_BUNDLE`. A platform gate is a way to lose coverage
+   * quietly, so this row refuses to let the gate be a free-standing opinion
+   * about the host: it re-derives the answer from the ONE prebuild the bundle
+   * actually contains. Ship a linux prebuild and the gate must widen or this
+   * fails. Move to darwin-x64 and the gate must follow or this fails. Skip the
+   * executing rows on a host that could have run them and this fails.
+   */
+  it('gates the executing rows on the one prebuild the bundle ships', () => {
+    const natives = listing(OUT).filter((f) => f.endsWith('.node'));
+    expect(natives).toHaveLength(1);
+    const host = `${process.platform}-${process.arch}.node`;
+    expect(
+      RUNS_THE_BUNDLE,
+      `this host is ${host}; the bundle carries ${natives[0] ?? 'nothing'}`,
+    ).toBe(natives[0]?.endsWith(`/${host}`) === true);
+  });
+
   it('refuses to build for x64, because nothing has ever smoked one (F-135)', () => {
     let refused = '';
     try {
@@ -341,40 +384,46 @@ describe('s9 Sc5 row 2: the workspace is inlined; the externals are a closed set
 
 /* ── row 3 ────────────────────────────────────────────────────────────── */
 
-describe('s9 Sc5 row 3: it runs under Electron-as-Node and says which runtime it is', () => {
-  it('answers /v1/doctor with the electron runtime it was built for', async () => {
-    const { dir, chatDb } = bed();
-    const port = await freePort();
-    const d = launch(ELECTRON_BIN, [join(OUT, 'daemon/main.mjs')], {
-      ELECTRON_RUN_AS_NODE: '1',
-      WEMESSAGE_DIR: dir,
-      WEMESSAGE_PORT: String(port),
-      WEMESSAGE_CHATDB: chatDb,
-    });
-    try {
-      await waitFor(
-        () => d.stdout().includes('listening on 127.0.0.1'),
-        `the bundled daemon to listen (stderr: ${d.stderr()})`,
-        BOOT_BUDGET_MS,
-      );
-      const token = readFileSync(join(dir, 'daemon.token'), 'utf8').trim();
-      const res = await fetch(`http://127.0.0.1:${String(port)}/v1/doctor`, {
-        headers: { authorization: `Bearer ${token}` },
+describe.skipIf(!RUNS_THE_BUNDLE)(
+  's9 Sc5 row 3: it runs under Electron-as-Node and says which runtime it is',
+  () => {
+    it('answers /v1/doctor with the electron runtime it was built for', async () => {
+      const { dir, chatDb } = bed();
+      const port = await freePort();
+      const d = launch(ELECTRON_BIN, [join(OUT, 'daemon/main.mjs')], {
+        ELECTRON_RUN_AS_NODE: '1',
+        WEMESSAGE_DIR: dir,
+        WEMESSAGE_PORT: String(port),
+        WEMESSAGE_CHATDB: chatDb,
       });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        runtime?: { electron?: string; node?: string; abi?: number };
-      };
-      expect(body.runtime, 'the doctor report carries a runtime').toBeDefined();
-      expect(body.runtime?.electron).toMatch(/^\d+\.\d+\.\d+/);
-      expect(body.runtime?.node).toMatch(/^\d+\.\d+\.\d+/);
-      expect(typeof body.runtime?.abi).toBe('number');
-    } finally {
-      d.child.kill('SIGTERM');
-      await d.exited;
-    }
-  });
-});
+      try {
+        await waitFor(
+          () => d.stdout().includes('listening on 127.0.0.1'),
+          `the bundled daemon to listen (stderr: ${d.stderr()})`,
+          BOOT_BUDGET_MS,
+        );
+        const token = readFileSync(join(dir, 'daemon.token'), 'utf8').trim();
+        const res = await fetch(`http://127.0.0.1:${String(port)}/v1/doctor`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          runtime?: { electron?: string; node?: string; abi?: number };
+        };
+        expect(
+          body.runtime,
+          'the doctor report carries a runtime',
+        ).toBeDefined();
+        expect(body.runtime?.electron).toMatch(/^\d+\.\d+\.\d+/);
+        expect(body.runtime?.node).toMatch(/^\d+\.\d+\.\d+/);
+        expect(typeof body.runtime?.abi).toBe('number');
+      } finally {
+        d.child.kill('SIGTERM');
+        await d.exited;
+      }
+    });
+  },
+);
 
 /* ── row 4 ────────────────────────────────────────────────────────────── */
 
@@ -435,86 +484,94 @@ function programArguments(plist: string): string[] {
   );
 }
 
-describe('s9 Sc5 row 6: `service install` derives the plist from where it sits', () => {
-  /*
-   * WHY THIS BUILDS A FAKE .app INSTEAD OF INSTALLING FROM `dist-bundle/`.
-   *
-   * `resolveProgramArguments` recognises the packaged layout by the literal
-   * `/Contents/Resources/` in the daemon entry's own path, and `plist.ts`
-   * refuses any argv that is neither the packaged shape nor the dev shape.
-   * A raw `dist-bundle/` is a third layout, and the right response to that is
-   * the refusal we get, not a third entry on the allowlist.
-   *
-   * So the row asserts the claim that actually matters for Sc 6: DROP THIS
-   * BUNDLE INTO `Contents/Resources/` AND THE PLIST IS CORRECT WITH NOBODY
-   * CONFIGURING ANYTHING. The app root here is a temp directory that did not
-   * exist when the bundle was built, which is what makes "derived" mean
-   * something. Electron is invoked directly rather than through `bin/`s shim
-   * because this fake app has no `Contents/MacOS/WeMessage` to exec; the
-   * shim's own resolution is row 5's row.
-   */
-  let args: string[] = [];
-  let appRoot = '';
-  let plist = '';
+describe.skipIf(!RUNS_THE_BUNDLE)(
+  's9 Sc5 row 6: `service install` derives the plist from where it sits',
+  () => {
+    /*
+     * WHY THIS BUILDS A FAKE .app INSTEAD OF INSTALLING FROM `dist-bundle/`.
+     *
+     * `resolveProgramArguments` recognises the packaged layout by the literal
+     * `/Contents/Resources/` in the daemon entry's own path, and `plist.ts`
+     * refuses any argv that is neither the packaged shape nor the dev shape.
+     * A raw `dist-bundle/` is a third layout, and the right response to that is
+     * the refusal we get, not a third entry on the allowlist.
+     *
+     * So the row asserts the claim that actually matters for Sc 6: DROP THIS
+     * BUNDLE INTO `Contents/Resources/` AND THE PLIST IS CORRECT WITH NOBODY
+     * CONFIGURING ANYTHING. The app root here is a temp directory that did not
+     * exist when the bundle was built, which is what makes "derived" mean
+     * something. Electron is invoked directly rather than through `bin/`s shim
+     * because this fake app has no `Contents/MacOS/WeMessage` to exec; the
+     * shim's own resolution is row 5's row.
+     */
+    let args: string[] = [];
+    let appRoot = '';
+    let plist = '';
 
-  beforeAll(() => {
-    appRoot = join(tempDir('wemessage-app-'), 'WeMessage.app');
-    mkdirSync(join(appRoot, 'Contents', 'MacOS'), { recursive: true });
-    cpSync(OUT, join(appRoot, 'Contents', 'Resources'), { recursive: true });
+    beforeAll(() => {
+      appRoot = join(tempDir('wemessage-app-'), 'WeMessage.app');
+      mkdirSync(join(appRoot, 'Contents', 'MacOS'), { recursive: true });
+      cpSync(OUT, join(appRoot, 'Contents', 'Resources'), { recursive: true });
 
-    // F-120: the test label prefix, `--no-load` so launchd is never asked to
-    // do anything, and both directories inside the temp root the CLI's own
-    // G4 guard insists on.
-    const dir = tempDir('wemessage-svc-');
-    const agents = tempDir('wemessage-agents-');
-    execFileSync(
-      ELECTRON_BIN,
-      [
-        join(appRoot, 'Contents/Resources/daemon/wemessaged.mjs'),
-        'service',
-        'install',
-        '--no-load',
-        '--label-prefix',
-        'sh.wemessage.test.',
-        '--dir',
-        dir,
-        '--launch-agents-dir',
-        agents,
-      ],
-      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' },
-    );
-    const written = readdirSync(agents).filter((f) => f.endsWith('.plist'));
-    expect(written).toHaveLength(1);
-    plist = readFileSync(join(agents, written[0] ?? ''), 'utf8');
-    args = programArguments(plist);
-  }, 120_000);
+      // F-120: the test label prefix, `--no-load` so launchd is never asked to
+      // do anything, and both directories inside the temp root the CLI's own
+      // G4 guard insists on.
+      const dir = tempDir('wemessage-svc-');
+      const agents = tempDir('wemessage-agents-');
+      execFileSync(
+        ELECTRON_BIN,
+        [
+          join(appRoot, 'Contents/Resources/daemon/wemessaged.mjs'),
+          'service',
+          'install',
+          '--no-load',
+          '--label-prefix',
+          'sh.wemessage.test.',
+          '--dir',
+          dir,
+          '--launch-agents-dir',
+          agents,
+        ],
+        {
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          encoding: 'utf8',
+        },
+      );
+      const written = readdirSync(agents).filter((f) => f.endsWith('.plist'));
+      expect(written).toHaveLength(1);
+      plist = readFileSync(join(agents, written[0] ?? ''), 'utf8');
+      args = programArguments(plist);
+    }, 120_000);
 
-  it('names the app executable and the bundled main.mjs, by suffix', () => {
-    expect(args).toHaveLength(2);
-    const [exe = '', main = ''] = args;
-    expect(exe.endsWith('/WeMessage.app/Contents/MacOS/WeMessage')).toBe(true);
-    expect(
-      main.endsWith('/WeMessage.app/Contents/Resources/daemon/main.mjs'),
-    ).toBe(true);
-  });
+    it('names the app executable and the bundled main.mjs, by suffix', () => {
+      expect(args).toHaveLength(2);
+      const [exe = '', main = ''] = args;
+      expect(exe.endsWith('/WeMessage.app/Contents/MacOS/WeMessage')).toBe(
+        true,
+      );
+      expect(
+        main.endsWith('/WeMessage.app/Contents/Resources/daemon/main.mjs'),
+      ).toBe(true);
+    });
 
-  it('derives both entries from ONE root, which is the temp app, not a constant', () => {
-    const [exe = '', main = ''] = args;
-    const root = exe.slice(0, exe.indexOf('/Contents/'));
-    expect(root).not.toBe('');
-    expect(main.startsWith(`${root}/Contents/`)).toBe(true);
-    // The bundle was built inside the repo and installed from outside it. If
-    // any part of this were baked in at build time it would say so here.
-    expect(exe.includes(REPO)).toBe(false);
-    expect(main.includes(REPO)).toBe(false);
-    expect(root.endsWith('WeMessage.app')).toBe(true);
-  });
+    it('derives both entries from ONE root, which is the temp app, not a constant', () => {
+      const [exe = '', main = ''] = args;
+      const root = exe.slice(0, exe.indexOf('/Contents/'));
+      expect(root).not.toBe('');
+      expect(main.startsWith(`${root}/Contents/`)).toBe(true);
+      // The bundle was built inside the repo and installed from outside it. If
+      // any part of this were baked in at build time it would say so here.
+      expect(exe.includes(REPO)).toBe(false);
+      expect(main.includes(REPO)).toBe(false);
+      expect(root.endsWith('WeMessage.app')).toBe(true);
+    });
 
-  it('tells launchd to re-enter the app as Node, which is the whole of F-121', () => {
-    expect(plist).toContain('<key>ELECTRON_RUN_AS_NODE</key>');
-    expect(plist).toContain('<key>KeepAlive</key>');
-  });
-});
+    it('tells launchd to re-enter the app as Node, which is the whole of F-121', () => {
+      expect(plist).toContain('<key>ELECTRON_RUN_AS_NODE</key>');
+      expect(plist).toContain('<key>KeepAlive</key>');
+    });
+  },
+);
 
 /* ── row 5 ────────────────────────────────────────────────────────────── */
 
@@ -577,30 +634,33 @@ describe('s9 Sc5 row 8: the daemon bundle is not an Electron app', () => {
     expect(src.includes('require("electron")')).toBe(false);
   });
 
-  it('creates no Application Support directory of its own', async () => {
-    const support = join(homedir(), 'Library/Application Support');
-    const before = existsSync(support) ? readdirSync(support) : [];
-    const { dir, chatDb } = bed();
-    const port = await freePort();
-    const d = launch(ELECTRON_BIN, [join(OUT, 'daemon/main.mjs')], {
-      ELECTRON_RUN_AS_NODE: '1',
-      WEMESSAGE_DIR: dir,
-      WEMESSAGE_PORT: String(port),
-      WEMESSAGE_CHATDB: chatDb,
-    });
-    try {
-      await waitFor(
-        () => d.stdout().includes('listening on 127.0.0.1'),
-        'the bundled daemon to listen',
-        BOOT_BUDGET_MS,
-      );
-    } finally {
-      d.child.kill('SIGTERM');
-      await d.exited;
-    }
-    const after = existsSync(support) ? readdirSync(support) : [];
-    expect(after.filter((n) => !before.includes(n))).toEqual([]);
-  });
+  it.skipIf(!RUNS_THE_BUNDLE)(
+    'creates no Application Support directory of its own',
+    async () => {
+      const support = join(homedir(), 'Library/Application Support');
+      const before = existsSync(support) ? readdirSync(support) : [];
+      const { dir, chatDb } = bed();
+      const port = await freePort();
+      const d = launch(ELECTRON_BIN, [join(OUT, 'daemon/main.mjs')], {
+        ELECTRON_RUN_AS_NODE: '1',
+        WEMESSAGE_DIR: dir,
+        WEMESSAGE_PORT: String(port),
+        WEMESSAGE_CHATDB: chatDb,
+      });
+      try {
+        await waitFor(
+          () => d.stdout().includes('listening on 127.0.0.1'),
+          'the bundled daemon to listen',
+          BOOT_BUDGET_MS,
+        );
+      } finally {
+        d.child.kill('SIGTERM');
+        await d.exited;
+      }
+      const after = existsSync(support) ? readdirSync(support) : [];
+      expect(after.filter((n) => !before.includes(n))).toEqual([]);
+    },
+  );
 });
 
 /* ── row 9 ────────────────────────────────────────────────────────────── */

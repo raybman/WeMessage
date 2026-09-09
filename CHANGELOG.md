@@ -21,6 +21,18 @@ artefacts are named `-UNSIGNED` so nobody can mistake what they have, and the
 install page documents the one Gatekeeper step that costs. Signed and
 notarized builds are what the `1.0.0` tag is for.
 
+**Read this before you update: every update re-locks Full Disk Access.** It is
+the one consequence of the unsigned lane that costs something after the first
+launch, so it is here rather than in a footnote. macOS identifies an unsigned
+app by a hash of the binary, that hash changes on every build, and Full Disk
+Access has no consent dialog to re-ask. The result is that the WeMessage row in
+Privacy and Security stays visibly switched on after an update while the
+gateway's reads of the message database fail. Remove the WeMessage entry and
+add `/Applications/WeMessage.app` back; toggling the existing switch does not
+work, because it belongs to a build that no longer exists. `wemessage doctor`
+names this case, and the wizard verifies the daemon's own reads rather than the
+switch.
+
 ### Added
 
 - **S1, live tail.** The daemon reads the local `chat.db` in read-only WAL

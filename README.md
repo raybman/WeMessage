@@ -44,6 +44,19 @@ that what you downloaded is what was built:
 shasum -a 256 -c SHA256SUMS
 ```
 
+**Every update re-locks Full Disk Access.** This is the real cost of an
+unsigned build, and it is not the Gatekeeper prompt above. macOS identifies an
+unsigned app by a hash of the binary, and that hash changes on every build, so
+after an update the WeMessage row in **Privacy and Security, Full Disk
+Access** stays visibly switched on while the gateway's reads of the
+message database start failing. Nothing is broken and no data is lost. Select
+the WeMessage entry, remove it with the minus button, add
+`/Applications/WeMessage.app` back with the plus button, and restart the
+gateway. Toggling the existing switch off and on does not work, because the
+entry it belongs to points at a build that no longer exists. `wemessage doctor`
+reports this case by name rather than leaving you to guess at it, and the
+onboarding wizard checks the daemon's own reads instead of trusting the switch.
+
 Build it yourself instead, if you would rather:
 
 ```sh

@@ -245,4 +245,79 @@ describe('s9 Sc13: the README, the security policy and the changelog', () => {
     for (const [rel, lic] of manifests)
       expect([rel, lic]).toEqual([rel, declared]);
   });
+  /* ── row 10: the cost the unsigned lane actually charges ───────────── */
+  it('row 10: README, release notes and the daemon all name the FDA re-grant', () => {
+    /*
+     * F-142, and the only row in this file that crosses into `src`.
+     *
+     * The Gatekeeper prompt is the cost everybody expects from an unsigned
+     * build, and it is the cheap one: it happens once and it announces
+     * itself. The expensive one is silent. TCC matches an unsigned app by a
+     * hash of the binary, that hash moves on every build, and Full Disk
+     * Access has no consent dialog to re-ask. So after an update the row in
+     * System Settings still says WeMessage and still shows a filled switch,
+     * while every read of chat.db returns EPERM. An operator with no warning
+     * concludes the app is broken, because from where they are standing it
+     * is indistinguishable from broken.
+     *
+     * The plan makes this binding on three surfaces, and the reason it is
+     * three rather than one is that they are read at three different
+     * moments: the README before installing, the release notes before
+     * updating, and the doctor after it has already gone wrong. A sentence
+     * in one of them is not a substitute for the other two.
+     *
+     * The daemon's copy is read as TEXT, the way `cli-s9.spec.ts` reads the
+     * daemon's help rather than importing it: this file lives in the root
+     * project, and making a documentation row depend on a built `dist/`
+     * would mean a stale build reports a prose failure.
+     *
+     * Each surface is asserted on three claims, not on a phrase, because a
+     * paraphrase is fine and a missing claim is not: it must name the UPDATE
+     * as the trigger, it must say REMOVE rather than only grant, and it must
+     * say the switch still LOOKS on. That last one is the one a writer drops
+     * first, and it is the one that stops the reader concluding the
+     * instructions are wrong.
+     */
+    const surfaces: [string, string][] = [
+      [README, read(README)],
+      // The rc.1 section only: a sentence in some older release's notes is
+      // not a warning to somebody updating to this one.
+      [
+        'CHANGELOG.md [1.0.0-rc.1]',
+        (read(CHANGELOG).split(/^## \[/m)[2] ?? '').replace(/\n## .*$/s, ''),
+      ],
+      ['packages/daemon/src/doctor.ts', read('packages/daemon/src/doctor.ts')],
+    ];
+    // Non-vacuous: an empty CHANGELOG slice would pass every `not` below and
+    // fail nothing, so the slice has to have found the section.
+    expect(surfaces[1]?.[1]).toContain('1.0.0-rc.1]');
+
+    const claims: [string, RegExp][] = [
+      [
+        'names the update as the trigger',
+        /after (?:an|you install a new|every) update/i,
+      ],
+      [
+        'says to remove the existing entry',
+        /remov(?:e|ing) (?:the )?(?:it|WeMessage|the entry)/i,
+      ],
+      [
+        'says the switch still looks on',
+        /(?:stays|still)[^.]{0,40}(?:switched on|on\b|filled|enabled)/i,
+      ],
+    ];
+    const missing: string[] = [];
+    for (const [where, text] of surfaces)
+      for (const [claim, re] of claims)
+        if (!re.test(text)) missing.push(`${where}: ${claim}`);
+    expect(missing).toEqual([]);
+
+    // And the README says it in the INSTALL section, where somebody deciding
+    // whether to download this is looking, not in Uninstall at the bottom.
+    const readme = read(README);
+    const install = readme.indexOf('\n## Install');
+    const nextHeading = readme.indexOf('\n## ', install + 1);
+    expect([install, nextHeading].every((n) => n > 0)).toBe(true);
+    expect(readme.slice(install, nextHeading)).toMatch(/Full Disk Access/);
+  });
 });

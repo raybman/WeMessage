@@ -150,8 +150,27 @@ const MESSAGES_FAIL_3B =
 // tells them for the same failure.
 export const AUTOMATION_DENIED =
   'Automation permission denied; run tccutil reset AppleEvents sh.wemessage.gateway and approve the prompt on the next send. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
+/*
+ * s9 F-142: the second sentence, and why it is not "restart the app".
+ *
+ * TCC identifies an unsigned app by a hash of the binary, and that hash
+ * moves on every build even from byte-identical source, because the Mach-O
+ * carries a per-build UUID. So after an update the row in System Settings
+ * still says WeMessage and still shows a filled toggle, while the grant it
+ * represents belongs to a binary that no longer exists. Full Disk Access
+ * has no runtime consent dialog to re-ask, so nothing prompts and nothing
+ * looks wrong: reads of chat.db just return EPERM.
+ *
+ * The remediation therefore has to say REMOVE the existing entry before
+ * adding it back. Telling an operator to "grant Full Disk Access" when the
+ * toggle is already on reads as a bug in the instructions, and toggling it
+ * off and on again re-adds the same dead hash. That is the whole reason
+ * this clause is here rather than in the docs only, and it is the cost the
+ * unsigned lane actually charges, which the README, the install page and
+ * the release notes are each required to state in their own words.
+ */
 export const FDA_EPERM =
-  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
+  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items, and after an update to an unsigned build the existing entry stays switched on while no longer matching this binary. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, removing the entry already listed first if there is one, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 const FDA_ENOENT =
   'No Messages history found at the chat.db path; this is not a permission failure. Sign in to Messages and send or receive a message to create it.';
 const UNSUPPORTED_OS =

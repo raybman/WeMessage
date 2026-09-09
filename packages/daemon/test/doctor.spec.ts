@@ -60,7 +60,7 @@ const UNSUPPORTED_OS =
 const CHATDB_SCHEMA_HONESTY =
   'chat.db schema verified stable through macOS 26; newer releases may change it without notice.';
 const FDA_EPERM =
-  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
+  'Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items, and after an update to an unsigned build the existing entry stays switched on while no longer matching this binary. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, removing the entry already listed first if there is one, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.';
 const FDA_ENOENT =
   'No Messages history found at the chat.db path; this is not a permission failure. Sign in to Messages and send or receive a message to create it.';
 const AUTOMATION_DENIED =
@@ -165,6 +165,40 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
         { id: 'fda', status: 'fail', remediation: FDA_EPERM },
       ],
     });
+  });
+
+  it('s9 F-142: the FDA remediation names the update case and says to REMOVE first', () => {
+    /*
+     * The unsigned lane's real cost, asserted where the operator meets it.
+     *
+     * TCC matches an unsigned app by a hash that moves on every build, so
+     * after an update the System Settings toggle for WeMessage is still
+     * visibly on while chat.db reads return EPERM. There is no consent
+     * dialog for Full Disk Access, so nothing re-prompts. An operator who
+     * reads "grant Full Disk Access" while looking at a switch that is
+     * already on concludes the instructions are wrong, and toggling it off
+     * and on re-adds the same dead hash.
+     *
+     * Three claims, each separately failable, because the sentence is only
+     * useful if all three survive an edit: it names the UPDATE as the
+     * trigger, it says REMOVE rather than only grant, and it still carries
+     * the macOS 26 background-item case it was originally written for.
+     * Asserted on the exported constant, not on prose in this file, so a
+     * rewrite in `doctor.ts` that drops one of them fails here.
+     */
+    const said = evaluateDoctor({ ...healthy, fda: 'eperm' }).checks.at(-1);
+    expect(said?.id).toBe('fda');
+    const copy = said?.remediation ?? '';
+    expect(copy).toBe(FDA_EPERM);
+    expect(copy).toContain('after an update');
+    expect(copy).toMatch(/removing the entry already listed/i);
+    expect(copy).toContain('macOS 26');
+    // NEAR-MISS: "restart" alone is the remediation that does not work here,
+    // so the copy must not offer it as the whole answer to this case.
+    const removeAt = copy.indexOf('removing the entry');
+    const restartAt = copy.indexOf('then restart the agent');
+    expect([removeAt, restartAt].every((n) => n >= 0)).toBe(true);
+    expect(removeAt).toBeLessThan(restartAt);
   });
 
   it('row 6: FDA enoent (no chat.db yet) -> read-only, short-circuits before automation/messages', () => {

@@ -9950,6 +9950,22 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       });
     return rel;
   }
+  /** Remove the directory shells the plants created. Named so a row can prove it. */
+  function s9RemovePlantedDirs(): void {
+    for (const dir of [
+      'apps/desktop/scripts',
+      'packages/daemon/src/__s9__',
+      'packages/daemon/test/__s9__',
+    ]) {
+      const abs = join(repoRoot, dir);
+      // Empty-only, deliberately. The per-file loop in `afterEach` has already
+      // removed everything this block planted, so anything still standing here
+      // belongs to somebody else and a recursive force-remove would eat it.
+      if (existsSync(abs) && readdirSync(abs).length === 0)
+        rmSync(abs, { recursive: true });
+    }
+  }
+
   afterEach(() => {
     for (const rel of s9Planted.splice(0)) {
       try {
@@ -9963,12 +9979,34 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       }
       rmSync(join(repoRoot, rel), { force: true });
     }
-    for (const dir of [
-      'apps/desktop/scripts',
-      'packages/daemon/src/__s9__',
-      'packages/daemon/test/__s9__',
-    ])
-      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+    s9RemovePlantedDirs();
+  });
+
+  /**
+   * s9 D5: `apps/desktop/scripts` is a REAL, shipped path — Sc 5's
+   * `bundle-daemon.mjs` lives there — unlike its two `__s9__` siblings, which
+   * are namespaced precisely so they can never collide with source. This row
+   * is the guard that the cleanup above removes the empty shells a plant
+   * created and stops there. Without it, the sweep deletes a tracked file out
+   * of the working tree on every row in this block, and the failure looks like
+   * the file was never written.
+   */
+  it('cleanup removes the planted directory shells, but never a real file', () => {
+    const scripts = join(repoRoot, 'apps/desktop/scripts');
+    const keeper = join(scripts, '__s9_keeper__.mjs');
+    mkdirSync(scripts, { recursive: true });
+    writeFileSync(keeper, 'export const shipped = true;\n');
+    try {
+      s9RemovePlantedDirs();
+      expect(
+        existsSync(keeper),
+        'a non-empty apps/desktop/scripts must survive cleanup',
+      ).toBe(true);
+    } finally {
+      rmSync(keeper, { force: true });
+    }
+    s9RemovePlantedDirs();
+    expect(existsSync(scripts), 'the empty shell is still removed').toBe(false);
   });
 
   /* ── row 1: the public sweep reads more of the tree, and more shapes ── */

@@ -6,7 +6,16 @@
     "declarationMap": false,
     "sourceMap": false,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    // s9 Sc14. `test/release/versions.spec.ts` unit-tests two functions that
+    // live in `tools/release/bin/*.mjs`, because the `tools/` fence keeps the
+    // release machinery out of the workspace build and those bins therefore
+    // emit no declarations. `allowJs` lets the spec import them and get the
+    // types TypeScript infers from the real implementation, which is strictly
+    // better than a hand-written `.d.mts` that can drift away from the code it
+    // claims to describe. `checkJs` stays off: the bins are plain JS on
+    // purpose and are not asked to satisfy `strict`.
+    "allowJs": true
   },
   "include": ["test/**/*.ts"]
 }

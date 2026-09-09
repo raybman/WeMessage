@@ -1,11 +1,236 @@
 name: release
 
-# STUB (§1.8). Signing / notarization / distribution is S9 (§3.11.3).
+# s9 Scenario 9. Cutting a release of an app that is DELIBERATELY UNSIGNED.
+#
+# This repository has no Apple Developer ID and, by decision, does not need
+# one to ship. It is an open-source macOS app: the point is that anyone can
+# download it, read it, build it, and change it. Putting a 99 USD annual
+# membership between a reader and a working build would be a toll booth in
+# front of the only thing the project is for. So the default lane here is the
+# ad-hoc lane, and it produces an artefact named `-UNSIGNED` so that nobody
+# can mistake what they have.
+#
+# The signed lane is written, guarded, and dormant. The moment a certificate
+# exists, `APPLE_TEAM_ID` becomes a non-empty secret and every `release`-lane
+# step below switches on together. Until then every one of them is skipped,
+# which is why each carries an explicit `if:` rather than relying on an empty
+# secret to fail harmlessly. An unguarded step that reads an empty secret does
+# not fail harmlessly: `base64 -d` writes a zero-byte file, `security import`
+# exits non-zero, and the job dies at the import step with the perfectly good
+# ad-hoc artefact never built. `test/release/workflows.spec.ts` row 4 walks
+# every step in this file and refuses that shape.
+#
+# Every third-party action is pinned to a 40-hex commit SHA with its human
+# version in a trailing comment. A tag is mutable, and this job holds
+# `contents: write`.
+
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+# The whole grant. Attaching a DMG to a release needs `contents: write` and
+# nothing else. No `id-token` (no cloud identity to mint), no `packages` (this
+# publishes nothing to a registry).
+permissions:
+  contents: write
 
 jobs:
-  placeholder:
-    runs-on: macos-latest
+  # The same gate the branch CI runs, run again on the tagged tree. A tag is
+  # cut from a commit, not from a pull request, so it is entirely possible for
+  # the tagged tree to be one nobody ever ran the suite on.
+  build-test:
+    runs-on: ubuntu-24.04
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
-      - run: echo "Release signing + notarization is S9 — see plan §3.11.3"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-44.2.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wemessage/desktop exec install-electron
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm dep:check
+      - run: pnpm licenses:check
+      - run: xvfb-run -a pnpm test
+
+  pack-macos:
+    needs: [build-test]
+    runs-on: macos-15
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-44.2.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wemessage/desktop exec install-electron
+      - run: pnpm build
+
+      # THE ONE STEP THAT DECIDES THE LANE.
+      #
+      # It reads the secrets in `run:`, never in `if:`. GitHub's context
+      # availability table does not list `secrets` among the contexts readable
+      # from a step-level `if:`, so a condition written `if: secrets.X != ''`
+      # is at best undefined and at worst silently false, which would disable
+      # the step it was meant to enable. Converting the secret to an output
+      # here means every later `if:` reads `steps.*`, which is documented,
+      # and it means the decision is made exactly once and is visible in the
+      # job log as a single line.
+      - id: signing
+        name: decide-signing-lane
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          if [ -n "$APPLE_TEAM_ID" ]; then
+            printf 'mode=release\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'mode=adhoc\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$TAP_PUSH_TOKEN" ]; then
+            printf 'tap=yes\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'tap=no\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: import-signing-certificate
+        name: import-signing-certificate
+        if: steps.signing.outputs.mode == 'release'
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # A dedicated keychain, not the login keychain: the login keychain
+          # on a hosted runner is shared with whatever else the image does,
+          # and `security delete-keychain` on it would be unrecoverable.
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain-db
+          # Six hours, and `-u` so the timeout is actually armed. The default
+          # is "never lock", which on a recycled runner is a private key
+          # sitting unlocked for the next job.
+          security set-keychain-settings -lut 21600 build.keychain-db
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain-db
+          security list-keychains -d user -s build.keychain-db
+          # Key material goes to RUNNER_TEMP, which the runner wipes and which
+          # `actions/upload-artifact` cannot reach, never to the workspace.
+          printf '%s' "$APPLE_DEVELOPER_ID_P12_BASE64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k build.keychain-db \
+            -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain-db
+
+      - name: pack-signed
+        if: steps.signing.outputs.mode == 'release'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm pack:release
+
+      - name: verify-signed-bundle
+        if: steps.signing.outputs.mode == 'release'
+        run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app release
+
+      - name: notarize
+        if: steps.signing.outputs.mode == 'release'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/asc.p8"
+          pnpm release:notarize \
+            --zip "$(ls dist-pack/*.zip)" \
+            --dmg "$(ls dist-pack/*.dmg)" \
+            --key "$RUNNER_TEMP/asc.p8" \
+            --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID"
+
+      # THE DEFAULT LANE. No secret, no certificate, no Apple account.
+      - name: pack-unsigned
+        if: steps.signing.outputs.mode == 'adhoc'
+        run: pnpm pack:adhoc
+
+      - name: verify-unsigned-bundle
+        if: steps.signing.outputs.mode == 'adhoc'
+        run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app adhoc
+
+      # For an unsigned build this file is the ONLY thing a user can check
+      # their download against, because Gatekeeper will tell them nothing.
+      - name: checksums
+        run: |
+          set -euo pipefail
+          cd dist-pack
+          shasum -a 256 ./*.dmg ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: release-notes
+        run: pnpm release:notes --out dist-pack/RELEASE_NOTES.md
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # A draft, because the last check on a release is a human looking at
+          # it. Nothing in this file publishes on its own.
+          draft: true
+          prerelease: ${{ steps.signing.outputs.mode == 'adhoc' }}
+          body_path: dist-pack/RELEASE_NOTES.md
+          files: |
+            dist-pack/*.dmg
+            dist-pack/*.zip
+            dist-pack/SHA256SUMS
+
+      # Doubly gated: a cask that points at an unsigned build would tell
+      # Homebrew users the app is installable when Gatekeeper will refuse it.
+      - name: publish-cask
+        if: steps.signing.outputs.mode == 'release' && steps.signing.outputs.tap == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm release:cask --dmg "$(ls dist-pack/*.dmg)"
+          # Opens a review, never writes to the tap's default branch. A wrong
+          # sha256 pushed straight to main breaks `brew install` for everyone
+          # until somebody notices.
+          gh pr create --repo raybman/homebrew-wemessage \
+            --title "wemessage ${{ github.ref_name }}" \
+            --body "Automated cask update."
+
+      - id: cleanup-signing-credentials
+        name: cleanup-signing-credentials
+        # `always()`, not `success()`, and not omitted. The failure this
+        # catches: the job dies DURING notarization, and a keychain holding a
+        # Developer ID private key stays on a runner about to be recycled
+        # into somebody else's job.
+        if: always()
+        run: |
+          security delete-keychain build.keychain-db || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/asc.p8" || true

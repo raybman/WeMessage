@@ -232,7 +232,9 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
     expect(existsSync(APP)).toBe(true);
     for (const ext of ['dmg', 'zip'])
       expect(
-        existsSync(join(PACK_OUT, `WeMessage-${VERSION}-arm64-UNSIGNED.${ext}`)),
+        existsSync(
+          join(PACK_OUT, `WeMessage-${VERSION}-arm64-UNSIGNED.${ext}`),
+        ),
         ext,
       ).toBe(true);
     // F-135: arm64 only. An unsmoked x64 artefact on a release page is a bug
@@ -248,7 +250,9 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
     // for a notarized one on a release page, which is the whole reason Sc 14
     // is allowed to publish it.
     expect(
-      readdirSync(PACK_OUT).filter((f) => /\.(dmg|zip)$/.test(f)).sort(),
+      readdirSync(PACK_OUT)
+        .filter((f) => /\.(dmg|zip)$/.test(f))
+        .sort(),
     ).toEqual([
       `WeMessage-${VERSION}-arm64-UNSIGNED.dmg`,
       `WeMessage-${VERSION}-arm64-UNSIGNED.zip`,
@@ -312,7 +316,13 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
         ['daemon', 'main.mjs'],
         ['daemon', 'wemessaged.mjs'],
         ['daemon', 'ABI.json'],
-        ['daemon', 'node_modules', 'better-sqlite3', 'prebuilds', 'darwin-arm64.node'],
+        [
+          'daemon',
+          'node_modules',
+          'better-sqlite3',
+          'prebuilds',
+          'darwin-arm64.node',
+        ],
         ['migrations', '0001_init.sql'],
         ['bin', 'wemessage'],
         ['bin', 'wemessaged'],
@@ -439,7 +449,9 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
       // nobody has ever seen fail is a lane check that does nothing.
       const { code, out } = verify('release');
       expect(code).not.toBe(0);
-      expect(out).toContain('disable-library-validation present in release lane');
+      expect(out).toContain(
+        'disable-library-validation present in release lane',
+      );
     });
   });
 
@@ -449,18 +461,28 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
     expect(entitlementKeys(EXE)).toEqual(ADHOC_ENTITLEMENTS);
     const helpers = readdirSync(join(APP, 'Contents', 'Frameworks'))
       .filter((n) => n.endsWith('.app'))
-      .map((n) => join(APP, 'Contents', 'Frameworks', n, 'Contents', 'MacOS', n.replace(/\.app$/, '')))
+      .map((n) =>
+        join(
+          APP,
+          'Contents',
+          'Frameworks',
+          n,
+          'Contents',
+          'MacOS',
+          n.replace(/\.app$/, ''),
+        ),
+      )
       .filter((p) => existsSync(p));
     expect(helpers.length).toBeGreaterThanOrEqual(3); // GPU, Renderer, Plugin at least
-    for (const h of helpers) expect(entitlementKeys(h), h).toEqual(ADHOC_ENTITLEMENTS);
+    for (const h of helpers)
+      expect(entitlementKeys(h), h).toEqual(ADHOC_ENTITLEMENTS);
   });
 
   /* ── row 8: the fuses, and that they were flipped BEFORE signing ──── */
 
   it('row 8: the seven fuses are in their F-126 positions and the signature still verifies', async () => {
-    const { getCurrentFuseWire, FuseV1Options, FuseState } = (await import(
-      '@electron/fuses'
-    )) as typeof import('@electron/fuses');
+    const { getCurrentFuseWire, FuseV1Options, FuseState } =
+      (await import('@electron/fuses')) as typeof import('@electron/fuses');
     const wire = await getCurrentFuseWire(EXE);
     const expected: [keyof typeof FuseV1Options, boolean][] = [
       // ON, and load-bearing: F-121's one-Mach-O design IS this fuse. The app
@@ -504,13 +526,14 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
       // against the ad-hoc bundle.
       execFileSync('pnpm', ['pack:release'], { cwd: REPO, stdio: 'ignore' });
       const teams = new Set(
-        machOFiles(APP).map((rel) =>
-          /TeamIdentifier=(\S+)/.exec(
-            execFileSync('codesign', ['-dvv', join(APP, rel)], {
-              encoding: 'utf8',
-              stdio: ['ignore', 'pipe', 'pipe'],
-            }),
-          )?.[1] ?? 'none',
+        machOFiles(APP).map(
+          (rel) =>
+            /TeamIdentifier=(\S+)/.exec(
+              execFileSync('codesign', ['-dvv', join(APP, rel)], {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+              }),
+            )?.[1] ?? 'none',
         ),
       );
       expect([...teams]).toEqual([process.env['APPLE_TEAM_ID']]);
@@ -558,8 +581,10 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
       // below. It is dropped by shape, not by index, so a multi-slice file
       // (which would print one header per arch) drops all of them.
       for (const line of out.split('\n'))
-        if (!line.trimEnd().endsWith(']:') &&
-            /(^|\s)(\/opt\/homebrew|\/usr\/local|\/Users)\//.test(line))
+        if (
+          !line.trimEnd().endsWith(']:') &&
+          /(^|\s)(\/opt\/homebrew|\/usr\/local|\/Users)\//.test(line)
+        )
           offenders.push(`${rel}: ${line.trim()}`);
     }
     expect(offenders).toEqual([]);
@@ -646,7 +671,12 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
     const asarDir = tempDir('wemessage-asar-');
     execFileSync(
       process.execPath,
-      [need.resolve('@electron/asar/bin/asar.js'), 'extract', join(RES, 'app.asar'), asarDir],
+      [
+        need.resolve('@electron/asar/bin/asar.js'),
+        'extract',
+        join(RES, 'app.asar'),
+        asarDir,
+      ],
       { stdio: 'ignore' },
     );
     const offenders: string[] = [];

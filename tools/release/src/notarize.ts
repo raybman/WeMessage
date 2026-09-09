@@ -316,9 +316,7 @@ const defaultSleep = async (ms: number): Promise<void> => {
  *
  * Nothing returns to `submit`. That is the whole diagram.
  */
-export async function notarize(
-  opts: NotarizeOptions,
-): Promise<NotarizeResult> {
+export async function notarize(opts: NotarizeOptions): Promise<NotarizeResult> {
   const {
     artifact,
     tool,
@@ -460,8 +458,10 @@ export async function notarize(
 
 /* ── the two-artefact release sequence ──────────────────────────────── */
 
-export interface NotarizeReleaseOptions
-  extends Omit<NotarizeOptions, 'artifact'> {
+export interface NotarizeReleaseOptions extends Omit<
+  NotarizeOptions,
+  'artifact'
+> {
   readonly zip: string;
   readonly dmg: string;
 }

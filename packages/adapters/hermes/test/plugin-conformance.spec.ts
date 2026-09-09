@@ -615,7 +615,15 @@ describe('s7 Sc7: the Python lane is its own blocking CI job', () => {
   it('row 9: ci-python.yml pins 3.12, requires hashes, names the interpreter, runs both interpreted specs, and is separate from both TypeScript lanes', () => {
     expect(existsSync(`${REPO}.github/workflows/ci-python.yml`)).toBe(true);
     const source = workflow();
-    expect(source).toMatch(/uses:\s*actions\/setup-python@v\d+/);
+    // s9 Sc9 pinned every third-party action in every lane to a commit SHA
+    // with the tag it was cut from in a trailing comment, because a moving
+    // `@v5` tag is a supply-chain hole: whoever can move the tag can run
+    // arbitrary code in this repository's CI. So this assertion NARROWED
+    // rather than widened. The old form, `@v\d+`, now fails: a bare tag is
+    // no longer an acceptable way to name this action.
+    expect(source).toMatch(
+      /^\s*-\s*uses:\s*actions\/setup-python@[0-9a-f]{40}\s*#\s*v\d+\.\d+\.\d+\s*$/m,
+    );
     expect(source).toMatch(/python-version:\s*['"]3\.12['"]/);
     expect(source).toMatch(/--require-hashes/);
     expect(source).toMatch(

@@ -9,7 +9,7 @@
  *     packages/core/src importing the store package) IS reported — the rules
  *     catch bad imports, not merely "nothing bad exists yet".
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -2570,16 +2570,81 @@ describe('arch invariants (dependency-cruiser)', () => {
       // out the other way: it needs a tsconfig, a project reference, a
       // place in the cruise and a cruiser rule of its own, and it has all
       // four.
+      //
+      // `homebrew` arrives in s9 Sc 10 and the row did its job a second
+      // time: it failed the moment the cask was staged, and the six
+      // questions are answered in `(a2)` below before this list was
+      // touched. `homebrew/` is `skills/`-shaped rather than `tools/`-
+      // shaped: it holds a generated Ruby cask, its lock file and a
+      // README, so the answers to (c) and (d) are the same NO that
+      // `skills/` got, and (a2) asserts the no rather than assuming it.
       expect(topLevelTrackedDirs()).toEqual([
         '.github',
         'apps',
         'fixtures',
+        'homebrew',
         'packages',
         'site',
         'skills',
         'test',
         'tools',
       ]);
+    });
+
+    it('(a2) homebrew/ answers the six questions skills/ and tools/ did', () => {
+      const files = tracked('homebrew');
+      // (1) The enumeration, then non-vacuity, then the tree-wide sweep.
+      // Named rather than counted: a generated cask that stopped being
+      // tracked must not make the rest of this row vacuously true.
+      expect(files).toEqual([
+        'homebrew/Casks/wemessage.rb',
+        'homebrew/README.md',
+        'homebrew/cask.lock.json',
+      ]);
+      const swept = new Set(trackedTextFiles());
+      expect(files.filter((f) => !swept.has(f))).toEqual([]);
+
+      // (2) Neither formatter nor linter is configured to skip it. The cask
+      // is the file most likely to be waved through on the grounds that
+      // nobody formats Ruby, and an ignore entry is the cheapest way to
+      // lose a directory.
+      const ignored = readFileSync(join(repoRoot, '.prettierignore'), 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith('#'));
+      expect(ignored.filter((l) => l.startsWith('homebrew'))).toEqual([]);
+      const ignores =
+        /ignores:\s*\[([^\]]*)\]/.exec(
+          readFileSync(join(repoRoot, 'eslint.config.js'), 'utf8'),
+        )?.[1] ?? '';
+      expect(ignores).not.toContain('homebrew');
+
+      // (3) It carries NO compiled code, which is what makes the missing
+      // tsconfig and the missing project reference the right answer rather
+      // than an oversight. Asserted, because "there is no TypeScript in
+      // there" is exactly the kind of belief that stops being true.
+      expect(
+        files.filter((f) => /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(f)),
+      ).toEqual([]);
+
+      // (4) The launchd sweep reaches it, and this root is the reason that
+      // matters: a Homebrew cask is the one artefact in this repository
+      // whose whole job is to describe how to unload a launch agent, so it
+      // is the file most able to name a verb that kills one.
+      expect(swept.has('homebrew/Casks/wemessage.rb')).toBe(true);
+
+      // (5) Everything in it is generated, and the generator is a tool this
+      // repository builds rather than a paste. The cask and its lock file
+      // therefore have to agree about the version they describe.
+      const cask = readFileSync(
+        join(repoRoot, 'homebrew/Casks/wemessage.rb'),
+        'utf8',
+      );
+      const lock = JSON.parse(
+        readFileSync(join(repoRoot, 'homebrew/cask.lock.json'), 'utf8'),
+      ) as { version?: string };
+      expect(typeof lock.version).toBe('string');
+      expect(cask).toContain(`version "${lock.version ?? ''}"`);
     });
 
     it('(b) every tree-wide sweep reaches every file under skills/', () => {
@@ -2917,13 +2982,61 @@ describe('s7-execution Scenario 12 — the public document set', () => {
      * So the allowance is stated here, narrowly, at the call site.
      */
     const OURS = new Set(['wemessage.dev', 'wemessage.app']);
+    /**
+     * `github.com`, admitted as THIS repository's address and nothing else.
+     *
+     * s9 Sc9 made the download link load-bearing rather than decorative: the
+     * builds are unsigned, so the README's instruction is "get the DMG from
+     * the releases page", and a public README that cannot name its own
+     * releases page is not a README. But `github.com` is exactly the host
+     * the rule exists for elsewhere. A profile, a gist, another project's
+     * issue tracker: each is a person's address, and putting the bare host
+     * into `OURS` above would admit all three in every shipped document at
+     * once.
+     *
+     * So the allowance is keyed on the LINE, not on the host. The reference
+     * has to be the repository the release artefacts actually come from,
+     * and any other GitHub URL anywhere in the document set still fails,
+     * still carrying the file and the line that wrote it.
+     */
+    const OUR_REPO = /https:\/\/github\.com\/raybman\/WeMessage(?![\w.-])/;
     const offenders: string[] = [];
-    for (const rel of shippedDocs())
-      for (const f of lintTranscript(read(rel), policy)) {
+    for (const rel of shippedDocs()) {
+      const text = read(rel);
+      const lines = text.split('\n');
+      for (const f of lintTranscript(text, policy)) {
         if (f.rule === 'non-synthetic-contact' && OURS.has(f.detail)) continue;
+        if (
+          f.rule === 'non-synthetic-contact' &&
+          f.detail === 'github.com' &&
+          OUR_REPO.test(lines[f.line - 1] ?? '')
+        )
+          continue;
         offenders.push(`${rel}:${f.line}: ${f.rule} ${f.detail}`);
       }
+    }
     expect(offenders).toEqual([]);
+  });
+
+  it('the GitHub allowance is this repository and not the host', () => {
+    // Teeth for the exemption above, because an exemption nobody probed is
+    // a hole nobody measured. Written against the regex directly: these are
+    // the lines a future document is most likely to contain, and only the
+    // first of them may pass.
+    const OUR_REPO = /https:\/\/github\.com\/raybman\/WeMessage(?![\w.-])/;
+    expect(
+      OUR_REPO.test(
+        '[latest release](https://github.com/raybman/WeMessage/releases/latest).',
+      ),
+    ).toBe(true);
+    for (const line of [
+      'file an issue at https://github.com/raybman/WeMessage-tap/issues',
+      'thanks to https://github.com/raybman for the review',
+      'see https://github.com/someone/WeMessage for the fork',
+      'mirrored at https://github.com/raybman/WeMessage.wiki/home',
+      'https://gist.github.com/raybman/WeMessage',
+    ])
+      expect(OUR_REPO.test(line), line).toBe(false);
   });
 
   it('every route a document names is a route the daemon serves', () => {
@@ -3515,7 +3628,25 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       );
     }
 
-    it('SCREENS and WIZARD_STEPS are byte-for-byte the §1.7 arrays', () => {
+    it('SCREENS is §1.7; WIZARD_STEPS is §1.7 plus the s9 Sc7 amendment', () => {
+      /*
+       * Both arrays are closed, and the row's job is to make growing either
+       * one a reviewed diff rather than a quiet one. It did that job: s9 Sc7
+       * added a sixth wizard step and this was the row that said so, before
+       * the step reached a snapshot.
+       *
+       * The step is authorised, and by a document rather than by whoever
+       * wrote it: `docs/plans/slices/s9-execution.md`, Scenario 7 row 5,
+       * "the new step 'Keep it running' (after the permission probes,
+       * before the send test)". Position is part of the claim, so the
+       * equality below places it where the plan places it, between the last
+       * permission probe and the send test, rather than merely containing
+       * it. A step appended to the end would still fail here.
+       *
+       * SCREENS is untouched, and deliberately: the wizard is a modal flow
+       * with its own registry, not a sidebar destination, so a wizard step
+       * is never also a screen. That is why this row reads both arrays.
+       */
       expect(constArray('SCREENS')).toEqual([
         'queue',
         'rules',
@@ -3529,6 +3660,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         'full-disk',
         'automation',
         'optional',
+        'keep-running',
         'send-test',
       ]);
     });
@@ -9047,7 +9179,13 @@ describe('S8 extensions (s8-execution Scenario 15: the onboarding wizard and eve
       archRead(`${RENDERER}/router.ts`),
       'WIZARD_STEPS',
     );
-    expect(steps).toHaveLength(5);
+    // Non-vacuity for the loop below, not a second opinion about the
+    // contents: the authoritative list lives in S8 Sc1 row 9, which pins
+    // every member and its position. What this needs is proof that the
+    // reader found an array at all, because an empty `steps` would make
+    // every `expect` in the loop pass without covering anything. Six since
+    // s9 Sc7 added `keep-running`.
+    expect(steps).toHaveLength(6);
     for (const record of ['STEP_TITLE', 'STEP_CHECKS']) {
       expect(src, record).toMatch(
         new RegExp(`${record}\\s*:\\s*Readonly<\\s*Record<\\s*WizardStep`),
@@ -9770,6 +9908,41 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
    * job is to close the slice, and this scenario has already been warned
    * about editing existing guards to fit new work.
    */
+  /**
+   * The `jobs:` block alone, and then the body of ONE named job inside it.
+   *
+   * s9 Sc9 narrowed the readers below. Until this slice each CI file held
+   * exactly one job, so "the steps in the file" and "the steps in the gate
+   * job" were the same list and a reader could take the whole file. Then the
+   * macOS file gained a `pack-adhoc` job and the two stopped being the same
+   * list. The narrowing runs in the strict direction: the rows below would
+   * previously have been satisfied by steps belonging to ANY job, so a lane
+   * could have moved `pnpm test` out of its gate job into a second job that
+   * never runs on a pull request, and nothing here would have noticed.
+   *
+   * The slice starts at `jobs:` on purpose, and that is not defensiveness.
+   * `on:` holds `push:` and `pull_request:` at the same two-space indent a
+   * job name uses, so a reader scanning the whole file hands back the trigger
+   * block for a job called `push`.
+   */
+  const sc17Jobs = (text: string): string => {
+    const at = /^jobs:$/m.exec(text);
+    if (at === null) throw new Error('this workflow has no `jobs:` block');
+    return text.slice(at.index + at[0].length);
+  };
+
+  const sc17Job = (text: string, job: string): string => {
+    const body = sc17Jobs(text);
+    const start = new RegExp(`^  ${job}:$`, 'm').exec(body);
+    if (start === null) throw new Error(`no job \`${job}\` in this workflow`);
+    const after = body.slice(start.index + start[0].length);
+    const next = /^  [\w-]+:$/m.exec(after);
+    return next === null ? after : after.slice(0, next.index);
+  };
+
+  /** The gate job. Both lanes spell it the same way, and a row asserts that. */
+  const GATE_JOB = 'build-and-test';
+
   const sc17Steps = (text: string): string[] =>
     text
       .split(/\n {6}- /)
@@ -9792,15 +9965,27 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // checks, with the one legitimate difference normalised away: Linux has
     // no window server and needs `xvfb-run -a`, macOS has one and must not
     // use it. Any other difference is a difference.
-    const linux = sc17Steps(archRead(LINUX)).map((s) =>
+    const linux = sc17Steps(sc17Job(archRead(LINUX), GATE_JOB)).map((s) =>
       s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
     );
-    const macos = sc17Steps(archRead(MACOS));
+    const macos = sc17Steps(sc17Job(archRead(MACOS), GATE_JOB));
     expect(linux.length).toBeGreaterThanOrEqual(9);
     expect(macos).toEqual(linux);
     // …and the reader is not vacuous: it found the step that matters.
     expect(macos).toContain('run: pnpm test');
     expect(macos).toContain('run: pnpm build');
+  });
+
+  it('the macOS lane holds exactly the gate job and the pack job', () => {
+    // The readers above name their job, so they can no longer notice a job
+    // that was ADDED. This row is what replaces that: the job list is closed,
+    // and growing it is a reviewed diff rather than a silent one.
+    const jobsIn = (text: string): string[] =>
+      [...sc17Jobs(text).matchAll(/^ {2}([\w-]+):$/gm)].map((m) => m[1] ?? '');
+    expect(jobsIn(archRead(MACOS))).toEqual([GATE_JOB, 'pack-adhoc']);
+    // Linux has one job and spells its name the same way, which is the whole
+    // reason the step-for-step comparison above means anything.
+    expect(jobsIn(archRead(LINUX))).toEqual([GATE_JOB]);
   });
 
   it('runs on a real macOS runner, and Linux still runs on Linux', () => {
@@ -9818,7 +10003,10 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // project, and the repo is public. A step that pretended to sign would
     // either need a secret this repo must not carry, or would be a tick
     // attached to nothing — and the second is worse, because it reads as
-    // "signing is covered". Packaging arrives with the credential.
+    // "signing is covered". s9 Sc9 added a `pack-adhoc` job to this file
+    // and that does not weaken this row: packing is not signing, the job
+    // carries no secret, and the sweep below reads the WHOLE file, so a
+    // signing step added to EITHER job still fails here.
     const text = archRead(MACOS);
     for (const forbidden of [
       'secrets.',
@@ -9841,10 +10029,10 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
       '.github/workflows/__s8_sc17_probe__.yml',
       archRead(MACOS).replace('      - run: pnpm test\n', ''),
     );
-    const linux = sc17Steps(archRead(LINUX)).map((s) =>
+    const linux = sc17Steps(sc17Job(archRead(LINUX), GATE_JOB)).map((s) =>
       s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
     );
-    expect(sc17Steps(archRead(rel))).not.toEqual(linux);
+    expect(sc17Steps(sc17Job(archRead(rel), GATE_JOB))).not.toEqual(linux);
   });
 
   it('LEGITIMATE NEAR-MISS: the same lane with a reworded comment is not a drift', () => {
@@ -9857,7 +10045,9 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
         '# macOS runners have a window server, so no xvfb',
       ),
     );
-    expect(sc17Steps(archRead(rel))).toEqual(sc17Steps(archRead(MACOS)));
+    expect(sc17Steps(sc17Job(archRead(rel), GATE_JOB))).toEqual(
+      sc17Steps(sc17Job(archRead(MACOS), GATE_JOB)),
+    );
   });
 
   /* ── row 8 (meta): the GUI-era slice added no transport ────────────── */
@@ -10447,17 +10637,22 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(swept.length).toBeGreaterThan(300);
       // Which roots actually have tracked files is a fact about the tree,
       // and pinning it is what stops this row from silently becoming a
-      // sweep of two directories. `homebrew/` is Sc 11's and correctly
-      // absent; `tools/` arrives in THIS scenario, which is half of why
-      // this row is red at HEAD.
+      // sweep of two directories.
       //
-      // SELF-TRIP: this list was authored with `test/` in it, and `test/`
-      // cannot contribute — its ONLY tracked file is `test/arch.spec.ts`,
-      // which is the sweep's one exemption. The root is deliberately KEPT
-      // in `LAUNCHD_ROOTS` rather than deleted, because the day a second
-      // file lands under `test/` it must be swept from its first commit;
-      // the fact that makes the root empty today is asserted below instead,
-      // so that day is also the day this row fails and is looked at.
+      // SELF-TRIP, AND IT FIRED. This list was authored WITHOUT `test/` and
+      // WITHOUT `homebrew/`. `test/` could not contribute, because its only
+      // tracked file was `test/arch.spec.ts` and `trackedTextFiles()` drops
+      // that one file by name; `homebrew/` did not exist yet. Both roots
+      // were nevertheless put into `LAUNCHD_ROOTS` on purpose, so that the
+      // day a real file landed under either one it would be swept from its
+      // FIRST commit rather than from the commit somebody remembered.
+      //
+      // Sc8 landed `test/release/notarize.spec.ts` and Sc10 landed the cask,
+      // so that day arrived twice, and both times this row is what said so.
+      // The old singleton assertion recorded the empty state and is replaced
+      // below by the fact that outlives it: the exemption is still exactly
+      // one file, and every other tracked spec under `test/` really is
+      // inside the sweep rather than merely adjacent to it.
       const contributing = LAUNCHD_ROOTS.filter((r) =>
         swept.some((f) => f.startsWith(r)),
       );
@@ -10466,15 +10661,25 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         'apps/',
         'tools/',
         'fixtures/',
+        'test/',
         '.github/',
+        'homebrew/',
       ]);
+      const trackedUnderTest = execFileSync(
+        'git',
+        ['ls-files', '--', 'test/'],
+        { cwd: repoRoot, encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter((f) => f.length > 0);
+      // More than one, or the clause below is asserting nothing.
+      expect(trackedUnderTest.length).toBeGreaterThan(1);
+      // Restricted to `.ts` so that the sweep's binary-extension policy
+      // cannot quietly move a file out of this comparison. A second name
+      // added to `trackedTextFiles()`' exclusion list shows up right here,
+      // carrying its own path.
       expect(
-        execFileSync('git', ['ls-files', '--', 'test/'], {
-          cwd: repoRoot,
-          encoding: 'utf8',
-        })
-          .split('\n')
-          .filter((f) => f.length > 0),
+        trackedUnderTest.filter((f) => f.endsWith('.ts') && !swept.includes(f)),
       ).toEqual(['test/arch.spec.ts']);
     });
 
@@ -10704,8 +10909,100 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort();
     }
 
+    /**
+     * Files that WRITE the tool's name into another program's file instead of
+     * handing it to a process.
+     *
+     * s9 Sc10 added the Homebrew cask renderer, and that renderer has to emit
+     * an `uninstall launchctl:` stanza. It is the key Homebrew's own DSL uses
+     * to unload a launch agent during `brew uninstall`, and a cask without it
+     * leaves the agent running after the app it belonged to is gone. So the
+     * word genuinely has to appear in what that module writes.
+     *
+     * It is admitted by CONDITION, not by name. Being on this list grants
+     * nothing on its own: `rendererFaults` re-derives the facts that make the
+     * admission safe, and a renderer that stops satisfying them fails the row
+     * below carrying its own path. Those facts are that it still names the
+     * tool at all, that it imports nothing and therefore has no spawner in
+     * scope, that no spawn API appears in it, and that every occurrence of
+     * the word is the cask stanza rather than an argv. Row 5 goes on saying
+     * exactly what it always said, which is that one module can put this
+     * binary on a command line.
+     */
+    const RENDERERS: readonly string[] = ['tools/release/src/cask.ts'];
+
+    /** The emitted Homebrew key: the only occurrence a renderer may hold. */
+    const CASK_STANZA = /^\s*uninstall launchctl: "/;
+
+    /** Empty when `rel` may be admitted, otherwise every reason it may not. */
+    function rendererFaults(rel: string): string[] {
+      const code = codeOf(s9Read(rel));
+      const faults: string[] = [];
+      // A stale exemption is worse than no exemption: it reads as a granted
+      // permission and grants a file that no longer needs it.
+      if (!withoutSpecifiers(code).includes(TOOL))
+        faults.push(`${rel}: no longer names the tool, so this entry is stale`);
+      // Imports nothing. This is the load-bearing one. A module with no
+      // module specifiers has no way to reach a child process, so it cannot
+      // run the string it is writing however the string is shaped.
+      for (const sp of specifiersOf(code)) faults.push(`${rel}: imports ${sp}`);
+      // Belt and braces, for the day someone adds a global that does not
+      // need an import to spawn.
+      for (const api of ['child_process', 'execFile', 'execSync', 'spawn'])
+        if (code.includes(api)) faults.push(`${rel}: holds ${api}`);
+      // And the word appears only where the cask needs it. An `export const
+      // CMD = 'launchctl bootout …'` handed to a caller would fail here even
+      // though the renderer itself still runs nothing.
+      for (const [i, line] of code.split('\n').entries())
+        if (line.includes(TOOL) && !CASK_STANZA.test(line))
+          faults.push(`${rel}:${i + 1}: names it outside the stanza`);
+      return faults;
+    }
+
+    /** Production spellers, renderers removed. The row's real subject. */
+    const spellers = (): string[] =>
+      namers(true, 'spelled').filter((f) => !RENDERERS.includes(f));
+
+    it('the renderers are admitted by a property, not by their names', () => {
+      // Non-vacuity: an empty list would make the loop assert nothing while
+      // the filter above went on exempting nothing, and both would be green.
+      expect(RENDERERS.length).toBeGreaterThan(0);
+      for (const rel of RENDERERS) {
+        expect(existsSync(join(repoRoot, rel)), rel).toBe(true);
+        expect(rendererFaults(rel), rel).toEqual([]);
+        // Each entry is carrying weight: it really is a speller, so deleting
+        // it from the list breaks the row above rather than doing nothing.
+        expect(namers(true, 'spelled')).toContain(rel);
+      }
+    });
+
+    it('PLANTED: a renderer that could actually run it is not admitted', () => {
+      const rel = s9Plant(
+        'packages/daemon/src/__s9__/renderer.ts',
+        [
+          "import { execFile } from 'node:child_process';",
+          'export const stanza = (): string =>',
+          '  `  uninstall launchctl: "sh.wemessage.gateway",`;',
+          'export const go = (): void => {',
+          "  execFile('launchctl', ['print', 'gui/501']);",
+          '};',
+          '',
+        ].join('\n'),
+      );
+      // It emits the same stanza the real renderer does, so the shape alone
+      // is not what earns the exemption. Three separate arms refuse it, and
+      // each one names the file that broke it.
+      const faults = rendererFaults(rel);
+      expect(faults.some((f) => f.includes('imports'))).toBe(true);
+      expect(faults.some((f) => f.includes('holds'))).toBe(true);
+      expect(faults.some((f) => f.includes('outside the stanza'))).toBe(true);
+      // And putting it on the list by name would not have saved it either:
+      // the admission row above is what would fail next.
+      expect(spellers()).toEqual([RUNNER, rel].sort());
+    });
+
     it('exactly one production module names the tool', () => {
-      expect(namers(true, 'spelled')).toEqual([RUNNER]);
+      expect(spellers()).toEqual([RUNNER]);
     });
 
     it('the derived program-root set is neither empty nor a wildcard', () => {
@@ -10749,7 +11046,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           '',
         ].join('\n'),
       );
-      expect(namers(true, 'spelled')).toEqual([RUNNER, rel].sort());
+      expect(spellers()).toEqual([RUNNER, rel].sort());
     });
 
     it('PLANTED: a second production importer of the runner is a second hit', () => {
@@ -10765,7 +11062,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // …and it is NOT a speller, which is the whole point of blanking
       // specifiers: importing the runner and spawning the binary are
       // different facts and get different rows.
-      expect(namers(true, 'spelled')).toEqual([RUNNER]);
+      expect(spellers()).toEqual([RUNNER]);
     });
 
     it('NEAR-MISS: a module that only TALKS about it is not a spawner', () => {
@@ -10779,7 +11076,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           '',
         ].join('\n'),
       );
-      expect(namers(true, 'spelled')).toEqual([RUNNER]);
+      expect(spellers()).toEqual([RUNNER]);
       expect(runnerImporters(true)).toEqual(PROGRAM_ROOTS);
     });
 
@@ -11110,11 +11407,38 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
 
   /* ── row 10: the release scripts are declared and land somewhere ───── */
 
-  describe('row 10: seven release scripts, each resolving to a real file', () => {
+  /**
+   * s9 Sc14 rebuilt this row, because the shape it had drifted twice in one
+   * slice and both drifts were silent.
+   *
+   * Sc1 wrote it when all of them were stubs and asserted one thing: the body
+   * contains `process.exit(2)`. Sc6 implemented `pack.mjs`, which kept
+   * `process.exit(2)` for its refusal path, so the row went on passing while
+   * claiming `pack:adhoc` does nothing. Sc6 patched that with a second bucket
+   * split on "reaches a child process". Then Sc11 implemented `cask.mjs` and
+   * Sc14 implemented `check-versions.mjs`, `release-notes.mjs` and
+   * `cut-tag.mjs`, and NONE of those four spawn anything, so all four sat in
+   * STUBS making the same false claim the split was added to prevent.
+   *
+   * The lesson is that "does it spawn" is a fact about a script's plumbing,
+   * not about whether it is finished, and the row kept guessing the second
+   * from the first. So the buckets no longer guess. A stub now has to SAY it
+   * is a stub, in its own text, in the words its own refusal message uses,
+   * and every other lane has to prove it is real in the way that lane can:
+   * by driving a build, by delegating to a compiled and separately tested
+   * module, or by being run right here and watched.
+   *
+   * The direction matters. Every arm below is a narrowing: the stub arm gained
+   * a self-declaration requirement it did not have, and the implemented arms
+   * gained proofs where they previously had none. Nothing was admitted by
+   * being named.
+   */
+  describe('row 10: eight release scripts, each resolving to a real file', () => {
     const RELEASE_SCRIPTS: readonly string[] = [
       'release:notarize',
       'release:cask',
       'release:check-versions',
+      'release:notes',
       'release:cut-tag',
       'pack:adhoc',
       'pack:release',
@@ -11127,20 +11451,73 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         }
       ).scripts;
 
-    it('all seven are declared', () => {
+    /** The `tools/...` path a script's command line names. */
+    const pathOf = (name: string): string =>
+      /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(scripts()[name] ?? '')?.[1] ??
+      '';
+    const bodyOf = (name: string): string => s9Read(pathOf(name));
+
+    /** The sentence a stub in this tree writes about itself. */
+    const STUB_SELF_DECLARATION = 'not implemented yet (';
+    const SPAWN_SHAPE =
+      /\b(spawnSync|execFileSync|execSync|spawn|execFile)\s*\(/;
+
+    /** Announces itself as unfinished, and does nothing else. */
+    const STUBS: readonly string[] = ['release:notarize', 'smoke:automated'];
+
+    /** Drives a real build through a child process. */
+    const DRIVES_A_BUILD: readonly string[] = ['pack:adhoc', 'pack:release'];
+
+    /**
+     * Thin bins over a compiled module in `tools/release/src`. Running these
+     * for real writes files or creates git tags, so the proof they are not
+     * hollow is that they delegate to a module that has its own spec.
+     */
+    const DELEGATES_TO_SRC: readonly string[] = [
+      'release:cask',
+      'release:cut-tag',
+    ];
+
+    /**
+     * Pure readers. Nothing to mock and nothing to clean up, so these are not
+     * argued about, they are executed: once on input they must reject and once
+     * on this tree as it stands.
+     */
+    const RUNS_IN_PROCESS: readonly string[] = [
+      'release:check-versions',
+      'release:notes',
+    ];
+
+    const BUCKETS: readonly (readonly string[])[] = [
+      STUBS,
+      DRIVES_A_BUILD,
+      DELEGATES_TO_SRC,
+      RUNS_IN_PROCESS,
+    ];
+
+    it('all eight are declared', () => {
       const have = scripts();
       expect(RELEASE_SCRIPTS.filter((s) => !(s in have))).toEqual([]);
     });
 
+    it('the root declares no ninth release script this row does not know about', () => {
+      // The other direction, and the one the old row was missing: a script
+      // added to `package.json` and never added here would have been covered
+      // by nothing at all. `release:notes` arrived exactly that way.
+      const declared = Object.keys(scripts()).filter((n) =>
+        /^(?:release|pack|smoke):/.test(n),
+      );
+      expect(declared.sort()).toEqual([...RELEASE_SCRIPTS].sort());
+    });
+
     it('every one of them points at a file that exists', () => {
       // A script naming a path that is not there is a script that fails at
-      // 3am with `MODULE_NOT_FOUND` instead of at review time. The stubs
-      // exist now and exit 2; the scenarios that own them fill them in.
+      // 3am with `MODULE_NOT_FOUND` instead of at review time.
       const have = scripts();
       const missing: string[] = [];
       for (const name of RELEASE_SCRIPTS) {
         const cmd = have[name] ?? '';
-        const path = /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(cmd)?.[1] ?? '';
+        const path = pathOf(name);
         if (path.length === 0) missing.push(`${name}: no file in ${cmd}`);
         else if (!existsSync(join(repoRoot, path)))
           missing.push(`${name}: ${path} does not exist`);
@@ -11148,64 +11525,49 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(missing).toEqual([]);
     });
 
-    /**
-     * s9 Sc6 split this row, and the split is the point.
-     *
-     * The row was written in Sc 1, when all seven were stubs, and it said one
-     * thing about all of them: the body contains `process.exit(2)`. Sc 6
-     * implemented `pack.mjs`, which still contains `process.exit(2)` because
-     * its refusal path uses it, so the row went on passing while quietly
-     * making a false claim: `pack:adhoc` is no longer a script that does
-     * nothing.
-     *
-     * A row that keeps passing after the thing it describes stops being true
-     * is the shape this suite exists to avoid, so the claim is now two claims
-     * about two named sets, and the sets have to partition the seven. The
-     * mechanical difference between the halves is reaching a child process: a
-     * stub is a refusal and cannot spawn; an implemented lane's entire job is
-     * to drive `pnpm` and `electron-builder`. Moving a script between the sets
-     * is now a diff somebody has to write on purpose.
-     */
-    const IMPLEMENTED: readonly string[] = ['pack:adhoc', 'pack:release'];
-    const STUBS: readonly string[] = [
-      'release:notarize',
-      'release:cask',
-      'release:check-versions',
-      'release:cut-tag',
-      'smoke:automated',
-    ];
-    const bodyOf = (name: string): string =>
-      s9Read(
-        /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(scripts()[name] ?? '')?.[1] ??
-          '',
-      );
-
-    it('the two sets partition the seven, with nothing in both or neither', () => {
-      expect([...IMPLEMENTED, ...STUBS].sort()).toEqual(
-        [...RELEASE_SCRIPTS].sort(),
-      );
-      expect(IMPLEMENTED.filter((n) => STUBS.includes(n))).toEqual([]);
+    it('the four buckets partition the eight, with nothing in two or in none', () => {
+      expect(BUCKETS.flat().sort()).toEqual([...RELEASE_SCRIPTS].sort());
+      // Pairwise, so a failure names the two buckets that overlap instead of
+      // printing two eight-element arrays side by side.
+      for (const [i, a] of BUCKETS.entries())
+        for (const b of BUCKETS.slice(i + 1))
+          expect(a.filter((n) => b.includes(n))).toEqual([]);
     });
 
-    it('the stubs refuse loudly rather than succeeding by doing nothing', () => {
+    it('the stubs say they are stubs, and refuse loudly rather than no-op', () => {
       // Exit 2, not 0. A release script that is a no-op is the single most
       // dangerous shape in this list: `pnpm release:notarize && ship` would
       // ship an unnotarised app and report success.
       for (const name of STUBS) {
         const body = bodyOf(name);
+        expect(body, `${name} does not declare itself unfinished`).toContain(
+          STUB_SELF_DECLARATION,
+        );
         expect(body, name).toContain('process.exit(2)');
-        // …and a stub cannot quietly become half a lane. The moment one of
-        // these reaches a child process it belongs in IMPLEMENTED, where it
-        // gets the stronger row below instead of this one.
         expect(
-          /\b(spawnSync|execFileSync|execSync|spawn|execFile)\s*\(/.test(body),
+          SPAWN_SHAPE.test(body),
           `${name} spawns, so it is no longer a stub`,
+        ).toBe(false);
+        expect(
+          body.includes('../dist/'),
+          `${name} imports compiled work, so it is no longer a stub`,
         ).toBe(false);
       }
     });
 
-    it('the implemented lanes still refuse loudly, and actually do the work', () => {
-      for (const name of IMPLEMENTED) {
+    it('no implemented lane still describes itself as unfinished', () => {
+      // The drift that got past this row twice, stated directly. A lane that
+      // has been built and whose header still says "not implemented yet" is
+      // either a lie in the tree or a lane that was never finished, and both
+      // are worth a red test.
+      for (const name of RELEASE_SCRIPTS.filter((n) => !STUBS.includes(n)))
+        expect(bodyOf(name), `${name} still calls itself a stub`).not.toContain(
+          STUB_SELF_DECLARATION,
+        );
+    });
+
+    it('the build drivers actually drive a build, and still refuse loudly', () => {
+      for (const name of DRIVES_A_BUILD) {
         const body = bodyOf(name);
         // The refusal path does not go away when the happy path arrives: a
         // release lane with no certificate has to fail, not degrade.
@@ -11214,6 +11576,74 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           /\b(spawnSync|execFileSync)\s*\(/.test(body),
           `${name} must drive a real build`,
         ).toBe(true);
+      }
+    });
+
+    it('the delegating bins really delegate, to a module that exists in src', () => {
+      for (const name of DELEGATES_TO_SRC) {
+        const body = bodyOf(name);
+        const imported = [
+          ...body.matchAll(/from '\.\.\/dist\/([\w.-]+)\.js'/g),
+        ].map((m) => m[1] ?? '');
+        expect(
+          imported.length,
+          `${name} imports nothing from ../dist`,
+        ).toBeGreaterThan(0);
+        for (const mod of imported)
+          expect(
+            existsSync(join(repoRoot, `tools/release/src/${mod}.ts`)),
+            `${name} imports ../dist/${mod}.js with no tools/release/src/${mod}.ts behind it`,
+          ).toBe(true);
+        // A bin that delegates has no business spawning as well: the child
+        // process, if there is one, belongs in the module that is tested.
+        expect(
+          SPAWN_SHAPE.test(body),
+          `${name} both delegates and spawns; pick one`,
+        ).toBe(false);
+        expect(body, `${name} has no refusal path`).toContain('process.exit(');
+      }
+    });
+
+    it('the in-process lanes refuse bad input and pass this tree, for real', () => {
+      for (const name of RUNS_IN_PROCESS) {
+        const script = join(repoRoot, pathOf(name));
+
+        // Arm one: it refuses. A version string nothing in the tree is at, so
+        // both lanes must fail: no manifest matches it and the CHANGELOG has
+        // no section for it.
+        const refused = spawnSync(
+          process.execPath,
+          [
+            script,
+            '--version',
+            'no-such-version',
+            '--expect',
+            'no-such-version',
+          ],
+          { encoding: 'utf8' },
+        );
+        expect(
+          refused.status,
+          `${name} accepted a version nothing in this tree is at`,
+        ).not.toBe(0);
+        expect(
+          refused.stderr.trim().length,
+          `${name} failed silently`,
+        ).toBeGreaterThan(0);
+
+        // Arm two: it is not merely an always-failer, which is all arm one on
+        // its own would have proved. With no arguments each lane falls back to
+        // the root's OWN version, so a green here is a real claim about this
+        // tree: every manifest agrees on a version, and the CHANGELOG has a
+        // non-empty section for it. No version literal appears in this file,
+        // which is why the row survives the next bump.
+        const accepted = spawnSync(process.execPath, [script], {
+          encoding: 'utf8',
+        });
+        expect(
+          accepted.status,
+          `${name} rejects this very tree: ${accepted.stderr.trim()}`,
+        ).toBe(0);
       }
     });
   });
@@ -11318,11 +11748,47 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(trackedTextFiles()).toContain(rel);
     });
 
+    /**
+     * s9 admits a second KIND of 64-hex run rather than a longer list of
+     * names: the all-zero placeholder, and only that.
+     *
+     * Two files earned the shape in this era and neither carries a value.
+     * The notary-log fixture has to look like real `notarytool log` output
+     * and that output has a `sha256` field; the rendered Homebrew cask has
+     * to have a `sha256` field before a release exists to fill it in. Adding
+     * those two names to the list above would have been the widening this
+     * row exists to prevent, and worse, it would then have licensed a REAL
+     * digest pasted into either of them forever. Naming the VALUE does not:
+     * one non-zero run in the same file moves that file straight back onto
+     * the strict side, carrying the name that did it.
+     */
+    const NULL_DIGEST = '0'.repeat(64);
+
+    /** True when every 64-hex run in `text` is that placeholder. */
+    const onlyNullDigests = (text: string): boolean =>
+      [...text.matchAll(/\b[0-9a-f]{64}\b/g)].every(
+        (m) => m[0] === NULL_DIGEST,
+      );
+
     it('a 64-hex digest lives in exactly three files, all of them earned', () => {
       const carriers = trackedTextFiles()
         .filter((f) => HEX64.test(readFileSync(join(repoRoot, f), 'utf8')))
         .sort();
-      expect(carriers).toEqual([...DIGEST_CARRIERS].sort());
+      const placeholders = carriers.filter((f) =>
+        onlyNullDigests(readFileSync(join(repoRoot, f), 'utf8')),
+      );
+      expect(carriers.filter((f) => !placeholders.includes(f))).toEqual(
+        [...DIGEST_CARRIERS].sort(),
+      );
+      // Non-vacuity: the placeholder arm is an ARM, not a hole. It accepted
+      // at least one file, and it is proved to reject a real digest and to
+      // reject a file that holds one real digest beside the placeholder.
+      expect(placeholders.length).toBeGreaterThan(0);
+      expect(onlyNullDigests(`  sha256 "${NULL_DIGEST}"`)).toBe(true);
+      expect(onlyNullDigests(`  sha256 "${'a'.repeat(64)}"`)).toBe(false);
+      expect(onlyNullDigests(`"${NULL_DIGEST}" and "${'b'.repeat(64)}"`)).toBe(
+        false,
+      );
     });
 
     /**
@@ -11352,6 +11818,33 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
     const HEX40_CARRIERS: readonly string[] = [
       'apps/desktop/test/tokens.spec.ts',
     ];
+
+    /**
+     * SELF-TRIP, THE SECOND, and the same repair as the first.
+     *
+     * s9 Sc9 pins every third-party action to a commit SHA, because a
+     * mutable tag is how `tj-actions/changed-files` shipped an attacker's
+     * code into every workflow that referenced it in March 2025, and the
+     * release job here holds `contents: write`. A commit SHA is forty hex
+     * characters. So the security control this slice adds and the ban this
+     * row enforces are the same forty characters, and one of them had to
+     * give.
+     *
+     * Neither does. The workflow files are admitted by CONDITION: a 40-hex
+     * run inside one of them must be the commit half of a pinned `uses:`, on
+     * a line that also carries the human-readable version it was resolved
+     * from. `test/release/workflows.spec.ts` row 8 requires that shape from
+     * the other direction, so the claim is made twice by two readers. A
+     * checksum line, an Apple key id or a digest pasted into a workflow
+     * still fails here, and still fails carrying the line that did it.
+     */
+    const isWorkflowFile = (rel: string): boolean =>
+      rel.startsWith('.github/workflows/') &&
+      (rel.endsWith('.yml') || rel.endsWith('.yaml'));
+
+    /** Not `/g`: `.test` on a global regex advances `lastIndex`. */
+    const HEX40_PINNED =
+      /^\s*(?:-\s*)?uses:\s*[\w.-]+\/[\w.-]+@[0-9a-f]{40}\s*#\s*v\d+\.\d+\.\d+\s*$/;
     /** `Buffer.from('..' + '..', 'hex')` — the chunks, re-joined. */
     function hexBlobs(text: string): string[] {
       const out: string[] = [];
@@ -11381,7 +11874,20 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
         )
         .sort();
-      expect(carriers).toEqual([...HEX40_CARRIERS].sort());
+      expect(carriers.filter((f) => !isWorkflowFile(f))).toEqual(
+        [...HEX40_CARRIERS].sort(),
+      );
+      // The workflow arm, line by line, so a failure names the offender.
+      const loose: string[] = [];
+      for (const rel of carriers.filter(isWorkflowFile))
+        for (const [n, line] of readFileSync(join(repoRoot, rel), 'utf8')
+          .split('\n')
+          .entries())
+          if (/\b[0-9a-f]{40}\b/.test(line) && !HEX40_PINNED.test(line))
+            loose.push(`${rel}:${n + 1}: ${line.trim()}`);
+      expect(loose).toEqual([]);
+      // Non-vacuity again: there ARE pinned workflows, so that arm ran.
+      expect(carriers.filter(isWorkflowFile).length).toBeGreaterThan(0);
       // Non-vacuity: the carrier really does hold runs, and they really are
       // inside blobs this project can decode.
       for (const rel of HEX40_CARRIERS) {
@@ -11429,8 +11935,28 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           .filter((f) =>
             /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
           )
-          .filter((f) => !HEX40_CARRIERS.includes(f)),
+          .filter((f) => !HEX40_CARRIERS.includes(f) && !isWorkflowFile(f)),
       ).toEqual([rel]);
+    });
+
+    it('PLANTED: the workflow arm admits a PIN and nothing else', () => {
+      // The condition is the entire reason `.github/workflows` may hold
+      // forty hex characters, so it is proved directly rather than trusted.
+      const sha = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
+      expect(
+        HEX40_PINNED.test(`      - uses: actions/checkout@${sha} # v4.4.0`),
+      ).toBe(true);
+      // No version comment: pinned, but unreviewable at a glance.
+      expect(HEX40_PINNED.test(`      - uses: actions/checkout@${sha}`)).toBe(
+        false,
+      );
+      // A tag name is not a version.
+      expect(
+        HEX40_PINNED.test(`      - uses: actions/checkout@${sha} # main`),
+      ).toBe(false);
+      // And the two shapes this ban is actually about.
+      expect(HEX40_PINNED.test(`      # ${sha}  WeMessage.dmg`)).toBe(false);
+      expect(HEX40_PINNED.test(`          key: ${sha}`)).toBe(false);
     });
   });
 
@@ -11687,9 +12213,24 @@ describe('S9 extensions (s9-execution Scenario 2: the two deferred guards)', () 
       expect([...starts].sort()).toEqual([...expected].sort());
     });
 
-    it('every pass fails on the same GPL/AGPL family', () => {
-      // A root added without the `--failOn` clause would be a pass that
-      // scans and then approves whatever it finds.
+    it('every pass is the same allowlist gate, not a denylist', () => {
+      /*
+       * s1 Sc11 replaced `--failOn 'GPL;AGPL;…'` with `--onlyAllow`, and the
+       * swap is the substance of this row rather than a rename of it.
+       * `--failOn` is a denylist: it catches the copyleft families somebody
+       * thought to name and waves through every licence nobody did, which
+       * includes every licence that did not exist when the list was written.
+       * `--onlyAllow` inverts the default, so an unrecognised licence is a
+       * failure rather than a pass.
+       *
+       * What the row has always been about survives unchanged: a root added
+       * without the clause would be a pass that scans and then approves
+       * whatever it finds. It now also pins `--production`, because a pass
+       * that dropped it would gate the wrong dependency set, and
+       * `--excludePrivatePackages`, because a pass that dropped that would
+       * trip over this repo's own unpublished members and get "fixed" by
+       * widening the allowlist to admit them.
+       */
       const script = licensesScript();
       const passes = script
         .split('&&')
@@ -11698,7 +12239,12 @@ describe('S9 extensions (s9-execution Scenario 2: the two deferred guards)', () 
       expect(passes.length).toBe(workspacePackageDirs().length + 1);
       for (const pass of passes) {
         expect(pass).toMatch(/^license-checker-rseidelsohn\b/);
-        expect(pass).toContain("--failOn 'GPL;AGPL;GPL-3.0;AGPL-3.0'");
+        expect(pass).toContain('--production ');
+        expect(pass).toContain('--onlyAllow "$(cat licenses.allow)"');
+        expect(pass).toContain('--excludePrivatePackages');
+        // Gone from EVERY pass, not merely absent from the ones a reader
+        // happened to scroll past.
+        expect(pass).not.toContain('--failOn');
       }
     });
   });

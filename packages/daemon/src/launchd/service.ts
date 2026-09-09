@@ -246,6 +246,65 @@ export async function installService(
   return { label: input.label, plistPath, bootstrapped, changed };
 }
 
+/* ── restart ──────────────────────────────────────────────────────────── */
+
+export interface RestartResult {
+  readonly label: string;
+  readonly plistPath: string;
+  readonly bootstrapped: boolean;
+}
+
+/**
+ * s9 Sc7 row 6. `bootout` then `bootstrap`, unconditionally — the fourth verb
+ * pair on the guarded runner, and still not the reload-in-place verb this
+ * project refuses to use.
+ *
+ * `installService` only reloads when the plist CONTENT changed, which is
+ * correct for an install and wrong for a restart: the whole point of the
+ * button this serves is "macOS granted the permission after the agent last
+ * started", a fact the plist bytes say nothing about. So this skips the
+ * content diff entirely and always tears down and reloads whatever
+ * `service.json` already points at.
+ *
+ * Throws if nothing is installed in `dir` — there is no plist to restart, and
+ * a caller reaching this without checking first has a bug worth surfacing
+ * rather than a no-op worth swallowing.
+ */
+export async function serviceRestart(
+  dir: string,
+  deps: ServiceDeps,
+): Promise<RestartResult> {
+  const state = readServiceState(dir);
+  if (state === null)
+    throw new Error(`serviceRestart: nothing installed in ${dir}`);
+  const label = asLaunchAgentLabel(state.label);
+
+  // §1.8, same as install: the row is appended before anything is asked of
+  // the service manager. Reuses `service.installed` rather than minting a
+  // new audit event type — the fact recorded ("this label is loaded under
+  // launchd, from this plist") is exactly as true after a restart as after
+  // an install, and `AuditEvent`'s union is not this file's to widen.
+  deps.audit({ type: 'service.installed', label, plistPath: state.plistPath });
+
+  await deps.run('bootout', label, runOptions(deps.uid));
+  await waitForLaunchdState(
+    label,
+    (r) => r.code !== 0,
+    LAUNCHD_SETTLE_BUDGET_MS,
+    deps,
+  );
+  await deps.run('bootstrap', label, runOptions(deps.uid, state.plistPath));
+  const bootstrapped =
+    (await deps.run('print', label, runOptions(deps.uid))).code === 0;
+
+  writeServiceState(dir, {
+    label: state.label,
+    plistPath: state.plistPath,
+    bootstrapped,
+  });
+  return { label: state.label, plistPath: state.plistPath, bootstrapped };
+}
+
 /* ── uninstall ────────────────────────────────────────────────────────── */
 
 export interface UninstallResult {

@@ -50,15 +50,17 @@ import { renderLaunchAgentPlist } from './plist.js';
 import {
   installService,
   isUnderTempRoot,
+  serviceRestart,
   statusService,
   uninstallService,
   type ServiceDeps,
 } from './service.js';
 import { mintServiceLabel } from './label.js';
+import { APP_VERSION } from '@wemessage/protocol';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-const SUBCOMMANDS = ['install', 'uninstall', 'status'] as const;
+const SUBCOMMANDS = ['install', 'uninstall', 'status', 'restart'] as const;
 
 export interface CliIo {
   readonly out: (s: string) => void;
@@ -95,6 +97,9 @@ const HELP = `wemessaged — the WeMessage gateway daemon
   wemessaged service install       write the LaunchAgent plist and load it
   wemessaged service uninstall     unload the agent and remove its plist
   wemessaged service status        report whether the agent is loaded
+  wemessaged service restart       bootout and bootstrap the loaded agent
+
+  wemessaged --version             print the version and exit
 
 Options for the service subcommands:
   --dir <path>                  the daemon's configuration directory
@@ -211,6 +216,14 @@ export async function runServiceCli(
   io: CliIo,
   over: CliOverrides = {},
 ): Promise<number> {
+  if (argv[0] === '--version') {
+    // Before the help branch and before flag parsing, because a version
+    // request is answerable on a machine where nothing else about this
+    // daemon is set up yet, which is the machine somebody asks it on.
+    io.out(`${APP_VERSION}\n`);
+    return 0;
+  }
+
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
     io.out(HELP);
     return 0;
@@ -333,6 +346,16 @@ async function dispatch(
       result.changed
         ? `uninstalled ${String(result.label)}`
         : 'nothing installed in this directory',
+    ]);
+    return 0;
+  }
+
+  if (sub === 'restart') {
+    const result = await serviceRestart(dir, deps);
+    emit(io, flags.json, result, [
+      `restarted ${result.label}`,
+      `  plist   ${result.plistPath}`,
+      `  loaded  ${String(result.bootstrapped)}`,
     ]);
     return 0;
   }

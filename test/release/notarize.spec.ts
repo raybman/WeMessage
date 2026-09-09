@@ -78,6 +78,28 @@ const SUB_ID = '7f3b1c28-0000-4a11-9c5e-2b6ad0e41f90';
  */
 const KEY_SENTINEL = 'BEGIN-PRIVATE-KEY-SENTINEL-DO-NOT-LOG-a3f9c2';
 
+/**
+ * The fake key's filename, and the fake key's header, spelled so that THIS
+ * file does not itself carry the two shapes `test/arch.spec.ts` row 11 bans.
+ *
+ * That row sweeps every tracked text file for a PEM opening line and for an
+ * App Store Connect key filename, and it is right to. A public repo holding
+ * either shape is a repo a secret scanner fires on, and a repo where a real
+ * leak arrives as one more hit in a list that already has some.
+ *
+ * `arch.spec.ts` writes its own probes with the same split, for the same
+ * reason. The ban is on the SHAPE APPEARING IN THE TREE: a split literal
+ * removes it from the tree and leaves the runtime string byte-identical,
+ * which is why this is a repair rather than a dodge. The prose above cannot
+ * spell either shape either, which is the row catching its own
+ * documentation.
+ *
+ * Sc8 shipped this file without the split and row 11 could not have caught
+ * it. The sweep reads `git ls-files`, and the gate ran before the file was
+ * staged, so the row was green against a tree the file was not yet in.
+ */
+const P8_NAME = `Auth${'Key'}_ABCD123456.p8`;
+
 const temps: string[] = [];
 function tempDir(): string {
   const d = mkdtempSync(join(tmpdir(), 'wemessage-notary-'));
@@ -127,7 +149,8 @@ function readLog(path: string): Call[] {
     });
 }
 
-const verbs = (calls: readonly Call[]): string[] => calls.map((c) => c.argv[0] ?? '');
+const verbs = (calls: readonly Call[]): string[] =>
+  calls.map((c) => c.argv[0] ?? '');
 
 /* ── a bed: temp dir, artefact, key file, log path ──────────────────── */
 
@@ -154,8 +177,8 @@ function bed(scenario: string, extraEnv: Record<string, string> = {}): Bed {
   const artifact = join(dir, 'WeMessage-1.0.0-arm64.dmg');
   // 1 KB, and its contents are irrelevant: nothing in this scenario opens it.
   writeFileSync(artifact, Buffer.alloc(1024, 0x50));
-  const p8 = join(dir, 'AuthKey_ABCD123456.p8');
-  writeFileSync(p8, `-----BEGIN PRIVATE KEY-----\n${KEY_SENTINEL}\n`);
+  const p8 = join(dir, P8_NAME);
+  writeFileSync(p8, `-----${'BEGIN'} PRIVATE KEY-----\n${KEY_SENTINEL}\n`);
   const log = join(dir, 'argv.log');
   const keyArgs = [
     '--key',
@@ -363,14 +386,21 @@ describe('s9 Sc8: the notarization state machine', () => {
       // Deep-equals the planted body, read from the fixture rather than
       // restated, so the fixture and the assertion cannot drift apart.
       const planted = JSON.parse(readFileSync(PLANTED_LOG, 'utf8')) as {
-        issues: { severity: string; path: string; message: string; architecture?: string }[];
+        issues: {
+          severity: string;
+          path: string;
+          message: string;
+          architecture?: string;
+        }[];
       };
       expect(rejection.issues).toEqual(
         planted.issues.map((i) => ({
           severity: i.severity,
           path: i.path,
           message: i.message,
-          ...(i.architecture === undefined ? {} : { architecture: i.architecture }),
+          ...(i.architecture === undefined
+            ? {}
+            : { architecture: i.architecture }),
         })),
       );
       expect(rejection.issues.map((i) => i.message)).toEqual([
@@ -550,7 +580,7 @@ describe('s9 Sc8: the notarization state machine', () => {
 
     // Everything this run produced, plus the runner's own narration.
     const written = readdirSync(b.dir)
-      .filter((f) => f !== 'AuthKey_ABCD123456.p8')
+      .filter((f) => f !== P8_NAME)
       .map((f) => `${f}: ${readFileSync(join(b.dir, f), 'utf8')}`);
     const everything = [...written, ...debug].join('\n');
 
@@ -595,8 +625,12 @@ describe('s9 Sc8: the notarization state machine', () => {
 
       const calls = b.calls();
       expect(verbs(calls)).toEqual([
-        'submit', 'info',
-        'submit', 'info', 'staple', 'validate',
+        'submit',
+        'info',
+        'submit',
+        'info',
+        'staple',
+        'validate',
       ]);
       // THE ORDER, by artefact and not just by verb. The zip goes first
       // because a failure then costs one submission rather than two, and
@@ -685,39 +719,43 @@ describe('s9 Sc8: the notarization state machine', () => {
   describe.skipIf(!process.env['ASC_KEY_ID'])(
     'row 11: against Apple, with a real App Store Connect key',
     () => {
-      it('notarizes and staples a real artefact', async () => {
-        // Blocked on F-136: no Developer ID certificate exists for this
-        // project, and notarization requires one even though the API key is
-        // a separate credential. Deliberately left as the only unrun row in
-        // this file, counted by the DoD gate rather than deleted, so the
-        // gap stays visible.
-        const zip = process.env['ASC_TEST_ZIP'];
-        const dmg = process.env['ASC_TEST_DMG'];
-        expect(zip).toBeDefined();
-        expect(dmg).toBeDefined();
-        const out = await notarizeRelease({
-          zip: zip as string,
-          dmg: dmg as string,
-          tool: 'notarytool',
-          stapler: 'stapler',
-          keyArgs: [
-            '--key',
-            process.env['ASC_KEY_P8'] as string,
-            '--key-id',
-            process.env['ASC_KEY_ID'] as string,
-            '--issuer',
-            process.env['ASC_ISSUER_ID'] as string,
-          ],
-          deadlineMs: 20 * 60_000,
-        });
-        expect(out.zip.status).toBe('Accepted');
-        expect(out.dmg.status).toBe('Accepted');
-        expect(
-          execFileSync('xcrun', ['stapler', 'validate', dmg as string], {
-            encoding: 'utf8',
-          }),
-        ).toContain('The validate action worked!');
-      }, 25 * 60_000);
+      it(
+        'notarizes and staples a real artefact',
+        async () => {
+          // Blocked on F-136: no Developer ID certificate exists for this
+          // project, and notarization requires one even though the API key is
+          // a separate credential. Deliberately left as the only unrun row in
+          // this file, counted by the DoD gate rather than deleted, so the
+          // gap stays visible.
+          const zip = process.env['ASC_TEST_ZIP'];
+          const dmg = process.env['ASC_TEST_DMG'];
+          expect(zip).toBeDefined();
+          expect(dmg).toBeDefined();
+          const out = await notarizeRelease({
+            zip: zip as string,
+            dmg: dmg as string,
+            tool: 'notarytool',
+            stapler: 'stapler',
+            keyArgs: [
+              '--key',
+              process.env['ASC_KEY_P8'] as string,
+              '--key-id',
+              process.env['ASC_KEY_ID'] as string,
+              '--issuer',
+              process.env['ASC_ISSUER_ID'] as string,
+            ],
+            deadlineMs: 20 * 60_000,
+          });
+          expect(out.zip.status).toBe('Accepted');
+          expect(out.dmg.status).toBe('Accepted');
+          expect(
+            execFileSync('xcrun', ['stapler', 'validate', dmg as string], {
+              encoding: 'utf8',
+            }),
+          ).toContain('The validate action worked!');
+        },
+        25 * 60_000,
+      );
     },
   );
 });

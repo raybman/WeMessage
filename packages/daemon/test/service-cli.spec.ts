@@ -220,6 +220,13 @@ interface InstallJson {
   readonly bootstrapped: boolean;
   readonly changed: boolean;
 }
+/** s9 Sc7 row 6. Same shape as install, minus `changed` — a restart has no
+ *  content to compare against. */
+interface RestartJson {
+  readonly label: string;
+  readonly plistPath: string;
+  readonly bootstrapped: boolean;
+}
 interface StatusJson {
   readonly installed: boolean;
   readonly running: boolean;
@@ -254,22 +261,45 @@ function installArgs(b: { dir: string; la: string }, ...extra: string[]) {
   ];
 }
 
+/** s9 Sc7 row 6. `--launch-agents-dir` is unused by `serviceRestart` itself
+ *  (the plist path comes from `service.json`), but G4 checks it regardless
+ *  of which subcommand is running whenever `--label-prefix` is the test one,
+ *  so it is supplied here for the same reason `installArgs` supplies it. */
+function restartArgs(b: { dir: string; la: string }, ...extra: string[]) {
+  return [
+    'service',
+    'restart',
+    '--dir',
+    b.dir,
+    '--launch-agents-dir',
+    b.la,
+    '--label-prefix',
+    TEST_PREFIX,
+    '--json',
+    ...extra,
+  ];
+}
+
 /* ── row 5: the entrypoint is a daemon first and a CLI second ─────────── */
 
 describe('s9 Sc3 row 5: wemessaged --help, and wemessaged with no args', () => {
-  it('--help names all three service subcommands', async () => {
+  it('--help names all four service subcommands', async () => {
     const r = await cli(['--help']);
     expect(r.code).toBe(0);
     for (const line of [
       'service install',
       'service uninstall',
       'service status',
+      'service restart',
     ])
       expect(r.out, line).toContain(line);
-    // …and it does not silently accept a fourth verb it does not have.
-    const bad = await cli(['service', 'restart']);
+    // …and it does not silently accept a verb it does not have. (s9 Sc7:
+    // 'restart' used to BE this example; it is now a real fourth verb — see
+    // "s9 Sc7 row 6: service restart" below — so the placeholder moved to a
+    // word that can never become one.)
+    const bad = await cli(['service', 'bogus']);
     expect(bad.code).toBe(2);
-    expect(bad.err).toContain('restart');
+    expect(bad.err).toContain('bogus');
   });
 
   it('an unknown top-level command is a refusal, not a daemon start', async () => {
@@ -634,6 +664,64 @@ describe('s9 Sc3 row 7: a second install with the same content changes nothing',
       env,
     });
     expect(third.json<InstallJson>().changed).toBe(true);
+  });
+});
+
+/* ── s9 Sc7 row 6: restart — bootout then bootstrap, unconditionally ──── */
+
+describe('s9 Sc7 row 6: service restart', () => {
+  it('bootout, poll, bootstrap, poll — in that order, regardless of plist content', async () => {
+    const b = bed();
+    const fake = fakeServiceManager();
+    const env = { WEMESSAGE_LAUNCHD_LABEL: PINNED };
+    const installed = await cli(installArgs(b), {
+      run: laneRun(fake.rec.spawn),
+      env,
+    });
+    const plistPath = installed.json<InstallJson>().plistPath;
+    fake.rec.calls.length = 0;
+
+    const r = await cli(restartArgs(b), { run: laneRun(fake.rec.spawn), env });
+    expect(r.code).toBe(0);
+    const json = r.json<RestartJson>();
+    expect(json).toEqual({ label: PINNED, plistPath, bootstrapped: true });
+
+    // Same order as an install whose content changed (row 7 above), because
+    // a restart is exactly that sequence run unconditionally: bootout, a
+    // poll that proves the old job is gone, bootstrap, then a poll that
+    // reports whether the new one took.
+    expect(fake.rec.argvs()).toEqual([
+      ['bootout', `gui/${U}/${PINNED}`],
+      ['print', `gui/${U}/${PINNED}`],
+      ['bootstrap', `gui/${U}`, plistPath],
+      ['print', `gui/${U}/${PINNED}`],
+    ]);
+  });
+
+  it('the audit row lands before anything is written to stdout (§1.8)', async () => {
+    const b = bed();
+    const fake = fakeServiceManager();
+    const env = { WEMESSAGE_LAUNCHD_LABEL: PINNED };
+    await cli(installArgs(b), { run: laneRun(fake.rec.spawn), env });
+    fake.rec.calls.length = 0;
+
+    const r = await cli(restartArgs(b), { run: laneRun(fake.rec.spawn), env });
+    // Reuses `service.installed` rather than minting a new audit event type
+    // (see the comment on `serviceRestart` in service.ts) — the fact
+    // recorded is exactly as true after a restart as after an install.
+    expect(r.order[0]).toBe('audit:service.installed');
+  });
+
+  it('refuses, without spawning anything, when nothing is installed in --dir', async () => {
+    const b = bed();
+    const fake = fakeServiceManager();
+    const r = await cli(restartArgs(b), {
+      run: laneRun(fake.rec.spawn),
+      env: {},
+    });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('nothing installed');
+    expect(fake.rec.calls).toHaveLength(0);
   });
 });
 

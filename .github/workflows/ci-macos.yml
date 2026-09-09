@@ -7,12 +7,19 @@ name: ci-macos
 # a real macOS runner, and `arch.spec.ts` asserts step-for-step that it is the
 # same gate rather than a smaller one.
 #
-# What this lane deliberately does NOT do: sign, notarize, staple, or produce
-# a distributable. There is no Apple Developer ID and no notarization
-# credential for this project, the repo is public, and a step that pretended
-# to sign would either need a secret this repo must not carry or would be a
-# green tick attached to nothing. Packaging arrives with the credential, not
-# before it.
+# What this lane deliberately does NOT do, still: ask for a secret. There is
+# no Apple Developer ID for this project and the repo is public, so a step
+# that pretended to sign would either need a secret this repo must not carry
+# or would be a green tick attached to nothing.
+#
+# s9 Sc9 added the `pack-adhoc` job below, and that is not a reversal of the
+# paragraph above. It packs the app the way this project actually ships it:
+# ad-hoc signed, not notarize-able, and named `-UNSIGNED` so that nobody who
+# downloads one is confused about what they have. The distinction that
+# matters is between a lane that FAKES a credential it does not hold and a
+# lane that is honest about shipping without one. This is the second. It
+# carries no secret, and the sweep in `test/arch.spec.ts` reads the whole
+# file, so a signing step added to either job still fails there.
 on:
   push:
     branches: ['**']
@@ -32,15 +39,15 @@ jobs:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .cache/electron
           key: electron-${{ runner.os }}-44.2.0
@@ -62,3 +69,50 @@ jobs:
       # opens for real. This is the ONE step that runs the suite, so nothing
       # is excluded from it: an excluded file is an untested file.
       - run: pnpm test
+
+  # s9 Sc9 row 9. The one automated proof that the shipped SHAPE still builds.
+  #
+  # `build-and-test` proves the code is correct. This proves the BUNDLE is:
+  # that electron-builder still produces one app, that the native module is
+  # the single arm64 prebuild, that the ad-hoc signature is intact, and that
+  # no dylib points at a Homebrew prefix which exists only on the machine
+  # that built it. Those are the failures invisible to every unit test and
+  # visible to every user on first launch.
+  #
+  # It `needs` the gate job rather than running beside it. Packing takes long
+  # enough that racing it against a suite which may be about to fail wastes a
+  # runner for no information.
+  pack-adhoc:
+    needs: [build-and-test]
+    runs-on: macos-15
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .cache/electron
+          key: electron-${{ runner.os }}-44.2.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wemessage/desktop exec install-electron
+      - run: pnpm build
+      - run: pnpm pack:adhoc
+      # The verifier is the point of the job. Packing that produced a broken
+      # bundle and exited 0 would be a green tick attached to nothing, which
+      # is the exact failure the header above refuses.
+      - run: sh apps/desktop/scripts/verify-bundle.sh dist-pack/mac-arm64/WeMessage.app adhoc
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wemessage-unsigned-${{ github.sha }}
+          path: dist-pack/*-UNSIGNED.zip
+          # Seven days. These are per-push builds on a public repo and the
+          # storage is finite; raising this is a reviewed diff, not a drift.
+          retention-days: 7

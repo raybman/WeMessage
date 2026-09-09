@@ -198,7 +198,11 @@ describe('wizard exit states (Scenario 15)', () => {
   });
 
   it('numbers the steps off the router’s list rather than a literal', () => {
-    expect(WIZARD_STEPS.length).toBe(5);
+    // Six since the s9 Sc7 amendment added `keep-running`. The literal is the
+    // whole point of the row: everything below counts off `WIZARD_STEPS`, so
+    // without this one line a step could be added or dropped and every other
+    // assertion in this file would still agree with itself, loudly.
+    expect(WIZARD_STEPS.length).toBe(6);
     WIZARD_STEPS.forEach((step, i) => {
       const line = progressLine(step);
       expect(line, step).toBe(

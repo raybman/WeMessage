@@ -143,6 +143,28 @@ export interface DraftSummary {
 
 export const WIRE_VERSION = 1;
 
+/**
+ * The shipped version of the whole program, and the one `wemessage --version`
+ * and `wemessaged --version` print.
+ *
+ * WHY A CONSTANT AND NOT `readFileSync('package.json')`. A binary that reads
+ * its own manifest at runtime is a binary that reports a different version
+ * depending on where it was copied to, and that prints nothing at all inside
+ * an app bundle where the manifest was never copied. The version has to be
+ * baked in at build time, and this is the smallest way to bake it in:
+ * `tsc` inlines nothing, but a string in a source file needs nothing inlined.
+ *
+ * WHY IT CANNOT DRIFT FROM THE MANIFESTS. `release:check-versions` reads this
+ * declaration by text and puts it in the same lockstep check as the eighteen
+ * `package.json` files. Bumping the manifests and forgetting this line fails
+ * that check, which the release lane and `release:cut-tag` both run.
+ *
+ * It lives beside `WIRE_VERSION` on purpose, and they are NOT the same
+ * number: the wire version changes when the frame vocabulary changes, which
+ * is almost never, and this one changes every release.
+ */
+export const APP_VERSION = '1.0.0-rc.1';
+
 /** Every frame on the wire is exactly these five keys. */
 export interface Envelope<T extends string, P> {
   v: number;

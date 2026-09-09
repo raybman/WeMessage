@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+/**
+ * `licenses:notices` (generator, not an npm script) — writes
+ * THIRD_PARTY_NOTICES.md from the real dependency graph. Never hand-edit
+ * the generated file: run this again and commit its output.
+ *
+ * Scenario 11. SCOPE: the union of a `--production` scan of every
+ * workspace member (every package that ends up in a `dependencies` field
+ * and is genuinely bundled), plus BUNDLED_EXTRAS below. That constant holds
+ * two names for two different reasons, not one:
+ *
+ *   - `electron` is a devDependency of apps/desktop. electron-builder
+ *     copies Electron's own binary into the shipped app, so it IS bundled,
+ *     but a `--production` scan structurally cannot see it: `--production`
+ *     only reads a package.json's own `dependencies` field, and Electron
+ *     sits under `devDependencies` because npm considers it a build-time
+ *     tool, not because it is absent from the app.
+ *   - `better-sqlite3` is already a `dependencies` entry in packages/store
+ *     and packages/ingest, so the production scan finds it on its own.
+ *     It is listed here anyway, belt and braces, so a future refactor that
+ *     moves it to devDependencies (native modules sometimes get moved
+ *     there for build-tooling reasons) cannot silently drop it from a
+ *     notices file nobody is watching that closely.
+ *
+ * WHAT NEVER APPEARS IN THE OUTPUT: license-checker's `email` field, and
+ * the full text of any bundled LICENSE file. Both can carry a maintainer's
+ * personal address (plenty of MIT copyright headers read "Copyright (c)
+ * 2020 Jane Doe <jane@example.com>"), and neither has any business in a
+ * file this project redistributes. Only the package name, version, SPDX
+ * license identifier and repository URL are recorded.
+ *
+ * THE `tools/` FENCE. Only `node:*` imports and one relative import, of
+ * `manifestPaths` from the sibling `check-versions.mjs`, which is the same
+ * pnpm-workspace.yaml reader that tool already uses: one place derives the
+ * workspace member list, not three.
+ */
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { manifestPaths } from './check-versions.mjs';
+
+const repoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+);
+const licenseCheckerBin = join(
+  repoRoot,
+  'node_modules/.bin/license-checker-rseidelsohn',
+);
+
+/** Root first, every workspace member after, dirs rather than manifest paths. */
+const WORKSPACE_ROOTS = manifestPaths()
+  .map((p) => (p === 'package.json' ? '.' : p.replace(/\/package\.json$/, '')))
+  .sort();
+
+/** See the header comment: two names, two different reasons. */
+const BUNDLED_EXTRAS = ['electron', 'better-sqlite3'];
+
+const scanJson = (root, production) => {
+  const args = [
+    ...(production ? ['--production'] : []),
+    '--start',
+    root,
+    '--json',
+    '--excludePrivatePackages',
+  ];
+  const stdout = execFileSync(licenseCheckerBin, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    cwd: repoRoot,
+  });
+  return JSON.parse(stdout);
+};
+
+const bareName = (key) => key.slice(0, key.lastIndexOf('@'));
+
+/**
+ * Every package this workspace publishes lives under this scope. A scan
+ * finds them too, since one workspace member's `dependencies` on another
+ * (packages/sendkit on @wemessage/core, say) is a real `dependencies`
+ * entry as far as license-checker is concerned, and none of them are
+ * marked `private` in their own package.json, so `--excludePrivatePackages`
+ * does not touch them either. They are this project's own code, not a
+ * third party, and do not belong in a THIRD_PARTY_NOTICES.md.
+ */
+const INTERNAL_SCOPE = '@wemessage/';
+
+/** The union this file documents: every production package, plus BUNDLED_EXTRAS. */
+export const buildNoticesUnion = () => {
+  const union = new Map();
+  for (const root of WORKSPACE_ROOTS) {
+    const report = scanJson(root, true);
+    for (const [key, info] of Object.entries(report)) {
+      if (bareName(key).startsWith(INTERNAL_SCOPE)) continue;
+      union.set(key, info);
+    }
+  }
+  // A full (non-production) scan per root, kept ONLY where the bare name
+  // matches BUNDLED_EXTRAS, so pulling electron in does not also pull in
+  // the rest of apps/desktop's devDependency graph (axe-core and friends,
+  // which are test-time only and never enter the bundle).
+  for (const root of WORKSPACE_ROOTS) {
+    let report;
+    try {
+      report = scanJson(root, false);
+    } catch {
+      continue;
+    }
+    for (const [key, info] of Object.entries(report)) {
+      if (BUNDLED_EXTRAS.includes(bareName(key))) union.set(key, info);
+    }
+  }
+  return union;
+};
+
+export const renderNotices = (union) => {
+  const lines = [];
+  lines.push('# Third-Party Notices');
+  lines.push('');
+  lines.push(
+    'This file is generated by `tools/release/bin/notices.mjs`. Do not edit ' +
+      'it by hand: regenerate it and commit the result instead.',
+  );
+  lines.push('');
+  lines.push(
+    'It lists every third-party package a WeMessage release bundles: the ' +
+      "union of each workspace member's production dependencies, plus " +
+      '`electron` and `better-sqlite3`, which are bundled regardless of ' +
+      'how they happen to be declared. See the generator source for why.',
+  );
+  lines.push('');
+  for (const name of [...union.keys()].sort()) {
+    const info = union.get(name);
+    lines.push(`## ${name}`);
+    lines.push('');
+    lines.push(`License: ${info.licenses ?? 'UNKNOWN'}`);
+    if (info.repository) lines.push(`Repository: ${info.repository}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+};
+
+const main = () => {
+  const content = renderNotices(buildNoticesUnion());
+  const outIdx = process.argv.indexOf('--out');
+  const outPath = outIdx === -1 ? undefined : process.argv[outIdx + 1];
+  if (outPath) writeFileSync(outPath, content);
+  else process.stdout.write(content);
+};
+
+if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url)))
+  main();

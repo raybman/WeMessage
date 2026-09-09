@@ -20,6 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError } from 'commander';
+import { APP_VERSION } from '@wemessage/protocol';
 import {
   createClient,
   readTokenFile,
@@ -316,6 +317,10 @@ const program = new Command();
 program
   .name('wemessage')
   .description('WeMessage gateway CLI — thin client over the local daemon API')
+  // `-V` is commander's default short flag and is left alone; `-v` is not
+  // taken here, but a short flag for the version is the kind of thing a
+  // later verb wants back, so only the long form is documented.
+  .version(APP_VERSION, '--version', 'print the version and exit')
   .exitOverride();
 
 program

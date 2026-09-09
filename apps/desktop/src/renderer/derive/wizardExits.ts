@@ -295,6 +295,7 @@ export const STEP_TITLE: Readonly<Record<WizardStep, string>> = {
   'full-disk': 'FULL DISK ACCESS',
   automation: 'AUTOMATION',
   optional: 'OPTIONAL EXTRAS',
+  'keep-running': 'KEEP IT RUNNING',
   'send-test': 'SEND A TEST',
 };
 
@@ -309,16 +310,17 @@ export const STEP_TITLE: Readonly<Record<WizardStep, string>> = {
  * `welcome` owns the two that are facts about the machine rather than
  * grants: the OS version, and whether Messages is actually running. The two
  * TCC grants get a step each, because each has its own pane and its own
- * instructions. The last two steps own no check at all — there is nothing
- * for the daemon to say about "would you like notifications" — so they are
- * gated by the exit rather than by a verdict, which is why `worstOf([])` is
- * OK and not unknown.
+ * instructions. The last three steps own no check at all — there is nothing
+ * for the daemon to say about "would you like notifications" or "how should
+ * the agent keep running" — so they are gated by the exit rather than by a
+ * verdict, which is why `worstOf([])` is OK and not unknown.
  */
 export const STEP_CHECKS: Readonly<Record<WizardStep, readonly CheckId[]>> = {
   welcome: ['os', 'messages'],
   'full-disk': ['fda'],
   automation: ['automation'],
   optional: [],
+  'keep-running': [],
   'send-test': [],
 };
 
@@ -343,7 +345,7 @@ export function stepVerdict(
 }
 
 /**
- * `STEP 2 OF 5 · FULL DISK ACCESS`.
+ * `STEP 2 OF 6 · FULL DISK ACCESS`.
  *
  * Numbered off the router's list in both places, so a sixth step renumbers
  * every line rather than leaving a "STEP 5 OF 5" in the middle of six.

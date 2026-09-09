@@ -94,8 +94,10 @@ export interface WizardScreenProps {
  * What each step tells the operator to go and do, total over the step list.
  *
  * A `Readonly<Record<WizardStep, …>>` for the same reason `STEP_TITLE` is: a
- * sixth step is a compile error here rather than a step that renders its
- * heading over an empty panel.
+ * new step is a compile error here rather than a step that renders its
+ * heading over an empty panel. It did exactly that when s9 Sc7 added
+ * `keep-running`, which is why this record has a sixth entry now, and a
+ * SEVENTH step would stop the build the same way.
  *
  * The copy never says a permission was granted, never says this app granted
  * one, and never says a check passed that was not run. Those three sentences
@@ -118,6 +120,10 @@ const STEP_BODY: Readonly<Record<WizardStep, readonly string[]>> = {
   optional: [
     'Notifications and accessibility are worth having and neither is required. This app works with both switched off, and the daemon does not probe either of them.',
     'So there is no card here and no button: a screen that reported on a check nobody ran would be doing the one thing this flow exists not to do. Turn them on in System Settings whenever you like.',
+  ],
+  'keep-running': [
+    'A reply can only be drafted while the daemon is running. Installed as a background service it starts at login and starts again if it stops, so a message that arrives while this app is closed is still waiting in the queue when you open it.',
+    'It is a recommendation and not a requirement: running the daemon by hand from a terminal works exactly as well. This screen reports on nothing, because there is nothing here that anybody has checked. When you want the service, the daemon installs it for you with `wemessaged service install`.',
   ],
   'send-test': [
     'One message, to a handle you can read on this Mac, to prove the pipe end to end. It takes the ordinary path: the daemon writes a draft, records an approval against it, logs both, and only then hands it to the sender.',

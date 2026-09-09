@@ -23,12 +23,13 @@ export const SCREENS = [
   'settings',
 ] as const;
 
-/** The onboarding flow, in order. Step 5 is the only send in the app. */
+/** The onboarding flow, in order. Step 6 is the only send in the app. */
 export const WIZARD_STEPS = [
   'welcome',
   'full-disk',
   'automation',
   'optional',
+  'keep-running',
   'send-test',
 ] as const;
 

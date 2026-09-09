@@ -29,8 +29,9 @@
  *
  * NOTHING IS PUBLISHED HERE. `pnpm pack` writes a local tarball into a temp
  * directory and the temp directory is removed; there is no `npm publish`, no
- * `--dry-run` against the registry, and no login. F-94 keeps the versions at
- * 0.1.0 and defers the first real publish to F1.
+ * `--dry-run` against the registry, and no login. F-94 keeps the first real
+ * publish deferred; s9 Sc14 moved the packed version off the 0.1.0 placeholder
+ * and onto the repo's lockstep release version.
  *
  * COST. Packing runs the real packer against three packages, so it is done
  * ONCE in `beforeAll` rather than per row, with an explicit hook timeout;
@@ -174,7 +175,7 @@ describe('s7 Sc12 row 6: the publish set produces publishable tarballs', () => {
       // three packages that silently cannot be installed.
       expect(Object.keys(manifest)).not.toContain('private');
       expect(manifest['license']).toBe('Apache-2.0');
-      expect(manifest['version']).toBe('0.1.0'); // F-94: no version bump here
+      expect(manifest['version']).toBe('1.0.0-rc.1'); // s9 Sc14: lockstep version, bumped off the 0.1.0 placeholder
       expect(manifest['publishConfig']).toMatchObject({ access: 'public' });
       // pnpm rewrites `workspace:*` at pack time. If one survives, the
       // published package is uninstallable outside this monorepo.

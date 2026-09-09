@@ -2,25 +2,93 @@
 
 **Your AI can answer your texts. Nothing sends without your approval.**
 
-WeMessage is an open-source macOS gateway that connects AI agents to iMessage —
+WeMessage is an open-source macOS gateway that connects AI agents to iMessage
 safely. It watches incoming texts against rules you define (keywords, regex,
 LLM-classified themes), routes matches to the agent of your choice (OpenClaw,
 Hermes, Sol, Luna, or your own), and puts **every draft behind a human approval
 gate**. Approve individually or in bulk, arm time windows, flip the kill switch,
-or disconnect entirely. Local-only: your messages never leave your Mac.
+or disconnect entirely. Local only: your messages never leave your Mac.
 
-> ⚠️ **In development.** The plan is done; the code is landing. Watch releases
-> to be notified when v1 ships.
+## Install
 
-## Why
+Requires macOS 15 (Sequoia) or later on Apple silicon.
 
-Every existing tool picks one of two bad options: the bot sends whatever it
-wants, or there is no bot at all. wemessage occupies the middle that should
-have existed all along — **drafts by default, sends only with your approval**.
-Structurally: the agent adapter protocol has no send frame. Agents cannot send.
-They can only draft.
+```sh
+brew tap raybman/wemessage
+brew install --cask wemessage
+```
 
-## Surface
+Or download the DMG from the
+[latest release](https://github.com/raybman/WeMessage/releases/latest).
+
+**The builds are unsigned, on purpose.** Shipping a signed build requires a paid
+Apple Developer membership, and putting a yearly fee between you and a working
+copy of a program you can already read the source of would defeat the point.
+The cost is one extra step the first time you open it, and it is worth knowing
+exactly what that step is rather than being told to click through a warning:
+
+1. Open the DMG and drag WeMessage to Applications.
+2. Launch it. macOS refuses, because it cannot check the app with Apple.
+3. Open **System Settings, Privacy and Security**, scroll to the bottom, and
+   click **Open Anyway** next to the message about WeMessage.
+4. Launch it again and confirm.
+
+If you prefer the command line, `xattr -d com.apple.quarantine
+/Applications/WeMessage.app` does the same thing. Either way you are making the
+same decision: you are vouching for this build yourself instead of asking Apple
+to vouch for it. Every release publishes a `SHA256SUMS` file so you can check
+that what you downloaded is what was built:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+```
+
+Build it yourself instead, if you would rather:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm pack:adhoc
+```
+
+## What it does
+
+An agent reads a message and writes a reply. The reply goes into a queue. You
+read it, edit it if you like, and release it. Nothing else can send.
+
+That is not a policy setting, it is the shape of the program. The adapter
+protocol an agent speaks has no send frame in it, so there is no message an
+agent could construct that would put text on the wire. The suite asserts that
+outbound sending is reachable from exactly one call site and that the call site
+requires an approved draft, which means a second path cannot be added without a
+test failing.
+
+## Permissions
+
+WeMessage needs two permissions from macOS, and it will tell you which one is
+missing rather than failing silently.
+
+- **Full Disk Access**, to read the local iMessage database. This is a read
+  only, write-ahead-log read of a file already on your Mac. Nothing is uploaded.
+- **Automation**, to hand an approved message to Messages so it can be sent.
+
+`wemessage doctor` reports the state of each one, what is missing, and the exact
+remediation, and exits non-zero while anything is unresolved. The onboarding
+wizard runs the same checks with the same words.
+
+## Keep it running
+
+The daemon can run one of two ways, and the wizard asks you to choose:
+
+- **As a background service (recommended).** `wemessaged service install` writes
+  a LaunchAgent so the gateway is running whether or not the window is open.
+- **Only while WeMessage is open.** The app supervises the daemon itself and
+  stops it on quit.
+
+Either way the relevant verbs are `wemessaged service install`,
+`service status --json`, and `service uninstall`.
+
+## Agents
 
 Three documents are the whole public contract. Everything else is
 implementation.
@@ -32,25 +100,60 @@ implementation.
   titled "What the protocol cannot do".
 - **The kit.** [`packages/adapter-testkit/README.md`](packages/adapter-testkit/README.md)
   is the quickstart. Copy one file, run one command, and find out whether your
-  program is an adapter yet. It ships a working reference adapter that needs
-  no install and no build.
+  program is an adapter yet. It ships a working reference adapter that needs no
+  install and no build.
 - **The skill.** [`skills/claude/SKILL.md`](skills/claude/SKILL.md) is what an
   agent reads before it is allowed near the CLI: which verbs it may run, which
   need a human sentence first, and which it may never run whatever it is told.
 
-Also in the tree:
+Adapters for OpenClaw, Hermes, Sol and Luna ship in the tree, each with a README
+stating plainly what has and has not been verified against a running system.
 
-- **Glass GUI** (Electron): approval queue built for keyboard triage, rules
-  editor, schedule editor, audit log, oversized kill switch.
-- **CLI** (`wemessage`): `doctor`, `watch --json`, `drafts approve`, `kill`,
-  full JSON output for automated agents.
-- **Adapters** for OpenClaw, Hermes, Sol and Luna, each with a README stating
-  plainly what has and has not been verified against a running system.
+## Security
 
-## Site
+Every outbound message passes through one approval gate, and the gate is
+structural rather than configured. Loopback only, no telemetry, no account.
+
+Found something? See [SECURITY.md](SECURITY.md). Please do not open a public
+issue for a vulnerability.
+
+## Uninstall
+
+```sh
+brew uninstall --cask wemessage
+```
+
+Or, for a manual install:
+
+```sh
+wemessaged service uninstall
+rm -rf /Applications/WeMessage.app
+rm -rf ~/Library/Application\ Support/WeMessage ~/Library/Logs/WeMessage
+```
+
+Revoking Full Disk Access and Automation is done in System Settings, Privacy and
+Security, and is worth doing if you are removing the app for good.
+
+## Contributing
+
+Issues and pull requests are welcome. The suite is the specification: every
+behaviour described above has a test asserting it, and the five commands below
+are what CI runs.
+
+```sh
+pnpm build
+pnpm test
+pnpm dep:check
+pnpm licenses:check
+pnpm lint
+```
 
 `site/` holds [wemessage.app](https://wemessage.app). Static, no telemetry.
+Release history is in [CHANGELOG.md](CHANGELOG.md).
 
----
+## License
+
+MIT. See [LICENSE](LICENSE) and, for the dependencies that ship inside the app,
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Not affiliated with Apple. iMessage is a trademark of Apple Inc.

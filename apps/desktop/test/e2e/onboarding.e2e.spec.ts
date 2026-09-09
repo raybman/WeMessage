@@ -99,7 +99,7 @@ const BUDGET_MS = 60_000;
 const PRESS_DELAY_MS = 60;
 
 /**
- * The keystrokes a full five-step walk costs.
+ * The keystrokes a full six-step walk costs.
  *
  * `tabTo` blurs and then Tabs until the control has focus, which costs
  * more presses than tabbing onward from wherever focus happens to be and is
@@ -117,25 +117,34 @@ const PRESS_DELAY_MS = 60;
  * difference is real behaviour rather than a missing control — the ids
  * present at every step are asserted alongside it below.
  *
- *   welcome     [recheck continue finish]            2 Tab + Enter =  3
- *   full-disk   [back recheck continue finish]       4 Tab + Enter =  5
- *   automation  [back recheck continue finish]       4 Tab + Enter =  5
- *   optional    [back recheck continue finish]       4 Tab + Enter =  5
- *   send-test   [back recheck handle send finish]
- *               to the handle                        4 Tab         =  4
- *               the handle, typed                    12 characters = 12
- *               to SEND, and press it                1 Tab + Enter =  2
- *               to FINISH, and press it              1 Tab + Enter =  2
+ *   welcome      [recheck continue finish]           2 Tab + Enter =  3
+ *   full-disk    [back recheck continue finish]      4 Tab + Enter =  5
+ *   automation   [back recheck continue finish]      4 Tab + Enter =  5
+ *   optional     [back recheck continue finish]      4 Tab + Enter =  5
+ *   keep-running [back recheck continue finish]      4 Tab + Enter =  5
+ *   send-test    [back recheck handle send finish]
+ *                to the handle                       4 Tab         =  4
+ *                the handle, typed                   12 characters = 12
+ *                to SEND, and press it               1 Tab + Enter =  2
+ *                to FINISH, and press it             1 Tab + Enter =  2
  *                                                                    ──
- *                                                                    38
+ *                                                                    43
  *
  * Asserted exactly rather than as an upper bound, Sc8-style: a walk that
  * became cheaper because a step stopped rendering a control is a regression
  * in this product, not an improvement. The four Tabs that reach CONTINUE on
  * the middle steps are load-bearing in exactly that way: three of them
  * would mean FINISH had stopped being rendered.
+ *
+ * `keep-running` is the s9 Sc7 amendment, and it is in this table because
+ * the wizard grew a step, not because the number was inconvenient. It costs
+ * what `optional` costs and for the same reason: it checks nothing, so it
+ * renders the same four controls, and the count went UP by exactly that
+ * step's price. A ratchet that had been relaxed to an upper bound would
+ * have absorbed the change in silence, which is the whole argument for
+ * asserting it exactly.
  */
-const EXPECTED_PRESSES = 38;
+const EXPECTED_PRESSES = 43;
 
 /**
  * The regression guard, expressed against the keyboard floor.
@@ -345,7 +354,7 @@ async function openWizard(app: LaunchedApp): Promise<void> {
 
 interface Walk {
   readonly view: WizardView;
-  /** Every control id present, in DOM order, at each of the five steps. */
+  /** Every control id present, in DOM order, at each of the six steps. */
   readonly controls: ReadonlyArray<readonly string[]>;
   readonly elapsed: number;
   readonly presses: number;
@@ -396,7 +405,13 @@ async function walkAndMeasure(): Promise<Walk> {
   };
   const start = await app.page.evaluate(() => performance.now());
 
-  for (const step of ['full-disk', 'automation', 'optional', 'send-test']) {
+  for (const step of [
+    'full-disk',
+    'automation',
+    'optional',
+    'keep-running',
+    'send-test',
+  ]) {
     await ids();
     await keys.tabTo('wizard-continue');
     await keys.key('Enter');
@@ -707,6 +722,7 @@ describe('s8 Sc15 — onboarding: the wizard through every exit state', () => {
       ['wizard-back', 'wizard-recheck', 'wizard-continue', 'wizard-finish'],
       ['wizard-back', 'wizard-recheck', 'wizard-continue', 'wizard-finish'],
       ['wizard-back', 'wizard-recheck', 'wizard-continue', 'wizard-finish'],
+      ['wizard-back', 'wizard-recheck', 'wizard-continue', 'wizard-finish'],
       [
         'wizard-back',
         'wizard-recheck',
@@ -824,7 +840,7 @@ describe('s8 Sc15 — onboarding: the wizard through every exit state', () => {
     // because a counter said so would be asserting three passes it has not
     // re-established.
     expect(view.step).toBe('welcome');
-    expect(view.progress).toContain('STEP 1 OF 5');
+    expect(view.progress).toContain('STEP 1 OF 6');
 
     // Nothing about the wizard is in the daemon's settings table. Opening
     // onboarding does not change the product, and closing it does not

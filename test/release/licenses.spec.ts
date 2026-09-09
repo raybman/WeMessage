@@ -303,10 +303,12 @@ describe('s1 Sc11: the license gate, from --failOn to --onlyAllow', () => {
 
   /* ── the two scripts, exact shape ──────────────────────────────────── */
 
+  // teeth: TN-substring-is-fine (row 1): swapping --onlyAllow for --failOn in licenses:check failed this row and row 3, but every planted-probe row stayed green because runOnlyAllow builds its own argv. Reverted.
   it('row 1: licenses:check is the exact production --onlyAllow chain, one clause per workspace root', () => {
     expect(readScripts()['licenses:check']).toBe(buildChain(true));
   });
 
+  // teeth: TN-dev-is-not-shipped (row 2): deleting the licenses:check:dev script failed this row and row 3. Reverted.
   it('row 2: licenses:check:dev is the same chain, sourced from licenses.allow.dev, without --production', () => {
     expect(readScripts()['licenses:check:dev']).toBe(buildChain(false));
   });

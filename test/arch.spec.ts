@@ -10548,6 +10548,8 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
    * exemption is proved to be a set of size one and the exempt file's own
    * hits are ENUMERATED rather than counted. Both legs are below.
    */
+  // teeth: TN-sol-agent-by-cast (row 6): a foreign label cast past the brand was refused as LaunchdInvocationRefused rather than LaunchdLabelRefused, failing row 6 of packages/daemon/test/launchctl.spec.ts and its sibling. Reverted.
+  // Recorded in this file because row 4 below bans that tooth's own name in every tracked file under the product roots, and this file is the single exemption.
   describe('row 4: no tracked file names a launchd verb that kills', () => {
     const LAUNCHD_BANNED: readonly string[] = [
       'kickstart',

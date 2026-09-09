@@ -226,6 +226,7 @@ describe('s9 Sc2 rows 1 and 2: `wx`, and who is allowed to be alive', () => {
    * the three outcomes. This row hands the daemon a holder it is not allowed
    * to signal at all.
    */
+  // teeth: TN-stale-means-yours (row 2): reading EPERM as dead in pidLiveness let the daemon reclaim pid 1's lock; this row and the EPERM liveness row failed, and nothing else did. Reverted.
   it.skipIf(IS_ROOT)(
     'row 2: a holder this process may not signal is ALIVE, not stale',
     async () => {

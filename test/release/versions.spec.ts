@@ -357,6 +357,7 @@ describe('s9 Sc14: CHANGELOG, lockstep versions, cut-tag, v1.0.0-rc.1', () => {
       expect(result.stderr).toContain('dirty tree');
     });
 
+    // teeth: TN-tag-with-docs (row 4): removing the staged-docs gate from planTag let a tag be cut with docs/ staged; this row and its planTag unit sibling both failed. Reverted.
     it("end to end: staged docs/ refuses, this is TN-tag-with-docs's target row", () => {
       const dir = seedRepo({ version: TARGET_VERSION });
       mkdirSync(join(dir, 'docs/plans/slices'), { recursive: true });

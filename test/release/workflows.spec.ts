@@ -309,6 +309,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 4: every step declares its lane ────────────────────────────── */
 
+  // teeth: TN-secret-in-adhoc-lane (row 4): deleting the release-lane if from import-signing-certificate made this row report that step as touching a signing secret with no lane guard. Reverted.
   it('row 4: no step touches a signing secret without a lane guard', () => {
     const wf = load(RELEASE);
     const offenders: string[] = [];

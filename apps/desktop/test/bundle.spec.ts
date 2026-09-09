@@ -203,6 +203,7 @@ describe('s9 Sc5 row 1: the bundle is an exact listing, not a directory that gre
     }
   });
 
+  // teeth: TN-wrong-arch-prebuild (row 1): copying prebuilds/darwin-x64.node in place of darwin-arm64 made this row list the x64 binary. Reverted.
   it('ships exactly one native binary, and it is the arm64 one (F-135)', () => {
     const natives = listing(OUT).filter((f) => f.endsWith('.node'));
     expect(natives).toEqual([

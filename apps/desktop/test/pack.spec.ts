@@ -457,6 +457,7 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
 
   /* ── row 6: the closed entitlement list ───────────────────────────── */
 
+  // teeth: TN-builder-defaults (row 6): deleting pack.mjs's entitlements override dropped the ad-hoc lane onto the release list, 3 keys against 4, the missing one being disable-library-validation. Reverted.
   it('row 6: the entitlement set is exactly the lane list, top and inherited', () => {
     expect(entitlementKeys(EXE)).toEqual(ADHOC_ENTITLEMENTS);
     const helpers = readdirSync(join(APP, 'Contents', 'Frameworks'))

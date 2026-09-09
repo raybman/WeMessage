@@ -424,6 +424,7 @@ describe('s9 Sc8: the notarization state machine', () => {
 
   /* ── row 5 ──────────────────────────────────────────────────────────── */
 
+  // teeth: TN-resubmit-on-hang (row 5): re-submitting once more after the timeout put two submit lines in the fake's log. Reverted.
   it('row 5: hang — times out carrying the id, and NEVER submits again', async () => {
     const b = bed('hang');
     const err = await notarize(b.opts()).then(

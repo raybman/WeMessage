@@ -170,6 +170,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     expect(rb).toContain('depends_on arch: :arm64');
   });
 
+  // teeth: TN-uninstall-forgets-the-agent (row 3): dropping the launchctl line from the rendered uninstall stanza failed the exact-stanza match here. Reverted.
   it('row 3: uninstall has exactly launchctl/quit/delete, and nothing else', () => {
     const rb = renderCask({
       version: '1.0.0-rc.1',

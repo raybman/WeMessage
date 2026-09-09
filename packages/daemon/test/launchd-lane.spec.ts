@@ -423,6 +423,7 @@ describe('s9 Sc3 G3 refusal 1: the lane refuses before it delegates', () => {
 
 /* ── refusal 2: sweepOwnDir ───────────────────────────────────────────── */
 
+// teeth: TN-real-launchagents-dir (row 14): resolving every path to the real ~/Library/LaunchAgents made the sweep accept it; this row failed, and so did all four rows of Sc3 row 6. Reverted.
 describe('s9 Sc3 G3 refusal 2 (plan row 14): the sweep stays in its own dir', () => {
   it('PLANTED: the real LaunchAgents directory is refused, not swept', async () => {
     // The path is OBTAINED, not spelled: it is whatever the installer would

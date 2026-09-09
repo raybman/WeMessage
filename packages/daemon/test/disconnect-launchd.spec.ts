@@ -403,6 +403,7 @@ describe('s9 Sc4 rows 7-9: armed in phase A, fired in phase B', () => {
     expect(afterResponse).not.toBeNull();
   });
 
+  // teeth: TN-unload-before-flush (row 8): firing the unload un-awaited in phase A put run:bootout ahead of the audit append; rows 8 and 9 failed. Reverted.
   it('row 8 — the audit row is appended BEFORE the thunk exists', async () => {
     /*
      * §1.8 in its strongest available form. This is not "the append happens

@@ -375,10 +375,37 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
      * A shell that cannot open a window must die here, and it must say what
      * it said on the way down.
      */
+    /*
+     * WHAT THE PROCESS WAS DOING WHEN THE WAIT RAN OUT, captured BEFORE the
+     * kill, because after `SIGKILL` every process looks the same.
+     *
+     * `exitCode`/`signalCode` are null while a child is running and set once
+     * it is reaped, so the pair answers the one question the transcript on
+     * its own cannot: did main DIE or is it STUCK? An empty transcript is
+     * consistent with both, and the two have nothing to do with each other.
+     * Dead with code 0 is main's single-instance branch quitting silently
+     * (`src/main/index.ts` now prints a line there, so a transcript that is
+     * still empty rules that out too). Dead on a signal is a crash. Still
+     * running is `app.whenReady()` never settling, which on a hosted macOS
+     * runner means the GUI session, not this repository.
+     *
+     * A CI run that fails 168 times should say which of those it was. The
+     * one that prompted this said only "no window", 168 times, with nothing
+     * after it.
+     */
+    const state =
+      child.exitCode !== null
+        ? `exited code=${String(child.exitCode)}`
+        : child.signalCode !== null
+          ? `killed signal=${child.signalCode}`
+          : 'STILL RUNNING (never became ready)';
     child.kill('SIGKILL');
     const reason = error instanceof Error ? error.message : String(error);
+    const said = chunks.join('');
     throw new Error(
-      `launchApp: no window: ${reason}\n--- main transcript ---\n${chunks.join('')}`,
+      `launchApp: no window: ${reason}\n` +
+        `--- main process: ${state}, pid=${String(child.pid)} ---\n` +
+        `--- main transcript (${String(said.length)} bytes) ---\n${said}`,
     );
   }
   /*

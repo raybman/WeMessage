@@ -250,7 +250,30 @@ async function boot(): Promise<void> {
 }
 
 if (singleInstance) void boot();
-else app.quit();
+else {
+  /*
+   * SAY SO ON THE WAY OUT. This branch is the app's one SILENT exit: it
+   * writes nothing, opens nothing, and returns 0, which is indistinguishable
+   * from a process that hung before `whenReady` ever resolved.
+   *
+   * That ambiguity cost a full CI run to diagnose and still did not resolve
+   * it. `test/e2e/harness.ts` reports a failed launch as `launchApp: no
+   * window` followed by everything main said, and on the run that found this
+   * the transcript was EMPTY 168 times over. Empty is consistent with two
+   * completely different faults: a second instance losing the lock and
+   * quitting here, or the GUI session never coming up so `whenReady` never
+   * settles. The first is our bug, the second is the runner's, and there was
+   * no way to tell them apart from the artefact the failure left behind.
+   *
+   * One line on stderr is the whole fix. It is not a log level, not a
+   * setting, and not conditional on the test flag: the operator who
+   * double-clicks a second copy deserves the same sentence.
+   */
+  process.stderr.write(
+    'wemessage: another instance already holds the single-instance lock; exiting\n',
+  );
+  app.quit();
+}
 
 /**
  * Closing the last window does not end the app any more.

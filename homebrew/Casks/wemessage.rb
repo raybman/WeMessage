@@ -16,8 +16,8 @@ cask "wemessage" do
   depends_on arch: :arm64
 
   app "WeMessage.app"
-  binary "#{appdir}/WeMessage.app/Contents/MacOS/wemessaged", target: "wemessaged"
-  binary "#{appdir}/WeMessage.app/Contents/MacOS/wemessage", target: "wemessage"
+  binary "#{appdir}/WeMessage.app/Contents/Resources/bin/wemessaged", target: "wemessaged"
+  binary "#{appdir}/WeMessage.app/Contents/Resources/bin/wemessage", target: "wemessage"
 
   uninstall launchctl: "sh.wemessage.gateway",
             quit:      "sh.wemessage.gateway",
@@ -32,12 +32,23 @@ cask "wemessage" do
 
   caveats do
     <<~EOS
+      This build is UNSIGNED and Homebrew quarantines what it downloads, so
+      macOS will refuse the first launch. To allow it:
+
+        1. Open WeMessage once and let macOS refuse it.
+        2. Open System Settings > Privacy & Security, scroll to the bottom,
+           and click "Open Anyway" next to the message about WeMessage.
+        3. Open it again and confirm.
+
+      Or, in a terminal:
+        xattr -d com.apple.quarantine /Applications/WeMessage.app
+
       WeMessage needs Full Disk Access and Automation permission for Messages
       to read and send messages. Grant both in System Settings > Privacy &
       Security before starting the service.
 
       Start the gateway service with:
-        wemessage service install
+        wemessaged service install
     EOS
   end
 end

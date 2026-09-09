@@ -34,12 +34,27 @@
  *   - the cask token is "wemessage" (lowercase; must equal the basename of
  *     `homebrew/Casks/wemessage.rb` for `brew style`'s token/filename cop)
  *   - the app bundle is "WeMessage.app", exposing two on-PATH binaries:
- *     the "wemessaged" gateway daemon and the "wemessage" control CLI
+ *     the "wemessaged" gateway daemon and the "wemessage" control CLI.
+ *     Both live at Contents/Resources/bin/, NOT Contents/MacOS/. The
+ *     bundle has exactly ONE Mach-O (arch F-121) and these two are
+ *     `/bin/sh` shims written by `apps/desktop/scripts/bundle-daemon.mjs`;
+ *     `apps/desktop/electron-builder.yml` copies `dist-bundle/bin` to
+ *     `bin` under Resources. This renderer named Contents/MacOS/ for two
+ *     releases and every path it emitted pointed at nothing, which
+ *     Homebrew reports as "source is not there" and refuses to install.
+ *     Row 11 now pins these paths to the builder config so the two files
+ *     cannot disagree again in silence.
  *   - the daemon runs as a launchd agent labelled "sh.wemessage.gateway",
  *     installed at ~/Library/LaunchAgents/sh.wemessage.gateway.plist
- *   - "wemessage service install" is the operator's on-ramp to that agent
- *     (referenced in `caveats`; the caveats block is the only place a
- *     first-time installer reliably reads before anything else runs)
+ *   - "wemessaged service install" is the operator's on-ramp to that
+ *     agent. The verb is on the DAEMON, not the CLI: it is defined in
+ *     `packages/daemon/src/launchd/cli.ts`, and `wemessage service` is
+ *     not a command at all. Referenced in `caveats`, which is the only
+ *     text a first-time installer reliably reads before anything runs.
+ *   - the download is UNSIGNED, and Homebrew quarantines what it fetches
+ *     exactly like a browser would, so Gatekeeper will refuse the first
+ *     launch. The caveats say how to get past it. A cask that installs an
+ *     app the operator then cannot open has not installed anything.
  */
 
 export interface RenderCaskInput {
@@ -170,8 +185,8 @@ export function renderCask(input: RenderCaskInput): string {
   depends_on arch: :arm64
 
   app "WeMessage.app"
-  binary "#{appdir}/WeMessage.app/Contents/MacOS/wemessaged", target: "wemessaged"
-  binary "#{appdir}/WeMessage.app/Contents/MacOS/wemessage", target: "wemessage"
+  binary "#{appdir}/WeMessage.app/Contents/Resources/bin/wemessaged", target: "wemessaged"
+  binary "#{appdir}/WeMessage.app/Contents/Resources/bin/wemessage", target: "wemessage"
 
   uninstall launchctl: "sh.wemessage.gateway",
             quit:      "sh.wemessage.gateway",
@@ -186,12 +201,23 @@ export function renderCask(input: RenderCaskInput): string {
 
   caveats do
     <<~EOS
+      This build is UNSIGNED and Homebrew quarantines what it downloads, so
+      macOS will refuse the first launch. To allow it:
+
+        1. Open WeMessage once and let macOS refuse it.
+        2. Open System Settings > Privacy & Security, scroll to the bottom,
+           and click "Open Anyway" next to the message about WeMessage.
+        3. Open it again and confirm.
+
+      Or, in a terminal:
+        xattr -d com.apple.quarantine /Applications/WeMessage.app
+
       WeMessage needs Full Disk Access and Automation permission for Messages
       to read and send messages. Grant both in System Settings > Privacy &
       Security before starting the service.
 
       Start the gateway service with:
-        wemessage service install
+        wemessaged service install
     EOS
   end
 end

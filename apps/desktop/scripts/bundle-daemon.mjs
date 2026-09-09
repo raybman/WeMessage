@@ -135,7 +135,19 @@ function shim(entry) {
 #
 #   shipped: WeMessage.app/Contents/Resources/bin/ -> ../../MacOS/WeMessage
 #   dev:     apps/desktop/dist-bundle/bin/         -> ../../node_modules/electron
-here=$(cd -- "$(dirname -- "$0")" && pwd)
+#
+# "readlink -f" FIRST, and the reason is the Homebrew cask: its two binary
+# stanzas do not COPY these files, they SYMLINK them into a directory on
+# PATH. Invoked through such a link, "$0" is the link, so a plain dirname
+# puts "here" in the link's directory and both hops above then point at
+# nothing. The app is not found, the dev fallback is not found either, and
+# the shim dies "cannot execute: No such file or directory" with status
+# 126, which would be the first thing this program ever said to somebody
+# who had just run brew install. Following the link first makes "here" the
+# directory the shim actually lives in, which is the only directory those
+# hops were ever relative to. "pwd -P" is the same problem one level up,
+# for a parent directory that is itself a link.
+here=$(cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd -P)
 app="$here/../../MacOS/WeMessage"
 if [ ! -x "$app" ]; then
   app="$here/../../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"

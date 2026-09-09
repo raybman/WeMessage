@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import {
   CASK_STANZA_ORDER,
@@ -55,6 +56,7 @@ const REPO = fileURLToPath(new URL('../..', import.meta.url));
 const CASK_RB_PATH = join(REPO, 'homebrew', 'Casks', 'wemessage.rb');
 const LOCK_PATH = join(REPO, 'homebrew', 'cask.lock.json');
 const README_PATH = join(REPO, 'homebrew', 'README.md');
+const BUILDER_YML_PATH = join(REPO, 'apps', 'desktop', 'electron-builder.yml');
 
 // FACTS (s9 Sc10): the repo this cask tracks releases from. Fixed, not an
 // input the lock file carries, because it does not change release to
@@ -209,7 +211,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     );
   });
 
-  it('row 4: caveats names the two permissions and the install command; no hex colour, no handle', () => {
+  it('row 4: caveats names the permissions, the Gatekeeper flow and the right install verb; no hex colour, no handle', () => {
     const rb = renderCask({
       version: '1.0.0-rc.1',
       sha256: SHA_64,
@@ -222,7 +224,37 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
 
     expect(caveatsBlock).toContain('Full Disk Access');
     expect(caveatsBlock).toContain('Automation');
-    expect(caveatsBlock).toContain('wemessage service install');
+
+    /*
+     * THE VERB IS ON THE DAEMON. `service install|uninstall|status` are
+     * defined in `packages/daemon/src/launchd/cli.ts`; the control CLI has
+     * no `service` command at all, so an operator who copies the caveats
+     * line as it used to read gets commander's "unknown command" and exit
+     * 2 as the very first thing this program ever says to them.
+     *
+     * This row asserted the wrong string until now, which is why nothing
+     * caught it. That is a MIS-TRANSCRIPTION of the plan, not a guard being
+     * relaxed: `docs/plans/slices/s9-execution.md:522` names
+     * `wemessaged service install`, and the assertion below restores it.
+     * The negative is what makes the pair non-vacuous. `\b` after
+     * `wemessage` cannot match inside `wemessaged`, since `d` is a word
+     * character, so the two assertions genuinely disagree with each other.
+     */
+    expect(caveatsBlock).toContain('wemessaged service install');
+    expect(rb).not.toMatch(/\bwemessage service\b/);
+
+    /*
+     * AND THE STEP BEFORE ANY OF THAT. This cask ships an unsigned build,
+     * Homebrew quarantines what it downloads exactly as a browser would,
+     * and macOS 15 removed the right-click-Open escape hatch for unsigned
+     * apps. So the very first thing that happens after a successful `brew
+     * install --cask` is a refusal, and the caveats block is the only text
+     * the operator is shown between those two events. A cask that installs
+     * an app the operator cannot then open has not installed anything.
+     */
+    expect(caveatsBlock).toContain('UNSIGNED');
+    expect(caveatsBlock).toContain('Open Anyway');
+    expect(caveatsBlock).toContain('com.apple.quarantine');
 
     // No hex colour, checked across the WHOLE rendered string rather than
     // only inside caveats: a colour is exactly the kind of thing that
@@ -428,5 +460,90 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
       expect(readme).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
       expect(readme).not.toMatch(/@\w[\w-]{1,30}\b/);
     });
+  });
+
+  /* ── row 11: the cask and the packer agree on where the shims are ───── */
+
+  /*
+   * THE BUG THIS ROW IS NAMED AFTER, because every row above it passed
+   * while it was live.
+   *
+   * The renderer emitted `Contents/MacOS/wemessaged` and
+   * `Contents/MacOS/wemessage`. Neither file has ever existed. The bundle
+   * carries exactly ONE Mach-O (arch F-121: `Contents/MacOS/` holds only
+   * `WeMessage`), and the two things the cask wants on PATH are `/bin/sh`
+   * shims that `apps/desktop/scripts/bundle-daemon.mjs` writes into
+   * `dist-bundle/bin`, which `electron-builder.yml` then copies to `bin`
+   * under `Contents/Resources`. Homebrew does not shrug at a `binary`
+   * stanza whose source is missing, it raises "source is not there" and
+   * the install fails, so the committed cask was UNINSTALLABLE and the
+   * whole of this file was green.
+   *
+   * Rows 1 through 10 could not have caught it. Every one of them asks
+   * this renderer about itself: the stanza order it emits, the version it
+   * interpolates, the words in its caveats. `brew style` and `brew audit`
+   * in row 7 are linters and never fetch anything, so they are equally
+   * blind to a path that does not resolve. The missing assertion is the
+   * only kind that could have caught it: one that reads a SECOND file,
+   * owned by a different tool, and insists the two agree.
+   *
+   * So this row derives the expected prefix rather than restating it. If
+   * someone moves the shims by editing `extraResources`, this row fails
+   * and names the new location; it does not quietly keep asserting the old
+   * one. That is the difference between a coupling test and a copy.
+   *
+   * What it deliberately does NOT do is check that the files exist on
+   * disk. They only exist after a bundle, which is minutes of work and
+   * darwin/arm64-only; `apps/desktop/test/pack.spec.ts` already asserts
+   * both are present under `Contents/Resources/bin` in a real packed app,
+   * and `apps/desktop/test/bundle.spec.ts` asserts a shim survives being
+   * invoked through a symlink, which is the form a `binary` stanza
+   * actually installs it in. This row is the cheap, always-on link
+   * between those two and the string this renderer writes.
+   */
+  it('row 11: binary stanza paths are derived from electron-builder extraResources', () => {
+    const builder = parse(readFileSync(BUILDER_YML_PATH, 'utf8')) as {
+      extraResources?: readonly { from?: unknown; to?: unknown }[];
+    };
+    const resources = builder.extraResources ?? [];
+    // Not vacuous: a parse that silently produced nothing would make every
+    // assertion below unreachable and this row would pass having read air.
+    expect(resources.length).toBeGreaterThanOrEqual(2);
+
+    const binEntry = resources.find((e) => e.from === 'dist-bundle/bin');
+    expect(
+      binEntry,
+      'electron-builder.yml no longer copies dist-bundle/bin; the cask ' +
+        'binary stanzas below point at wherever it went, so say where',
+    ).toBeDefined();
+    const to = String(binEntry?.to ?? '');
+    expect(to).not.toBe('');
+
+    const rb = renderCask({
+      version: '1.0.0-rc.1',
+      sha256: SHA_64,
+      repo: REPO_SLUG,
+    });
+
+    const stanzas = [
+      ...rb.matchAll(
+        /^ {2}binary "#\{appdir\}\/WeMessage\.app\/([^"]+)", target: "([^"]+)"$/gm,
+      ),
+    ].map(([, path, target]) => ({ path, target }));
+
+    // Two, matching CASK_STANZA_ORDER's two `binary` entries. A regex that
+    // matched none would make the loop below a no-op.
+    expect(stanzas.map((b) => b.target)).toEqual(['wemessaged', 'wemessage']);
+
+    for (const { path, target } of stanzas)
+      expect([target, path]).toEqual([
+        target,
+        `Contents/Resources/${to}/${String(target)}`,
+      ]);
+
+    // And the negative that states the rule in its own right: nothing this
+    // cask links onto PATH may live in `Contents/MacOS`, which holds the
+    // single Mach-O and nothing else.
+    expect(rb).not.toContain('Contents/MacOS');
   });
 });

@@ -34,8 +34,10 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from 'node:fs';
 import { createRequire, isBuiltin } from 'node:module';
 import { homedir } from 'node:os';
@@ -535,6 +537,72 @@ describe('s9 Sc5 row 5: the CLI bundle, and a shim with no machine in it', () =>
       );
     }
   });
+
+  /*
+   * THE FORM THE OPERATOR ACTUALLY RUNS IT IN, which is not this one.
+   *
+   * Nobody types the path to `Contents/Resources/bin/wemessage`. The
+   * Homebrew cask's two `binary` stanzas SYMLINK these files into a
+   * directory on PATH, so on a real install every invocation arrives
+   * through a link. The row above proves the shim carries no absolute
+   * path; it cannot prove the relative hops still land, and those are two
+   * different properties.
+   *
+   * They came apart. `$0` under a symlink is the LINK, so a plain
+   * `dirname` put `here` in the link's directory, both hops then pointed
+   * at nothing, and the shim died `cannot execute: No such file or
+   * directory` with exit 126. Reproduced by hand before this row existed,
+   * and the message is worth quoting because of who reads it: it is the
+   * first thing WeMessage ever says to somebody who just ran `brew
+   * install`, and it names a path inside Homebrew's prefix that has
+   * nothing to do with anything they did.
+   *
+   * BOTH LINK SHAPES, because they fail differently. An absolute link is
+   * what Homebrew writes today. A relative one is what a person writes,
+   * and it is resolved by the kernel against the link's PHYSICAL
+   * directory, which is why the target below is computed from
+   * `realpathSync` of the temp dir: on macOS `/var` is itself a link to
+   * `/private/var`, and a relative target computed from the logical path
+   * is broken before the shim is even reached. That trap caught this test
+   * while it was being written, not the shim.
+   *
+   * `--version` and not `--help`: it is the cheapest verb that proves the
+   * whole chain (shim, Electron-as-Node, CLI entry) ran, and its output is
+   * a fact this repo already knows, so the assertion is an equality rather
+   * than a substring.
+   *
+   * Gated on `RUNS_THE_BUNDLE`. The shim's dev-layout fallback names
+   * `Electron.app/Contents/MacOS/Electron`, which is a macOS bundle path;
+   * off darwin there is no shim to execute, only a shim to read, and the
+   * rows above already read it everywhere.
+   */
+  it.skipIf(!RUNS_THE_BUNDLE)(
+    'still resolves when invoked through a symlink, which is how the cask installs it',
+    () => {
+      const version = String(
+        (
+          JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')) as {
+            version: string;
+          }
+        ).version,
+      );
+      expect(version).not.toBe('');
+
+      const target = realpathSync(join(OUT, 'bin', 'wemessage'));
+      const dir = realpathSync(tempDir('wemessage-shim-link-'));
+
+      for (const [shape, linkTarget] of [
+        ['absolute', target],
+        ['relative', relative(dir, target)],
+      ] as const) {
+        const link = join(dir, `wemessage-${shape}`);
+        symlinkSync(linkTarget, link);
+        const out = execFileSync(link, ['--version'], { encoding: 'utf8' });
+        expect([shape, out.trim()]).toEqual([shape, version]);
+      }
+    },
+    BOOT_BUDGET_MS,
+  );
 });
 
 /* ── row 7 ────────────────────────────────────────────────────────────── */

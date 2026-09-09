@@ -548,6 +548,10 @@ export async function startDaemon(
         ? {}
         : { onUnloadError: options.onUnloadError }),
       purge: () => {
+        // Same ordering as `stop()`: adapter sessions finalize against this
+        // store, so they must be drained before it goes away. Without this a
+        // disconnect --purge takes an unhandled TypeError through `finalize`.
+        agentTransport.current?.closeAll();
         store.close();
         rmSync(options.configDir, { recursive: true, force: true });
       },
@@ -661,6 +665,10 @@ export async function startDaemon(
     tick: () => scheduler.tick(),
     stop: async () => {
       trigger.stop();
+      // Adapter sessions first: they finalize against the store, and their
+      // `adapter.health` broadcast should reach event-stream subscribers
+      // before those subscribers are themselves cut off just below.
+      server.agentTransport?.closeAll();
       for (const socket of sockets) socket.close();
       await server.app.close();
       // Idempotent: a prior `purge:true` disconnect may have already closed

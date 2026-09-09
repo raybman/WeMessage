@@ -243,6 +243,15 @@ export function createAdapterTransport(
   };
 
   const onMessage = (s: Session, raw: unknown): void => {
+    // A frame that arrived after this session's single exit already ran. Every
+    // branch below reaches the store -- `violate` and `stillCredentialed` both
+    // do -- and a real shutdown closes the store on the line after
+    // `closeAll()`: @fastify/websocket's `defaultPreClose` calls `done()`
+    // without waiting for any client 'close', so this window genuinely opens.
+    // `main.ts` installs no `uncaughtException` handler, so an append against
+    // a closed database here is a daemon crash, not a dropped frame.
+    if (s.finalized) return;
+
     let json: unknown;
     try {
       json = JSON.parse(String(raw));
@@ -416,7 +425,16 @@ export function createAdapterTransport(
     },
 
     closeAll() {
-      for (const s of [...sessions]) s.socket.close();
+      // Finalize FIRST, while the store is guaranteed open. A socket's own
+      // 'close' event lands a tick later, by which time a real `stop()` has
+      // closed the store out from under the `sink.append` in `finalize` --
+      // and that append is deliberately unguarded, being the record that
+      // matters. `finalize` is idempotent, so the later event no-ops and the
+      // row is written exactly once, with the reason it was written with here.
+      for (const s of [...sessions]) {
+        finalize(s, 'closed');
+        s.socket.close();
+      }
     },
   };
 }

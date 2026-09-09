@@ -338,3 +338,96 @@ describe('adapter transport: the bearer exemption is narrow (F-56)', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+/**
+ * s9 Sc5 — the shutdown drain.
+ *
+ * `finalize` writes `adapter.disconnected` through the audit sink, and unlike
+ * the `setAdapterHealth` call beneath it that row is deliberately NOT wrapped
+ * in a try/catch: it is the record that matters. That makes the ORDER of
+ * shutdown load-bearing. `closeAll` is the documented drain ("shutdown drains
+ * against this"), so it must leave nothing for a later tick to do, because in
+ * a real `stop()` the very next statements close the store.
+ */
+describe('adapter transport: shutdown drain', () => {
+  it('finalizes synchronously, so the row lands while the store is open', async () => {
+    const h = await bootAgent();
+    const cred = await addAdapter(h);
+    await connectAuthed(h, cred);
+    expect(auditOf(h, 'adapter.disconnected')).toHaveLength(0);
+
+    // No await between the drain and the assertion: whatever `closeAll` has
+    // not written by the time it returns is a row a real shutdown loses.
+    h.server.agentTransport?.closeAll();
+    expect(
+      auditOf(h, 'adapter.disconnected').map(
+        (e) => (e as { reason: string }).reason,
+      ),
+    ).toEqual(['closed']);
+  });
+
+  it('survives the store closing underneath a still-draining socket', async () => {
+    const h = await bootAgent();
+    const cred = await addAdapter(h);
+    const sock = await connectAuthed(h, cred);
+
+    // Exactly the sequence `daemon.stop()` performs, in that order. The
+    // socket's own 'close' event has NOT fired yet at the point the store
+    // goes away; if the drain deferred the audit write to that event, this
+    // surfaces as "TypeError: The database connection is not open" — an
+    // unhandled error that fails the file even though every row passed.
+    h.server.agentTransport?.closeAll();
+    h.store.close();
+
+    await sock.closeCode;
+    await waitUntil(
+      () => (h.server.agentTransport?.openSessions() ?? 0) === 0,
+      'sessions drained after store close',
+    );
+  });
+
+  it('ignores a frame that arrives after the drain, with the store gone', async () => {
+    const h = await bootAgent();
+    const cred = await addAdapter(h);
+
+    // A fake socket handed to the REAL transport, so the server-side listeners
+    // are drivable directly. A client-driven race cannot pin this: the window
+    // is between `closeAll()` and the socket actually closing, and that is
+    // exactly where a frame already on the wire lands.
+    const listeners: Record<string, (...a: unknown[]) => void> = {};
+    const fake = {
+      readyState: 1,
+      on: (event: string, fn: (...a: unknown[]) => void) => {
+        listeners[event] = fn;
+      },
+      send: () => {},
+      close: () => {},
+    };
+    h.server.agentTransport?.accept(fake as never);
+
+    const frame = (type: string, payload: unknown): string =>
+      JSON.stringify({
+        v: 1,
+        id: `01${'F'.repeat(24)}`,
+        type,
+        ts: h.clockCtl.clock.now(),
+        payload,
+      });
+
+    listeners.message?.(
+      frame('hello', { adapterId: cred.id, token: cred.token, wire: 1 }),
+    );
+    expect(h.store.getAdapter(cred.id)?.health).toBe('connected');
+
+    h.server.agentTransport?.closeAll();
+    h.store.close();
+
+    // Every entry into the transport must be inert now. Unguarded, the first
+    // reaches `stillCredentialed` (a store read) and the second reaches
+    // `violate` (a store append). `main.ts` installs no `uncaughtException`
+    // handler, so in production either one ends the daemon.
+    expect(() => listeners.message?.(frame('pong', {}))).not.toThrow();
+    expect(() => listeners.message?.('}{ not json')).not.toThrow();
+    expect(() => listeners.close?.()).not.toThrow();
+  });
+});

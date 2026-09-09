@@ -33,3 +33,9 @@ fixtures/typedstream/staging/
 __pycache__/
 *.py[cod]
 .venv/
+
+# s9: build outputs of the packaging lane (never committed, and
+# `cut-tag` refuses a dirty tree, so they must not show up in porcelain).
+dist-bundle/
+dist-pack/
+dist-pack-next/

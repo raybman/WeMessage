@@ -15,6 +15,25 @@ interface MigrationRow {
 }
 
 /**
+ * s9: this store was written by a build newer than the one opening it.
+ *
+ * A separate class rather than a bare Error because the daemon maps it to a
+ * named refusal code, and because the ids are the only thing that tells an
+ * operator WHICH build to go back to.
+ */
+export class SchemaNewerThanBuildError extends Error {
+  readonly unknownMigrations: readonly string[];
+
+  constructor(unknown: readonly string[]) {
+    super(
+      `store was written by a newer build: it has applied ${unknown.join(', ')}, which this build does not ship`,
+    );
+    this.name = 'SchemaNewerThanBuildError';
+    this.unknownMigrations = [...unknown];
+  }
+}
+
+/**
  * Idempotent forward-only migration runner. Applies every unapplied `*.sql` file in
  * lexical order, each inside its own transaction, and records it in `_migrations`.
  * Re-running is a no-op (Scenario 3: "re-opening is idempotent").
@@ -35,6 +54,16 @@ export function applyMigrations(
     .prepare('SELECT id FROM _migrations')
     .all() as MigrationRow[];
   const applied = new Set(appliedRows.map((r) => r.id));
+
+  // s9: forward-only cuts both ways. The loop below applies what this build
+  // ships and never looks at what it does not, so a store carrying a
+  // migration from a future build used to open silently: everything shipped
+  // is already applied, the loop is a no-op, and this build then serves a
+  // schema it does not understand. Checked BEFORE anything runs, so the
+  // database on the refusing path is exactly the database we were handed.
+  const shipped = new Set(files);
+  const unknown = [...applied].filter((id) => !shipped.has(id)).sort();
+  if (unknown.length > 0) throw new SchemaNewerThanBuildError(unknown);
 
   const record = db.prepare(
     'INSERT INTO _migrations (id, applied_at) VALUES (?, ?)',

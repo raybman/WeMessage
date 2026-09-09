@@ -1,6 +1,6 @@
 // @wemessage/store — SQLite store + migrations (schema §2.3). Implements the
 // `Store` port from @wemessage/core.
-export { applyMigrations } from './migrate.js';
+export { applyMigrations, SchemaNewerThanBuildError } from './migrate.js';
 export {
   DB_FILENAME,
   SqliteStore,

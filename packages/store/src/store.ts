@@ -438,7 +438,15 @@ export class SqliteStore implements Store {
     this.db = new Database(this.path);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
-    applyMigrations(this.db, opts.clock.now());
+    try {
+      applyMigrations(this.db, opts.clock.now());
+    } catch (err) {
+      // s9: a refusal is still an open handle and a live -wal. `openStore`
+      // never returns a store to close on this path, so close it here or the
+      // caller has no way to.
+      this.db.close();
+      throw err;
+    }
     // F-22 (s3-execution Scenario 5): idempotent boot-time seed of the
     // reserved 'human' adapter row — humans can hold drafts (adapter_id is
     // NOT NULL, §2.3) without relaxing the FK. token_hash stays NULL

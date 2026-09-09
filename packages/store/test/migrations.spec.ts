@@ -8,9 +8,15 @@
 import { statSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Clock } from '@wemessage/core';
-import { DB_FILENAME, openStore, type SqliteStore } from '@wemessage/store';
+import {
+  DB_FILENAME,
+  openStore,
+  SchemaNewerThanBuildError,
+  type SqliteStore,
+} from '@wemessage/store';
 
 /** Fake Clock (§4.0: hand-rolled fakes, no mocking library). */
 function fakeClock(iso = '2026-09-01T12:00:00.000Z'): Clock {
@@ -237,5 +243,47 @@ describe('store migrations (§2.3 schema)', () => {
       .prepare('SELECT applied_at FROM _migrations')
       .get() as { applied_at: string };
     expect(applied.applied_at).toBe('2026-09-01T12:00:00.000Z');
+  });
+
+  it('refuses to open a store written by a newer build', () => {
+    // s9: forward-only cuts both ways. The runner applies what it ships and
+    // never looks at what it does not, so a store carrying a migration from a
+    // future build opened silently: every shipped migration is already in
+    // `_migrations`, the loop is a no-op, and this build then serves a schema
+    // it does not understand and writes rows the newer build must reconcile.
+    store.setCursor({ lastRowid: 77, lastScanAt: '2026-09-01T12:00:00.000Z' });
+    store.db
+      .prepare('INSERT INTO _migrations (id, applied_at) VALUES (?, ?)')
+      .run('9999_future.sql', '2027-01-01T00:00:00.000Z');
+    store.close();
+
+    expect(() => openStore({ dir, clock: fakeClock() })).toThrow(
+      SchemaNewerThanBuildError,
+    );
+    // Names the id: an operator has to be able to tell WHICH build wrote it.
+    expect(() => openStore({ dir, clock: fakeClock() })).toThrow(
+      /9999_future\.sql/,
+    );
+
+    // The remedy is necessarily raw sqlite: `openStore` is exactly what
+    // refuses, so it cannot also be the tool that clears the refusal. That is
+    // the point -- the only ways out are running the newer build again or an
+    // operator deliberately reaching past the guard.
+    const raw = new Database(join(dir, DB_FILENAME));
+    try {
+      raw
+        .prepare('DELETE FROM _migrations WHERE id = ?')
+        .run('9999_future.sql');
+    } finally {
+      raw.close();
+    }
+
+    // And the database it refused is byte-for-byte the one it was handed: the
+    // check runs before a single migration does, so nothing was written.
+    store = openStore({ dir, clock: fakeClock() });
+    expect(store.getCursor()).toEqual({
+      lastRowid: 77,
+      lastScanAt: '2026-09-01T12:00:00.000Z',
+    });
   });
 });

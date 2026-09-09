@@ -1,0 +1,134 @@
+# s9 Sc 6. The pack.
+#
+# WHAT THIS FILE IS NOT ALLOWED TO DO: rely on a default. electron-builder has
+# a good default for nearly everything here, and two of those defaults are
+# wrong in a way that is invisible in the artefact and fatal in the field:
+#
+#   - the default macOS entitlements template includes
+#     `com.apple.security.cs.disable-library-validation` and omits
+#     `com.apple.security.automation.apple-events`. Taking it would ship a
+#     RELEASE build with library validation disabled, which is the one
+#     security property this bundle most needs, while ALSO failing to declare
+#     the Apple Events use that is the entire product. Both entitlement files
+#     are therefore named explicitly, and Sc 6 row 6 deep-equals the sorted
+#     key set so a default can never quietly reappear.
+#   - the default target list builds for the host arch and would happily
+#     produce a universal binary. F-135 says arm64 only: it is the only
+#     architecture anyone has ever run this on, and an unsmoked x64 artefact
+#     on a release page is a bug-report generator.
+#
+# THE LANE IS NOT IN THIS FILE. `mac.identity` and `artifactName` are supplied
+# by `tools/release/bin/pack.mjs` per lane, because a lane that can be
+# selected by editing a config is a lane that can be selected by accident.
+# This file describes the app; the runner describes the signature.
+appId: sh.wemessage.gateway
+productName: WeMessage
+copyright: Copyright © 2026 the WeMessage authors
+
+directories:
+  output: dist-pack
+  buildResources: build
+
+# The asar holds the app and nothing else. Type declarations and source maps
+# are build intermediates, not runtime, and every megabyte of them is a
+# megabyte that gets signed, notarized, hashed and downloaded.
+asar: true
+files:
+  - package.json
+  - dist/main/**/*.js
+  - dist/app/**
+  - '!**/*.map'
+  - '!**/*.d.ts'
+  - '!**/*.tsbuildinfo'
+
+# WHY THE DAEMON IS extraResources AND NOT files: it must be a real file on
+# disk with a real path. launchd's `ProgramArguments` names
+# `Contents/Resources/daemon/main.mjs`, and `better-sqlite3`'s prebuilt `.node`
+# is dlopen'd by the dynamic linker, which cannot read an asar. `migrations/`
+# rides along beside them because `packages/store/src/migrate.ts` resolves it
+# with `new URL('../migrations/', import.meta.url)` at RUN time (F-140.1), so
+# the same relative hop that works in `dist-bundle/` works here.
+#
+# THE SPLIT ENTRY IS LOAD-BEARING, and it took a build and a read of
+# electron-builder's source to find out why (F-143).
+#
+# `app-builder-lib/out/util/filter.js` opens every copy filter with:
+#
+#     if (relative === "node_modules") return false;
+#
+# unconditionally, before any user pattern is consulted. It is a sane default
+# for an app directory and exactly wrong here: the one thing in
+# `dist-bundle/daemon/node_modules` is the curated `better-sqlite3` tree
+# holding the N-API prebuild, and at the root of that copy its relative path
+# is the literal string `node_modules`. No `filter:` can override it, because
+# the check runs first. The copy succeeded, the pack succeeded, the app signed
+# and `codesign --verify --strict --deep` passed, and the daemon inside it
+# could not open a database.
+#
+# Naming the directory as its own `from` moves it off depth zero: the relative
+# paths inside are `better-sqlite3/...`, which the rule does not match. Sc 6
+# row 3 names the prebuild explicitly, and row 4 launches the packed app, so
+# this cannot regress silently a second time.
+extraResources:
+  - from: dist-bundle/daemon
+    to: daemon
+  - from: dist-bundle/daemon/node_modules
+    to: daemon/node_modules
+  - from: dist-bundle/bin
+    to: bin
+  - from: dist-bundle/migrations
+    to: migrations
+# `Contents/Resources/licenses` is deliberately NOT declared here. It is
+# GENERATED, not committed: `scripts/after-pack.cjs` copies Electron's own
+# LICENSE and LICENSES.chromium.html out of the distribution that actually
+# shipped, and writes the notices file. Declaring it as well would mean two
+# owners for one directory and a committed placeholder that goes stale.
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  minimumSystemVersion: '15.0'
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  # Both lanes. A hardened runtime is what makes the entitlement list mean
+  # anything; without it the entitlements are decoration.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # `gatekeeperAssess` runs `spctl` at build time. In the ad-hoc lane it
+  # ALWAYS fails by definition, so leaving it on would make the ad-hoc lane
+  # unbuildable for a reason that is not a defect. `spctl` is asserted where
+  # it belongs, in Sc 8's release lane.
+  gatekeeperAssess: false
+  extendInfo:
+    # Shown by macOS in the Automation consent dialog, verbatim. It has one
+    # job: tell the user what the app will do with the permission before they
+    # grant it. INV-2 is the thing worth saying, so it is what it says.
+    NSAppleEventsUsageDescription: >-
+      WeMessage sends replies through Messages on your behalf, and only ones
+      you have approved.
+    CFBundleURLTypes:
+      - CFBundleURLName: sh.wemessage.gateway
+        CFBundleURLSchemes:
+          - wemessage
+  # Deliberately absent: LSUIElement. The app has a Dock icon while its window
+  # is open; the tray (S8 Sc 16) is additive, not a replacement.
+
+dmg:
+  background: build/dmg-background.png
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+# Fuses live in the binary, so flipping them after signing invalidates the
+# signature. `afterPack` runs before signing; Sc 6 row 8 reads the fuse wire
+# and `codesign --verify --strict` in the same run to prove the order held.
+afterPack: scripts/after-pack.cjs

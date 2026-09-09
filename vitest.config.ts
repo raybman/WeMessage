@@ -27,6 +27,12 @@ export default defineConfig({
       // the glob for the same reason, listed by hand for the same reason: its
       // `sequence.groupOrder` is the point.
       'apps/desktop/vitest.a11y.config.ts',
+      // The pack project. A FOURTH config inside `apps/desktop`, invisible to
+      // the glob for the same reason, listed by hand for the same reason. It
+      // runs LAST (`groupOrder` 4) because it is the only project in the repo
+      // that shells out to `electron-builder`, and a DMG being written is not
+      // something to do while eleven other files are each holding an Electron.
+      'apps/desktop/vitest.pack.config.ts',
       'fixtures/vitest.config.ts',
       {
         test: {

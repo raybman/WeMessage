@@ -9,6 +9,13 @@ export default tseslint.config(
       // s9 Sc5: `apps/desktop/dist-bundle/` is esbuild output, gitignored at
       // `.gitignore:39`. `**/dist/**` does not match it; the name is not `dist`.
       '**/dist-bundle/**',
+      // s9 Sc6: electron-builder's output, gitignored at `.gitignore:40-41`.
+      // `dist-pack/` holds a packed `.app` whose `Contents/Resources/` is a
+      // COPY of `dist-bundle/`, so leaving it unignored lints the same three
+      // generated files a second time, from inside a bundle, and reports
+      // esbuild's output as if a human had written it.
+      '**/dist-pack/**',
+      '**/dist-pack-next/**',
       '**/node_modules/**',
       '**/coverage/**',
       '**/*.tsbuildinfo',
@@ -71,5 +78,14 @@ export default tseslint.config(
     // the type-aware block above did (s8 Sc1).
     files: ['apps/desktop/**/*.{ts,tsx}'],
     rules: { 'no-restricted-imports': 'off' },
+  },
+  {
+    // s9 Sc6: electron-builder loads its lifecycle hooks with `require`, and
+    // `apps/desktop` is `"type": "module"`, so the hook has to be `.cjs` and a
+    // `.cjs` file has to use `require`. The exception is the exact directory
+    // that holds build hooks, not `**/*.cjs`: a stray CommonJS file anywhere
+    // else in the repo should still have to argue for itself.
+    files: ['apps/desktop/scripts/*.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
 );

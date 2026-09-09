@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The RELEASE lane's entitlements: three, and the absence of a fourth is the
+  point of the file.
+
+  Chromium's renderers JIT, so `allow-jit` and `allow-unsigned-executable-memory`
+  are not optional for an Electron app under a hardened runtime; without them
+  the app dies at first paint. `automation.apple-events` is what lets the
+  daemon drive Messages.app, which is the entire product.
+
+  What is deliberately NOT here is `com.apple.security.cs.disable-library-validation`.
+  Library validation is the check that refuses to load a Mach-O signed by a
+  different team than the loading process, and turning it off is the single
+  most load-bearing security property this bundle has: it is what stops a
+  dylib dropped beside the app from being loaded into a process that holds
+  Full Disk Access and Automation rights over the user's messages. Under a
+  Developer ID signature the app and `better-sqlite3` share one Team ID, so
+  validation passes and the entitlement is not needed. It IS needed in the
+  ad-hoc lane, where there is no team at all, which is why that lane has a
+  second file rather than this one growing a fourth key.
+
+  electron-builder's own default template includes `disable-library-validation`
+  and omits `automation.apple-events`. Both deltas are why `electron-builder.yml`
+  names this file explicitly and why Sc 6 row 6 deep-equals the sorted key set:
+  a default that happens to work is a default that ships the wrong thing the
+  day it stops happening to work.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+  </dict>
+</plist>

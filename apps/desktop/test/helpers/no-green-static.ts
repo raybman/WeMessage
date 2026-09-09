@@ -131,8 +131,26 @@ const RASTER_EXTENSIONS = [
  *
  * Entries are asserted to exist (the s6 (a) precedent: an allowlist entry
  * that does not exist is an allowlist entry nobody can review).
+ *
+ * s9 Sc 6 is the "later slice" the paragraph above anticipated, and it adds
+ * two of the three artefacts named there. Both are BUILD INPUTS rather than
+ * app content: electron-builder reads `icon.icns` to make the bundle's icon
+ * and `dmg-background.png` to draw the drag-to-Applications window. Both are
+ * reproducible from `site/logo/mark.svg` by
+ * `apps/desktop/scripts/render-brand-assets.sh`, so neither is a binary whose
+ * provenance is a mystery, and both are decoded and pixel-swept by row 3b
+ * rather than merely named. The launch animation is Sc 13's and is not here
+ * yet.
+ *
+ * Every PNG in both, including the eight embedded inside the icns, is 8-bit
+ * BY REQUIREMENT: `raster-decode.ts` refuses any other depth, so a 16-bit
+ * render would be an allowlisted file the sweep cannot actually read. The
+ * render script asserts the depth itself, at the point of writing.
  */
-export const RASTER_ALLOWLIST: readonly string[] = [];
+export const RASTER_ALLOWLIST: readonly string[] = [
+  'apps/desktop/build/dmg-background.png',
+  'apps/desktop/build/icon.icns',
+];
 
 function walk(absRoot: string): string[] {
   if (!existsSync(absRoot)) return [];

@@ -27,10 +27,13 @@
  *    reader below, every frame decoded independently. Independently and not
  *    composited on purpose: a green pixel in frame 40 of a launch animation
  *    is a green pixel, and composition could only hide it.
- *  - ICNS. Entry table walk; the modern entry types carry a whole PNG, so
- *    the PNG reader is reused on the embedded bytes. Older raw-ARGB entry
- *    types and JPEG-2000 entries are reported as UNDECODED rather than
- *    skipped.
+ *  - ICNS. Entry table walk, and TWO readers rather than one, because
+ *    `iconutil` writes ONE icon in two encodings. Every slot from 32px up
+ *    carries a whole PNG, so the PNG reader is reused on the embedded
+ *    bytes; the 16pt and 32pt slots are ARGB, four run-length-encoded
+ *    planes behind an `ARGB` magic, read by `decodeIcnsArgb` below. Raw
+ *    24-bit RLE (`is32`, `il32`) and JPEG-2000 entries are still reported
+ *    as UNDECODED rather than skipped.
  *
  * KNOWN SHARP EDGE, recorded for the slice that first puts a photograph on
  * the list: `greenVerdict`'s hue arm has no tolerance band, so a pixel on an
@@ -371,6 +374,115 @@ function decodeGif(label: string, bytes: Uint8Array): DecodedRaster {
 /** Entry types that carry no image: a table of contents, a version, names. */
 const ICNS_METADATA = new Set(['TOC ', 'icnV', 'name', 'info']);
 
+/**
+ * The ARGB entry types, and the square each one covers.
+ *
+ * NOT a legacy concern, which is what this file assumed until s9 Sc 6 read
+ * the artefact instead of the format's history. `iconutil` on macOS 15 emits
+ * a modern `.icns` in TWO encodings: every slot from `icon_16x16@2x` upward
+ * is a whole PNG, and the 16pt and 32pt slots are ARGB. So the bundle icon,
+ * built the supported way from a standard `.iconset`, arrives here as nine
+ * PNGs and two ARGBs — and a reader that knows only PNG leaves the two
+ * SMALLEST renderings unswept. Those are the Finder list icon and the
+ * menu-bar-size icon: precisely the two a designer hand-tunes when the
+ * vector stops reading at size, which is precisely when a new colour gets
+ * introduced.
+ *
+ * The square cannot be recovered from the payload. An ARGB entry is a magic
+ * followed by a byte stream, with the dimensions implied by the OSType
+ * alone, so this map is their only source and an ARGB type that is not in it
+ * is REPORTED rather than guessed at.
+ */
+const ICNS_ARGB_SIDE = new Map<string, number>([
+  ['ic04', 16],
+  ['ic05', 32],
+]);
+
+const startsWithArgb = (d: Uint8Array): boolean =>
+  String.fromCharCode(...d.subarray(0, 4)) === 'ARGB';
+
+/**
+ * Apple's PackBits variant, as used by every run-length entry in an `.icns`.
+ *
+ * It is NOT stock TIFF PackBits, and the difference is silent: the control
+ * byte is unsigned, and a run's length is `c - 125` (3..130) rather than
+ * `257 - c`. Decoding one as the other yields plausible-looking noise, never
+ * an error. So the caller is given no room to accept a partial read: `want`
+ * comes in, and a stream that does not fill it EXACTLY while consuming
+ * EXACTLY all of its input returns null, which the caller reports as
+ * undecoded. Landing on both totals by accident is not a thing a wrong
+ * variant does twice.
+ */
+function unpackIcnsRle(src: Uint8Array, want: number): Uint8Array | null {
+  const out = new Uint8Array(want);
+  let s = 0;
+  let d = 0;
+  while (d < want && s < src.length) {
+    const c = src[s] ?? 0;
+    s += 1;
+    if (c >= 0x80) {
+      const run = c - 125;
+      if (s >= src.length || d + run > want) return null;
+      out.fill(src[s] ?? 0, d, d + run);
+      s += 1;
+      d += run;
+    } else {
+      const run = c + 1;
+      if (s + run > src.length || d + run > want) return null;
+      out.set(src.subarray(s, s + run), d);
+      s += run;
+      d += run;
+    }
+  }
+  return d === want && s === src.length ? out : null;
+}
+
+/**
+ * One ARGB entry: four planes, A then R then G then B, each `side * side`
+ * bytes, run-length-encoded as one continuous stream behind the magic.
+ *
+ * The stored alpha is STRAIGHT, not premultiplied, and this reader does not
+ * touch it. `iconutil` does round the colour through premultiplied space on
+ * the way in, which visibly shifts RGB on low-alpha edge pixels — brand blue
+ * `rgb(10, 132, 255)` at alpha 1 comes back as cyan `rgb(0, 255, 255)`, and
+ * at alpha 29 as `rgb(9, 132, 255)`. That is a property of the committed
+ * artefact rather than of this reader, and un-rounding it here would be the
+ * decoder deciding what the sweep is allowed to see. Those are real pixels
+ * in the shipped icon; they get a real verdict.
+ */
+function decodeIcnsArgb(
+  label: string,
+  type: string,
+  data: Uint8Array,
+): DecodedRaster {
+  const side = ICNS_ARGB_SIDE.get(type);
+  if (side === undefined)
+    return {
+      frames: [],
+      undecoded: [`${label}:${type}: an ARGB entry of no recorded size`],
+    };
+  const n = side * side;
+  const planes = unpackIcnsRle(data.subarray(4), n * 4);
+  if (planes === null)
+    return {
+      frames: [],
+      undecoded: [
+        `${label}:${type}: ARGB stream is not ${String(side)}x${String(side)}`,
+      ],
+    };
+  const rgba = new Uint8Array(n * 4);
+  for (let p = 0; p < n; p += 1) {
+    rgba[p * 4] = planes[n + p] ?? 0;
+    rgba[p * 4 + 1] = planes[n * 2 + p] ?? 0;
+    rgba[p * 4 + 2] = planes[n * 3 + p] ?? 0;
+    rgba[p * 4 + 3] = planes[p] ?? 0;
+  }
+  return {
+    frames: [{ label: `${label}:${type}`, width: side, height: side, rgba }],
+    undecoded: [],
+  };
+}
+
 function decodeIcns(label: string, bytes: Uint8Array): DecodedRaster {
   if (String.fromCharCode(...bytes.subarray(0, 4)) !== 'icns')
     return { frames: [], undecoded: [`${label}: not an ICNS`] };
@@ -388,11 +500,15 @@ function decodeIcns(label: string, bytes: Uint8Array): DecodedRaster {
         const inner = decodePng(`${label}:${type}`, data);
         frames.push(...inner.frames);
         undecoded.push(...inner.undecoded);
+      } else if (startsWithArgb(data)) {
+        const inner = decodeIcnsArgb(label, type, data);
+        frames.push(...inner.frames);
+        undecoded.push(...inner.undecoded);
       } else {
-        // Raw 24-bit RLE (`is32`…) and JPEG-2000 (`ic09` on old tooling).
-        // Reported, never skipped: an entry this reader cannot see is an
-        // entry the hue sweep did not sweep.
-        undecoded.push(`${label}:${type}: not an embedded PNG`);
+        // Raw 24-bit RLE (`is32`, `il32`) and JPEG-2000. Reported, never
+        // skipped: an entry this reader cannot see is an entry the hue
+        // sweep did not sweep.
+        undecoded.push(`${label}:${type}: not an embedded PNG or ARGB`);
       }
     }
     i += len;

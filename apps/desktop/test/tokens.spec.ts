@@ -491,7 +491,12 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
      */
     it('row 3a: the tracked raster set IS the allowlist, exactly', () => {
       expect(trackedRasters()).toEqual([...RASTER_ALLOWLIST]);
-      expect([...RASTER_ALLOWLIST]).toEqual([]);
+      // Spelled out here as well as in the helper, so that admitting a raster
+      // is a two-file diff and never a quiet append.
+      expect([...RASTER_ALLOWLIST]).toEqual([
+        'apps/desktop/build/dmg-background.png',
+        'apps/desktop/build/icon.icns',
+      ]);
     });
 
     it('row 3a PLANTED: the equality is a verdict, not an empty search', () => {
@@ -508,7 +513,15 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
         execFileSync('git', ['add', '--intent-to-add', '--', rel], {
           cwd: REPO_ROOT,
         });
-        expect(trackedRasters()).toEqual([rel]);
+        // The row's actual claim, asserted directly rather than inferred
+        // from the equality below: the predicate MATCHED the file we
+        // planted. This survives the allowlist growing again.
+        expect(trackedRasters()).toContain(rel);
+        // And the set is still EXACT now that the allowlist is not empty:
+        // the probe plus the allowlist, nothing else. Sorted rather than
+        // written out in order, because the order is `git ls-files`' and
+        // not a fact worth pinning twice.
+        expect(trackedRasters()).toEqual([...RASTER_ALLOWLIST, rel].sort());
         expect(trackedRasters()).not.toEqual([...RASTER_ALLOWLIST]);
       } finally {
         try {
@@ -533,9 +546,13 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
         expect(existsSync(abs), rel).toBe(true);
         expect(rasterGreenOffenders(rel, readFileSync(abs)), rel).toEqual([]);
       }
-      // Vacuous today BY CONSTRUCTION, and said out loud rather than left
-      // to be discovered. The teeth below are what make the decoder real.
-      expect(RASTER_ALLOWLIST.length).toBe(0);
+      // No longer vacuous. s9 Sc 6 put the two packaging artefacts on the
+      // list, so the loop above now really does decode a 155 KB icns holding
+      // eight embedded PNGs and a 540x380 background, and really does sweep
+      // their pixels for the banned hues. The teeth below still matter: they
+      // are what proves the decoder would convict if there were anything to
+      // convict.
+      expect(RASTER_ALLOWLIST.length).toBe(2);
     });
 
     it('row 3c: the ban still holds inside the swept roots', () => {
@@ -562,6 +579,20 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
           'ff0b4e45545343415045322e30030100000021f9' +
           '0400000000002c00000000040002000008090001' +
           '080410a0608080003b',
+        'hex',
+      );
+      // A 16x16 `ic04`: four #30D158 pixels then 252 #0A84FF, fully
+      // opaque, as four run-length-encoded planes behind the `ARGB` magic.
+      // Encoded by a PYTHON encoder written from the format description,
+      // for the same reason PNG_BYTES came out of `pngjs`: a decoder proved
+      // against its own encoder proves only that it agrees with itself, and
+      // there is no third-party ARGB encoder to reach for. Small enough to
+      // check by hand: `ffff` is a run of 130 alpha bytes, `8130` a run of
+      // four 0x30 reds.
+      const ARGB_ICNS_BYTES = Buffer.from(
+        '69636e730000002a696330340000002241524742' +
+          'fffffbff8130ff0af70a81d1ff84f7848158ffff' +
+          'f7ff',
         'hex',
       );
       const GREEN_PIXEL = 'rgb(48, 209, 88)';
@@ -632,6 +663,82 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
         expect(decoded.undecoded).toEqual([]);
         expect(decoded.frames.map((f) => f.label)).toEqual(['probe.icns:ic09']);
         expect(rasterGreenOffenders('probe.icns', bytes).length).toBe(4);
+      });
+
+      it('ICNS: the ARGB entries `iconutil` really writes are read too', () => {
+        // NOT hypothetical, and not legacy. `iconutil` on macOS 15 writes
+        // the 16pt and 32pt slots of a standard `.iconset` as ARGB and
+        // every larger slot as PNG, so the committed `build/icon.icns` is
+        // nine PNGs and two ARGBs. Until s9 Sc 6 taught the reader ARGB,
+        // those two came back UNDECODED and row 3b failed. That failure is
+        // the only reason the gap was visible instead of two unswept
+        // renderings of the app icon sitting quietly in the bundle.
+        const bytes = onDisk('argb.icns', ARGB_ICNS_BYTES);
+        const decoded = decodeRaster('argb.icns', bytes);
+        expect(decoded.undecoded).toEqual([]);
+        expect(decoded.frames.map((f) => f.label)).toEqual(['argb.icns:ic04']);
+        const frame = decoded.frames[0];
+        expect(frame?.width).toBe(16);
+        expect(frame?.height).toBe(16);
+        // By byte, on both sides of the boundary. The plane order (A,R,G,B
+        // in the file, RGBA out of the reader) is the one thing a wrong
+        // decoder would get plausibly, invisibly wrong.
+        expect([...(frame?.rgba.subarray(0, 4) ?? [])]).toEqual([
+          48, 209, 88, 255,
+        ]);
+        expect([...(frame?.rgba.subarray(16, 20) ?? [])]).toEqual([
+          10, 132, 255, 255,
+        ]);
+        const offenders = rasterGreenOffenders('argb.icns', bytes);
+        expect(offenders.length).toBe(4);
+        expect(offenders.join('\n')).toContain(GREEN_PIXEL);
+        expect(offenders.join('\n')).not.toContain(BLUE_PIXEL);
+      });
+
+      it('a TRUNCATED ARGB entry is an offender, not a partial sweep', () => {
+        // `unpackIcnsRle` returns null unless the stream fills the planes
+        // EXACTLY while consuming EXACTLY all of its input. Without both
+        // halves of that, a corrupt or misread entry decodes to a short
+        // buffer of zeroes, sweeps clean, and reports nothing: the
+        // quiet-pass shape this whole file exists to refuse. Two bytes come
+        // off the end (one run of 122 blue bytes) and both length fields
+        // are repaired, so the ONLY thing wrong with the file is the one
+        // thing under test.
+        const cut = Buffer.from(
+          ARGB_ICNS_BYTES.subarray(0, ARGB_ICNS_BYTES.length - 2),
+        );
+        cut.writeUInt32BE(cut.length, 4);
+        cut.writeUInt32BE(cut.length - 8, 12);
+        const offenders = rasterGreenOffenders('cut.icns', cut);
+        expect(offenders.length).toBe(1);
+        expect(offenders[0]).toContain('UNDECODED');
+        expect(offenders[0]).toContain('16x16');
+      });
+
+      it('an ARGB entry LONGER than its OSType implies is an offender', () => {
+        // The other half of `unpackIcnsRle`'s exactness, and the half that
+        // checks `ICNS_ARGB_SIDE` against the file instead of trusting it.
+        // The square is not recoverable from an ARGB payload, so if that map
+        // ever said 16 for a type that is really 32, a reader which stopped
+        // at "the planes are full" would sweep a QUARTER of the icon and
+        // call the rest clean. Two bytes are appended and both length fields
+        // repaired, so the planes still fill exactly and the leftover input
+        // is the only thing wrong.
+        //
+        // Written because the mutation that drops `s === src.length` from
+        // `unpackIcnsRle` survived the whole suite until this row existed.
+        // `Buffer.alloc`, NOT a hex literal: `test/arch.spec.ts` row 11
+        // admits a `Buffer.from(..., 'hex')` blob in this file only when it
+        // starts with a raster magic, because a standalone hex run is what
+        // a leaked signing digest looks like. Two padding bytes are not a
+        // raster and have no business pretending to be one.
+        const fat = Buffer.concat([ARGB_ICNS_BYTES, Buffer.alloc(2)]);
+        fat.writeUInt32BE(fat.length, 4);
+        fat.writeUInt32BE(fat.length - 8, 12);
+        const offenders = rasterGreenOffenders('fat.icns', fat);
+        expect(offenders.length).toBe(1);
+        expect(offenders[0]).toContain('UNDECODED');
+        expect(offenders[0]).toContain('16x16');
       });
 
       it('an entry this reader cannot read is an OFFENDER, not a pass', () => {

@@ -10,12 +10,15 @@ export default defineConfig({
     globals: false,
     retry: 0,
     include: ['test/**/*.spec.ts'],
-    // s9: two specs are SEQUENCED into projects of their own and excluded
+    // s9: three specs are SEQUENCED into projects of their own and excluded
     // here so they do not ALSO run in this pool. The tray spec asserts a
     // display-wide key grab (`vitest.tray.config.ts`, groupOrder 2); the a11y
     // sweep holds one Electron instance for minutes while every other spec in
     // this project launches its own beside it (`vitest.a11y.config.ts`,
-    // groupOrder 3). Neither is a skip: both files run on every `pnpm test`.
+    // groupOrder 3); the pack spec BUILDS a signed `.app` and a DMG before it
+    // asserts anything, which is minutes of `electron-builder` that must not
+    // run beside eleven Electron launches (`vitest.pack.config.ts`,
+    // groupOrder 4). None is a skip: all three run on every `pnpm test`.
     // The defaults are spread rather than replaced: `exclude` overwrites
     // vitest's own list, and an empty one starts collecting specs out of
     // `node_modules`.
@@ -23,6 +26,7 @@ export default defineConfig({
       ...configDefaults.exclude,
       'test/e2e/tray.e2e.spec.ts',
       'test/e2e/a11y.spec.ts',
+      'test/pack.spec.ts',
     ],
     // s8 Sc4. Launching a real Electron binary, loading a document and
     // handshaking with a real daemon does not fit in vitest's 5s default,
@@ -60,6 +64,7 @@ export default defineConfig({
         ...configDefaults.typecheck.exclude,
         'test/e2e/tray.e2e.spec.ts',
         'test/e2e/a11y.spec.ts',
+        'test/pack.spec.ts',
       ],
       tsconfig: './tsconfig.vitest.json',
     },

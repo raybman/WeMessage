@@ -26,24 +26,30 @@
  * NO TIMER CALLS. `test/arch.spec.ts` bans them under this whole tree as a
  * text scan, so readiness is observed off the child's stdout, never slept on.
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
 } from 'node:fs';
-import { createServer } from 'node:net';
 import { createRequire, isBuiltin } from 'node:module';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  bed,
+  cleanupTemps,
+  freePort,
+  launch,
+  tempDir,
+  waitFor,
+} from './helpers/bundle-lane.js';
 
 const need = createRequire(import.meta.url);
 /** Electron's runtime export is the path to its binary, not its API surface. */
@@ -82,88 +88,14 @@ const BOOT_BUDGET_MS = 20_000;
 const RUNS_THE_BUNDLE =
   process.platform === 'darwin' && process.arch === 'arm64';
 
-const temps: string[] = [];
-function tempDir(prefix = 'wemessage-bundle-'): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  temps.push(dir);
-  return dir;
-}
-
-async function freePort(): Promise<number> {
-  return await new Promise((ok, bad) => {
-    const srv = createServer();
-    srv.on('error', bad);
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      if (addr === null || typeof addr === 'string') {
-        bad(new Error('no port'));
-        return;
-      }
-      const { port } = addr;
-      srv.close(() => {
-        ok(port);
-      });
-    });
-  });
-}
-
-/**
- * Poll a predicate on the macrotask queue. `setTimeout` is banned under this
- * tree, and `setImmediate` is not a timer: it yields to I/O, which is exactly
- * what a test waiting on a child's stdout needs.
+/*
+ * `tempDir`, `cleanupTemps`, `freePort`, `waitFor`, `launch` and `bed` moved
+ * to `test/helpers/bundle-lane.ts` at s9 Sc 6, unchanged. Sc 6 launches the
+ * SAME daemon out of `WeMessage.app/Contents/Resources/` and needs the same
+ * machinery; a second copy of the polling rule above is a second place to get
+ * it wrong. `listing` stays here because Sc 6 lists a `.app`, not a
+ * directory of build output, and the two want different roots.
  */
-async function waitFor(
-  cond: () => boolean,
-  what: string,
-  budgetMs: number,
-): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise<void>((ok) => {
-      setImmediate(ok);
-    });
-  }
-}
-
-interface Launched {
-  child: ChildProcess;
-  stdout: () => string;
-  stderr: () => string;
-  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-}
-
-function launch(cmd: string, args: string[], env: NodeJS.ProcessEnv): Launched {
-  const child = spawn(cmd, args, {
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let out = '';
-  let err = '';
-  child.stdout?.on('data', (b: Buffer) => (out += b.toString()));
-  child.stderr?.on('data', (b: Buffer) => (err += b.toString()));
-  const exited = new Promise<{
-    code: number | null;
-    signal: NodeJS.Signals | null;
-  }>((ok) => {
-    child.on('close', (code, signal) => {
-      ok({ code, signal });
-    });
-  });
-  return { child, stdout: () => out, stderr: () => err, exited };
-}
-
-/** A chat.db the daemon can tail without touching the operator's real one. */
-function bed(): { dir: string; chatDb: string } {
-  const dir = tempDir();
-  const dbDir = tempDir('wemessage-chatdb-');
-  const chatDb = join(dbDir, 'fixture.db');
-  const fixtures = need('../../../fixtures/dist/index.js') as {
-    createChatDb: (p: string) => { close: () => void };
-  };
-  fixtures.createChatDb(chatDb).close();
-  return { dir, chatDb };
-}
 
 /** Every file under `dir`, repo-relative, sorted. */
 function listing(dir: string): string[] {
@@ -208,7 +140,7 @@ beforeAll(() => {
 }, 180_000);
 
 afterAll(() => {
-  for (const d of temps) rmSync(d, { recursive: true, force: true });
+  cleanupTemps();
 });
 
 /* ── row 1 ────────────────────────────────────────────────────────────── */
@@ -418,7 +350,7 @@ describe.skipIf(!RUNS_THE_BUNDLE)(
         expect(body.runtime?.node).toMatch(/^\d+\.\d+\.\d+/);
         expect(typeof body.runtime?.abi).toBe('number');
       } finally {
-        d.child.kill('SIGTERM');
+        await d.stop();
         await d.exited;
       }
     });
@@ -654,7 +586,7 @@ describe('s9 Sc5 row 8: the daemon bundle is not an Electron app', () => {
           BOOT_BUDGET_MS,
         );
       } finally {
-        d.child.kill('SIGTERM');
+        await d.stop();
         await d.exited;
       }
       const after = existsSync(support) ? readdirSync(support) : [];

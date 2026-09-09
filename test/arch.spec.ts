@@ -3810,7 +3810,30 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
         .filter((f) => f.length > 0)
         .sort();
     /**
-     * Empty, and empty is the Sc 17 answer.
+     * The one raster this repo tracks, and the reason it is allowed to.
+     *
+     * Empty from Sc 17 through the whole of S8, and the reason for that is
+     * unchanged and restated below: NO golden PNG has been committed and
+     * none will be. What changed at s9 Sc 6 is that the app acquired a
+     * PACKAGING INPUT. `electron-builder` hands `dmg-background.png` to
+     * Finder to composite behind the drag-to-Applications arrow, and the
+     * DMG format takes a raster or it takes nothing — there is no vector
+     * path to argue for.
+     *
+     * So the admission is bounded by LOCATION as well as by name, in the
+     * row below. Anything under `apps/desktop/build/` is a build input:
+     * reproducible from `site/logo/mark.svg` by
+     * `apps/desktop/scripts/render-brand-assets.sh`, and decoded and swept
+     * pixel by pixel by `apps/desktop/test/tokens.spec.ts` row 3b rather
+     * than merely named. A PNG anywhere else is a screenshot, and still
+     * fails on sight.
+     *
+     * `icon.icns` is NOT here because this row reads `*.png` only. The
+     * all-extensions equality is tokens.spec.ts row 3a, which is the
+     * stronger of the two and says so.
+     *
+     * THE SC 17 REASONING, retained because it is what keeps this list from
+     * growing a third member:
      *
      * Sc 1 wrote this list expecting Sc 17 to commit two reduced-transparency
      * reference PNGs and then tighten the subset below into an equality. Sc 17
@@ -3829,15 +3852,24 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
      * for 0.72, 199 for 0.78, 255 for the reduced branch — and `a11y.spec.ts`
      * asserts the equality rather than a ratio against a picture of last week.
      */
-    const SNAPSHOT_PNGS: readonly string[] = [];
+    const BUILD_INPUT_PNGS: readonly string[] = [
+      'apps/desktop/build/dmg-background.png',
+    ];
 
     it('no brand string, no operator handle, no absolute home path', () => {
       expect(publicRepoOffenders()).toEqual([]);
     });
 
-    it('the repo tracks no raster at all', () => {
-      // Equality from Sc 17, and the equality is with the empty list.
-      expect(tracked('*.png')).toEqual([...SNAPSHOT_PNGS]);
+    it('the repo tracks no raster but the DMG background', () => {
+      // Equality from Sc 17. s9 Sc 6 moved the list from empty to one, and
+      // moving it is a two-file diff: this row and tokens.spec.ts row 3a.
+      expect(tracked('*.png')).toEqual([...BUILD_INPUT_PNGS]);
+      // Bounded by LOCATION, not only by name. Without this a golden could
+      // join the list by being appended to it, which is the exact move the
+      // paragraph above spends twenty lines refusing.
+      expect(
+        BUILD_INPUT_PNGS.filter((p) => !p.startsWith('apps/desktop/build/')),
+      ).toEqual([]);
     });
 
     it('PLANTED: a screenshot committed anywhere else fails the row', () => {
@@ -3851,7 +3883,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       );
       const pngs = tracked('*.png');
       expect(pngs).toContain(rel);
-      expect(pngs.filter((p) => !SNAPSHOT_PNGS.includes(p))).toEqual([rel]);
+      expect(pngs.filter((p) => !BUILD_INPUT_PNGS.includes(p))).toEqual([rel]);
     });
 
     it('LEGITIMATE NEAR-MISS: a monochrome template SVG is not a raster', () => {
@@ -3865,7 +3897,7 @@ describe('S8 extensions (s8-execution Scenario 1: GUI-era guards)', () => {
       );
       expect(tracked('*.png')).not.toContain(rel);
       expect(
-        tracked('*.png').filter((p) => !SNAPSHOT_PNGS.includes(p)),
+        tracked('*.png').filter((p) => !BUILD_INPUT_PNGS.includes(p)),
       ).toEqual([]);
     });
   });
@@ -4259,6 +4291,14 @@ const ARCH_SKIP = new Set([
   // can flip is not a guard. The row below pins this set against .gitignore so
   // the entry cannot quietly become a place to hide a real file.
   'dist-bundle',
+  // s9 Sc6. The pack's outputs, same argument. `dist-pack` holds a COPIED
+  // ELECTRON: ~14 Mach-O binaries and a few thousand files of Chromium's
+  // resources, none of it written here and all of it visible to a sweep that
+  // walks the filesystem. `dist-pack-next` is the staging name the release
+  // lane uses so a failed pack cannot leave a half-built app where the
+  // previous good one was.
+  'dist-pack',
+  'dist-pack-next',
   '.git',
   'coverage',
   '.turbo',
@@ -9042,7 +9082,7 @@ describe('S8 extensions (s8-execution Scenario 15: the onboarding wizard and eve
    * A wizard is example paths and example handles from top to bottom, and
    * this repo is public. The global sweep already runs; this row states it
    * as a Sc15 claim over exactly the files this scenario adds, plus the
-   * `/Users/` count that has been three since S6 and is three now.
+   * `/Users/` census, which S6 left at three and s9 Sc6 takes to four.
    */
   it('nothing the wizard shows an operator identifies one', () => {
     expect(publicRepoOffenders()).toEqual([]);
@@ -9061,22 +9101,38 @@ describe('S8 extensions (s8-execution Scenario 15: the onboarding wizard and eve
       for (const host of raw.match(/@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [])
         expect(host.endsWith('example.com'), `${rel}: ${host}`).toBe(true);
     }
-    // Three homes, and NAMING them beats counting them: a fourth fails on
-    // the list and says which file it was, where an integer would only say
-    // the number moved.
+    // NAMING the homes beats counting them: a new one fails on the list and
+    // says which file it was, where an integer would only say the number
+    // moved.
     //
-    // Two of the three are here, because `trackedTextFiles()` deliberately
-    // excludes `test/arch.spec.ts` — the guard file is the third home, and
-    // it has to be able to spell the shape it hunts for. Asserting "three"
-    // over a list that structurally cannot contain the third was this
-    // scenario's own row being wrong rather than the tree.
+    // Three of the four are here, because `trackedTextFiles()` deliberately
+    // excludes `test/arch.spec.ts` — the guard file is a home too, and it
+    // has to be able to spell the shape it hunts for. Asserting a COUNT over
+    // a list that structurally cannot contain that one was this scenario's
+    // own row being wrong rather than the tree.
     const homes = trackedTextFiles().filter((rel) =>
       readFileSync(join(repoRoot, rel), 'utf8').includes('/Users/'),
     );
     expect(homes.sort()).toEqual([
+      'apps/desktop/scripts/verify-bundle.sh',
       'packages/adapter-testkit/test/pack.spec.ts',
       'packages/cli/test/skill-dryrun.spec.ts',
     ]);
+    // s9 Sc6 admits the FOURTH home, and admitting one by NAME ALONE would
+    // be exactly the widening this census exists to prevent. So the entry
+    // arrives with a condition attached. The bundle verifier hunts absolute
+    // paths inside a shipped Mach-O, which means it has to be able to spell
+    // one, and every `/Users/` in it must therefore sit inside a grep
+    // pattern. An edit that later hard-codes a real home on a line of its
+    // own still fails, and fails carrying the line that did it.
+    for (const line of readFileSync(
+      join(repoRoot, 'apps/desktop/scripts/verify-bundle.sh'),
+      'utf8',
+    ).split('\n'))
+      if (line.includes('/Users/'))
+        expect(line, 'verify-bundle.sh names a home outside a grep').toContain(
+          'grep',
+        );
     expect(readFileSync(join(repoRoot, 'test/arch.spec.ts'), 'utf8')).toContain(
       '/Users/',
     );
@@ -9655,16 +9711,32 @@ describe('S8 extensions (s8-execution Scenario 16: the tray, PAUSE, deep links a
       for (const host of raw.match(/@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? [])
         expect(host.endsWith('example.com'), `${rel}: ${host}`).toBe(true);
     }
-    // And the census itself is still the three it has been since S6, so a
-    // fourth introduced by this scenario fails HERE with a filename rather
+    // And the census itself is re-asserted here by NAME, so a carrier
+    // introduced by any later scenario fails HERE with a filename rather
     // than three scenarios later with an integer.
     const homes = trackedTextFiles().filter((rel) =>
       readFileSync(join(repoRoot, rel), 'utf8').includes('/Users/'),
     );
     expect(homes.sort()).toEqual([
+      'apps/desktop/scripts/verify-bundle.sh',
       'packages/adapter-testkit/test/pack.spec.ts',
       'packages/cli/test/skill-dryrun.spec.ts',
     ]);
+    // s9 Sc6 admits the FOURTH home, and admitting one by NAME ALONE would
+    // be exactly the widening this census exists to prevent. So the entry
+    // arrives with a condition attached. The bundle verifier hunts absolute
+    // paths inside a shipped Mach-O, which means it has to be able to spell
+    // one, and every `/Users/` in it must therefore sit inside a grep
+    // pattern. An edit that later hard-codes a real home on a line of its
+    // own still fails, and fails carrying the line that did it.
+    for (const line of readFileSync(
+      join(repoRoot, 'apps/desktop/scripts/verify-bundle.sh'),
+      'utf8',
+    ).split('\n'))
+      if (line.includes('/Users/'))
+        expect(line, 'verify-bundle.sh names a home outside a grep').toContain(
+          'grep',
+        );
   });
 });
 
@@ -10083,6 +10155,8 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       'coverage',
       'dist',
       'dist-bundle',
+      'dist-pack',
+      'dist-pack-next',
       'node_modules',
     ]);
     for (const name of ARCH_SKIP) expect(admissible(name), name).toBe(true);
@@ -11074,18 +11148,72 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(missing).toEqual([]);
     });
 
+    /**
+     * s9 Sc6 split this row, and the split is the point.
+     *
+     * The row was written in Sc 1, when all seven were stubs, and it said one
+     * thing about all of them: the body contains `process.exit(2)`. Sc 6
+     * implemented `pack.mjs`, which still contains `process.exit(2)` because
+     * its refusal path uses it, so the row went on passing while quietly
+     * making a false claim: `pack:adhoc` is no longer a script that does
+     * nothing.
+     *
+     * A row that keeps passing after the thing it describes stops being true
+     * is the shape this suite exists to avoid, so the claim is now two claims
+     * about two named sets, and the sets have to partition the seven. The
+     * mechanical difference between the halves is reaching a child process: a
+     * stub is a refusal and cannot spawn; an implemented lane's entire job is
+     * to drive `pnpm` and `electron-builder`. Moving a script between the sets
+     * is now a diff somebody has to write on purpose.
+     */
+    const IMPLEMENTED: readonly string[] = ['pack:adhoc', 'pack:release'];
+    const STUBS: readonly string[] = [
+      'release:notarize',
+      'release:cask',
+      'release:check-versions',
+      'release:cut-tag',
+      'smoke:automated',
+    ];
+    const bodyOf = (name: string): string =>
+      s9Read(
+        /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(scripts()[name] ?? '')?.[1] ??
+          '',
+      );
+
+    it('the two sets partition the seven, with nothing in both or neither', () => {
+      expect([...IMPLEMENTED, ...STUBS].sort()).toEqual(
+        [...RELEASE_SCRIPTS].sort(),
+      );
+      expect(IMPLEMENTED.filter((n) => STUBS.includes(n))).toEqual([]);
+    });
+
     it('the stubs refuse loudly rather than succeeding by doing nothing', () => {
       // Exit 2, not 0. A release script that is a no-op is the single most
       // dangerous shape in this list: `pnpm release:notarize && ship` would
       // ship an unnotarised app and report success.
-      const have = scripts();
-      for (const name of RELEASE_SCRIPTS) {
-        const path = /(tools\/[^\s]+\.(?:mjs|js|ts|sh))/.exec(
-          have[name] ?? '',
-        )?.[1];
-        expect(path, name).toBeDefined();
-        const body = s9Read(path ?? '');
-        expect(body, `${name} (${path ?? ''})`).toContain('process.exit(2)');
+      for (const name of STUBS) {
+        const body = bodyOf(name);
+        expect(body, name).toContain('process.exit(2)');
+        // …and a stub cannot quietly become half a lane. The moment one of
+        // these reaches a child process it belongs in IMPLEMENTED, where it
+        // gets the stronger row below instead of this one.
+        expect(
+          /\b(spawnSync|execFileSync|execSync|spawn|execFile)\s*\(/.test(body),
+          `${name} spawns, so it is no longer a stub`,
+        ).toBe(false);
+      }
+    });
+
+    it('the implemented lanes still refuse loudly, and actually do the work', () => {
+      for (const name of IMPLEMENTED) {
+        const body = bodyOf(name);
+        // The refusal path does not go away when the happy path arrives: a
+        // release lane with no certificate has to fail, not degrade.
+        expect(body, name).toContain('process.exit(2)');
+        expect(
+          /\b(spawnSync|execFileSync)\s*\(/.test(body),
+          `${name} must drive a real build`,
+        ).toBe(true);
       }
     });
   });

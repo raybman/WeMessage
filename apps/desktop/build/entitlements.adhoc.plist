@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The AD-HOC lane's entitlements: the release three, plus the one that only
+  an ad-hoc signature needs.
+
+  `com.apple.security.cs.disable-library-validation` is here because library
+  validation compares the Team ID of a Mach-O against the Team ID of the
+  process loading it, and an ad-hoc signature HAS no Team ID. Under a hardened
+  runtime the ad-hoc app therefore cannot load `better-sqlite3`'s prebuilt
+  `.node` at all: the daemon dies in `dlopen` before it opens a database.
+  electron-builder warns about precisely this case when it sees `identity: '-'`
+  together with `hardenedRuntime: true`.
+
+  This is a real reduction in the app's security posture and it is confined to
+  the lane that cannot avoid it. `scripts/verify-bundle.sh <app> release` fails
+  loudly if this key is ever found in a release bundle, and Sc 6 row 7 runs
+  that check against THIS bundle to prove the failure is real rather than
+  theoretical. The two files exist so the difference between the lanes is a
+  file name in a config, visible in a diff, rather than a conditional inside a
+  build script that nobody reads.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+  </dict>
+</plist>

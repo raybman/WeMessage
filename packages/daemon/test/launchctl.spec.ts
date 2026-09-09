@@ -259,12 +259,20 @@ describe('s9 Sc1 row 6: a launchd label this project does not own is refused', (
       const spy = spawnSpy();
       const result = await runLaunchctl('print', asLaunchAgentLabel(OURS), {
         spawn: spy.spawn,
-        uid: 501,
+        // The CALLER'S uid, not a literal. `501` is the first human account
+        // on a Mac and it is what this row hardcoded, so the row asserted a
+        // fact about the developer's laptop and went red on a CI runner whose
+        // uid is 1001. The domain under test is "the caller's own GUI
+        // session", and that is what `UID` says.
+        uid: UID,
       });
       expect(result.code).toBe(0);
       expect(spy.calls.length).toBe(1);
       expect(spy.calls[0]?.file).toBe('launchctl');
-      expect(spy.calls[0]?.args).toEqual(['print', `gui/501/${OURS}`]);
+      expect(spy.calls[0]?.args).toEqual([
+        'print',
+        `gui/${String(UID)}/${OURS}`,
+      ]);
     });
 
     it('the domain is the caller uid, never a root domain and never another user', () => {

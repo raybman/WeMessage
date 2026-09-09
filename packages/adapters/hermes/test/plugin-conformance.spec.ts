@@ -19,12 +19,14 @@
  *    would make the rows below lie. Resolution is a documented ladder
  *    (`$WEMESSAGE_PYTHON`, then `uv`, then a bare `python3`), every rung is
  *    PROBED before it is believed, and the outcome is printed.
- *  - **A missing interpreter skips, loudly, and never under CI.** C-11: a
+ *  - **A missing interpreter skips, loudly; a NAMED one may not.** C-11: a
  *    cross-language row must not make the TypeScript gate red on a machine
- *    without the interpreter, and must not go quietly green on CI because the
- *    interpreter was missing. So the skips are COUNTED, the count is asserted
- *    against the declared row list at the end of the file, and `CI=true`
- *    turns any skip into a failure (F-88).
+ *    without the interpreter, and must not go quietly green on the lane that
+ *    installed one. So the skips are COUNTED, the count is asserted against
+ *    the declared row list at the end of the file, and `WEMESSAGE_PYTHON`
+ *    turns any skip into a failure (F-88). The promise, not the ambient `CI`
+ *    flag: GitHub sets `CI` on every runner, so it identified no lane and
+ *    made the TypeScript lanes assert an interpreter row 9 forbids them.
  *  - **INV-2 holds in a second language.** The protocol has no send frame.
  *    `wemessage_wire.py` has one `AGENT_FRAME_TYPES` frozenset, one `_emit`
  *    chokepoint that raises on anything outside it, and exactly one socket
@@ -147,8 +149,12 @@ function resolvePython(): PythonRuntime | null {
   const fromEnv = process.env['WEMESSAGE_PYTHON'];
   if (fromEnv !== undefined && fromEnv !== '') {
     const detail = probe(fromEnv, []);
-    if (detail !== null)
-      return { source: 'env', cmd: fromEnv, args: [], label: detail };
+    // Named means named. There is deliberately no rung below this one:
+    // falling through to uv or python3 would run the rows on an interpreter
+    // nobody pinned, and the caller would be told the pin took when it did
+    // not. Returning null here is what makes the strict branch honest.
+    if (detail === null) return null;
+    return { source: 'env', cmd: fromEnv, args: [], label: detail };
   }
   if (hasUv()) {
     const args = [
@@ -174,7 +180,23 @@ function resolvePython(): PythonRuntime | null {
 }
 
 const PYTHON = resolvePython();
-const CI = process.env['CI'] === 'true';
+/**
+ * The promise, and the reason it is not `CI`.
+ *
+ * When `WEMESSAGE_PYTHON` names an interpreter, a skip is a FAILURE: the
+ * caller said which one to use, so "none found" is a broken promise rather
+ * than a missing tool. ci-python.yml is the caller that matters, and row 9
+ * asserts that it names one, so the promise cannot be dropped without a row
+ * going red. A contributor who exports the variable has made the same
+ * promise and gets the same strictness.
+ *
+ * Ambient `CI` is deliberately not consulted. GitHub sets it on EVERY
+ * runner, so it identifies no lane: read as a marker it made ci-linux and
+ * ci-macos assert that they have an interpreter, while row 9 forbids them
+ * from provisioning one. That contradiction is what this replaces.
+ */
+const PROMISED = process.env['WEMESSAGE_PYTHON'] ?? '';
+const STRICT = PROMISED !== '';
 
 /**
  * The rows that need an interpreter, named exactly as they are declared. The
@@ -192,7 +214,15 @@ const INTERPRETED_ROWS = [
 const ran: string[] = [];
 const skipped: string[] = [];
 
-if (PYTHON === null)
+if (PYTHON === null && STRICT)
+  // A promise was made and broken. Saying "will SKIP" here would describe
+  // the lenient path on the one lane that is not taking it.
+  console.warn(
+    `[s7 Sc7] WEMESSAGE_PYTHON=${PROMISED} did not probe: it must be an ` +
+      'interpreter in >=3.11,<3.14 that can import websockets. Every ' +
+      'interpreted row will SKIP and row 11 will FAIL for that reason.',
+  );
+else if (PYTHON === null)
   // Printed, not swallowed. A skip nobody sees is a pass with extra steps.
   console.warn(
     '[s7 Sc7] no usable Python: every interpreted row will SKIP. Wanted an ' +
@@ -582,7 +612,7 @@ describe('s7 Sc7: the Python lane is its own blocking CI job', () => {
   const workflow = (): string =>
     readFileSync(`${REPO}.github/workflows/ci-python.yml`, 'utf8');
 
-  it('row 9: ci-python.yml pins 3.12, requires hashes, and is separate from ci-linux', () => {
+  it('row 9: ci-python.yml pins 3.12, requires hashes, names the interpreter, runs both interpreted specs, and is separate from both TypeScript lanes', () => {
     expect(existsSync(`${REPO}.github/workflows/ci-python.yml`)).toBe(true);
     const source = workflow();
     expect(source).toMatch(/uses:\s*actions\/setup-python@v\d+/);
@@ -591,17 +621,40 @@ describe('s7 Sc7: the Python lane is its own blocking CI job', () => {
     expect(source).toMatch(
       /-r packages\/adapters\/hermes\/plugin\/requirements\.txt/,
     );
-    expect(source).toMatch(/--project adapter-hermes/);
-    expect(source).toMatch(/CI:\s*['"]?true['"]?/);
+    // The promise. `WEMESSAGE_PYTHON` is what turns a skip into a failure in
+    // row 11 here and in s7-e2e, so the lane must set it, to the same word
+    // the pip step installed into. Absent or empty would switch the strict
+    // branch off everywhere and no lane would notice.
+    //
+    // This replaces an assertion that this file set `CI: true`. That one had
+    // no teeth: GitHub sets `CI` on every runner, so the workflow saying it
+    // verified nothing at all.
+    expect(source).toMatch(/^\s*WEMESSAGE_PYTHON:\s*python[ \t]*$/m);
+    // Two steps, one per interpreted spec. NOT one command with two
+    // `--project` flags: a positional filter applies to EVERY listed
+    // project, so `--project adapter-hermes --project daemon s7-e2e`
+    // collects zero adapter-hermes files and passes having run none of them.
+    expect(source).toMatch(
+      /^\s*- run: pnpm vitest run --project adapter-hermes[ \t]*$/m,
+    );
+    expect(source).toMatch(
+      /^\s*- run: pnpm vitest run --project daemon s7-e2e[ \t]*$/m,
+    );
     // Blocking, not advisory. `continue-on-error` is how a red lane becomes
     // wallpaper, and the escape hatch is a commit that cites flake logs and
     // opens a flag, not a line nobody notices (F-88).
     expect(source).not.toMatch(/continue-on-error/);
     // Its OWN job in its OWN workflow: a Python flake must never stop the
-    // TypeScript signal from being readable.
-    expect(
-      readFileSync(`${REPO}.github/workflows/ci-linux.yml`, 'utf8'),
-    ).not.toMatch(/python/i);
+    // TypeScript signal from being readable. NEITHER TypeScript lane may
+    // provision, name, or promise an interpreter. ci-macos is named here for
+    // the first time: it was always covered by the intent and never by the
+    // assertion. The promise variable carries the banned word itself, so the
+    // ban and the strict predicate are locked together by one string.
+    for (const lane of ['ci-linux', 'ci-macos'])
+      expect(
+        readFileSync(`${REPO}.github/workflows/${lane}.yml`, 'utf8'),
+        lane,
+      ).not.toMatch(/python/i);
   });
 });
 
@@ -646,12 +699,19 @@ describe('s7 Sc7: the interpreter gap is counted, not assumed', () => {
     expect(INTERPRETED_ROWS).toHaveLength(4);
     expect([...ran, ...skipped].sort()).toEqual([...INTERPRETED_ROWS].sort());
 
-    if (CI) {
-      // F-88 / C-11: on CI the interpreter is pinned by ci-python.yml, so a
-      // skip here means the pin did not take and the green tick would be a
-      // lie about what was verified.
-      expect(PYTHON).not.toBeNull();
+    if (STRICT) {
+      // F-88 / C-11: an interpreter was NAMED (ci-python.yml names one, and
+      // row 9 asserts that it does). A skip here means the pin did not take
+      // and the green tick would be a lie about what was verified.
+      expect(
+        PYTHON,
+        `WEMESSAGE_PYTHON=${PROMISED} did not probe`,
+      ).not.toBeNull();
+      // The pin took on the rung that was pinned, not on some other one.
+      expect(PYTHON?.source).toBe('env');
+      expect(PYTHON?.label).toMatch(/^PROBE ok 3 (?:11|12|13) /);
       expect(skipped).toEqual([]);
+      expect([...ran].sort()).toEqual([...INTERPRETED_ROWS].sort());
       return;
     }
     if (PYTHON === null) {

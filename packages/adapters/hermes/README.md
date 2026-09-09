@@ -113,8 +113,16 @@ CONFORMANT v1 - hermes-plugin
 
 Six checks, the same six the Node reference adapter answers. If you have no
 Python in `>=3.11,<3.14` the vitest rows that need one skip, say so on
-stdout, and count themselves; under `CI=true` they fail instead, because a
-skip that looks like a pass is worse than a failure.
+stdout, and count themselves. Set `WEMESSAGE_PYTHON` and they fail instead:
+naming an interpreter is a promise, and a skip under a promise is a broken
+one, because a skip that looks like a pass is worse than a failure. Naming
+one also stops the ladder, so the rows run on the interpreter you named or
+they do not run at all.
+
+This used to key off `CI=true`. It no longer does: GitHub sets `CI` on every
+runner, so it named no lane, and it made the TypeScript lanes assert that
+they had an interpreter that `ci-python.yml` is the only lane allowed to
+install.
 
 ## There is no send frame
 

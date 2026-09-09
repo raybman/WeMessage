@@ -21,11 +21,16 @@ on:
 jobs:
   build-and-test:
     runs-on: macos-15
-    # Same reason as ci-linux: electron's postinstall IS the binary download.
-    # The cache key carries `runner.os`, so the macOS binary and the Linux one
-    # do not evict each other.
+    # Same as ci-linux, and corrected the same way in s9: electron@44.2.0 has
+    # no postinstall, so the lowercase `electron_config_cache` is the key the
+    # download actually reads. The cache key carries `runner.os`, so the macOS
+    # binary and the Linux one do not evict each other. There is deliberately
+    # no interpreter provisioned here: the interpreted rows belong to the
+    # dedicated lane, which is the only one that pins and hash-installs one
+    # (s7 Sc7 row 9).
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -40,6 +45,15 @@ jobs:
           path: .cache/electron
           key: electron-${{ runner.os }}-44.2.0
       - run: pnpm install --frozen-lockfile
+      # Fetch the Electron binary ONCE, before any vitest worker exists.
+      # Left to the first `require('electron')`, that download happens inside
+      # two or three desktop workers at the same time, and the second
+      # extractor writes over the file the first is exec'ing: ETXTBSY, and a
+      # whole e2e file goes red for a reason that has nothing to do with it.
+      # This is provisioning, not serialisation: the suite still runs with the
+      # parallelism the runner has. Idempotent, so it exits in about a second
+      # once the cache above is warm.
+      - run: pnpm --filter @wemessage/desktop exec install-electron
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm dep:check

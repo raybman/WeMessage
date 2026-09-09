@@ -9,8 +9,13 @@ name: ci-python
 # checks list. And this job is the ONLY place the Python conformance rows
 # actually execute: the vitest rows skip when no interpreter in the supported
 # range is available, so on a contributor's machine they may be green without
-# having run. `CI: 'true'` below flips that — under CI a skip is a failure,
-# because a green tick that verified nothing is worse than a red one.
+# having run. `WEMESSAGE_PYTHON` below flips that — naming an interpreter is a
+# PROMISE, and under a promise a skip is a failure, because a green tick that
+# verified nothing is worse than a red one.
+#
+# It is deliberately not `CI: 'true'`. GitHub sets `CI` on every runner, so it
+# identifies no lane: read as a marker it made the TypeScript lanes, which are
+# forbidden an interpreter by row 9, assert that they have one.
 #
 # Blocking, not advisory. Nothing here is marked as tolerating failure, on
 # purpose: a lane allowed to go red quietly is a lane nobody reads. If this
@@ -25,6 +30,12 @@ on:
 jobs:
   python-conformance:
     runs-on: ubuntu-latest
+    # The promise, job-level so the pip step and both vitest steps below mean
+    # the same binary. Row 9 asserts this line, with exactly this value: drop
+    # it and the strict branch in both interpreted specs switches off, on the
+    # one lane whose entire purpose is that it must not skip.
+    env:
+      WEMESSAGE_PYTHON: python
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -52,9 +63,12 @@ jobs:
       # not optional here even though this job runs no TypeScript of its own.
       - run: pnpm build
       - run: pnpm vitest run --project adapter-hermes
-        env:
-          CI: 'true'
-          # The interpreter setup-python just installed, named explicitly.
-          # Leaving resolution to the ladder would let this job silently fall
-          # through to a different interpreter than the one it pinned.
-          WEMESSAGE_PYTHON: python
+      # A SECOND step, not a second `--project` on the first. A positional
+      # filter applies to EVERY listed project, so one command carrying
+      # `--project adapter-hermes --project daemon s7-e2e` collects zero
+      # adapter-hermes files and goes green having run none of them.
+      #
+      # This is the only lane on which the daemon's interpreted row executes.
+      # It ran nowhere before: this workflow filtered to adapter-hermes, and
+      # the TypeScript lanes have no interpreter to run it with.
+      - run: pnpm vitest run --project daemon s7-e2e

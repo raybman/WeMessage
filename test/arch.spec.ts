@@ -11252,9 +11252,28 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       .split('\n')
       .filter((f) => f.length > 0);
     expect(tracked).toEqual([]);
-    // Non-vacuity: the tree HAS a docs/ directory, so an empty result is a
-    // fact about the index rather than a fact about the filesystem.
-    expect(existsSync(join(repoRoot, 'docs'))).toBe(true);
+    /*
+     * Non-vacuity: the tree KNOWS about `docs/`, so an empty result above is
+     * a fact about the INDEX rather than about a directory that happens not
+     * to exist.
+     *
+     * This used to be `existsSync(join(repoRoot, 'docs'))`, and that probe
+     * was false on every fresh clone for exactly the reason this row exists:
+     * `docs/` is ignored, so it is never cloned. The row therefore passed on
+     * the machine that has the directory and failed on every CI runner, which
+     * is the worst possible arrangement -- a guard that is red where nobody
+     * can act on it and green where the mistake would be made.
+     *
+     * `git check-ignore -q` exits 0 iff a rule would ignore the path. That is
+     * the same fact the old probe was reaching for, and it holds in a
+     * checkout that never had the directory at all.
+     */
+    expect(() =>
+      execFileSync('git', ['check-ignore', '-q', 'docs/anything'], {
+        cwd: repoRoot,
+        stdio: 'ignore',
+      }),
+    ).not.toThrow();
     expect(s9Read('.gitignore')).toMatch(/^docs\/$/m);
   });
 });

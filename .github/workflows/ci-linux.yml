@@ -9,12 +9,17 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # s8 Sc4 (F-99). Electron's postinstall IS the binary download, so it has
-    # to land somewhere cacheable: without this the shell is fetched from
-    # GitHub releases on every run, and a rate-limited or offline fetch turns
-    # into "the desktop suite failed" rather than "the download failed".
+    # s8 Sc4 (F-99), corrected in s9. electron@44.2.0 has NO postinstall: the
+    # binary is fetched by `@electron/get` the first time `require('electron')`
+    # runs. That fetch honours `electron_config_cache` and nothing else, so for
+    # four months the cache step below saved an empty directory and every run
+    # re-downloaded the shell ("Cache not found for input keys" on every log).
+    # `ELECTRON_CACHE` stays because an arch row names it and because the
+    # tooling around electron-builder still reads it; the lowercase key is the
+    # one the download actually consults.
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +37,15 @@ jobs:
           path: .cache/electron
           key: electron-${{ runner.os }}-44.2.0
       - run: pnpm install --frozen-lockfile
+      # Fetch the Electron binary ONCE, before any vitest worker exists.
+      # Left to the first `require('electron')`, that download happens inside
+      # two or three desktop workers at the same time, and the second
+      # extractor writes over the file the first is exec'ing: ETXTBSY, and a
+      # whole e2e file goes red for a reason that has nothing to do with it.
+      # This is provisioning, not serialisation: the suite still runs with the
+      # parallelism the runner has. Idempotent, so it exits in about a second
+      # once the cache above is warm.
+      - run: pnpm --filter @wemessage/desktop exec install-electron
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm dep:check

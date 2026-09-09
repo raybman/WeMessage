@@ -64,8 +64,10 @@
  * fifth surface and it needs an interpreter, so it is declared through
  * `pyRow` exactly as `plugin-conformance.spec.ts` declares its rows: every
  * declared row lands in `ran[]` or `skipped[]`, an accounting row asserts
- * the union is the declared set exactly, it is all-or-nothing, and under
- * `CI=true` nothing may skip at all.
+ * the union is the declared set exactly, it is all-or-nothing, and when
+ * `WEMESSAGE_PYTHON` names an interpreter nothing may skip at all. That
+ * promise, not the ambient `CI` flag, and `ci-python.yml` runs this file by
+ * name so the row has a lane it actually executes on.
  *
  * **Flake discipline, because this file spawns more concurrent real
  * processes than anything else in the suite.** Port 0 everywhere, never a
@@ -833,8 +835,12 @@ function resolvePython(): PythonRuntime | null {
   const fromEnv = process.env['WEMESSAGE_PYTHON'];
   if (fromEnv !== undefined && fromEnv !== '') {
     const detail = probe(fromEnv, []);
-    if (detail !== null)
-      return { source: 'env', cmd: fromEnv, args: [], label: detail };
+    // Named means named. There is deliberately no rung below this one:
+    // falling through to uv or python3 would run the rows on an interpreter
+    // nobody pinned, and the caller would be told the pin took when it did
+    // not. Returning null here is what makes the strict branch honest.
+    if (detail === null) return null;
+    return { source: 'env', cmd: fromEnv, args: [], label: detail };
   }
   if (hasUv()) {
     const args = [
@@ -860,7 +866,23 @@ function resolvePython(): PythonRuntime | null {
 }
 
 const PYTHON = resolvePython();
-const CI = process.env['CI'] === 'true';
+/**
+ * The promise, and the reason it is not `CI`.
+ *
+ * When `WEMESSAGE_PYTHON` names an interpreter, a skip is a FAILURE: the
+ * caller said which one to use, so "none found" is a broken promise rather
+ * than a missing tool. ci-python.yml is the caller that matters, and row 9
+ * asserts that it names one, so the promise cannot be dropped without a row
+ * going red. A contributor who exports the variable has made the same
+ * promise and gets the same strictness.
+ *
+ * Ambient `CI` is deliberately not consulted. GitHub sets it on EVERY
+ * runner, so it identifies no lane: read as a marker it made ci-linux and
+ * ci-macos assert that they have an interpreter, while row 9 forbids them
+ * from provisioning one. That contradiction is what this replaces.
+ */
+const PROMISED = process.env['WEMESSAGE_PYTHON'] ?? '';
+const STRICT = PROMISED !== '';
 
 /** The rows that need an interpreter, named exactly as they are declared. */
 const INTERPRETED_ROWS = [
@@ -870,7 +892,15 @@ const INTERPRETED_ROWS = [
 const ran: string[] = [];
 const skipped: string[] = [];
 
-if (PYTHON === null)
+if (PYTHON === null && STRICT)
+  // A promise was made and broken. Saying "will SKIP" here would describe
+  // the lenient path on the one lane that is not taking it.
+  console.warn(
+    `[s7 Sc13] WEMESSAGE_PYTHON=${PROMISED} did not probe: it must be an ` +
+      'interpreter in >=3.11,<3.14 that can import websockets. Every ' +
+      'interpreted row will SKIP and row 11 will FAIL for that reason.',
+  );
+else if (PYTHON === null)
   // Printed, not swallowed. A skip nobody sees is a pass with extra steps.
   console.warn(
     '[s7 Sc13] no usable Python: every interpreted row will SKIP. Wanted an ' +
@@ -1621,12 +1651,19 @@ describe('s7 Scenario 13: the fifth surface needs an interpreter', () => {
     expect(INTERPRETED_ROWS).toHaveLength(1);
     expect([...ran, ...skipped].sort()).toEqual([...INTERPRETED_ROWS].sort());
 
-    if (CI) {
-      // F-88 / C-11: on CI the interpreter is pinned by ci-python.yml, so a
-      // skip here means the pin did not take and the green tick would be a
-      // lie about what was verified.
-      expect(PYTHON).not.toBeNull();
+    if (STRICT) {
+      // F-88 / C-11: an interpreter was NAMED (ci-python.yml names one, and
+      // row 9 asserts that it does). A skip here means the pin did not take
+      // and the green tick would be a lie about what was verified.
+      expect(
+        PYTHON,
+        `WEMESSAGE_PYTHON=${PROMISED} did not probe`,
+      ).not.toBeNull();
+      // The pin took on the rung that was pinned, not on some other one.
+      expect(PYTHON?.source).toBe('env');
+      expect(PYTHON?.label).toMatch(/^PROBE ok 3 (?:11|12|13) /);
       expect(skipped).toEqual([]);
+      expect([...ran].sort()).toEqual([...INTERPRETED_ROWS].sort());
       return;
     }
     if (PYTHON === null) {

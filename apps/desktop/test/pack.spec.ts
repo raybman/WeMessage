@@ -32,7 +32,7 @@
  * as a text scan, so readiness is observed off the child's stdout through the
  * shared lane helper, never slept on.
  */
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -541,6 +541,81 @@ describe.skipIf(!darwin)('s9 Sc6: the packed, ad-hoc-signed app', () => {
     },
     PACK_BUDGET_MS,
   );
+
+  /* ── row 9b (A): what Gatekeeper does to the thing we actually ship ─ */
+
+  /*
+   * THE README MAKES FOUR NUMBERED PROMISES ABOUT THIS ARTEFACT. Nothing
+   * checked whether any of them were true of it.
+   *
+   * `test/release/readme.spec.ts` row 3 asserts the README contains the
+   * WORDS "unsigned", "Open Anyway" and "com.apple.quarantine". That is a
+   * test of the document. This is the test of the program, and the two are
+   * not the same question: a README can describe a Gatekeeper flow
+   * perfectly and ship an artefact that behaves some other way.
+   *
+   * Three facts, and the third is the one that is easy to get wrong.
+   *
+   *  1. AD-HOC AND TEAMLESS. This lane deliberately ships without a
+   *     Developer ID, so that a paid Apple membership is not standing
+   *     between a reader and a working copy. If a Team ID ever appeared
+   *     here by accident, the README would be describing a flow the user
+   *     no longer gets, and the project would have quietly acquired a
+   *     dependency on a certificate nobody decided to take on.
+   *
+   *  2. GATEKEEPER REFUSES IT. Step 2 of the README ("macOS refuses,
+   *     because it cannot check the app with Apple") is a claim about
+   *     `spctl`, so it is asked of `spctl`. If Apple ever starts accepting
+   *     ad-hoc bundles, this row goes red and the README is what needs
+   *     editing, which is the correct direction for that signal to travel.
+   *
+   *  3. AND YET THE SIGNATURE IS VALID. This is the subtle one, and it is
+   *     what makes steps 3 and 4 possible at all. "Unsigned" in the
+   *     README's sense means "not Developer-ID signed"; the bundle is
+   *     still ad-hoc signed under a hardened runtime, and it has to be
+   *     VALIDLY so. An app whose seal is broken is not merely unverified,
+   *     it is unopenable: "Open Anyway" does not rescue it and neither
+   *     does stripping the quarantine attribute. So the escape hatch the
+   *     README hands a stranger only exists while `codesign --verify`
+   *     passes, and that is asserted here rather than assumed.
+   *
+   * WHY THE `spctl --status` GATE. Some CI images turn assessments off
+   * entirely, and on such a host `--assess` cannot answer the question this
+   * row is asking; it would report "accepted" for a reason that has nothing
+   * to do with our bundle. That is a host whose answer is unavailable, not
+   * a host where the answer changed, so it is a counted skip in the manner
+   * this suite already uses for an absent tool. Facts 1 and 3 are
+   * properties of the artefact alone and are asserted unconditionally.
+   */
+  it('row 9b: ad-hoc, teamless, validly sealed, and refused by Gatekeeper', () => {
+    // `codesign -dv` reports on STDERR, always, even on success.
+    const described = spawnSync('codesign', ['-dv', '--verbose=2', APP], {
+      encoding: 'utf8',
+    }).stderr;
+    expect(described).toContain('Signature=adhoc');
+    expect(described).toContain('TeamIdentifier=not set');
+    // Not vacuous: an empty stderr would satisfy neither, but say so early.
+    expect(described.length).toBeGreaterThan(0);
+
+    // Throws on a non-zero exit, which is the assertion.
+    execFileSync('codesign', ['--verify', '--deep', '--strict', APP], {
+      stdio: 'ignore',
+    });
+
+    const gatekeeperOn = spawnSync('spctl', ['--status'], {
+      encoding: 'utf8',
+    }).stdout.includes('assessments enabled');
+    if (!gatekeeperOn) return;
+
+    const assessed = spawnSync(
+      'spctl',
+      ['--assess', '--type', 'execute', '--verbose=4', APP],
+      { encoding: 'utf8' },
+    );
+    // `spctl` says "rejected" on stderr and exits 3 when it refuses.
+    expect(assessed.stderr).toContain('rejected');
+    expect(assessed.status).not.toBe(0);
+  });
 
   /* ── row 10 (A): nothing links against this machine ───────────────── */
 

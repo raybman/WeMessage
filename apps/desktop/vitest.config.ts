@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // s8 Sc1. The desktop app's first tests. `retry: 0` from the first commit
 // (C-11): a flaky test in this project is a bug, and the e2e lane Sc 4 adds
@@ -10,6 +10,20 @@ export default defineConfig({
     globals: false,
     retry: 0,
     include: ['test/**/*.spec.ts'],
+    // s9: two specs are SEQUENCED into projects of their own and excluded
+    // here so they do not ALSO run in this pool. The tray spec asserts a
+    // display-wide key grab (`vitest.tray.config.ts`, groupOrder 2); the a11y
+    // sweep holds one Electron instance for minutes while every other spec in
+    // this project launches its own beside it (`vitest.a11y.config.ts`,
+    // groupOrder 3). Neither is a skip: both files run on every `pnpm test`.
+    // The defaults are spread rather than replaced: `exclude` overwrites
+    // vitest's own list, and an empty one starts collecting specs out of
+    // `node_modules`.
+    exclude: [
+      ...configDefaults.exclude,
+      'test/e2e/tray.e2e.spec.ts',
+      'test/e2e/a11y.spec.ts',
+    ],
     // s8 Sc4. Launching a real Electron binary, loading a document and
     // handshaking with a real daemon does not fit in vitest's 5s default,
     // and a per-test timeout argument on thirty rows is thirty places for
@@ -26,6 +40,13 @@ export default defineConfig({
     typecheck: {
       enabled: true,
       include: ['test/**/*.spec.ts'],
+      // Type ownership moves with the file: one project checks it, and it is
+      // the project that runs it.
+      exclude: [
+        ...configDefaults.typecheck.exclude,
+        'test/e2e/tray.e2e.spec.ts',
+        'test/e2e/a11y.spec.ts',
+      ],
       tsconfig: './tsconfig.vitest.json',
     },
   },

@@ -414,7 +414,12 @@ async function retype(
   value: string,
 ): Promise<void> {
   await app.page.click(selector);
-  await app.page.keyboard.press('Meta+a');
+  // `ControlOrMeta` is the operator's select-all on whichever platform this
+  // runs on. `Meta+a` is that chord on macOS only: on Linux it is a modifier
+  // nothing binds, so nothing was selected and the new value was APPENDED to
+  // the old one. Four rows failed on the Linux lane for a reason that had
+  // nothing to do with rules.
+  await app.page.keyboard.press('ControlOrMeta+a');
   await app.page.keyboard.type(value);
 }
 

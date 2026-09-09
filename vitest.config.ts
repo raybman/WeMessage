@@ -19,6 +19,14 @@ export default defineConfig({
       // test/arch.spec.ts key off structure: the next app must not be able
       // to be invisible to `pnpm test` by omission.
       'apps/*/vitest.config.ts',
+      // The tray project. A SECOND config inside `apps/desktop`, so the glob
+      // above structurally cannot see it; listed by hand for the same reason
+      // the lifecycle project is, its `sequence.groupOrder` being the point.
+      'apps/desktop/vitest.tray.config.ts',
+      // The a11y project. A THIRD config inside `apps/desktop`, invisible to
+      // the glob for the same reason, listed by hand for the same reason: its
+      // `sequence.groupOrder` is the point.
+      'apps/desktop/vitest.a11y.config.ts',
       'fixtures/vitest.config.ts',
       {
         test: {

@@ -277,7 +277,15 @@ const trayView = (app: LaunchedApp): Promise<TrayView> =>
       exists: true,
       destroyed: state.tray.isDestroyed(),
       title: state.title,
+      /*
+       * `getTitle` is `@platform darwin` in Electron's own typings. On Linux
+       * the function EXISTS and returns '' whatever main set, so `typeof` was
+       * the wrong detector: it read back a lie and the rows below compared
+       * against it. `null` means "this platform cannot be asked", which is
+       * what the guarded rows were already written for.
+       */
       titleRead:
+        process.platform === 'darwin' &&
         typeof state.tray.getTitle === 'function'
           ? state.tray.getTitle()
           : null,
@@ -372,7 +380,12 @@ async function trayUntil(
 
 interface ImageView {
   name: string;
-  template: boolean;
+  /**
+   * `null` off darwin. "Whether the image is a macOS template image" is how
+   * Electron documents the flag, and this Electron answers `false` on Linux
+   * regardless of what main set, so there is no answer to record there.
+   */
+  template: boolean | null;
   width: number;
   height: number;
   /** Every pixel has r === g === b. A macOS template image is a mask. */
@@ -408,7 +421,7 @@ const imageViews = (app: LaunchedApp): Promise<ImageView[]> =>
       }
       return {
         name,
-        template: img.isTemplateImage(),
+        template: process.platform === 'darwin' ? img.isTemplateImage() : null,
         width: size.width,
         height: size.height,
         monochrome,
@@ -527,7 +540,15 @@ describe('s8 Sc16 row 1: the icon carries state as a SHAPE', () => {
       // allowlist. So the glyphs are generated procedurally into a bitmap,
       // which also makes "monochrome" checkable at the byte level instead of
       // by a text sweep over a colour literal.
-      expect([image.name, image.template]).toEqual([image.name, true]);
+      // Asserted where the platform can answer, and recorded as `null` where
+      // it cannot. The DECISION main made is still under test on every lane:
+      // it is the `Template` suffix and the monochrome bitmap below, which
+      // are facts about what this app built rather than about what the
+      // window server chose to remember.
+      expect([image.name, image.template]).toEqual([
+        image.name,
+        process.platform === 'darwin' ? true : null,
+      ]);
       expect([image.name, image.monochrome]).toEqual([image.name, true]);
       expect(image.width).toBeGreaterThan(8);
       expect(image.height).toBe(image.width);

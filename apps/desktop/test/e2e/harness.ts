@@ -356,7 +356,55 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
   const child = app.process();
   child.stdout?.on('data', (d: Buffer) => chunks.push(d.toString('utf8')));
   child.stderr?.on('data', (d: Buffer) => chunks.push(d.toString('utf8')));
-  const page = await app.firstWindow();
+  let page: Page;
+  try {
+    // Playwright's own 30s default, deliberately NOT raised. In every run
+    // where this fired the window never arrived at all, so a longer wait buys
+    // nothing but a slower red.
+    page = await app.firstWindow();
+  } catch (error: unknown) {
+    /*
+     * Before this catch, the timeout threw straight past this frame. Two
+     * things followed, and both of them made the next failure harder to read
+     * than this one: the Electron process stayed alive until the whole worker
+     * exited, competing for the machine with every file that ran after it,
+     * and everything main had written to stderr was collected into `chunks`
+     * and then dropped on the floor, because the only reader of `chunks` is
+     * the `transcript()` on the object this function never got to return.
+     *
+     * A shell that cannot open a window must die here, and it must say what
+     * it said on the way down.
+     */
+    child.kill('SIGKILL');
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `launchApp: no window: ${reason}\n--- main transcript ---\n${chunks.join('')}`,
+    );
+  }
+  /*
+   * The same reasoning as `--force-color-profile=srgb` above, for one more
+   * input the renderer takes from the MACHINE rather than from the product.
+   *
+   * `prefers-reduced-transparency` is a real system setting, and the product
+   * honours it on purpose (`tokens.css` swaps the translucent layers opaque),
+   * because Reduce Transparency is an accessibility preference and ignoring
+   * it would be the bug. GitHub's macos-15 runners report `reduce`, so every
+   * layer was already opaque before any row pushed a theme, and the rows that
+   * assert translucency failed against a preference nobody in the tree chose.
+   *
+   * Pinned to `no-preference` for this page, which narrows the ENVIRONMENT
+   * and not the assertion: no threshold moves, and the product's own path is
+   * still under test, since `__wmPushTheme` drives
+   * `data-reduced-transparency` and the Sc17 rows assert both states through
+   * it. The session is deliberately kept open: Chromium drops a session's
+   * emulation when it detaches.
+   */
+  const media = await app.context().newCDPSession(page);
+  await media.send('Emulation.setEmulatedMedia', {
+    features: [
+      { name: 'prefers-reduced-transparency', value: 'no-preference' },
+    ],
+  });
   return {
     app,
     page,

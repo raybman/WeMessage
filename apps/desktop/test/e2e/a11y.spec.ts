@@ -557,11 +557,80 @@ async function go(s: Sweep, screen: Screen): Promise<void> {
   });
 }
 
+/**
+ * Wait for the store to report EXACTLY `n` rows, and say what it saw instead.
+ *
+ * The budget is unchanged and there is no retry. What is added is the
+ * sentence the failure prints, and the reason is a run of this file on a
+ * hosted macOS runner that reported, in full:
+ *
+ *   TimeoutError: page.waitForSelector: Timeout 30000ms exceeded.
+ *   Call log:
+ *     - waiting for locator('html[data-store-rows="20"]') to be visible
+ *
+ * Nine words, and every distinct fault below produces exactly those nine:
+ *
+ *   the daemon never got the drafts        (a seeding failure)
+ *   the daemon has them, the store is behind   (a stream or replay failure)
+ *   the store has MORE than n              (a surface leaked state into this
+ *                                           one, and `="20"` is an equality)
+ *   the stream is down                     (nothing will arrive, ever)
+ *   the store knows it is stale            (the refetch is the thing failing)
+ *
+ * The first is our bug in the fixture, the second and fifth are our bug in
+ * the renderer, the third is our bug in the registry above, and the fourth is
+ * the runner's. Telling them apart cost one CI round trip per guess, on a
+ * failure that does not reproduce on developer hardware — the same shape, and
+ * the same cost, as the silent `launchApp: no window` this suite already
+ * learned to make talk.
+ *
+ * So on the way out the store is asked what it thinks, and the DAEMON is
+ * asked what is true. Those two numbers together name the fault. The original
+ * error is kept as `cause` so the Playwright call log is not thrown away.
+ */
 const rows = async (s: Sweep, n: number): Promise<void> => {
-  await s.app.page.waitForSelector(`html[data-store-rows="${String(n)}"]`, {
-    timeout: 30_000,
-  });
+  try {
+    await s.app.page.waitForSelector(`html[data-store-rows="${String(n)}"]`, {
+      timeout: 30_000,
+    });
+  } catch (cause) {
+    throw new Error(await whyNoRows(s, n), { cause });
+  }
 };
+
+/**
+ * The sentence `rows` prints when it gives up. Never throws itself: this runs
+ * on a path that is already failing, and a diagnostic that dies while
+ * explaining a death replaces the message with its own.
+ */
+async function whyNoRows(s: Sweep, want: number): Promise<string> {
+  const seen = await s.app.page
+    .evaluate(() => {
+      const d = document.documentElement.dataset;
+      return {
+        rows: d['storeRows'] ?? '(unset)',
+        missed: d['storeMissed'] ?? '(unset)',
+        stale: d['storeStale'] ?? '(unset)',
+        syncedAt: d['storeSyncedAt'] ?? '(never)',
+        conn: d['conn'] ?? '(unset)',
+        screen: d['screen'] ?? '(unset)',
+        // What is DRAWN, as against what the store counts. The two are
+        // written in one paint on purpose, so a disagreement here is itself
+        // the finding.
+        drawn: document.querySelectorAll('#queue-list [role="option"]').length,
+      };
+    })
+    .catch((e: unknown) => `unreadable: ${String(e)}`);
+  const truth = await s.fixture.directClient
+    .listDrafts({})
+    .then((ds) => String(ds.length))
+    .catch((e: unknown) => `unreachable: ${String(e)}`);
+  return [
+    `the store never reported ${String(want)} rows.`,
+    `document: ${JSON.stringify(seen)}`,
+    `daemon holds: ${truth} draft(s); this sweep seeded ${String(s.seeded.length)}`,
+  ].join(' ');
+}
 
 /**
  * Every screen, and every state of it this app can be in.
@@ -1262,6 +1331,65 @@ function triage(s: Scan, v: Variant): Triaged {
 }
 
 /* ══ the sweep ════════════════════════════════════════════════════════ */
+
+describe('s8 Sc17 — the wait that went dark in CI now says what it saw', () => {
+  /**
+   * The instrument, exercised. An error path nobody has ever run is a
+   * liability at exactly the moment it matters: `whyNoRows` runs INSIDE a
+   * `catch`, so a throw of its own would replace the failure it was written
+   * to explain with a failure about itself, and the run that needed it would
+   * come back with less information than before rather than more.
+   *
+   * `4242` is not reachable: the sweep seeds twenty and this row seeds one.
+   * So the wait is guaranteed to expire, which is the point — the 30 second
+   * budget is spent here on purpose, once, to prove the sentence is right.
+   * The row's own ceiling is raised to accommodate that and NOTHING else;
+   * the budget inside `rows` is untouched, and C-11 is about deadlines the
+   * product has to meet, not about a row whose subject is a deadline
+   * expiring.
+   */
+  it('names the store, the document and the daemon when the count never comes', async () => {
+    const fixture = await bootHere();
+    const app = await launchHere(fixture);
+    await waitForConnected(app.page);
+    const sweep: Sweep = {
+      app,
+      fixture,
+      seeded: [],
+      ruleId: '',
+      scheduleId: '',
+    };
+
+    const draft = await fixture.directClient.createDraft({
+      chatGuid: CHAT,
+      body: 'Reply 1: confirming receipt.',
+      ttlMinutes: LONG_TTL,
+    });
+    sweep.seeded.push(`${draft.id}:${draft.state}`);
+    // The happy path first, so the row proves the wait still WORKS. Without
+    // this line a `rows` that had been broken into always-throwing would
+    // pass every assertion below.
+    await rows(sweep, 1);
+
+    const unreachable = 4242;
+    const err = await rows(sweep, unreachable).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    const said = (err as Error | null)?.message ?? '';
+    expect(said).toContain(`the store never reported ${String(unreachable)}`);
+    // The three numbers that split the failure space. Each is read from a
+    // different place — the document, the daemon, the sweep's own ledger —
+    // because the whole value of the sentence is in their disagreement.
+    expect(said).toContain('"rows":"1"');
+    expect(said).toContain('daemon holds: 1 draft(s)');
+    expect(said).toContain('this sweep seeded 1');
+    // And it ADDS to the old failure rather than replacing it: the Playwright
+    // call log, which names the selector, is still reachable underneath.
+    expect(String((err as { cause?: unknown }).cause)).toContain('Timeout');
+  }, 120_000);
+});
 
 describe('s8 Sc17 — every screen, every state, every rendering variant', () => {
   it('scans the whole product and finds nothing an operator could not use', async () => {

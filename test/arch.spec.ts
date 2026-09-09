@@ -215,6 +215,49 @@ interface CruiseSummary {
  * in-suite measurement and 3905 ms below the worst isolated one, which is
  * why these rows have been green-or-timeout for six slices: nobody chose
  * that number, it is what you get for not choosing.
+ *
+ * AND THEN THE SAME ROW RAN SOMEWHERE ELSE.
+ *
+ * Every number above was taken on a developer laptop. The hosted macOS
+ * runner is a 3-vCPU virtual machine with a cold filesystem cache, and it
+ * runs this cruise while vitest's other forks are competing for those three
+ * cores. Six observations of `reports zero violations on the scaffold`,
+ * sorted by duration rather than by date, each the row's own reported
+ * total:
+ *
+ *   12301 ms  run 34346002664
+ *   15216 ms  run 34356051222
+ *   17909 ms  run 34348016549
+ *   23186 ms  run 34357757135
+ *   24202 ms  run 34319438457
+ *   32958 ms  run 34360873292   FAILED: cruise 32779 ms, ceiling 26715 ms
+ *
+ * The Linux lane is not exempt, only luckier. The same row on
+ * `ubuntu-24.04`, three consecutive runs:
+ *
+ *   17456 ms  run 34357757037
+ *   18888 ms  run 34357089607
+ *   19947 ms  run 34360873154
+ *
+ * All three passed, and all three sat within 34% of the old ceiling. The
+ * split below is not a macOS patch; it is the CI lane's number.
+ *
+ * The worst hosted-macOS observation is 3.7x the worst measurement this
+ * laptop has ever produced, and the spread across those six is 2.7x on
+ * runners of the same type within a day. THE TREE IS NOT THE VARIABLE:
+ * `git ls-files packages apps fixtures`, filtered exactly as
+ * `minModulesFor` filters, returns 242 non-spec TypeScript files at
+ * b492282, at the S8 close a292dc5, and at this commit. Not one file
+ * either way. The budget is not being raised because the
+ * cruise got more expensive; it is being raised because the measurement it
+ * was derived from was taken on the wrong machine.
+ *
+ * So there are two measurements now, and the ratchet applies to each in its
+ * own place. The laptop keeps the tight one, which is where a real cost
+ * regression would be caught first and caught hardest; CI gets the one its
+ * own hardware justifies. A single global ceiling wide enough for a hosted
+ * runner would be 98s, and a 5x regression on this laptop would sail under
+ * it in silence. That is the opposite of what this constant is for.
  */
 
 /**
@@ -222,6 +265,13 @@ interface CruiseSummary {
  * Raising it means pasting the run that justified it into the block above.
  */
 const CRUISE_WORST_MEASURED_MS = 8_905;
+/**
+ * The worst cruise ever measured on a hosted macOS runner: the cruise inside
+ * the row that failed on run 34360873292. Same rule as its sibling above,
+ * and the same obligation: raising it means pasting the run that justified
+ * it into the block above, with its id.
+ */
+const CRUISE_WORST_MEASURED_CI_MS = 32_779;
 /** The cheapest cruise in this file, `packages/sendkit` at 38 modules. */
 const CRUISE_CHEAPEST_MEASURED_MS = 450;
 /**
@@ -237,8 +287,18 @@ const CRUISE_CHEAPEST_MEASURED_MS = 450;
  * the measurement the row actually has to survive.
  */
 const CRUISE_RATCHET_FACTOR = 3;
-/** A CEILING, not a cost: the rows still finish in seconds. */
-const CRUISE_BUDGET_MS = CRUISE_WORST_MEASURED_MS * CRUISE_RATCHET_FACTOR;
+/**
+ * A CEILING, not a cost: on this laptop the rows still finish in seconds.
+ *
+ * `CI` rather than a darwin check or a runner-name sniff, because the
+ * property that moves the number is "three shared vCPUs and a cold cache",
+ * and that is what every CI provider has in common and what no developer
+ * machine here has. GitHub Actions sets `CI=true` on every runner.
+ */
+const CRUISE_BUDGET_MS =
+  (process.env['CI'] === undefined
+    ? CRUISE_WORST_MEASURED_MS
+    : CRUISE_WORST_MEASURED_CI_MS) * CRUISE_RATCHET_FACTOR;
 /*
  * And the other end — with a caveat this file is required to state, because
  * the ratified shape was "assert a lower bound so a run that beats the floor
@@ -12350,21 +12410,67 @@ describe('S9 extensions (s9-execution Scenario 2: the two deferred guards)', () 
        * slice that wants a bigger budget has to move the MEASUREMENT, which
        * means pasting the run that justified it into the comment block. A
        * bare `const CRUISE_BUDGET_MS = 60_000;` fails here.
+       *
+       * There are TWO worst-case measurements now, one per machine class,
+       * because the laptop number was blown by a 3-vCPU hosted runner and a
+       * single ceiling wide enough for the runner would hide a 5x regression
+       * here. The shape below pins the selector as well as the arithmetic:
+       * both measurement names, the factor, and exactly one environment
+       * read. A third branch, or a second `process.env` in this expression,
+       * fails.
        */
       expect(src).toMatch(
-        /const CRUISE_BUDGET_MS =\s*\n?\s*CRUISE_WORST_MEASURED_MS \* CRUISE_RATCHET_FACTOR;/,
+        /const CRUISE_BUDGET_MS =\s*\n?\s*\(process\.env\['CI'\] === undefined\s*\n?\s*\? CRUISE_WORST_MEASURED_MS\s*\n?\s*: CRUISE_WORST_MEASURED_CI_MS\) \* CRUISE_RATCHET_FACTOR;/,
       );
       expect(src).toMatch(
         /const CRUISE_NOOP_FLOOR_MS = Math\.floor\(\s*\n?\s*CRUISE_CHEAPEST_MEASURED_MS \/ CRUISE_RATCHET_FACTOR,?\s*\n?\s*\);/,
       );
-      // The two measurements are literals, because measurements are.
+      // The three measurements are literals, because measurements are.
       expect(src).toMatch(/const CRUISE_WORST_MEASURED_MS = [\d_]+;/);
+      expect(src).toMatch(/const CRUISE_WORST_MEASURED_CI_MS = [\d_]+;/);
       expect(src).toMatch(/const CRUISE_CHEAPEST_MEASURED_MS = [\d_]+;/);
       // The factor is the ratified one and is not a free parameter.
       expect(CRUISE_RATCHET_FACTOR).toBe(3);
+      /*
+       * Both branches, evaluated here rather than only the one this process
+       * happens to be in. Asserting only the live branch would mean the CI
+       * arithmetic is checked on CI and the laptop arithmetic on a laptop,
+       * and neither run would ever see the other half.
+       */
       expect(CRUISE_BUDGET_MS).toBe(
-        CRUISE_WORST_MEASURED_MS * CRUISE_RATCHET_FACTOR,
+        (process.env['CI'] === undefined
+          ? CRUISE_WORST_MEASURED_MS
+          : CRUISE_WORST_MEASURED_CI_MS) * CRUISE_RATCHET_FACTOR,
       );
+      expect([
+        CRUISE_WORST_MEASURED_MS * CRUISE_RATCHET_FACTOR,
+        CRUISE_WORST_MEASURED_CI_MS * CRUISE_RATCHET_FACTOR,
+      ]).toContain(CRUISE_BUDGET_MS);
+      /*
+       * A hosted runner is slower than this laptop, never faster. If that
+       * inverts, the CI number was not measured on a runner and the split
+       * has stopped meaning what its comment says it means.
+       */
+      expect(CRUISE_WORST_MEASURED_CI_MS).toBeGreaterThan(
+        CRUISE_WORST_MEASURED_MS,
+      );
+      /*
+       * THE RATCHET, and the row that makes the rest non-vacuous: the CI
+       * measurement's own digits must appear in this file's prose on a line
+       * that also names the run they came from. Bumping the constant to
+       * survive a red build, without pasting the run that justified it, is
+       * the exact move this fails.
+       */
+      const ciDigits = String(CRUISE_WORST_MEASURED_CI_MS);
+      const justified = src
+        .split('\n')
+        .filter((line) => line.trimStart().startsWith('*'))
+        .filter((line) => line.includes(ciDigits))
+        .filter((line) => /\brun \d{8,}/.test(line));
+      expect(
+        justified.length,
+        `no comment line pastes a run id beside ${ciDigits}`,
+      ).toBeGreaterThanOrEqual(1);
       expect(CRUISE_NOOP_FLOOR_MS).toBe(
         Math.floor(CRUISE_CHEAPEST_MEASURED_MS / CRUISE_RATCHET_FACTOR),
       );

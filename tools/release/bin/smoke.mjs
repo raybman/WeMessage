@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `smoke:automated` — DECLARED, NOT IMPLEMENTED. Scenario 13 owns this.
+ * `smoke:automated` — DECLARED, NOT IMPLEMENTED. Scenario 12 owns this.
  *
  * s9 Sc 1 row 10 requires that every release script named in the root
  * package.json resolves to a file that exists, so that a typo in a script
@@ -15,7 +15,7 @@
  * When implemented, this will: unpack the artefact into a temp prefix, install a throwaway LaunchAgent, and drive the wizard end to end against it.
  */
 process.stderr.write(
-  'smoke:automated: not implemented yet (Scenario 13 of s9-execution owns it).\n' +
+  'smoke:automated: not implemented yet (Scenario 12 of s9-execution owns it).\n' +
     'This stub exists so the script resolves; it refuses rather than ' +
     'succeeding by doing nothing.\n',
 );

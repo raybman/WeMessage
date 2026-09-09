@@ -588,7 +588,19 @@ async function go(s: Sweep, screen: Screen): Promise<void> {
  * asked what is true. Those two numbers together name the fault. The original
  * error is kept as `cause` so the Playwright call log is not thrown away.
  */
-const rows = async (s: Sweep, n: number): Promise<void> => {
+/**
+ * The three things the diagnostic needs, and not a whole `Sweep`.
+ *
+ * The tree row below seeds the same twenty drafts and waits for the same
+ * attribute, but it has no rule and no schedule, so requiring a `Sweep` is
+ * what kept it on a bare `waitForSelector` and left it printing the nine
+ * words this helper exists to replace. It failed there, on CI, on the very
+ * next run. `Sweep` satisfies this shape structurally, so the sweep's own
+ * call sites are unchanged.
+ */
+type Seeder = Pick<Sweep, 'app' | 'fixture' | 'seeded'>;
+
+const rows = async (s: Seeder, n: number): Promise<void> => {
   try {
     await s.app.page.waitForSelector(`html[data-store-rows="${String(n)}"]`, {
       timeout: 30_000,
@@ -603,7 +615,7 @@ const rows = async (s: Sweep, n: number): Promise<void> => {
  * on a path that is already failing, and a diagnostic that dies while
  * explaining a death replaces the message with its own.
  */
-async function whyNoRows(s: Sweep, want: number): Promise<string> {
+async function whyNoRows(s: Seeder, want: number): Promise<string> {
   const seen = await s.app.page
     .evaluate(() => {
       const d = document.documentElement.dataset;
@@ -1389,6 +1401,29 @@ describe('s8 Sc17 — the wait that went dark in CI now says what it saw', () =>
     // call log, which names the selector, is still reachable underneath.
     expect(String((err as { cause?: unknown }).cause)).toContain('Timeout');
   }, 120_000);
+
+  it('is the only place this file waits on that attribute', () => {
+    /*
+     * A count that must be one, and it is not pedantry. There were TWO waits on
+     * `data-store-rows` in this file and only one of them went through the
+     * helper. Both failed on CI, on consecutive runs, in different rows, and
+     * the instrumented one is the only one that would have said why. A third
+     * bare wait added later would reintroduce exactly the blind spot this
+     * pair of commits closed, and it would do so silently.
+     *
+     * Read as TEXT, from this file, because the claim is about how the file
+     * is written and there is nothing at runtime to ask.
+     */
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const waits = src
+      .split('\n')
+      .map((line, i) => [i + 1, line] as const)
+      .filter(([, line]) => line.includes('data-store-rows'))
+      .filter(([, line]) => line.includes('waitForSelector'));
+    expect(waits.map(([n]) => n).length, JSON.stringify(waits)).toBe(1);
+    // Non-vacuous: the term is still the one the renderer writes.
+    expect(src).toContain('data-store-rows');
+  });
 });
 
 describe('s8 Sc17 — every screen, every state, every rendering variant', () => {
@@ -1708,12 +1743,10 @@ describe('s8 Sc17 — the tree the platform computes, not the attributes we wrot
           })
         ).id,
       );
-    await app.page.waitForSelector(
-      `html[data-store-rows="${String(DRAFTS)}"]`,
-      {
-        timeout: 30_000,
-      },
-    );
+    // Through `rows`, not a bare `waitForSelector`. This is the wait that
+    // went dark on the run after the sweep's did: same attribute, same
+    // twenty, same nine words. One helper, one diagnostic.
+    await rows({ app, fixture, seeded: ids }, DRAFTS);
 
     /* ── row 1: no option is focusable, anywhere in the product ──────── */
 

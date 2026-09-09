@@ -1,5 +1,9 @@
-# private planning docs — scrub pass required before these ever go public
-docs/
+# private planning docs, scrub pass required before these ever go public.
+# ANCHORED with a leading slash on purpose: an unanchored `docs/` matches a
+# directory of that name at ANY depth, which silently swallowed `site/docs/`
+# (the published install / permissions / launchd / uninstall / security pages)
+# and made them untrackable. Only the ROOT planning tree is private.
+/docs/
 
 # os / editor
 .DS_Store

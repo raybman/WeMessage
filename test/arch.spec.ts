@@ -12112,7 +12112,31 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         stdio: 'ignore',
       }),
     ).not.toThrow();
-    expect(s9Read('.gitignore')).toMatch(/^docs\/$/m);
+    /*
+     * ANCHORED, and the anchor is the assertion. What stood here was
+     * `/^docs\/$/m`, matching the unanchored pattern this file shipped with,
+     * and an unanchored `docs/` matches a directory of that name at ANY
+     * depth. It silently swallowed `site/docs/`, the five published install
+     * and permissions and launchd and uninstall and security pages, which
+     * were therefore untrackable: `git add` refused them, CI never saw them,
+     * and the site shipped with five dead links. The leading slash scopes
+     * the rule to the ROOT planning tree, which is the only tree this row
+     * has ever been about.
+     */
+    expect(s9Read('.gitignore')).toMatch(/^\/docs\/$/m);
+    /*
+     * The other direction, which nothing asserted before and which is the
+     * half that actually regressed. A published page under `site/docs/`
+     * must NOT be ignored. `check-ignore -q` exits 1 when no rule matches,
+     * so this is the mirror of the non-vacuity probe above rather than a
+     * restatement of it.
+     */
+    expect(() =>
+      execFileSync('git', ['check-ignore', '-q', 'site/docs/anything'], {
+        cwd: repoRoot,
+        stdio: 'ignore',
+      }),
+    ).toThrow();
   });
 });
 

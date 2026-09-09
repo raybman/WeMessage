@@ -12140,6 +12140,54 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       }),
     ).toThrow();
   });
+
+  /* ── row 14: the app never starts a process ────────────────────────── */
+
+  it('row 14: nothing under apps/desktop/src can spawn a process', () => {
+    /*
+     * THIS ROW EXISTS BECAUSE A TOOTH COULD NOT BE RUN, AND THAT IS THE
+     * INTERESTING PART.
+     *
+     * Gate 9's `TN-spawn-anyway` says: in the desktop app's daemon
+     * supervisor, on `installed && !running`, spawn the daemon "to be safe",
+     * and watch Sc7 row 4 go red when the app's spawn and launchd's respawn
+     * race and the loser reports `already running (pid N)`.
+     *
+     * The mutation could not be applied. There is no `daemon-supervisor.ts`,
+     * there is no `daemon.app.log`, and nothing under `apps/desktop/src`
+     * imports a process primitive at all. Sc7 was implemented along a seam
+     * that made an app-side supervisor unnecessary, so the tooth was aimed
+     * at a module the slice never wrote.
+     *
+     * The honest reading of that is NOT "the tooth passes". It is that the
+     * invariant the tooth was protecting, launchd owns the daemon's
+     * lifetime and the app never races it, held by accident rather than by
+     * construction. Nothing stopped a future contributor from adding that
+     * spawn; the race would simply have come back, and the row aimed at it
+     * had never existed.
+     *
+     * So the tooth is discharged by building the guard it implies. The app
+     * may ASK for a service operation over the local API, which is what the
+     * wizard's install and restart buttons already do. It may not start a
+     * process itself.
+     */
+    const desktopSrc = archFiles('apps').filter((f) =>
+      f.startsWith('apps/desktop/src/'),
+    );
+
+    // Non-vacuity: an empty scan would make the assertion below trivially
+    // true, and this row's whole value is that the set it scans is real.
+    expect(desktopSrc.length).toBeGreaterThan(10);
+
+    // teeth: TN-spawn-anyway (row 14): the tooth's own target does not exist,
+    // so it was re-aimed at the invariant the target would have broken.
+    // Importing spawn from node:child_process into main/gateway.ts listed
+    // that file here, against an expected empty set. Reverted.
+    const spawners = desktopSrc.filter((f) =>
+      /\bfrom\s+['"](?:node:)?child_process['"]/.test(codeOf(s9Read(f))),
+    );
+    expect(spawners).toEqual([]);
+  });
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */

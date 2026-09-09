@@ -5,9 +5,10 @@
  * (pragma table_info), journal_mode=wal, POSIX file mode 0600, idempotent
  * re-open (no re-apply), and drafts UNIQUE(adapter_id, idempotency_key).
  */
-import { statSync, mkdtempSync, rmSync } from 'node:fs';
+import { readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Clock } from '@wemessage/core';
@@ -285,5 +286,29 @@ describe('store migrations (§2.3 schema)', () => {
       lastRowid: 77,
       lastScanAt: '2026-09-01T12:00:00.000Z',
     });
+  });
+
+  it('ships exactly these migration ids, and they are append-only', () => {
+    // The refusal above reads "an id I do not ship is an id a newer build
+    // applied". That sentence is only true while ids are immutable once
+    // released. Squash `0001_init.sql` into a `0001_base.sql`, or rename it,
+    // and every store already in the field claims to come from the future --
+    // under a supervisor that restarts on the refusal, so the machine simply
+    // stops, and the one line it prints is a lie about which build is newer.
+    //
+    // Nothing else in the build could have caught that: renaming a file the
+    // loader reads by `readdirSync` type-checks, lints, and passes every
+    // other row here, because a fresh database does not care what the file
+    // was called. So the list is written down. The way past this row is to
+    // ADD a file and add its name here; it is not to edit a name.
+    const migrations = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../migrations',
+    );
+    expect(
+      readdirSync(migrations)
+        .filter((f) => f.endsWith('.sql'))
+        .sort(),
+    ).toEqual(['0001_init.sql']);
   });
 });

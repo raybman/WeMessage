@@ -57,6 +57,7 @@ import {
   AlreadyRunningError,
   LockDirUnwritableError,
   PortInUseError,
+  StoreNewerThanBuildError,
   type DaemonErrorCode,
 } from '../src/errors.js';
 import {
@@ -493,7 +494,7 @@ describe('s9 Sc2: the C-6 error taxonomy is total in both directions', () => {
     expect(DAEMON_ERROR_CODES.length).toBeGreaterThan(0);
   });
 
-  it('the union is exactly these six codes', () => {
+  it('the union is exactly these seven codes', () => {
     expect([...DAEMON_ERROR_CODES].sort()).toEqual([
       'ALREADY_RUNNING',
       // s9 Sc3: the argv guard. Distinct from the label refusal below
@@ -510,6 +511,11 @@ describe('s9 Sc2: the C-6 error taxonomy is total in both directions', () => {
       'LAUNCHD_PLIST_REFUSED',
       'LOCK_DIR_UNWRITABLE',
       'PORT_IN_USE',
+      // s9 D4: an older build pointed at a directory a newer one wrote. The
+      // store is what refuses; this code is that refusal restated here, so
+      // the daemon exits with a sentence rather than a stack trace. Its own
+      // class, not the store's, because the scan below reads THIS package.
+      'STORE_NEWER_THAN_BUILD',
     ]);
   });
 
@@ -547,8 +553,15 @@ describe('s9 Sc2: the C-6 error taxonomy is total in both directions', () => {
       [new AlreadyRunningError(4242), 'ALREADY_RUNNING'],
       [new PortInUseError(47100), 'PORT_IN_USE'],
       [new LockDirUnwritableError('/nowhere'), 'LOCK_DIR_UNWRITABLE'],
+      [
+        new StoreNewerThanBuildError('/nowhere', ['9999_future.sql']),
+        'STORE_NEWER_THAN_BUILD',
+      ],
     ];
     for (const [err, code] of cases) {
+      // Whatever else the message says, it names the thing the operator has
+      // to act on. Every one of these carries exactly one such noun.
+      expect(err.message).not.toBe('');
       expect(err).toBeInstanceOf(Error);
       expect(err.code).toBe(code);
       expect(err.name).toBe(err.constructor.name);

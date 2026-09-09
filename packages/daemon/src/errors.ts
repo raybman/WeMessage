@@ -46,6 +46,7 @@ export const DAEMON_ERROR_CODES = [
   'LAUNCHD_PLIST_REFUSED',
   'LOCK_DIR_UNWRITABLE',
   'PORT_IN_USE',
+  'STORE_NEWER_THAN_BUILD',
 ] as const;
 
 export type DaemonErrorCode = (typeof DAEMON_ERROR_CODES)[number];
@@ -88,6 +89,12 @@ export const DAEMON_ERROR_SPECS: Readonly<
   PORT_IN_USE: {
     exitCode: 1,
     summary: 'the local API port is bound by something that is not us',
+  },
+  STORE_NEWER_THAN_BUILD: {
+    exitCode: 1,
+    summary:
+      'the store in the configured directory has migrations this build does ' +
+      'not ship, so a newer build wrote it',
   },
 };
 
@@ -147,6 +154,38 @@ export class LockDirUnwritableError extends Error {
     );
     this.name = 'LockDirUnwritableError';
     this.dir = dir;
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+/**
+ * An older build, pointed at a directory a newer one already wrote.
+ *
+ * The store itself refuses (`SchemaNewerThanBuildError`, thrown before a
+ * single migration runs); this is that refusal restated in the daemon's own
+ * taxonomy, so it exits with a sentence instead of a stack trace. It stays a
+ * separate class rather than the store's, because the code scan in
+ * `lock.spec.ts` reads THIS package's source: a taxonomy whose membership
+ * could be declared from any package in the workspace is not a closed set.
+ *
+ * The directory is in the message for the same reason it is in
+ * `LockDirUnwritableError`: `WEMESSAGE_DIR` is overridable, and "which store"
+ * is the operator's first question. So is the way out, because the answer is
+ * not obvious and the alternative is an operator deleting a database.
+ */
+export class StoreNewerThanBuildError extends Error {
+  readonly code = 'STORE_NEWER_THAN_BUILD' as const;
+  readonly dir: string;
+  readonly unknownMigrations: readonly string[];
+  constructor(dir: string, unknown: readonly string[], cause?: unknown) {
+    super(
+      `the store in ${dir} was written by a newer build ` +
+        `(it has applied ${unknown.join(', ')}, which this build does not ship): ` +
+        'start that build again, or run `wemessaged service status` to see which one is installed',
+    );
+    this.name = 'StoreNewerThanBuildError';
+    this.dir = dir;
+    this.unknownMigrations = [...unknown];
     if (cause !== undefined) this.cause = cause;
   }
 }

@@ -12,7 +12,7 @@ import {
   createClockSkewWakeSignal,
   createNodeFsWatcher,
 } from '@wemessage/ingest';
-import { SqliteStore } from '@wemessage/store';
+import { openDaemonStore } from './open-store.js';
 import { AppleScriptSendBackend, type ExecFn } from '@wemessage/sendkit';
 import { createAuditSink } from './audit-sink.js';
 import { startDaemon } from './daemon.js';
@@ -126,7 +126,7 @@ const lock = await acquireInstanceLock({
     // §1.8, and the reason this callback exists at all: the row goes down
     // BEFORE the stale file comes off disk. A store opened here and closed
     // again is the whole cost, paid once, only on the crash-recovery path.
-    const store = new SqliteStore({ dir: configDir, clock });
+    const store = openDaemonStore({ dir: configDir, clock });
     try {
       createAuditSink({ store, clock }).append(
         staleReclaimEvent(stalePid),
@@ -188,13 +188,19 @@ const daemon = await startDaemon({
   onError: (error) => {
     console.error('wemessage daemon: pipeline error (loop continues):', error);
   },
-}).catch((err: unknown) => {
-  // The lock is ours and this process is not going to use it. A lock left
-  // behind by a start that failed names a pid that has already exited, and
-  // the next honest start would report a holder nobody can find.
-  lock.release();
-  throw err;
-});
+})
+  .catch((err: unknown) => {
+    // The lock is ours and this process is not going to use it. A lock left
+    // behind by a start that failed names a pid that has already exited, and
+    // the next honest start would report a holder nobody can find.
+    lock.release();
+    throw err;
+  })
+  // A SECOND catch, so the release above stays unconditional. Everything
+  // `startDaemon` raises used to arrive here as an unhandled rejection and
+  // print a stack, the taxonomy included: `refuseToStart` rethrows anything
+  // outside it, so a defect keeps exactly the trace it has today.
+  .catch(refuseToStart);
 
 /*
  * BEFORE THE READINESS LINE, NOT AFTER IT.

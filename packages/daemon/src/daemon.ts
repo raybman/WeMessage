@@ -48,7 +48,8 @@ import {
   type WakeSignal,
 } from '@wemessage/ingest';
 import type { GatewayEventPayload } from '@wemessage/protocol';
-import { SqliteStore } from '@wemessage/store';
+import type { SqliteStore } from '@wemessage/store';
+import { openDaemonStore } from './open-store.js';
 import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
 import { createInboundDispatch } from './adapters/dispatch.js';
@@ -267,7 +268,7 @@ export async function startDaemon(
   options: StartDaemonOptions,
 ): Promise<RunningDaemon> {
   const bootLog: string[] = [];
-  const store = new SqliteStore({
+  const store = openDaemonStore({
     dir: options.configDir,
     clock: options.clock,
   });

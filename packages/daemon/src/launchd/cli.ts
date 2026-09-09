@@ -29,7 +29,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Actor, AuditEvent, Clock } from '@wemessage/core';
-import { SqliteStore } from '@wemessage/store';
+import { openDaemonStore } from '../open-store.js';
 import { createAuditSink } from '../audit-sink.js';
 import {
   LAUNCH_AGENT_TEST_LABEL_PREFIX,
@@ -172,7 +172,7 @@ function storeAppender(dir: string): (event: AuditEvent) => void {
   };
   const actor: Actor = { kind: 'human', via: 'cli' };
   return (event) => {
-    const store = new SqliteStore({ dir, clock });
+    const store = openDaemonStore({ dir, clock });
     try {
       createAuditSink({ store, clock }).append(event, actor);
     } finally {

@@ -40,7 +40,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createChatDb } from '@wemessage/fixtures';
@@ -447,4 +447,114 @@ describe('s9 Sc2 row 8: an unwritable directory stops the daemon', () => {
     },
     BOOT_BUDGET_MS * 2,
   );
+});
+
+/* ── D4: an older build, pointed at a newer build's directory ─────────── */
+
+/** Make this directory's store look like a newer build wrote it. */
+function plantFutureMigration(dir: string): void {
+  const store = new SqliteStore({ dir, clock });
+  try {
+    store.db
+      .prepare('INSERT INTO _migrations (id, applied_at) VALUES (?, ?)')
+      .run('9999_future.sql', '2027-01-01T00:00:00.000Z');
+  } finally {
+    store.close();
+  }
+}
+
+/** The one line, byte for byte, both paths below must print. */
+const refusal = (dir: string): string =>
+  `the store in ${dir} was written by a newer build ` +
+  `(it has applied 9999_future.sql, which this build does not ship): ` +
+  'start that build again, or run `wemessaged service status` to see which one is installed\n';
+
+describe('s9 D4: an older build refuses a store a newer one wrote', () => {
+  it(
+    'exits 1 with one line on stderr, and leaves no lock behind',
+    async () => {
+      const { dir, chatDb, path } = bed();
+      plantFutureMigration(dir);
+
+      const child = launch({ dir, port: await freePort(), chatDb, path });
+      const end = await child.exited;
+
+      expect(end.code).toBe(1);
+      // Exactly these bytes, for the reason row 6 gives: a stack trace would
+      // pass `toContain` and would mean this arrived as a defect rather than
+      // as a condition. That is the whole difference this change makes.
+      expect(child.stderr()).toBe(refusal(dir));
+      expect(child.stdout()).toBe('');
+      // The lock was taken before the store was opened, and a process that
+      // is not going to use it must not leave it naming a pid that has
+      // exited. This is the second `.catch` in `main.ts` doing its job.
+      expect(existsSync(join(dir, LOCK_FILENAME))).toBe(false);
+    },
+    BOOT_BUDGET_MS * 2,
+  );
+
+  it(
+    'says the same thing when the newer build died and left a stale lock',
+    async () => {
+      // THE path this actually arrives by. Nobody downgrades a daemon that is
+      // running fine; they downgrade because the newer one crashed. So the
+      // store is met in `onStaleReclaim` -- which writes the recovery row
+      // BEFORE clearing the lock (§1.8) and therefore opens the store first
+      // -- and not in `startDaemon` at all. A translation installed only at
+      // the `startDaemon` site is never reached here, and this row is the
+      // difference between one sentence and a stack trace every ten seconds
+      // under `KeepAlive`.
+      const { dir, chatDb, path } = bed();
+      const port = await freePort();
+
+      const first = launch({ dir, port, chatDb, path });
+      await waitFor(
+        () => first.stdout().includes('listening on 127.0.0.1'),
+        'the first daemon to listen',
+        BOOT_BUDGET_MS,
+      );
+      first.child.kill('SIGKILL');
+      await first.exited;
+      // A crash leaves the file; that is what makes the next start a reclaim.
+      expect(existsSync(join(dir, LOCK_FILENAME))).toBe(true);
+
+      plantFutureMigration(dir);
+
+      const second = launch({ dir, port, chatDb, path });
+      const end = await second.exited;
+
+      expect(end.code).toBe(1);
+      expect(second.stderr()).toBe(refusal(dir));
+      expect(second.stdout()).toBe('');
+      // Still there, and correctly so: nothing was reclaimed, so nothing
+      // should claim to have reclaimed it.
+      expect(existsSync(join(dir, LOCK_FILENAME))).toBe(true);
+    },
+    BOOT_BUDGET_MS * 3,
+  );
+
+  it('opens the store through one door, so no path can miss the translation', () => {
+    // The two rows above cover the two paths that exist TODAY. This one
+    // covers the third somebody adds next year: a fresh `new SqliteStore(`
+    // compiles, passes every row in this file, and quietly reintroduces the
+    // stack trace on whichever path its author did not have in mind. The
+    // translation is only a property of the daemon if this is the only door.
+    const src = resolve(HERE, '..', 'src');
+    const files: string[] = [];
+    const walk = (d: string): void => {
+      for (const entry of readdirSync(d, { withFileTypes: true })) {
+        const full = join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (full.endsWith('.ts')) files.push(full);
+      }
+    };
+    walk(src);
+    expect(files.length).toBeGreaterThan(10);
+    expect(
+      files
+        .filter((f) => readFileSync(f, 'utf8').includes('new SqliteStore('))
+        .map((f) => relative(src, f))
+        .sort(),
+    ).toEqual(['open-store.ts']);
+  });
 });

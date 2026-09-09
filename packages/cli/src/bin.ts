@@ -2157,6 +2157,49 @@ settings
     },
   );
 
+/* ── the verb that is deliberately somewhere else (F-125) ──────────────── */
+
+/**
+ * `service` is not here, and this command exists to say so in one line.
+ *
+ * F-125 put `install|uninstall|status|restart` on `wemessaged` rather than
+ * on this binary, and the reason is a fence, not a preference: supervision
+ * needs the plist renderer and the guarded launchctl runner, both of which
+ * are daemon code, and `cli-thin-client` (S8 Sc 1) forbids this package
+ * from importing `@wemessage/daemon` at all. Routing it over the API was
+ * rejected for a sharper reason: a `POST /v1/service` is a way for anything
+ * holding a token to install a LaunchAgent.
+ *
+ * So the verb genuinely is not here. The question this command answers is
+ * what happens to the operator who types it anyway, and they will, because
+ * two binaries with a shared prefix is exactly the kind of distinction that
+ * does not survive being read once in a README. Until now they got
+ * commander's "unknown command", which is correct, useless, and identical
+ * to what a typo produces. The redirect costs four lines and turns a dead
+ * end into a signpost.
+ *
+ * Still exit 2. It is a usage error and scripts should keep treating it as
+ * one; being helpful about a refusal is not the same as not refusing.
+ *
+ * `allowUnknownOption` and `allowExcessArguments` because the operator is
+ * mid-paste: `wemessage service install --dir ~/x` has to reach this action
+ * rather than dying on an option this command does not define, or the
+ * redirect never prints for the person most likely to need it.
+ */
+program
+  .command('service')
+  .description('not here; supervision lives on wemessaged (F-125)')
+  .argument('[subcommand]', 'install, uninstall, status or restart')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action((subcommand?: string) => {
+    fail(
+      `service lives on the daemon, not the CLI. Run: wemessaged service ` +
+        (subcommand ?? '<install|uninstall|status|restart>'),
+      EXIT_USAGE,
+    );
+  });
+
 try {
   await program.parseAsync(process.argv);
 } catch (error) {

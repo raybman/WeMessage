@@ -71,12 +71,33 @@ brew install --cask wemessage
 ## Verifying the cask before it ships
 
 The same two checks `test/release/cask.spec.ts` row 7 runs are available on
-the command line, and both need to exit 0 before a release goes out:
+the command line, and both need to exit 0 before a release goes out. Both
+need the cask to be IN A TAP first, which is why these go through
+`brew --repo` instead of naming the file where it sits in this directory:
 
 ```
-brew style --cask homebrew/Casks/wemessage.rb
-brew audit --cask --strict --online=false homebrew/Casks/wemessage.rb
+brew tap-new raybman/wemessage
+cp homebrew/Casks/wemessage.rb "$(brew --repo raybman/wemessage)/Casks/wemessage.rb"
+brew style --cask "$(brew --repo raybman/wemessage)/Casks/wemessage.rb"
+brew audit --cask --strict raybman/wemessage/wemessage
 ```
+
+Pointed at the loose file instead, neither works, and they fail in two
+different ways, which is worse than both failing the same way:
+
+- `brew style --cask homebrew/Casks/wemessage.rb` exits **1 and prints
+  nothing at all**. A silent non-zero is the failure mode a release
+  checklist cannot survive: it reads as "the cask is bad" when what it means
+  is "I was handed a file I have nowhere to put".
+- `brew audit --cask --strict homebrew/Casks/wemessage.rb` at least says so:
+  "Calling `brew audit [path ...]` is disabled! Use `brew audit [name ...]`
+  instead." The fully qualified `owner/repo/token` form above is also what
+  lets audit resolve the cask without tripping the separate untrusted-tap
+  gate that a bare token name hits.
+
+Both behaviours were run on the machine that wrote this paragraph, not read
+off a manual page, and `cask.spec.ts` row 10 now pins the commands in the
+block above so this section cannot quietly rot back.
 
 ## Uninstalling
 

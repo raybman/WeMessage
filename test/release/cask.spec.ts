@@ -460,6 +460,47 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
       expect(readme).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
       expect(readme).not.toMatch(/@\w[\w-]{1,30}\b/);
     });
+
+    it('the commands it hands the owner are ones brew will actually accept', () => {
+      /*
+       * THE DIFFERENCE BETWEEN PROSE AND A COMMAND, which is the whole
+       * reason this row reads only the fenced blocks.
+       *
+       * This section used to say, in a block meant to be pasted:
+       *
+       *   brew style --cask homebrew/Casks/wemessage.rb
+       *   brew audit --cask --strict --online=false homebrew/Casks/wemessage.rb
+       *
+       * Neither works. `brew style` on a loose path exits 1 and prints
+       * NOTHING, which an owner reads as "the cask is broken" on the day
+       * they are trying to ship it. `brew audit` refuses paths outright
+       * ("Calling `brew audit [path ...]` is disabled"), and `--online` is
+       * not a flag that takes a value, so that line could not have run even
+       * if the path form were allowed. Row 7 has always done it correctly,
+       * through a real tap; the README simply never matched row 7.
+       *
+       * The prose below the block now QUOTES both broken forms on purpose,
+       * to say why they are broken. So a naive `not.toContain` over the
+       * whole file would fail on the explanation itself. Only the fenced
+       * blocks are copy-pasteable, so only they are held to this.
+       */
+      const readme = readFileSync(README_PATH, 'utf8');
+      const fenced = [...readme.matchAll(/```[^\n]*\n([\s\S]*?)```/g)]
+        .map((m) => m[1] ?? '')
+        .join('\n');
+      // Not vacuous: this README is mostly command blocks.
+      expect(fenced.length).toBeGreaterThan(200);
+
+      // The tap-qualified name is the form that resolves without tripping
+      // the untrusted-tap gate, and it is what row 7 itself runs.
+      expect(fenced).toContain(
+        'brew audit --cask --strict raybman/wemessage/wemessage',
+      );
+      // And nothing pasteable points either tool at the loose file.
+      expect(fenced).not.toMatch(/brew (?:style|audit)[^\n]*homebrew\/Casks/);
+      // `--online` takes no value; the broken form did not even parse.
+      expect(fenced).not.toContain('--online=');
+    });
   });
 
   /* ── row 11: the cask and the packer agree on where the shims are ───── */

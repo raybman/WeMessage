@@ -150,6 +150,13 @@ const RASTER_EXTENSIONS = [
 export const RASTER_ALLOWLIST: readonly string[] = [
   'apps/desktop/build/dmg-background.png',
   'apps/desktop/build/icon.icns',
+  // s9 Sc 13. The third and last of the rasters this era admits, and the
+  // only one a stranger sees before downloading anything. Being on this list
+  // is a PROMOTION and not an exemption: `rasterGreenOffenders` decodes all
+  // eight of its frames and sweeps every pixel under the same `greenVerdict`
+  // the token sheet answers to, which is a stricter reading than the SVG
+  // beside it gets.
+  'site/media/launch.gif',
 ];
 
 function walk(absRoot: string): string[] {

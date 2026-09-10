@@ -496,6 +496,7 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
       expect([...RASTER_ALLOWLIST]).toEqual([
         'apps/desktop/build/dmg-background.png',
         'apps/desktop/build/icon.icns',
+        'site/media/launch.gif',
       ]);
     });
 
@@ -547,12 +548,49 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
         expect(rasterGreenOffenders(rel, readFileSync(abs)), rel).toEqual([]);
       }
       // No longer vacuous. s9 Sc 6 put the two packaging artefacts on the
-      // list, so the loop above now really does decode a 155 KB icns holding
-      // eight embedded PNGs and a 540x380 background, and really does sweep
-      // their pixels for the banned hues. The teeth below still matter: they
-      // are what proves the decoder would convict if there were anything to
-      // convict.
-      expect(RASTER_ALLOWLIST.length).toBe(2);
+      // list and Sc 13 added the launch animation, so the loop above now
+      // really does decode a 155 KB icns holding eight embedded PNGs, a
+      // 540x380 background, and eight 1200x750 GIF frames, and really does
+      // sweep their pixels for the banned hues. The teeth below still matter:
+      // they are what proves the decoder would convict if there were anything
+      // to convict.
+      //
+      // The GIF is swept HERE as well as in `test/gif.spec.ts`, and the
+      // duplication is deliberate. That file regenerates the animation and
+      // sweeps what it just made; this one sweeps the bytes that are actually
+      // COMMITTED. A drift between the two is exactly what row 7's drift
+      // check exists to report, and until it does, the committed file is the
+      // one a reader downloads.
+      expect(RASTER_ALLOWLIST.length).toBe(3);
+
+      // teeth: TN-green-in-the-gif (row 3b): applied, bit, reverted.
+      //
+      // The mutation had to be surgical or it would have proved nothing. A
+      // GIF carries one 256-entry palette and the animation reuses it across
+      // 72 frames, so repainting a COMMON index turns tens of millions of
+      // pixels green at once, and `rasterGreenOffenders` emits one string per
+      // green pixel: the first attempt at this tooth repainted every entry
+      // and killed the vitest worker on memory before it could report. The
+      // second attempt picked palette index 170 and passed, which was also
+      // correct and also useless, because 170 is padding and no pixel in the
+      // file uses it.
+      //
+      // So the palette was measured rather than guessed. A minimal LZW
+      // decoder counted index usage across all 72 frames and 64,800,000
+      // pixels: 154 of the 256 entries are ever used, and index 26,
+      // rgb(19, 80, 143), is used EXACTLY ONCE. Repainting that one entry to
+      // #34C759 changes a single pixel in the whole animation. This row then
+      // failed with exactly one offender and no others:
+      //
+      //   site/media/launch.gif#0@87,63: rgb(52, 199, 89)
+      //     -- dominant-G (g 199 > max(r 52, b 89) + 16)
+      //
+      // That is the strongest form this tooth could take. It proves the
+      // sweep is pixel-exact rather than sampled, that it decodes every
+      // frame rather than the first, and that it reports WHERE, since a
+      // sweep that found one green pixel in 64.8 million but could not name
+      // the frame and the coordinate would send a builder nowhere. Reverted
+      // with `git checkout --`; the artefact's digest is unchanged.
     });
 
     it('row 3c: the ban still holds inside the swept roots', () => {

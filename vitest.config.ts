@@ -33,6 +33,15 @@ export default defineConfig({
       // that shells out to `electron-builder`, and a DMG being written is not
       // something to do while eleven other files are each holding an Electron.
       'apps/desktop/vitest.pack.config.ts',
+      // The release smoke project. A FIFTH config inside `apps/desktop`,
+      // invisible to the glob for the same reason and listed by hand for a
+      // sharper version of the same reason: it runs at `groupOrder` 5, after
+      // BOTH the pack project that builds the artefact it opens and the
+      // daemon's launchd lifecycle project at 1. That second ordering is a
+      // safety property, not a convenience. Both projects sweep every
+      // test-scoped launch agent the service manager reports, and two sweeps
+      // running at once would each read the other's live job as an orphan.
+      'apps/desktop/vitest.smoke.config.ts',
       'fixtures/vitest.config.ts',
       {
         test: {

@@ -10,7 +10,7 @@ export default defineConfig({
     globals: false,
     retry: 0,
     include: ['test/**/*.spec.ts'],
-    // s9: three specs are SEQUENCED into projects of their own and excluded
+    // s9: four specs are SEQUENCED into projects of their own and excluded
     // here so they do not ALSO run in this pool. The tray spec asserts a
     // display-wide key grab (`vitest.tray.config.ts`, groupOrder 2); the a11y
     // sweep holds one Electron instance for minutes while every other spec in
@@ -18,7 +18,14 @@ export default defineConfig({
     // groupOrder 3); the pack spec BUILDS a signed `.app` and a DMG before it
     // asserts anything, which is minutes of `electron-builder` that must not
     // run beside eleven Electron launches (`vitest.pack.config.ts`,
-    // groupOrder 4). None is a skip: all three run on every `pnpm test`.
+    // groupOrder 4); and the release smoke spec drives the PACKAGED app
+    // against a REAL launch agent, whose sweep must not overlap the daemon's
+    // (`vitest.smoke.config.ts`, groupOrder 5). None is a skip: all four run
+    // on every `pnpm test`.
+    //
+    // `test/gif.spec.ts` is deliberately NOT here. It launches Electron like
+    // the other eleven and belongs in their queue; its cost is bounded by its
+    // own 300s hook argument rather than by a project of its own.
     // The defaults are spread rather than replaced: `exclude` overwrites
     // vitest's own list, and an empty one starts collecting specs out of
     // `node_modules`.
@@ -27,6 +34,7 @@ export default defineConfig({
       'test/e2e/tray.e2e.spec.ts',
       'test/e2e/a11y.spec.ts',
       'test/pack.spec.ts',
+      'test/smoke.spec.ts',
     ],
     // s8 Sc4. Launching a real Electron binary, loading a document and
     // handshaking with a real daemon does not fit in vitest's 5s default,
@@ -65,6 +73,7 @@ export default defineConfig({
         'test/e2e/tray.e2e.spec.ts',
         'test/e2e/a11y.spec.ts',
         'test/pack.spec.ts',
+        'test/smoke.spec.ts',
       ],
       tsconfig: './tsconfig.vitest.json',
     },

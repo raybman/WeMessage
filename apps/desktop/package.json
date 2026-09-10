@@ -15,6 +15,7 @@
     "build": "tsc -b",
     "bundle": "vite build --config vite.config.ts && vite build --config vite.preload.config.ts",
     "bundle:daemon": "node scripts/bundle-daemon.mjs",
+    "gif": "WEMESSAGE_GIF_WRITE=1 vitest run test/gif.spec.ts",
     "test": "vitest run"
   },
   "private": true,

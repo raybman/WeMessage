@@ -544,9 +544,31 @@ export function decodeRaster(rel: string, bytes: Uint8Array): DecodedRaster {
  * format, encoders write garbage there, and a verdict on garbage is noise.
  * Everything else gets the same `greenVerdict` as the token sheet.
  */
+/**
+ * How many offending PIXELS one call may NAME before it starts counting.
+ *
+ * Found the hard way while proving this sweep bites. The launch GIF is 72
+ * frames of 1200x750, so a mutation that turns a COMMON palette entry green
+ * makes tens of millions of pixels offenders at once, and a list with one
+ * string per offender is hundreds of megabytes of message for a failure whose
+ * information content is "this file is green". The first attempt at that
+ * tooth did not report a failure at all: it killed the vitest worker on
+ * memory, which reads as an infrastructure flake rather than as the red row
+ * it actually was.
+ *
+ * The cap is on the MESSAGE and not on the sweep. Every pixel of every frame
+ * is still examined, the true total is still counted and still printed, and
+ * the returned array is still non-empty for a single offending pixel, so
+ * every caller's `toEqual([])` and `length === 0` mean exactly what they
+ * meant before. What changes is only that a catastrophic failure now prints
+ * two dozen examples and a number instead of trying to print all of them.
+ */
+const OFFENDER_SAMPLE_CAP = 24;
+
 export function rasterGreenOffenders(rel: string, bytes: Uint8Array): string[] {
   const decoded = decodeRaster(rel, bytes);
   const out = decoded.undecoded.map((u) => `${u} (UNDECODED, so unswept)`);
+  let green = 0;
   for (const frame of decoded.frames)
     for (let p = 0; p < frame.width * frame.height; p += 1) {
       const d = p * 4;
@@ -555,12 +577,21 @@ export function rasterGreenOffenders(rel: string, bytes: Uint8Array): string[] {
         frame.rgba[d + 1] ?? 0,
       )}, ${String(frame.rgba[d + 2] ?? 0)})`;
       const verdict = greenVerdict(literal);
-      if (verdict?.green === true)
-        out.push(
-          `${frame.label}@${String(p % frame.width)},${String(
-            Math.floor(p / frame.width),
-          )}: ${literal} — ${verdict.why}`,
-        );
+      if (verdict?.green === true) {
+        green += 1;
+        if (green <= OFFENDER_SAMPLE_CAP)
+          out.push(
+            `${frame.label}@${String(p % frame.width)},${String(
+              Math.floor(p / frame.width),
+            )}: ${literal} — ${verdict.why}`,
+          );
+      }
     }
+  if (green > OFFENDER_SAMPLE_CAP)
+    out.push(
+      `${rel}: and ${String(green - OFFENDER_SAMPLE_CAP)} further green` +
+        ` pixels, ${String(green)} in all; the ${String(OFFENDER_SAMPLE_CAP)}` +
+        ' named above are the first the sweep reached, in frame order',
+    );
   return out;
 }

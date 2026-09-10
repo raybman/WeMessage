@@ -350,7 +350,31 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
     // again on both. This narrows the test's environment rather than
     // widening its tolerance — no threshold moves, and a real colour
     // regression still fails.
-    args: ['--force-color-profile=srgb', MAIN_ENTRY],
+    //
+    // `--force-device-scale-factor=1` is the same shape of fix for the same
+    // shape of bug, found at the s9 close by Sc 13's row 7, which encodes the
+    // launch GIF twice and requires the two passes to be equal byte for byte.
+    // They were not: one run differed from the next by a single 671-px
+    // horizontal line, always at the bottom edge of a card, at y=651 in one
+    // pass and y=652 in the other.
+    //
+    // Layout was not the cause and was measured, not assumed: a temporary
+    // `getBoundingClientRect` probe taken before and after a capture agreed
+    // to four decimals, so the DOM was identical across the passes. What it
+    // also reported was the reason. The display runs at `dpr` 2 and the cards
+    // are 78.7344 CSS px tall, so every card edge falls in the MIDDLE of a
+    // device pixel; Playwright's `scale: 'css'` then downsamples 2x back to
+    // 1x, and which side of the boundary a half-covered row rounds to is not
+    // guaranteed to repeat. Pinning the device scale to 1 means the
+    // compositor rasterises at the scale the capture is taken at and the
+    // rounding step disappears. Same principle as the flag above: narrow the
+    // environment, do not widen a tolerance. Row 7 still demands byte
+    // equality, and a real rendering regression still fails it.
+    args: [
+      '--force-color-profile=srgb',
+      '--force-device-scale-factor=1',
+      MAIN_ENTRY,
+    ],
     env,
   });
   const child = app.process();

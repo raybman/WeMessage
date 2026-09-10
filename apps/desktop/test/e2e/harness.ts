@@ -397,6 +397,30 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
       // bytes identical to the committed artefact, so pinning it costs the
       // shipping platform nothing.
       '--disable-lcd-text',
+      /*
+       * AND THE RASTERISER ITSELF, which is what was left after the flag
+       * above.
+       *
+       * F-149's one-pixel drift survived every layout fix aimed at it: a
+       * single pixel on the antialiased right edge of a `.card-keys` chip,
+       * always the same column, never differing WITHIN one window and only
+       * ever ACROSS two. That shape is the tell. Each capture pass launches
+       * its own Electron process, so anything that varies is per-process
+       * raster state rather than anything in the document, and GPU
+       * rasterisation is allowed to vary: tile boundaries, partial raster
+       * reuse and Skia's runtime CPU-feature detection can each land an
+       * edge pixel a shade either way without either result being wrong.
+       *
+       * Pinned to the deterministic path instead. Measured, not assumed:
+       * three consecutive runs, six independent launches, all six encoding
+       * to the same sha256 with zero disagreements, where the unpinned
+       * pipeline had been flipping between two hashes on the same machine.
+       * C-11 says a flaky test in this project is a bug, and the bug was
+       * never in the assertion.
+       */
+      '--disable-gpu-rasterization',
+      '--disable-partial-raster',
+      '--disable-skia-runtime-opts',
       MAIN_ENTRY,
     ],
     env,

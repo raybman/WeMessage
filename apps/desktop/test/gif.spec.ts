@@ -245,6 +245,18 @@ interface DiffReport {
   readonly count: number;
   /** Where the difference is, which is the half a bare count cannot say. */
   readonly box: Box | null;
+  /**
+   * The first few differing pixels, both values named.
+   *
+   * A count and a rectangle say WHERE two frames disagree and are silent on
+   * HOW, and the two answers point opposite ways. Values a shade apart are an
+   * antialiased edge landing differently, which is a property of the
+   * rasteriser and is fixed by pinning it. Values far apart, or one of them
+   * transparent, mean the two runs photographed genuinely different content,
+   * which is a bug in the product or in the capture's own sequencing. F-149
+   * was chased for three sessions on a count and a rectangle alone.
+   */
+  readonly samples: readonly string[];
 }
 
 /**
@@ -257,6 +269,7 @@ interface DiffReport {
  * sends them to the element.
  */
 function diffIn(a: RasterFrame, b: RasterFrame, box: Box): DiffReport {
+  const samples: string[] = [];
   let count = 0;
   let x0 = box.x + box.width;
   let y0 = box.y + box.height;
@@ -266,6 +279,10 @@ function diffIn(a: RasterFrame, b: RasterFrame, box: Box): DiffReport {
     for (let x = box.x; x < box.x + box.width; x += 1)
       if (at(a, x, y) !== at(b, x, y)) {
         count += 1;
+        if (samples.length < 4)
+          samples.push(
+            `${String(x)},${String(y)}: ${at(a, x, y)} vs ${at(b, x, y)}`,
+          );
         if (x < x0) x0 = x;
         if (y < y0) y0 = y;
         if (x > x1) x1 = x;
@@ -275,6 +292,7 @@ function diffIn(a: RasterFrame, b: RasterFrame, box: Box): DiffReport {
     count,
     box:
       x1 < 0 ? null : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 },
+    samples,
   };
 }
 
@@ -282,7 +300,8 @@ function sayDiff(d: DiffReport): string {
   if (d.box === null) return 'identical';
   return (
     `${String(d.count)} px differ, in ${String(d.box.width)}x` +
-    `${String(d.box.height)} at ${String(d.box.x)},${String(d.box.y)}`
+    `${String(d.box.height)} at ${String(d.box.x)},${String(d.box.y)}` +
+    (d.samples.length === 0 ? '' : ` — ${d.samples.join('; ')}`)
   );
 }
 
@@ -424,48 +443,94 @@ async function runPass(dir: string, out: string): Promise<Pass> {
       });
     });
 
-    const sized = await app.app.evaluate(
-      ({ BrowserWindow, screen }, size: readonly number[]) => {
+    await app.app.evaluate(
+      ({ BrowserWindow }, size: readonly number[]) => {
         const win = BrowserWindow.getAllWindows()[0];
         if (win === undefined) throw new Error('the shell has no window');
         win.setContentSize(size[0] ?? 0, size[1] ?? 0);
-        const got = win.getContentSize();
-        const area = screen.getPrimaryDisplay().workAreaSize;
-        return {
-          width: got[0] ?? 0,
-          height: got[1] ?? 0,
-          display: `${String(area.width)}x${String(area.height)}`,
-        };
       },
       [WIDTH, HEIGHT],
     );
 
     /*
-     * A SCREEN TOO SMALL TO HOLD THE CAPTURE IS A FACT, NOT A TIMEOUT.
+     * THE CAPTURE IS PINNED TO A VIEWPORT, NOT TO A SCREEN.
      *
-     * A window cannot be given a content box larger than the display it sits
-     * on: the request is clamped, silently. If that happens the capture would
-     * still be taken, at the wrong size, and the only row that would notice
-     * is the one reading the width back out of the logical screen descriptor,
-     * which would report a number nobody could explain. Reading the size back
-     * and refusing here names the screen instead, so the next reader learns
-     * the machine was too small rather than that something timed out.
+     * The window above is BEST EFFORT and nothing depends on it succeeding.
+     * A window cannot be given a content box taller than its display's work
+     * area, and macOS clamps the request while reporting success. GitHub's
+     * hosted macOS runners come up with a 1024x684 work area, and the
+     * measurement taken there is worth keeping: the 1200 px WIDTH was granted
+     * on a 1024 px screen, and only the height clamped, to 684. So the axis
+     * that bites is height alone, and 750 is not reachable there by asking.
+     *
+     * Overriding the device metrics makes the renderer's VIEWPORT the thing
+     * that is 1200x750, independent of any window and any screen, and
+     * `Page.captureScreenshot` photographs that. Same instrument and same
+     * justification as the `prefers-reduced-transparency` pin in
+     * `harness.ts`: it narrows the ENVIRONMENT the capture happens in, moves
+     * no threshold, and relaxes no assertion. The session is kept open for
+     * the same reason that one is, Chromium drops a session's emulation when
+     * it detaches.
+     *
+     * This was rejected once, wrongly. The pre-registered falsifier was that
+     * the drift row must still reproduce the committed artefact, emulation
+     * produced different bytes, and that looked conclusive. It was
+     * confounded: `--disable-lcd-text` had changed the artefact in the same
+     * commit, and the emulated bytes turned out to equal what a real window
+     * produces once BOTH are measured against the regenerated artefact. The
+     * lesson is not that the falsifier was wrong to be declared, it is that a
+     * falsifier run against a baseline that moved underneath it proves
+     * nothing about the thing on trial.
      */
-    if (sized.width !== WIDTH || sized.height !== HEIGHT)
-      throw new Error(
-        `this display cannot hold the capture: asked for a ${String(WIDTH)}x` +
-          `${String(HEIGHT)} content box, got ${String(sized.width)}x` +
-          `${String(sized.height)} on a ${sized.display} work area. The GIF is ` +
-          `defined at ${String(WIDTH)}x${String(HEIGHT)}, so this refuses ` +
-          `rather than photographing a different window.`,
-      );
+    const metrics = await app.app.context().newCDPSession(page);
+    await metrics.send('Emulation.setDeviceMetricsOverride', {
+      width: WIDTH,
+      height: HEIGHT,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
 
-    await page.waitForFunction(
-      (size: readonly number[]) =>
-        window.innerWidth === size[0] && window.innerHeight === size[1],
-      [WIDTH, HEIGHT],
-      { timeout: 30_000 },
-    );
+    /*
+     * WAIT ON THE STATE, THEN EXPLAIN IT IF IT NEVER ARRIVES.
+     *
+     * Reading the size straight back out of `getContentSize()` and refusing
+     * on the spot looks tempting and is wrong: the setter is synchronous on
+     * macOS but asynchronous under X11, so on ci-linux the readback can
+     * observe the PREVIOUS size and announce that the display cannot hold a
+     * capture it holds perfectly well. So the wait stays on the renderer's
+     * own `innerWidth`, which is the state that actually matters, and the
+     * measurement is taken only on the way out, where it costs nothing and a
+     * false reading is impossible because something is already wrong.
+     */
+    try {
+      await page.waitForFunction(
+        (size: readonly number[]) =>
+          window.innerWidth === size[0] && window.innerHeight === size[1],
+        [WIDTH, HEIGHT],
+        { timeout: 30_000 },
+      );
+    } catch (cause) {
+      const seen = await app.app.evaluate(({ BrowserWindow, screen }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        const box = win === undefined ? [0, 0] : win.getContentSize();
+        const area = screen.getPrimaryDisplay().workAreaSize;
+        return {
+          box: `${String(box[0] ?? 0)}x${String(box[1] ?? 0)}`,
+          work: `${String(area.width)}x${String(area.height)}`,
+        };
+      });
+      const inner = await page.evaluate(
+        () => `${String(window.innerWidth)}x${String(window.innerHeight)}`,
+      );
+      throw new Error(
+        `the renderer never reached ${String(WIDTH)}x${String(HEIGHT)}: ` +
+          `viewport is ${inner}, the window's content box is ${seen.box}, ` +
+          `and the display's work area is ${seen.work}. The GIF is defined ` +
+          `at ${String(WIDTH)}x${String(HEIGHT)}, so this refuses rather ` +
+          `than photographing a different window.`,
+        { cause },
+      );
+    }
 
     /*
      * The renderer's clock, frozen BEFORE the document runs.
@@ -596,6 +661,18 @@ async function runPass(dir: string, out: string): Promise<Pass> {
       await page.screenshot({
         path: join(frames, `frame-${String(i).padStart(3, '0')}.png`),
         scale: 'css',
+        // Frozen, not merely quiet. The wait above establishes that no
+        // animation is RUNNING, which is a weaker claim than it looks:
+        // a transition that has not started yet, and the compositor's own
+        // sub-frame state, are both still free to move between two
+        // processes photographing the same document. That freedom is worth
+        // exactly one pixel on an antialiased chip edge, which is precisely
+        // the drift F-149 chased across four different hashes. These two
+        // options are Playwright's own instrument for it: animations are
+        // finished to their end state and the caret is hidden, so the
+        // capture is of a document that cannot be mid-anything.
+        animations: 'disabled',
+        caret: 'hide',
       });
       if (i === 0) {
         // The same instant, captured twice, differing only in the caption.
@@ -605,7 +682,11 @@ async function runPass(dir: string, out: string): Promise<Pass> {
           const el = document.getElementById('gif-caption');
           if (el !== null) el.style.visibility = 'hidden';
         });
-        withoutCaption = await page.screenshot({ scale: 'css' });
+        withoutCaption = await page.screenshot({
+          scale: 'css',
+          animations: 'disabled',
+          caret: 'hide',
+        });
         await page.evaluate(() => {
           const el = document.getElementById('gif-caption');
           if (el !== null) el.style.visibility = 'visible';

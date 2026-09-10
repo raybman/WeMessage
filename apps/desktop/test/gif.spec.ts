@@ -390,14 +390,76 @@ async function runPass(dir: string, out: string): Promise<Pass> {
      * the two flags in `harness.ts`: narrow the environment, do not widen a
      * tolerance.
      */
-    await app.app.evaluate(
-      ({ BrowserWindow }, size: readonly number[]) => {
+    /*
+     * ON SCREEN FIRST, THEN RESIZED.
+     *
+     * `launchApp` returns as soon as `app.firstWindow()` resolves, which is
+     * when the web contents exist. The shell opens with `show: false` and
+     * only calls `show()` from `ready-to-show` (`main/window.ts`), so at this
+     * point the window may not be on screen at all. Resizing a window that is
+     * not yet shown does not reliably reach the renderer, `window.innerWidth`
+     * then never becomes `WIDTH`, and the wait below expires. That is exactly
+     * how this suite failed on `ci-macos`: the whole file errored in
+     * `beforeAll` on a bare 30 second `waitForFunction` timeout that named
+     * neither the size it got nor the screen it was on.
+     *
+     * Subscribed BEFORE the second check, deliberately. The obvious spelling
+     * tests `isVisible()` and then attaches a `show` listener, which loses
+     * the race if the window shows in between and waits forever for an event
+     * that has already gone by. Attaching first and re-checking after cannot
+     * lose it: either the listener catches the transition, or the re-check
+     * observes it already happened. Resolving twice is harmless, and no
+     * clock is involved, which is what row 14 of the arch file requires of
+     * everything under `apps/desktop/test`.
+     */
+    await app.app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win === undefined) throw new Error('the shell has no window');
+      if (win.isVisible()) return;
+      await new Promise<void>((resolve) => {
+        win.once('show', () => {
+          resolve();
+        });
+        if (win.isVisible()) resolve();
+      });
+    });
+
+    const sized = await app.app.evaluate(
+      ({ BrowserWindow, screen }, size: readonly number[]) => {
         const win = BrowserWindow.getAllWindows()[0];
         if (win === undefined) throw new Error('the shell has no window');
         win.setContentSize(size[0] ?? 0, size[1] ?? 0);
+        const got = win.getContentSize();
+        const area = screen.getPrimaryDisplay().workAreaSize;
+        return {
+          width: got[0] ?? 0,
+          height: got[1] ?? 0,
+          display: `${String(area.width)}x${String(area.height)}`,
+        };
       },
       [WIDTH, HEIGHT],
     );
+
+    /*
+     * A SCREEN TOO SMALL TO HOLD THE CAPTURE IS A FACT, NOT A TIMEOUT.
+     *
+     * A window cannot be given a content box larger than the display it sits
+     * on: the request is clamped, silently. If that happens the capture would
+     * still be taken, at the wrong size, and the only row that would notice
+     * is the one reading the width back out of the logical screen descriptor,
+     * which would report a number nobody could explain. Reading the size back
+     * and refusing here names the screen instead, so the next reader learns
+     * the machine was too small rather than that something timed out.
+     */
+    if (sized.width !== WIDTH || sized.height !== HEIGHT)
+      throw new Error(
+        `this display cannot hold the capture: asked for a ${String(WIDTH)}x` +
+          `${String(HEIGHT)} content box, got ${String(sized.width)}x` +
+          `${String(sized.height)} on a ${sized.display} work area. The GIF is ` +
+          `defined at ${String(WIDTH)}x${String(HEIGHT)}, so this refuses ` +
+          `rather than photographing a different window.`,
+      );
+
     await page.waitForFunction(
       (size: readonly number[]) =>
         window.innerWidth === size[0] && window.innerHeight === size[1],
@@ -753,14 +815,36 @@ describe('s9 Sc13 rows 5 to 8: the launch GIF', () => {
       const offenders = rasterGreenOffenders(ARTEFACT, primary.gif);
       // The failure has to name the frame and the count, which is what the
       // scenario's second tooth asks of it.
+      //
+      // Only the per-pixel entries carry a frame. `rasterGreenOffenders`
+      // caps its detail and then appends a SUMMARY line with no `@` in it,
+      // and splitting that line unconditionally runs it through
+      // `slice(0, -1)`: that is how the first CI failure came back reporting
+      // a frame called `... in frame orde` with `1 px` against it. A
+      // diagnostic that invents a frame is worse than none, because the
+      // reader spends their first minutes on the invention.
       const byFrame = new Map<string, number>();
       for (const o of offenders) {
-        const label = o.slice(0, o.indexOf('@'));
-        byFrame.set(label, (byFrame.get(label) ?? 0) + 1);
+        const at = o.indexOf('@');
+        if (at === -1) continue;
+        byFrame.set(o.slice(0, at), (byFrame.get(o.slice(0, at)) ?? 0) + 1);
       }
+      // And it has to name the COLOURS, because the count alone cannot tell
+      // apart the two things that put green here, and they want opposite
+      // responses. A green SURFACE is an INV-2 regression and the build must
+      // stop. A one-pixel scatter of `dominant-G` verdicts along glyph edges
+      // is subpixel text antialiasing, a property of the host the renderer
+      // happens to be on rather than of this product, and the answer to that
+      // is to pin the renderer, never to widen the band. Each offender
+      // already carries its `rgb()` literal and the arm of `greenVerdict`
+      // that fired, so printing a handful decides between those two on the
+      // first read instead of on the next round trip through CI.
       expect(
         offenders.length,
-        [...byFrame].map(([f, n]) => `${f}: ${String(n)} px`).join(', '),
+        [
+          [...byFrame].map(([f, n]) => `${f}: ${String(n)} px`).join(', '),
+          ...offenders.slice(0, 8),
+        ].join('\n'),
       ).toBe(0);
     }, 300_000);
 

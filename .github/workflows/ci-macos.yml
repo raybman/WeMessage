@@ -40,6 +40,16 @@ jobs:
       electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # `test/release/s9-e2e.spec.ts` diffs the tree against the S8-close
+          # commit `a292dc5`, and `actions/checkout` defaults to a depth-1
+          # shallow clone in which that revision does not exist. The rows do
+          # not degrade quietly when it is missing, they fail with `fatal: bad
+          # revision`, which is the right behaviour and is how this was found.
+          # The history is what the assertion needs, so the history is what CI
+          # gets: fetching it is narrowing the environment, whereas teaching
+          # the rows to skip on a shallow clone would be widening the guard.
+          fetch-depth: 0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.5

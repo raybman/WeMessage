@@ -373,6 +373,30 @@ export async function launchApp(options: LaunchOptions): Promise<LaunchedApp> {
     args: [
       '--force-color-profile=srgb',
       '--force-device-scale-factor=1',
+      // The THIRD raster pin, and the same argument as the two above.
+      //
+      // Subpixel text antialiasing weights a glyph's edge pixels per CHANNEL
+      // rather than per luminance, so one side of every stem lands
+      // green-dominant and the other magenta-dominant. `greenVerdict`'s first
+      // arm is exactly `g > max(r, b) + 16`, so on a host that renders text
+      // that way the no-green sweep reports hundreds of one-pixel offenders
+      // strewn along the edges of ordinary black-on-white type. That is what
+      // ci-linux found in the captured GIF (798 of them, densest in the
+      // caption frame) while macOS, which does not render these surfaces
+      // subpixel, saw none.
+      //
+      // The pixels are real, so the sweep is right to report them; they are
+      // just not this product's colour, they are the host's font rasteriser
+      // leaking a hue into a capture. The fix therefore goes where E.3 says
+      // it goes: remove the rendering mode from the capture environment and
+      // leave the assertion at zero. Widening the band, or excusing runs of
+      // one pixel, would blind the sweep to a genuine hairline of green in
+      // the UI, which is the exact thing INV-2 exists to catch.
+      //
+      // Verified a no-op on macOS: with this flag the GIF still encodes to
+      // bytes identical to the committed artefact, so pinning it costs the
+      // shipping platform nothing.
+      '--disable-lcd-text',
       MAIN_ENTRY,
     ],
     env,

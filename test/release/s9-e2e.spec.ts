@@ -585,12 +585,6 @@ const DECLARED_SKIPS: readonly SkipSite[] = [
     why: 'the release smoke drives the SHIPPED zip through a real launch agent, and neither the artefact nor a service manager exists on the Linux lane; the macOS lane builds the zip at groupOrder 4 and runs this at 5, so the guard is dark only where it could not be honest',
   },
   {
-    file: 'apps/desktop/test/gif.spec.ts',
-    guard: "process.platform !== 'darwin'",
-    count: 1,
-    why: 'the drift row alone, not the file: the other fifteen rows generate the animation and read its pixels everywhere, but comparing the TRACKED artefact byte for byte only means something on the platform it is rendered on, and a Linux renderer disagreeing with a macOS one would be a font stack difference reported as a regression',
-  },
-  {
     file: 'packages/daemon/test/lock.spec.ts',
     guard: 'IS_ROOT',
     count: 3,

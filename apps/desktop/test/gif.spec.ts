@@ -110,6 +110,13 @@ const STEP_COUNT = 8;
 const ENCODER = 'apps/desktop/scripts/make-gif.mjs';
 const ARTEFACT = 'site/media/launch.gif';
 const ARTEFACT_ABS = join(REPO_ROOT, ARTEFACT);
+/**
+ * The artefact's companion record: the facts about the animation that do NOT
+ * depend on which machine rasterised it. Published by the same `WRITE` step
+ * that publishes the GIF, so the two cannot describe different runs.
+ */
+const SIDECAR = 'site/media/launch.gif.json';
+const SIDECAR_ABS = join(REPO_ROOT, SIDECAR);
 
 /* ── the seed ─────────────────────────────────────────────────────────── */
 
@@ -340,6 +347,78 @@ interface Pass {
   /** The visible text of the document after each of the eight strokes. */
   readonly texts: readonly string[];
   readonly names: readonly string[];
+}
+
+/*
+ * F-153. What the drift row is allowed to claim.
+ *
+ * The row used to assert that the committed GIF's sha256 equalled the one
+ * this run produced, on macOS only. That assertion is unattainable BY
+ * CONSTRUCTION, and the evidence is three hosts and three digests:
+ *
+ *   publisher's laptop   macOS 26.5.1   a4397ccc
+ *   ci runner macos-15   macOS 15.7.9   a758acdd
+ *   ci runner macos-26   macOS 26.6.2   067e9c77
+ *
+ * The same host twice gives the same digest, so the pipeline IS
+ * deterministic; what differs is the rasteriser. Skia draws glyph coverage
+ * through CoreGraphics, and CoreGraphics changes its smoothing and gamma
+ * between OS releases. Pinning any one of those digests would schedule a
+ * red build for whenever GitHub next rolls its runner image, and C-11 says
+ * a flaky test is a bug, so pinning is not available either.
+ *
+ * The fix narrows the CLAIM instead of widening a tolerance, which is the
+ * direction E.3 requires. The row no longer says "these bytes are those
+ * bytes". It says "the animation this run describes is the animation the
+ * committed artefact describes", over the fields that a font rasteriser
+ * cannot move: the geometry, the frame count and the timing the encoder
+ * reports, the frame file names, and the TEXT the document showed at each
+ * of the eight steps.
+ *
+ * Deliberately EXCLUDED, because each is a function of the rasteriser and
+ * would reintroduce exactly the defect being removed:
+ *   sha256, bytes      the digest and the size of the compressed pixels
+ *   paletteColours     quantisation over host-specific glyph edge colours
+ *   transparentIndex   the reserved slot that quantisation happens to leave
+ *   changed            which frames differ, which is a pixel diff
+ *   caption (Box)      glyph metrics decide where the caption lands
+ *
+ * The row also stops being macOS-only. Every field below is one a Linux
+ * render agrees with, so the guard now runs on BOTH lanes instead of one,
+ * and its `skipIf` site is removed from `DECLARED_SKIPS` to match.
+ */
+interface PipelineFacts {
+  readonly width: number;
+  readonly height: number;
+  readonly captures: number;
+  readonly frames: number;
+  readonly hold: number;
+  readonly delayMs: number;
+  readonly delayCs: number;
+  readonly fps: number;
+  readonly maxBytes: number;
+  readonly names: readonly string[];
+  readonly viewport: { readonly width: number; readonly height: number };
+  readonly captionText: string;
+  readonly texts: readonly string[];
+}
+
+function pipelineFacts(pass: Pass): PipelineFacts {
+  return {
+    width: pass.record.width,
+    height: pass.record.height,
+    captures: pass.record.captures,
+    frames: pass.record.frames,
+    hold: pass.record.hold,
+    delayMs: pass.record.delayMs,
+    delayCs: pass.record.delayCs,
+    fps: pass.record.fps,
+    maxBytes: pass.record.maxBytes,
+    names: pass.names,
+    viewport: pass.viewport,
+    captionText: pass.captionText,
+    texts: pass.texts,
+  };
 }
 
 async function runPass(dir: string, out: string): Promise<Pass> {
@@ -728,9 +807,17 @@ let primary: Pass;
 let secondary: Pass;
 /** The tracked artefact AS IT STOOD before this run, for the drift row. */
 let committed: Buffer | null = null;
+/** The tracked sidecar AS IT STOOD before this run, read at the same instant. */
+let committedFacts: string | null = null;
 
 beforeAll(async () => {
   committed = existsSync(ARTEFACT_ABS) ? readFileSync(ARTEFACT_ABS) : null;
+  // Read in the SAME breath as the artefact and before either pass runs, so a
+  // run that republishes both still compares this run against what was
+  // committed BEFORE it, and never against what it just finished writing.
+  committedFacts = existsSync(SIDECAR_ABS)
+    ? readFileSync(SIDECAR_ABS, 'utf8')
+    : null;
   root = mkdtempSync(join(tmpdir(), 'wm-gif-'));
 
   /*
@@ -767,6 +854,13 @@ beforeAll(async () => {
           `untouched.`,
       );
     writeFileSync(ARTEFACT_ABS, primary.gif);
+    // The companion record, published in the same step and from the same
+    // pass. Writing one without the other is how the two would come to
+    // describe different runs, so there is no path that writes only one.
+    writeFileSync(
+      SIDECAR_ABS,
+      `${JSON.stringify(pipelineFacts(primary), null, 2)}\n`,
+    );
   }
 }, 300_000);
 
@@ -1048,30 +1142,47 @@ describe('s9 Sc13 rows 5 to 8: the launch GIF', () => {
     /**
      * The committed artefact is the one this pipeline produces.
      *
-     * Skipped off macOS because the frames are photographs of text rendered
-     * by the host: CoreText and FreeType disagree about hinting and about
-     * subpixel positioning, so a Linux render of an identical DOM is a
-     * different image, and asserting otherwise would be asserting that two
-     * font stacks agree. The macOS lane, which is the lane the artefact is
-     * generated in, asserts it.
+     * TWO rows, because the tracked pair can go stale in two ways that fail
+     * differently. The first catches a pipeline that changed without the
+     * artefact being regenerated. The second catches an artefact that was
+     * edited, truncated or replaced by hand, which the first cannot see
+     * because the sidecar would still agree with the run that wrote it.
+     *
+     * Neither is skipped anywhere, on any platform. See `PipelineFacts` for
+     * why the old byte-for-byte, macOS-only form could not be kept and what
+     * was deliberately left out of its replacement.
      */
-    describe.skipIf(process.platform !== 'darwin')(
-      'the drift check, on the platform the artefact is rendered on',
-      () => {
-        it('site/media/launch.gif equals what this run generated', () => {
-          expect(
-            committed,
-            `${ARTEFACT} is not present; run \`pnpm --filter @wemessage/desktop gif\``,
-          ).not.toBeNull();
-          expect(
-            createHash('sha256')
-              .update(committed ?? Buffer.alloc(0))
-              .digest('hex'),
-            `${ARTEFACT} has drifted from the pipeline that makes it`,
-          ).toBe(primary.record.sha256);
-        });
-      },
-    );
+    describe('the drift check', () => {
+      it('site/media/launch.gif.json equals what this run generated', () => {
+        expect(
+          committedFacts,
+          `${SIDECAR} is not present; run \`pnpm --filter @wemessage/desktop gif\``,
+        ).not.toBeNull();
+        expect(
+          JSON.parse(committedFacts ?? '{}') as PipelineFacts,
+          `${SIDECAR} has drifted from the pipeline that makes it`,
+        ).toEqual(pipelineFacts(primary));
+      });
+
+      it('site/media/launch.gif is the animation those facts describe', () => {
+        expect(
+          committed,
+          `${ARTEFACT} is not present; run \`pnpm --filter @wemessage/desktop gif\``,
+        ).not.toBeNull();
+        const bytes = committed ?? Buffer.alloc(0);
+        // Off the wire, from the logical screen descriptor, and not from any
+        // record the encoder wrote about itself.
+        expect(bytes.subarray(0, 6).toString('latin1')).toBe('GIF89a');
+        expect(bytes.readUInt16LE(6)).toBe(WIDTH);
+        expect(bytes.readUInt16LE(8)).toBe(HEIGHT);
+        expect(bytes.length).toBeLessThanOrEqual(MAX_BYTES);
+        // And it decodes to the frame count the sidecar claims, so a
+        // truncated or hand-assembled file fails here instead of shipping.
+        const decoded = decodeRaster(ARTEFACT, bytes);
+        expect(decoded.undecoded).toEqual([]);
+        expect(decoded.frames.length).toBe(STEP_COUNT * HOLD);
+      });
+    });
   });
 
   /* ── row 8 ──────────────────────────────────────────────────────────── */

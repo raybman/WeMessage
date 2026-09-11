@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/raybman/WeMessage/security/advisories/new
+    about: >-
+      Do not open a public issue. Use GitHub private vulnerability reporting so
+      a fix and an advisory can ship at the same time. See SECURITY.md.
+  - name: Question or idea
+    url: https://github.com/raybman/WeMessage/discussions
+    about: >-
+      Usage questions, adapter design talk, and anything that is not yet a
+      concrete bug or request.

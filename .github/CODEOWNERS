@@ -1,0 +1,20 @@
+# Every change gets a maintainer review.
+#
+# This project's guarantee is that nothing sends without a human approval
+# (INV-2), and that guarantee is only as good as the review on the files that
+# could break it. The catch-all below is the floor; the paths under it are the
+# ones where a careless diff is a safety bug rather than a style bug.
+
+* @raybman
+
+# The approval gate and the single site allowed to speak for the operator.
+/packages/core/src/sending/   @raybman
+/packages/core/src/domain/    @raybman
+
+# The transport surface is ratcheted (INV-3). Widening it is a deliberate act.
+/packages/protocol/           @raybman
+
+# Anything that decides what ships, how it is signed, and what the cask says.
+/.github/workflows/           @raybman
+/tools/release/               @raybman
+/homebrew/                    @raybman

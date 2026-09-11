@@ -1,0 +1,85 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Before you file: if the bug is that a message was sent without your
+        approval, or that something reached the send call site without an
+        approved draft, please do **not** file it here. That is a security
+        report. Use the Security tab and choose "Report a vulnerability".
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered steps someone else can follow. If it involves a specific
+        rule, schedule or adapter, say which.
+      placeholder: |
+        1. Create a rule matching ...
+        2. Receive a message that ...
+        3. Open the approval queue and ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Desktop app (approval queue, rules, settings)
+        - Daemon or CLI
+        - An adapter (OpenClaw, Hermes, Sol, Luna, or your own)
+        - Install, update, or first launch
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WeMessage version
+      description: From the app's About panel, or `wemessage --version`.
+      placeholder: 1.0.0-rc.1
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+      description: Apple menu, About This Mac.
+      placeholder: macOS 15.7 on M2
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        Redact message bodies and contact identifiers before pasting. This
+        repository is public and the logs are not worth your privacy.
+      render: shell
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: >-
+            I removed message content, phone numbers, and email addresses from
+            anything I pasted above.
+          required: true

@@ -1,0 +1,43 @@
+version: 2
+
+updates:
+  # The workspace. Grouped so a routine week is one reviewable pull request
+  # rather than twenty, and so the five-command gate runs once over the set
+  # instead of once per bump.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      production-patches:
+        dependency-type: production
+        update-types:
+          - patch
+    ignore:
+      # Electron's major line pins the bundled Node ABI and the Chromium that
+      # renders the launch animation. A major bump is a slice, not a chore:
+      # it moves the native prebuild target and it moves every rasterised
+      # pixel the desktop tests compare. Minor and patch still flow.
+      - dependency-name: electron
+        update-types:
+          - version-update:semver-major
+
+  # Actions are pinned to commit SHAs and checked by test/release/workflows.spec.ts.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci

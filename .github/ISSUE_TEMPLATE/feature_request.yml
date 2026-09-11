@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a capability this project does not have.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        One thing worth knowing before you write: **"send it for me
+        automatically" is out of scope, permanently.** The approval gate is the
+        product, not a setting on the way to being removed. Proposals that
+        route around it will be closed, kindly, and this note is here so you do
+        not spend an evening on one.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What are you trying to do today, and where does it fall down? Describe
+        the situation, not the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you already tried
+      description: >-
+        Existing rules, schedules, adapters, or a workaround outside the app.
+
+  - type: checkboxes
+    id: gate
+    attributes:
+      label: Scope check
+      options:
+        - label: >-
+            This proposal keeps every outbound message behind an explicit human
+            approval.
+          required: true

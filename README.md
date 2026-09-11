@@ -175,6 +175,11 @@ pnpm licenses:check
 pnpm lint
 ```
 
+Bug reports and feature requests have [forms](.github/ISSUE_TEMPLATE) that ask for the
+macOS version, the app version and the daemon state up front, so a report does not need
+a round trip before anyone can act on it. Participation is governed by the
+[Code of Conduct](.github/CODE_OF_CONDUCT.md).
+
 `site/` holds [wemessage.app](https://wemessage.app). Static, no telemetry.
 Release history is in [CHANGELOG.md](CHANGELOG.md).
 

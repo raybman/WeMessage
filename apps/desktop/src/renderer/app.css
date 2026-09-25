@@ -712,9 +712,8 @@ body {
 .rules {
   display: grid;
   grid-template-columns: minmax(220px, 300px) 1fr;
-  gap: 1px;
+  gap: 0;
   min-height: 0;
-  background: var(--stroke);
   overflow: hidden;
 }
 
@@ -725,8 +724,16 @@ body {
   gap: 8px;
   min-height: 0;
   padding: 10px 12px;
-  background: var(--layer-0);
+  background: var(--pane);
   overflow-y: auto;
+}
+
+/* G2 "even frost": the list/detail seam is a real hairline. It used to be
+   the grid's 1px gap over a `--stroke` ground, which only reads as a line
+   while both panes are opaque; over glass the ground would show through
+   every pane. */
+.rules-pane {
+  border-right: 1px solid var(--stroke);
 }
 
 .rules-pane-head {
@@ -1113,10 +1120,9 @@ body {
 .schedule {
   display: grid;
   grid-template-columns: minmax(220px, 300px) 1fr;
-  gap: 1px;
+  gap: 0;
   min-height: 0;
   margin-top: 16px;
-  background: var(--stroke);
   overflow: hidden;
 }
 
@@ -1126,7 +1132,7 @@ body {
   gap: 8px;
   min-height: 0;
   padding: 10px 12px;
-  background: var(--layer-0);
+  background: var(--pane);
   overflow-y: auto;
 }
 

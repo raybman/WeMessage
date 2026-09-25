@@ -2274,7 +2274,12 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
     });
     await app.page.locator('#queue-pane').first().waitFor({ timeout: 15_000 });
 
-    const PANES = ['#queue-pane'] as const;
+    /** Screen stroke, then the panes it must show as glass. */
+    const PANES: readonly (readonly [string, string, readonly string[]])[] = [
+      ['queue', 'Meta+Digit1', ['#queue-pane']],
+      ['rules', 'Meta+Digit2', ['.rules-pane', '.rules-detail']],
+      ['schedule', 'Meta+Digit3', ['.rules-pane', '.sched-pane']],
+    ];
     for (const variant of VARIANTS) {
       await applyVariant(app, variant);
       const pane = (await resolveColour(app.page, 'var(--pane)')) as Rgba;
@@ -2295,18 +2300,43 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
             .first()
             .screenshot({ omitBackground: true }),
         );
-      const ground = await alphaOf('#app');
-      expect(ground, `${variant.id}: #app is not glass`).toBeLessThan(255);
-      for (const sel of PANES) {
-        const a = await alphaOf(sel);
-        expect(a, `${variant.id}: ${sel} paints an opaque ground`).toBeLessThan(
-          255,
-        );
-        expect(
-          Math.abs(a - ground),
-          `${variant.id}: ${sel} alpha ${String(a)} vs #app ${String(ground)}, the frost is uneven`,
-        ).toBeLessThanOrEqual(1);
+      for (const [screen, key, panes] of PANES) {
+        await app.page.keyboard.press(key);
+        await app.page.waitForSelector(`html[data-screen="${screen}"]`, {
+          timeout: 30_000,
+        });
+        const ground = await alphaOf('#app');
+        expect(ground, `${variant.id}: #app is not glass`).toBeLessThan(255);
+        for (const sel of panes) {
+          const at = `${variant.id} ${screen} ${sel}`;
+          const a = await alphaOf(sel);
+          expect(a, `${at} paints an opaque ground`).toBeLessThan(255);
+          expect(
+            Math.abs(a - ground),
+            `${at}: alpha ${String(a)} vs #app ${String(ground)}, the frost is uneven`,
+          ).toBeLessThanOrEqual(1);
+        }
       }
+      // Back where the loop found it, so the next variant starts alike.
+      await app.page.keyboard.press('Meta+Digit1');
+      await app.page.waitForSelector('html[data-screen="queue"]');
+    }
+
+    // The hairline survives: the list pane is split from its detail by a
+    // real 1px stroke, not by a gap over a painted ground.
+    for (const [screen, key] of PANES.slice(1)) {
+      await app.page.keyboard.press(key);
+      await app.page.waitForSelector(`html[data-screen="${screen}"]`);
+      const seam = await app.page.evaluate(() => {
+        const cs = getComputedStyle(
+          document.querySelector('.rules-pane') as Element,
+        );
+        return { width: cs.borderRightWidth, style: cs.borderRightStyle };
+      });
+      expect(seam, `${screen}: the list/detail hairline`).toEqual({
+        width: '1px',
+        style: 'solid',
+      });
     }
   }, 300_000);
 

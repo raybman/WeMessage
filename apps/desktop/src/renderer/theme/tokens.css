@@ -67,6 +67,12 @@
   /* ---- motion ---------------------------------------------------------- */
   --dur-fast: 120ms;
   --dur-base: 220ms;
+
+  /* G2 "even frost": the ground every pane paints. Transparent, so the
+     window's one vibrancy material shows through every pane evenly and
+     panes are told apart by hairlines alone. Falls back to --layer-0 in
+     the reduced-transparency branches below. */
+  --pane: transparent;
 }
 
 @media (prefers-color-scheme: light) {
@@ -105,6 +111,7 @@
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --layer-0: #1c1c1e;
+    --pane: var(--layer-0);
     --layer-1: #1c1c1e;
     --layer-2: #2c2c2e;
     --backdrop: none;
@@ -148,6 +155,7 @@
  */
 :root[data-reduced-transparency='on'] {
   --layer-0: #1c1c1e;
+  --pane: var(--layer-0);
   --layer-1: #1c1c1e;
   --layer-2: #2c2c2e;
   --backdrop: none;

@@ -2227,7 +2227,9 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
      * every row that only ever asks it for inequalities, so it is aimed at
      * an element whose background is an opaque token and required to come
      * back with that token EXACTLY. `#state-strip` is the one chrome
-     * surface in the app that is opaque, which is itself Sc15's fix.
+     * surface in the app that is opaque, which is itself Sc15's fix, and G2
+     * "even frost" keeps it that way on purpose: it is the line that says
+     * whether the product is connected, killed or down.
      */
     for (const variant of VARIANTS) {
       await applyVariant(app, variant);
@@ -2248,6 +2250,63 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
       expect(await nodeIsOpaque(app, '#app'), `${variant.id}: #app`).toBe(
         variant.reduced,
       );
+    }
+  }, 300_000);
+
+  /**
+   * G2 "even frost": one material for the whole window. A pane is a
+   * hairline and a region, never a second, opaque ground laid over the
+   * glass. Measured, not read from the sheet: in every glass variant the
+   * alpha each pane actually paints equals the alpha `#app` paints (±1 for
+   * rounding) and is below 255, and `--pane` itself resolves to nothing.
+   * In the reduced variants `--pane` IS `--layer-0`, so the opaque
+   * fallback is exactly what it was before G2.
+   */
+  it('G2 even frost: every pane is the same glass as the window it sits in', async () => {
+    const fixture = await bootHere();
+    const app = await launchHere(fixture);
+    await waitForConnected(app.page);
+    // The thread pane only mounts for a draft, so hand the queue one.
+    await fixture.directClient.createDraft({
+      chatGuid: CHAT,
+      body: 'Reply 1: confirming receipt.',
+      ttlMinutes: LONG_TTL,
+    });
+    await app.page.locator('#queue-pane').first().waitFor({ timeout: 15_000 });
+
+    const PANES = ['#queue-pane'] as const;
+    for (const variant of VARIANTS) {
+      await applyVariant(app, variant);
+      const pane = (await resolveColour(app.page, 'var(--pane)')) as Rgba;
+      const layer0 = (await resolveColour(app.page, 'var(--layer-0)')) as Rgba;
+      if (variant.reduced) {
+        expect(hex(pane), `${variant.id}: --pane falls back to --layer-0`).toBe(
+          hex(layer0),
+        );
+        expect(pane.a, variant.id).toBe(1);
+        continue;
+      }
+      expect(pane.a, `${variant.id}: --pane is not glass`).toBe(0);
+
+      const alphaOf = async (sel: string): Promise<number> =>
+        modalAlpha(
+          await app.page
+            .locator(sel)
+            .first()
+            .screenshot({ omitBackground: true }),
+        );
+      const ground = await alphaOf('#app');
+      expect(ground, `${variant.id}: #app is not glass`).toBeLessThan(255);
+      for (const sel of PANES) {
+        const a = await alphaOf(sel);
+        expect(a, `${variant.id}: ${sel} paints an opaque ground`).toBeLessThan(
+          255,
+        );
+        expect(
+          Math.abs(a - ground),
+          `${variant.id}: ${sel} alpha ${String(a)} vs #app ${String(ground)}, the frost is uneven`,
+        ).toBeLessThanOrEqual(1);
+      }
     }
   }, 300_000);
 
@@ -2310,6 +2369,9 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
         `the ${scheme} reduced-transparency branches have drifted`,
       ).toEqual(media);
     }
+    // G2: the pane ground falls back to the opaque layer in both dark
+    // reduced branches; the light branches inherit it through `--layer-0`.
+    expect(block(pairs[0]?.[1] as string)['--pane']).toBe('var(--layer-0)');
     // And the two schemes are actually different, so a future edit that
     // "unifies" them back into one set of neutrals fails here rather than
     // silently reinstating the dark-panels-under-light-ink bug.

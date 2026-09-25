@@ -345,6 +345,7 @@ describe('s8 Sc4: the shell, the bridge and the token', () => {
         '--layer-0',
         '--layer-1',
         '--layer-2',
+        '--pane',
         '--stroke',
         '--stroke-strong',
         '--tint',

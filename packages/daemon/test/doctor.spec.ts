@@ -136,23 +136,38 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
     });
   });
 
-  it('row 4: automation denied -> read-only, short-circuits before the messages check', () => {
+  /*
+   * s10 Slice 5: the doctor reports EVERY check. Precedence still decides
+   * the STATE (fda > automation > messages, unchanged), but it no longer
+   * decides what the operator is told. All three probes already run in
+   * parallel; returning at the first failure threw the other answers away,
+   * so someone fixing Full Disk Access found the Automation denial only on
+   * the next run. Only the unsupported-OS row still stops early, because
+   * there the other probes are never called (row 7).
+   *
+   * Tooth: restore the early return in the fda arm -> rows 5, 5v, 6 and the
+   * every-failure row go red.
+   */
+  it('row 4: automation denied -> read-only, and the messages check is still reported', () => {
     expect(evaluateDoctor({ ...healthy, automation: 'denied' })).toEqual({
       state: 'read-only',
       checks: [
         { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
         { id: 'fda', status: 'ok' },
         { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+        { id: 'messages', status: 'ok' },
       ],
     });
   });
 
-  it('row 5: FDA eperm -> disconnected, short-circuits before automation/messages', () => {
+  it('row 5: FDA eperm -> disconnected, and automation/messages are still reported', () => {
     expect(evaluateDoctor({ ...healthy, fda: 'eperm' })).toEqual({
       state: 'disconnected',
       checks: [
         { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
         { id: 'fda', status: 'fail', remediation: FDA_EPERM },
+        { id: 'automation', status: 'ok' },
+        { id: 'messages', status: 'ok' },
       ],
     });
   });
@@ -163,6 +178,47 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
       checks: [
         { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
         { id: 'fda', status: 'fail', remediation: FDA_EPERM },
+        { id: 'automation', status: 'ok' },
+        { id: 'messages', status: 'ok' },
+      ],
+    });
+  });
+
+  it('s10 Sl5: every failure at once is reported at once, and the state is still the worst one', () => {
+    expect(
+      evaluateDoctor({
+        osMajor: 15,
+        fda: 'eperm',
+        automation: 'denied',
+        messagesRunning: false,
+        autoLaunch: false,
+      }),
+    ).toEqual({
+      state: 'disconnected',
+      checks: [
+        { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
+        { id: 'fda', status: 'fail', remediation: FDA_EPERM },
+        { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+        { id: 'messages', status: 'fail', remediation: MESSAGES_FAIL_3B },
+      ],
+    });
+  });
+
+  it('s10 Sl5: automation denied with Messages closed and autoLaunch on -> read-only, messages warns', () => {
+    expect(
+      evaluateDoctor({
+        ...healthy,
+        automation: 'denied',
+        messagesRunning: false,
+        autoLaunch: true,
+      }),
+    ).toEqual({
+      state: 'read-only',
+      checks: [
+        { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
+        { id: 'fda', status: 'ok' },
+        { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+        { id: 'messages', status: 'warn', remediation: MESSAGES_WARN_3A },
       ],
     });
   });
@@ -186,7 +242,9 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
      * Asserted on the exported constant, not on prose in this file, so a
      * rewrite in `doctor.ts` that drops one of them fails here.
      */
-    const said = evaluateDoctor({ ...healthy, fda: 'eperm' }).checks.at(-1);
+    const said = evaluateDoctor({ ...healthy, fda: 'eperm' }).checks.find(
+      (c) => c.id === 'fda',
+    );
     expect(said?.id).toBe('fda');
     const copy = said?.remediation ?? '';
     expect(copy).toBe(FDA_EPERM);
@@ -201,12 +259,16 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
     expect(removeAt).toBeLessThan(restartAt);
   });
 
-  it('row 6: FDA enoent (no chat.db yet) -> read-only, short-circuits before automation/messages', () => {
-    expect(evaluateDoctor({ ...healthy, fda: 'enoent' })).toEqual({
+  it('row 6: FDA enoent (no chat.db yet) -> read-only, and automation/messages are still reported', () => {
+    expect(
+      evaluateDoctor({ ...healthy, fda: 'enoent', automation: 'denied' }),
+    ).toEqual({
       state: 'read-only',
       checks: [
         { id: 'os', status: 'ok', detail: CHATDB_SCHEMA_HONESTY },
         { id: 'fda', status: 'warn', remediation: FDA_ENOENT },
+        { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+        { id: 'messages', status: 'ok' },
       ],
     });
   });

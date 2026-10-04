@@ -198,7 +198,8 @@ export function macOsMajorFromRelease(release: string): number {
  * reached here below the floor) > fda (eperm|error -> disconnected; enoent
  * -> read-only, not a permission failure) > automation (anything not 'ok'
  * -> read-only) > messages (check-only unless autoLaunch is off and
- * Messages isn't running, which forces read-only — row 3b).
+ * Messages isn't running, which forces read-only, row 3b). Precedence
+ * picks the state; it no longer truncates the checks (s10 Slice 5).
  *
  * TEETH #1 lives in the fda branch below: inverting the eperm/error case to
  * 'read-only' makes row 5 (macOS 26 FDA eperm) assert the wrong state.
@@ -227,68 +228,43 @@ export function evaluateDoctor(snapshot: DoctorSnapshot): {
     detail: CHATDB_SCHEMA_HONESTY,
   };
 
-  // fda takes precedence over everything below it: eperm/error and enoent
-  // both short-circuit without consulting automation/messages at all (row
-  // 5, row 6). TEETH #1: inverting the eperm/error arm to 'read-only' makes
-  // row 5 (macOS 26 FDA eperm) assert the wrong state.
+  // s10 Slice 5: every check is reported; precedence decides only the
+  // STATE. All three probes already ran in parallel (runDoctor), so stopping
+  // at the first failure discarded answers we had, and an operator fixing
+  // Full Disk Access met the Automation denial only on the next run.
+  const fdaCheck: DoctorCheck =
+    snapshot.fda === 'eperm' || snapshot.fda === 'error'
+      ? { id: 'fda', status: 'fail', remediation: FDA_EPERM }
+      : snapshot.fda === 'enoent'
+        ? { id: 'fda', status: 'warn', remediation: FDA_ENOENT }
+        : { id: 'fda', status: 'ok' };
+  const automationCheck: DoctorCheck =
+    snapshot.automation !== 'ok'
+      ? { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED }
+      : { id: 'automation', status: 'ok' };
+  const messagesCheck: DoctorCheck = snapshot.messagesRunning
+    ? { id: 'messages', status: 'ok' }
+    : snapshot.autoLaunch
+      ? { id: 'messages', status: 'warn', remediation: MESSAGES_WARN_3A }
+      : { id: 'messages', status: 'fail', remediation: MESSAGES_FAIL_3B };
+
+  const checks = [osCheck, fdaCheck, automationCheck, messagesCheck];
+
+  // State, by precedence. TEETH #1: inverting the eperm/error arm to
+  // 'read-only' makes row 5 (macOS 26 FDA eperm) assert the wrong state.
+  // enoent is read-only, not a permission failure (row 6). A messages warn
+  // (3a, autoLaunch on) does not degrade; a messages fail (3b) does.
   if (snapshot.fda === 'eperm' || snapshot.fda === 'error') {
-    return {
-      state: 'disconnected',
-      checks: [osCheck, { id: 'fda', status: 'fail', remediation: FDA_EPERM }],
-    };
+    return { state: 'disconnected', checks };
   }
-  if (snapshot.fda === 'enoent') {
-    return {
-      state: 'read-only',
-      checks: [osCheck, { id: 'fda', status: 'warn', remediation: FDA_ENOENT }],
-    };
+  if (
+    snapshot.fda === 'enoent' ||
+    automationCheck.status !== 'ok' ||
+    messagesCheck.status === 'fail'
+  ) {
+    return { state: 'read-only', checks };
   }
-  const fdaCheck: DoctorCheck = { id: 'fda', status: 'ok' };
-
-  if (snapshot.automation !== 'ok') {
-    return {
-      state: 'read-only',
-      checks: [
-        osCheck,
-        fdaCheck,
-        { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
-      ],
-    };
-  }
-  const automationCheck: DoctorCheck = { id: 'automation', status: 'ok' };
-
-  if (!snapshot.messagesRunning) {
-    if (!snapshot.autoLaunch) {
-      return {
-        state: 'read-only',
-        checks: [
-          osCheck,
-          fdaCheck,
-          automationCheck,
-          { id: 'messages', status: 'fail', remediation: MESSAGES_FAIL_3B },
-        ],
-      };
-    }
-    return {
-      state: 'fully-connected',
-      checks: [
-        osCheck,
-        fdaCheck,
-        automationCheck,
-        { id: 'messages', status: 'warn', remediation: MESSAGES_WARN_3A },
-      ],
-    };
-  }
-
-  return {
-    state: 'fully-connected',
-    checks: [
-      osCheck,
-      fdaCheck,
-      automationCheck,
-      { id: 'messages', status: 'ok' },
-    ],
-  };
+  return { state: 'fully-connected', checks };
 }
 
 export interface RunDoctorDeps {

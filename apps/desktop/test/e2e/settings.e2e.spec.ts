@@ -890,11 +890,17 @@ describe('s8 Sc14 row 6: a minted token is shown once and is not recoverable', (
 
 describe('s8 Sc14 row 7: the Permissions pane tells the truth about four things', () => {
   it('renders the doctor’s own remediation and offers only a System Settings pane', async () => {
-    // FDA cannot reach the daemon: `evaluateDoctor` short-circuits after
-    // `fda`, so `automation` and `messages` are ABSENT from `checks` — a
-    // state the daemon really produces and the pane must not paint over.
+    // FDA cannot reach the daemon AND Automation was refused. Since s10
+    // Slice 5 `evaluateDoctor` reports every check rather than stopping at
+    // the first failure, so the pane carries BOTH remediations on the first
+    // run instead of revealing the second only after the first is fixed.
+    // (A check nobody ran still reads NOT CHECKED: the throwing-probe row
+    // below, and the OS floor in the onboarding checkpoint, cover that.)
     const fixture = await boot({
-      probes: { fda: () => Promise.resolve('eperm') },
+      probes: {
+        fda: () => Promise.resolve('eperm'),
+        automation: () => Promise.resolve('denied'),
+      },
     });
     await fixture.directClient.doctor();
 
@@ -912,10 +918,9 @@ describe('s8 Sc14 row 7: the Permissions pane tells the truth about four things'
     const byId = Object.fromEntries(view.cards.map((c) => [c.check, c]));
     expect(byId['os']?.state).toBe('OK');
     expect(byId['fda']?.state).toBe('FAIL');
-    // The two the daemon never reached. "Not granted" and "not yet checked"
-    // are different sentences and this is the second one.
-    expect(byId['automation']?.state).toBe('NOT CHECKED');
-    expect(byId['messages']?.state).toBe('NOT CHECKED');
+    // Reached and refused, in the same report as the FDA failure.
+    expect(byId['automation']?.state).toBe('FAIL');
+    expect(byId['messages']?.state).toBe('OK');
     // Glyph AND uppercase word AND data-state, never colour alone.
     for (const card of view.cards) {
       expect([card.check, card.glyph]).not.toEqual([card.check, '']);
@@ -938,6 +943,7 @@ describe('s8 Sc14 row 7: the Permissions pane tells the truth about four things'
     // RE-RUN is one GET, and it really re-reads: the probe is repaired and
     // the pane changes its mind.
     fixture.probes.fda = () => Promise.resolve('ok');
+    fixture.probes.automation = () => Promise.resolve('ok');
     const mark = since(fixture);
     await app.page.click('#perms-rerun');
     await app.page.waitForSelector(

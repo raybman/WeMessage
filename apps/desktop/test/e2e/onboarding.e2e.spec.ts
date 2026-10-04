@@ -615,11 +615,14 @@ describe('s8 Sc15 — onboarding: the wizard through every exit state', () => {
       note(view);
       expect(view.exit).toBe('daemon:disconnected');
       expect(view.exitState).toBe('FAIL');
+      // s10 Slice 5: the daemon now runs every check past a failed FDA, so
+      // the two it used to skip come back with their real answers. Only the
+      // OS floor still short-circuits (the row above).
       expect(view.cards.map((c) => `${c.check}:${c.state}`)).toEqual([
         'os:OK',
         'fda:FAIL',
-        'automation:NOT CHECKED',
-        'messages:NOT CHECKED',
+        'automation:OK',
+        'messages:OK',
       ]);
       // TCC is not grantable through any API. The most this wizard may
       // offer is to open the pane the operator has to act in, BY NAME,

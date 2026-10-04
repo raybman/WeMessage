@@ -279,13 +279,19 @@ describe('S3 end-to-end: fresh Mac to fully-connected to send to restart to fail
     });
 
     // ---- Step 1: fresh boot, all probes red -> disconnected; doctor
-    // lists the (precedence-short-circuited, single) failing check with
-    // its remediation ----
+    // lists EVERY check with its remediation (s10 Slice 5: precedence
+    // picks the state and no longer truncates the list, so a fresh Mac
+    // sees all three things to fix on the first run, not one per run) ----
+    const MESSAGES_NOT_RUNNING = expect.stringContaining(
+      'Messages is not running',
+    ) as unknown as string;
     const redDoctor = await client1.doctor();
     expect(redDoctor.state).toBe('disconnected');
     expect(redDoctor.checks).toEqual([
       { id: 'os', status: 'ok', detail: expect.any(String) },
       { id: 'fda', status: 'fail', remediation: FDA_EPERM },
+      { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+      { id: 'messages', status: 'warn', remediation: MESSAGES_NOT_RUNNING },
     ]);
 
     const redCli = await runCli(['doctor'], env1);
@@ -304,6 +310,7 @@ describe('S3 end-to-end: fresh Mac to fully-connected to send to restart to fail
       { id: 'os', status: 'ok', detail: expect.any(String) },
       { id: 'fda', status: 'ok' },
       { id: 'automation', status: 'fail', remediation: AUTOMATION_DENIED },
+      { id: 'messages', status: 'warn', remediation: MESSAGES_NOT_RUNNING },
     ]);
 
     probeCtl.set({ automation: 'ok', messagesRunning: true });

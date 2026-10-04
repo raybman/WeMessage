@@ -768,7 +768,8 @@ describe('s7 Sc4 row 14: C-8 — no schema moved', () => {
 
 describe('s7 Sc4 row 15: INV-2 — settings cannot reach a send path', () => {
   it('keeps both new modules off the port-importer allowlist', () => {
-    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+    // 16 since s10 Slice 2 (#25, late-verify.ts).
+    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
     for (const entry of PORT_IMPORTER_ALLOWLIST) {
       expect(entry).not.toMatch(/settings/u);
     }

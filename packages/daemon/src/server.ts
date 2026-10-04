@@ -19,8 +19,10 @@ import type {
   ChatDbReader,
   Clock,
   Draft,
+  LateVerifyResult,
   SendBackend,
   Store,
+  Ulid,
 } from '@wemessage/core';
 import { createAuditSink, type AuditSink } from './audit-sink.js';
 import { loadOrCreateToken, readToken, tokenEquals } from './auth.js';
@@ -136,7 +138,16 @@ export interface DaemonOptions {
    * terms as `rules`/`send`/`connection`, and shares the ONE §1.8 sink with
    * them when the composed daemon passes several.
    */
-  drafts?: { store: Store; clock: Clock; sink?: AuditSink };
+  drafts?: {
+    store: Store;
+    clock: Clock;
+    sink?: AuditSink;
+    /**
+     * s10 Slice 2: the retry route's look-before-resend. Composed by the
+     * caller (it needs the chat.db reader), absent in a server with none.
+     */
+    lateVerify?: (draftId: Ulid) => Promise<LateVerifyResult>;
+  };
 
   /**
    * s5-execution Scenario 4: the adapter registry surface. Separate opt-in
@@ -451,6 +462,9 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       sink,
       feedback: (input) => agentFeedback?.emit(input),
       onRedraft: (source) => redraftRequest?.(source),
+      ...(opts.drafts.lateVerify !== undefined
+        ? { lateVerify: opts.drafts.lateVerify }
+        : {}),
     });
     // The kill switch rides with the draft surface: it exists to stop
     // drafts, and there is no configuration in which one is wanted without

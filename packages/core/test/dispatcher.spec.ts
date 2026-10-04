@@ -27,6 +27,7 @@ import type {
   Schedule,
   SendBackend,
   SendOutcome,
+  SendLedgerView,
   Store,
 } from '@wemessage/core';
 import {
@@ -93,6 +94,11 @@ function makeStore(cfg: {
   rule?: Rule | null;
   schedule?: Schedule | null;
   contact?: ContactPolicy | null;
+  /**
+   * s10 Slice 2: the ledger row the dispatcher's late-verify guard reads
+   * before beginSendAttempt. Default null: never dispatched, guard inert.
+   */
+  ledger?: SendLedgerView | null;
 }): Store {
   const settings = cfg.settings ?? {};
   return {
@@ -180,6 +186,10 @@ function makeStore(cfg: {
       cfg.calls.push(
         `applyDraftTransition:${input.id}:${input.from}->${input.to}:snb=${
           'sendNotBefore' in input ? String(input.sendNotBefore) : 'absent'
+        }${
+          input.sentMessageGuid === undefined
+            ? ''
+            : `:guid=${input.sentMessageGuid}`
         }`,
       );
       if (cfg.draft === null) throw new Error('no draft to transition');
@@ -196,6 +206,11 @@ function makeStore(cfg: {
     // s4 Scenario 5: the approval history read behind GET /v1/drafts/:id.
     listApprovals: () => [],
     sendAttemptCount: () => 0,
+    getSendLedger: (id) => {
+      cfg.calls.push(`getSendLedger:${id}`);
+      return cfg.ledger ?? null;
+    },
+    listRecentUnverified: () => [],
     latestApproveApproval: () => null,
     listGraceElapsed: () => [],
     listExpiredPending: () => [],
@@ -446,6 +461,9 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
       'getApproval:A1',
       'getContactPolicy:+15551234567',
       'resolveChat:+15551234567',
+      // s10 Slice 2: the late-verify guard reads the ledger inside the
+      // mutex, after resolveChat, before beginSendAttempt overwrites it.
+      'getSendLedger:D1',
       'beginSendAttempt:D1',
       'send:hello there',
       'findOutboundMessage',
@@ -1398,4 +1416,196 @@ describe('s6 Sc 10: the context-bearing re-gate (F-59)', () => {
       expect(backendCalls).toHaveLength(1);
     });
   }
+});
+
+/**
+ * s10 Slice 2: no blind re-send. A draft that failed 'unverified' may have
+ * landed after the 10s verify budget ran out (BlueBubbles' lesson: Messages
+ * writes the row late under load). Re-approving it must not send it twice.
+ *
+ * The guard lives inside the mutex, after resolveChat, before
+ * beginSendAttempt, because `#bumpLedgerAttempt` overwrites started_at on
+ * every retry: this is the last moment the FIRST attempt's window is still
+ * knowable. Found means approved -> sent via the system 'late-verify'
+ * actor, and the backend is never touched.
+ *
+ * Tooth TN-blind-resend: delete the guard -> row 1 sees a second backend
+ * send and fails.
+ */
+describe('s10 Sl2: the dispatcher late-verify guard', () => {
+  const LEDGER: SendLedgerView = {
+    attempt: 1,
+    startedAt: '2026-09-01T11:59:00.000Z',
+    verifiedGuid: null,
+  };
+  const RESOLVED = {
+    chatGuid: 'iMessage;-;+15551234567',
+    service: 'imessage' as const,
+    isGroup: false,
+  };
+
+  function guardDeps(opts: {
+    calls: string[];
+    auditEvents: AuditEvent[];
+    ledger: SendLedgerView | null;
+    findOutboundQueue: ({ guid: string } | null)[];
+  }): DispatchApprovedDeps {
+    return baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1' }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1' }),
+        settings: ALLOW_SETTINGS,
+        calls: opts.calls,
+        auditEvents: opts.auditEvents,
+        ledger: opts.ledger,
+      }),
+      reader: makeReader({
+        resolveChatResult: RESOLVED,
+        calls: opts.calls,
+        findOutboundQueue: opts.findOutboundQueue,
+      }),
+      backend: makeBackend({ result: { accepted: true }, calls: opts.calls }),
+    });
+  }
+
+  it('an open ledger whose message already landed -> sent, backend and ledger untouched', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const outcome = await dispatchApproved(
+      guardDeps({
+        calls,
+        auditEvents,
+        ledger: LEDGER,
+        findOutboundQueue: [{ guid: 'LATE-1' }],
+      }),
+      'D1',
+      'A1',
+    );
+    expect(outcome).toEqual({ outcome: 'sent', sentMessageGuid: 'LATE-1' });
+    expect(calls.filter((c) => c.startsWith('send:'))).toEqual([]);
+    expect(calls.some((c) => c.startsWith('beginSendAttempt:'))).toBe(false);
+    expect(calls.some((c) => c.startsWith('markDraftSent:'))).toBe(false);
+    // Persisted through the CAS port, carrying the found guid.
+    expect(calls).toContain(
+      'applyDraftTransition:D1:approved->sent:snb=absent:guid=LATE-1',
+    );
+    // Order: resolveChat, THEN the ledger read, THEN the one lookup.
+    const macro = calls.filter(
+      (c) =>
+        c.startsWith('resolveChat:') ||
+        c.startsWith('getSendLedger:') ||
+        c === 'findOutboundMessage',
+    );
+    expect(macro).toEqual([
+      'resolveChat:+15551234567',
+      'getSendLedger:D1',
+      'findOutboundMessage',
+    ]);
+    expect(auditEvents).toEqual([
+      { type: 'draft.sent', draftId: 'D1', sentMessageGuid: 'LATE-1' },
+    ]);
+  });
+
+  it('the late-verified draft.sent row is attributed to the system late-verify actor', async () => {
+    const actors: unknown[] = [];
+    const calls: string[] = [];
+    const deps = guardDeps({
+      calls,
+      auditEvents: [],
+      ledger: LEDGER,
+      findOutboundQueue: [{ guid: 'LATE-1' }],
+    });
+    const inner = deps.store.appendAudit.bind(deps.store);
+    deps.store.appendAudit = (entry) => {
+      actors.push(JSON.parse(entry.actorJson));
+      return inner(entry);
+    };
+    await dispatchApproved(deps, 'D1', 'A1');
+    expect(actors).toEqual([{ kind: 'system', reason: 'late-verify' }]);
+  });
+
+  it('an open ledger with no landed message -> the normal send proceeds', async () => {
+    const calls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const outcome = await dispatchApproved(
+      guardDeps({
+        calls,
+        auditEvents,
+        ledger: LEDGER,
+        // guard lookup misses, then the post-send verify poll hits.
+        findOutboundQueue: [null, { guid: 'NEW-1' }],
+      }),
+      'D1',
+      'A1',
+    );
+    expect(outcome).toEqual({ outcome: 'sent', sentMessageGuid: 'NEW-1' });
+    expect(calls.filter((c) => c.startsWith('send:'))).toEqual([
+      'send:hello there',
+    ]);
+    expect(calls.indexOf('getSendLedger:D1')).toBeLessThan(
+      calls.indexOf('beginSendAttempt:D1'),
+    );
+    expect(auditEvents.map((e) => e.type)).toEqual([
+      'send.attempted',
+      'draft.sent',
+    ]);
+  });
+
+  it('no ledger row (first dispatch) -> no guard lookup at all', async () => {
+    const calls: string[] = [];
+    await dispatchApproved(
+      guardDeps({
+        calls,
+        auditEvents: [],
+        ledger: null,
+        findOutboundQueue: [{ guid: 'MSG-1' }],
+      }),
+      'D1',
+      'A1',
+    );
+    // exactly one lookup: the post-send verify poll.
+    expect(calls.filter((c) => c === 'findOutboundMessage')).toHaveLength(1);
+    expect(calls.indexOf('send:hello there')).toBeLessThan(
+      calls.indexOf('findOutboundMessage'),
+    );
+  });
+
+  it('a ledger already verified -> no guard lookup (nothing is in doubt)', async () => {
+    const calls: string[] = [];
+    await dispatchApproved(
+      guardDeps({
+        calls,
+        auditEvents: [],
+        ledger: { ...LEDGER, verifiedGuid: 'OLD-1' },
+        findOutboundQueue: [{ guid: 'MSG-1' }],
+      }),
+      'D1',
+      'A1',
+    );
+    expect(calls.filter((c) => c === 'findOutboundMessage')).toHaveLength(1);
+    expect(calls.indexOf('send:hello there')).toBeLessThan(
+      calls.indexOf('findOutboundMessage'),
+    );
+  });
+
+  it('a gate denial short-circuits before the ledger is read', async () => {
+    const calls: string[] = [];
+    const deps = guardDeps({
+      calls,
+      auditEvents: [],
+      ledger: LEDGER,
+      findOutboundQueue: [{ guid: 'LATE-1' }],
+    });
+    deps.store = makeStore({
+      draft: makeDraft({ id: 'D1' }),
+      approval: makeApproval({ id: 'A1', draftId: 'D1' }),
+      settings: { ...ALLOW_SETTINGS, 'send.killSwitch': '1' },
+      calls,
+      auditEvents: [],
+      ledger: LEDGER,
+    });
+    const outcome = await dispatchApproved(deps, 'D1', 'A1');
+    expect(outcome.outcome).toBe('failed');
+    expect(calls.some((c) => c.startsWith('getSendLedger:'))).toBe(false);
+  });
 });

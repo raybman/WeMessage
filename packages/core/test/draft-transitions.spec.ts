@@ -65,6 +65,8 @@ const EVENTS: DraftEvent[] = [
   'retry',
   // s6 Sc 10 (F-72): the only event that moves a draft BACKWARDS.
   'window-closed',
+  // s10 Slice 2: chat.db proves a message landed that verify missed.
+  'late-verified',
 ];
 
 interface LegalRow {
@@ -126,6 +128,20 @@ const LEGAL: LegalRow[] = [
     event: 'window-closed',
     to: 'pending',
     actor: sys('window-closed'),
+  },
+  // s10 Slice 2. Two edges, one meaning: the message is already in chat.db,
+  // so the draft is sent whatever state the verify timeout left it in.
+  {
+    from: 'failed',
+    event: 'late-verified',
+    to: 'sent',
+    actor: sys('late-verify'),
+  },
+  {
+    from: 'approved',
+    event: 'late-verified',
+    to: 'sent',
+    actor: sys('late-verify'),
   },
 ];
 
@@ -445,6 +461,9 @@ describe('s6 Sc9 rows 1-2: the one legal system approver (F-58)', () => {
     // that is what keeps "a requeued draft is never re-auto-approved" a
     // property of the type system rather than of the dispatcher's manners.
     'window-closed': true,
+    // s10 Slice 2: the reconciler that may mark a draft sent from chat.db
+    // evidence. It may not approve, and the loop below proves it.
+    'late-verify': true,
   };
   const ALL_SYSTEM_REASONS = Object.keys(SYSTEM_REASONS) as Array<
     keyof typeof SYSTEM_REASONS
@@ -586,6 +605,109 @@ describe('s6 Sc9 rows 1-2: the one legal system approver (F-58)', () => {
         retriesUsed: 0,
       }),
     ).toThrow(IllegalDraftActor);
+  });
+});
+
+/**
+ * s10 Slice 2: late verification. A draft whose verify poll timed out
+ * ('failed', code 'unverified') or whose first attempt landed before a crash
+ * ('approved', ledger open) is reconciled to 'sent' from chat.db evidence.
+ * Only the system 'late-verify' actor may take that edge: a human or agent
+ * asserting "it was sent" would be a claim, not evidence.
+ */
+describe('s10 Sl2: late-verified is system late-verify only', () => {
+  // Total over the union (compiler-checked both ways), so a reason added in
+  // a later slice is refused here without anyone remembering to list it.
+  const REASONS: Record<Extract<Actor, { kind: 'system' }>['reason'], true> = {
+    expiry: true,
+    supersede: true,
+    'kill-switch': true,
+    'circuit-breaker': true,
+    'auto-respond': true,
+    'inbound-unsent': true,
+    disconnect: true,
+    recovery: true,
+    ingest: true,
+    'rule-engine': true,
+    'capability-probe': true,
+    'window-closed': true,
+    'late-verify': true,
+  };
+  const OTHER_ACTORS: Actor[] = [
+    HUMAN,
+    { kind: 'human', via: 'gui' },
+    { kind: 'human', via: 'cli' },
+    AGENT,
+    ...(Object.keys(REASONS) as Array<keyof typeof REASONS>)
+      .filter((r) => r !== 'late-verify')
+      .map(sys),
+  ];
+
+  for (const from of ['failed', 'approved'] as const) {
+    it(`${from} + late-verified -> sent under system 'late-verify'`, () => {
+      expect(
+        applyDraftTransition({
+          from,
+          event: 'late-verified',
+          actor: sys('late-verify'),
+        }),
+      ).toBe('sent');
+    });
+
+    for (const actor of OTHER_ACTORS) {
+      const label =
+        actor.kind === 'system'
+          ? `system '${actor.reason}'`
+          : actor.kind === 'human'
+            ? `human via ${actor.via}`
+            : 'agent';
+      it(`${from} + late-verified refuses ${label}`, () => {
+        expect(() =>
+          applyDraftTransition({ from, event: 'late-verified', actor }),
+        ).toThrow(IllegalDraftActor);
+      });
+    }
+  }
+
+  it('the late-verify actor may not retry, approve, recall or reject', () => {
+    const lv = sys('late-verify');
+    expect(() =>
+      applyDraftTransition({
+        from: 'failed',
+        event: 'retry',
+        actor: lv,
+        retriesUsed: 0,
+      }),
+    ).toThrow(IllegalDraftActor);
+    expect(() =>
+      applyDraftTransition({ from: 'pending', event: 'approve', actor: lv }),
+    ).toThrow(IllegalDraftActor);
+    expect(() =>
+      applyDraftTransition({ from: 'approved', event: 'recall', actor: lv }),
+    ).toThrow(IllegalDraftActor);
+    expect(() =>
+      applyDraftTransition({ from: 'approved', event: 'reject', actor: lv }),
+    ).toThrow(IllegalDraftActor);
+  });
+
+  it('sending, pending and every terminal state have no late-verified edge', () => {
+    for (const from of [
+      'pending',
+      'sending',
+      'sent',
+      'rejected',
+      'expired',
+      'superseded',
+      'recalled',
+    ] as const) {
+      expect(() =>
+        applyDraftTransition({
+          from,
+          event: 'late-verified',
+          actor: sys('late-verify'),
+        }),
+      ).toThrow(IllegalDraftTransition);
+    }
   });
 });
 

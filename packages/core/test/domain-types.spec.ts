@@ -348,6 +348,9 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       // s4 Scenario 5: the approval history read behind GET /v1/drafts/:id.
       listApprovals: () => [],
       sendAttemptCount: () => 0,
+      // s10 Slice 2: late verification's two reads.
+      getSendLedger: () => null,
+      listRecentUnverified: () => [],
       latestApproveApproval: () => null,
       listGraceElapsed: () => [],
       listExpiredPending: () => [],

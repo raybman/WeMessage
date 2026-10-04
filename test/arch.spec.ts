@@ -790,6 +790,11 @@ describe('arch invariants (dependency-cruiser)', () => {
       'packages/core/src/drafts/recovery.ts',
       'packages/core/src/ports/index.ts',
       'packages/core/src/sending/dispatcher.ts',
+      // s10 Slice 2, a deliberate growth: `sending/late-verify.ts` asks
+      // chat.db whether a draft parked 'unverified' landed late. It holds
+      // `Pick<ChatDbReader, 'resolveChat' | 'findOutboundMessage'>` and no
+      // send backend at all; the row below pins that it never gains one.
+      'packages/core/src/sending/late-verify.ts',
       // s5 Scenario 6 (F-46), the ONE deliberate growth of this list in S5:
       // `adapters/dispatch.ts` reads conversation context through
       // `ChatDbReader.readChatTurns`. Reviewed here, in the same commit as
@@ -884,10 +889,22 @@ describe('arch invariants (dependency-cruiser)', () => {
         );
     }
 
-    it('(a) SendBackend/ChatDbReader importers match the 15-file S3+S5 baseline exactly', () => {
+    it('(a) SendBackend/ChatDbReader importers match the S3+S5+s10 baseline exactly', () => {
       expect(sendBackendChatDbReaderImporters()).toEqual(
         SEND_BACKEND_CHAT_DB_READER_BASELINE,
       );
+    });
+
+    it('s10 Sl2: late-verify.ts reads chat.db but never names SendBackend', () => {
+      // verifyLate runs from the retry route and a scheduler sweep, two
+      // callers that are NOT dispatchApproved. Its whole safety argument is
+      // that it can only ever mark a draft sent, never put one on the wire.
+      const src = readFileSync(
+        join(repoRoot, 'packages/core/src/sending/late-verify.ts'),
+        'utf8',
+      );
+      expect(src).toContain('findOutboundMessage');
+      expect(src).not.toMatch(/SendBackend|\bbackend\b|\.send\(/);
     });
 
     it('(b) no production file derives a setTimeout horizon from expiresAt/sendNotBefore', () => {
@@ -1591,8 +1608,9 @@ describe('arch invariants (dependency-cruiser)', () => {
       expect(systemApprovalWriterOffenders()).toEqual([]);
     });
 
-    it('(c) the port importer allowlist is unchanged at 15 files (INV-2)', () => {
-      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+    it('(c) the port importer allowlist is pinned at 16 files (INV-2)', () => {
+      // 16 since s10 Slice 2 (#25, late-verify.ts).
+      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
       expect(sendBackendChatDbReaderImporters()).toEqual([
         ...PORT_IMPORTER_ALLOWLIST,
       ]);
@@ -2010,7 +2028,8 @@ describe('arch invariants (dependency-cruiser)', () => {
       // NONE of them may acquire a reference to `SendBackend` or
       // `ChatDbReader`. S6 (c) pins the count; this pins the SHAPE, so an
       // adapter that reaches for a port fails on a row that says why.
-      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+      // 16 since s10 Slice 2 (#25, late-verify.ts).
+      expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
       const forbiddenPrefixes = [
         'packages/adapters/',
         'packages/adapter-testkit/',
@@ -10157,7 +10176,9 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // be a way around that which no amount of GUI review would catch.
     expect(Object.keys(FRAME_SPECS)).not.toContain('send');
 
-    expect(PORT_IMPORTER_ALLOWLIST.length).toBe(15);
+    // 15 at S7 close; 16 since s10 Slice 2 (#25, core late-verify.ts, a
+    // chat.db reader with no send port). Routes and frames did not move.
+    expect(PORT_IMPORTER_ALLOWLIST.length).toBe(16);
     expect(new Set(PORT_IMPORTER_ALLOWLIST).size).toBe(
       PORT_IMPORTER_ALLOWLIST.length,
     );
@@ -12040,8 +12061,9 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
    * The plan says the last-update comment is `#23`. It is `#24`, minted in
    * s8 Sc 3 when the four `draft.*` lifecycle emit sites were wired and
    * `UNEMITTED_WS_EVENTS` was forced back to `[]`. The plan was written
-   * before Sc 3 landed. `#25` has never existed and this scenario must not
-   * mint one: S9 ships the product, it does not extend the wire.
+   * before Sc 3 landed. S9 minted nothing: it ships the product, it does
+   * not extend the wire. s10 Slice 2 later minted `#25` for the port
+   * allowlist only, and the row below records that rather than hiding it.
    */
   describe('row 12: the ratchet reads #24, and S9 does not bump it', () => {
     const RATCHET = 'packages/daemon/test/transport-surface.snapshot.ts';
@@ -12061,17 +12083,25 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(GATEWAY_EVENT_NAMES.length).toBe(21);
       expect(EMITTED_WS_EVENTS.length).toBe(21);
       expect(UNEMITTED_WS_EVENTS).toEqual([]);
-      expect(PORT_IMPORTER_ALLOWLIST.length).toBe(15);
+      // 15 at S8 close. s10 Slice 2 (#25) added core late-verify.ts, a
+      // chat.db reader with no send port; every wire count above is S8's.
+      expect(PORT_IMPORTER_ALLOWLIST.length).toBe(16);
       // `Object.keys`, not `.length`: `FRAME_SPECS` is a KEY TABLE, not an
       // array, and `.length` on it is `undefined` — an assertion that would
       // have failed for a reason that has nothing to do with the wire.
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('the highest deliberate update is #24 and #25 was never minted', () => {
-      const seen = deliberateUpdates(s9Read(RATCHET));
-      expect(Math.max(...seen)).toBe(24);
-      expect(seen).not.toContain(25);
+    it('S9 closed at #24; the only later update is s10 Slice 2 (#25), and #26 was never minted', () => {
+      // S9 itself minted nothing, which is what this row was written to
+      // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
+      // verification reads chat.db), not for the wire: every S8 wire count
+      // in the row above is untouched. #26 is the next tooth.
+      const text = s9Read(RATCHET);
+      const seen = deliberateUpdates(text);
+      expect(Math.max(...seen)).toBe(25);
+      expect(seen).not.toContain(26);
+      expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {

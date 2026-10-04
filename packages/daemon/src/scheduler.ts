@@ -1,12 +1,15 @@
 /**
  * The grace scheduler (s4-execution Scenario 6, §1.3.3 + §1.7).
  *
- * One `tick(now)` does exactly three things, in this order:
+ * One `tick(now)` does these things, in this order:
  *   1. Circuit sweep (s6 Sc 7) — the breaker is closed if its horizon has
  *      passed and opened if the failure threshold has been crossed.
  *   2. TTL sweep — every 'pending' draft past `expiresAt` becomes 'expired'.
  *   3. Grace sweep — every 'approved' draft whose persisted `sendNotBefore`
  *      has arrived is dispatched, SEQUENTIALLY, oldest first.
+ *   4. Late-verify sweep (s10 Slice 2): at most every 30s, recent
+ *      failed/unverified drafts are re-checked against chat.db and moved to
+ *      'sent' if Messages wrote the row late. It reads; it never sends.
  *
  * The circuit sweep goes FIRST so that the failures it counts are the ones
  * that had already happened when it decided, and so that an opening breaker
@@ -45,6 +48,7 @@ import {
   systemActor,
   type Clock,
   type DraftError,
+  type LateVerifyResult,
   type MessageGuid,
   type Store,
   type Ulid,
@@ -93,7 +97,23 @@ export interface SchedulerDeps {
    * and it has no business knowing whether an adapter exists.
    */
   onExpired?: (draftId: Ulid) => void;
+  /**
+   * s10 Slice 2: re-check recent failed/unverified drafts against chat.db.
+   * Messages can write the outbound row after the 10s verify budget, and a
+   * draft whose message went out must not sit in the queue as 'failed'
+   * inviting a second send. Injected as a bare closure for the same reason
+   * `dispatch` is: the scheduler decides WHEN to look, core decides WHAT
+   * landed, and this file never holds a chat.db reader.
+   */
+  lateVerify?: (draftId: Ulid) => Promise<LateVerifyResult>;
 }
+
+/** s10 Slice 2: the sweep looks at most this often... */
+export const LATE_VERIFY_INTERVAL_MS = 30_000;
+/** ...only this far back (older failures are a human's call)... */
+export const LATE_VERIFY_WINDOW_MS = 15 * 60_000;
+/** ...and at most this many drafts per pass, oldest first. */
+export const LATE_VERIFY_BATCH = 20;
 
 export interface Scheduler {
   /** Run both sweeps once against `clock.now()`. Never throws. */
@@ -101,8 +121,9 @@ export interface Scheduler {
 }
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
-  const { store, clock, sink, dispatch, onError, onExpired } = deps;
+  const { store, clock, sink, dispatch, onError, onExpired, lateVerify } = deps;
   let running = false;
+  let lastLateVerifyMs = Number.NEGATIVE_INFINITY;
 
   const sweepExpired = (now: string): void => {
     const expiry = systemActor('expiry');
@@ -196,6 +217,37 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   };
 
+  /**
+   * s10 Slice 2. Throttled because every look is a chat.db query per draft,
+   * and bounded because an unverified failure from an hour ago is no longer
+   * something the queue should quietly rewrite under a human who may already
+   * have acted on it. A lookup that throws (chat.db unreadable) is reported
+   * once and ends the pass: the next draft would hit the same wall.
+   */
+  const sweepLateVerify = async (nowMs: number): Promise<void> => {
+    if (lateVerify === undefined) return;
+    if (nowMs - lastLateVerifyMs < LATE_VERIFY_INTERVAL_MS) return;
+    lastLateVerifyMs = nowMs;
+    const since = new Date(nowMs - LATE_VERIFY_WINDOW_MS).toISOString();
+    for (const draft of store.listRecentUnverified(since, LATE_VERIFY_BATCH)) {
+      let result: LateVerifyResult;
+      try {
+        result = await lateVerify(draft.id);
+      } catch (err) {
+        onError?.(draft.id, err);
+        return;
+      }
+      if (result.outcome === 'sent') {
+        // verifyLate made the audit row durable before resolving (§1.8).
+        sink.broadcast({
+          event: 'draft.sent',
+          draftId: draft.id,
+          sentMessageGuid: result.sentMessageGuid,
+        });
+      }
+    }
+  };
+
   return {
     async tick(): Promise<void> {
       if (running) return;
@@ -211,6 +263,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const now = clock.now();
         sweepExpired(now);
         await sweepGrace(now);
+        // Last: a send that is due must never wait behind a chat.db re-read.
+        await sweepLateVerify(clock.nowMs());
       } finally {
         running = false;
       }

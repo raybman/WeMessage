@@ -1696,7 +1696,8 @@ describe('s7 Scenario 13: the surface did not move', () => {
     expect(WS_EVENT_VOCABULARY).toHaveLength(21);
     expect(EMITTED_WS_EVENTS).toHaveLength(21);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);
-    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+    // 16 since s10 Slice 2 (#25, late-verify.ts).
+    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
     expect(Object.keys(FRAME_SPECS)).toHaveLength(9);
     expect(Object.keys(FRAME_SPECS)).not.toContain('send');
 
@@ -1727,9 +1728,12 @@ describe('s7 Scenario 13: the surface did not move', () => {
      * usual one. A second exported function that takes a `SendBackend` and
      * calls it would build, would pass the allowlist, would never appear in
      * a `type: 'send'` grep, and fails right here.
+     *
+     * s10 Slice 2 moved the line (the ledger guard and late-verify import
+     * sit above it), not the count: still one site, still the dispatcher.
      */
     expect(sendBackendCallSites()).toEqual([
-      'packages/core/src/sending/dispatcher.ts:454',
+      'packages/core/src/sending/dispatcher.ts:463',
     ]);
   });
 

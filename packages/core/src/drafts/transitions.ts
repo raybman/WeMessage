@@ -46,7 +46,11 @@ export type DraftEvent =
   // F-72 (s6 Scenario 10): the send moment's one non-terminal refusal. A
   // clamp is not a failure, so a shut window does not park an approved draft
   // as 'failed'; it puts it back where a human can act on it.
-  | 'window-closed';
+  | 'window-closed'
+  // s10 Slice 2: chat.db shows the outbound row a verify poll missed. Legal
+  // from 'failed' (verify timed out) and 'approved' (a retry re-armed the
+  // draft, or a crash left the first attempt's row unclaimed).
+  | 'late-verified';
 
 export class IllegalDraftTransition extends Error {
   readonly from: DraftState;
@@ -119,6 +123,9 @@ const TABLE: {
     // shut nine seconds before the grace elapsed. The draft is unchanged and
     // still wanted; what expired was the authority to send it without asking.
     'window-closed': 'pending',
+    // s10 Slice 2: the dispatcher's ledger guard found the first attempt's
+    // message already in chat.db, so this approval is spent, not re-sent.
+    'late-verified': 'sent',
   },
   sending: {
     verified: 'sent',
@@ -126,6 +133,7 @@ const TABLE: {
   },
   failed: {
     retry: 'approved',
+    'late-verified': 'sent',
   },
   // sent | rejected | expired | superseded | recalled: terminal, no rows.
   // 'sending' crash recovery is not an event here — T-9.3 startup recovery
@@ -199,6 +207,13 @@ function assertActor(from: DraftState, event: DraftEvent, actor: Actor): void {
   }
   if (from === 'approved' && event === 'recall') {
     if (actor.kind !== 'human') illegal();
+    return;
+  }
+  if (event === 'late-verified') {
+    // Evidence, not a decision: only the reconciler that read chat.db may
+    // mark a draft sent this way. A person or agent saying "it went out"
+    // is exactly the claim this edge exists to replace.
+    if (!(actor.kind === 'system' && actor.reason === 'late-verify')) illegal();
     return;
   }
   if (from === 'failed' && event === 'retry') {

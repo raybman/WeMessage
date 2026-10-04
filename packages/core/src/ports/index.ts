@@ -69,6 +69,18 @@ export interface Store {
    * as "retry worked" right up until it didn't.
    */
   sendAttemptCount(draftId: Ulid): number;
+  /**
+   * s10 Slice 2: the ledger row's window, or null when the draft was never
+   * dispatched. Read BEFORE `beginSendAttempt`, which overwrites
+   * `started_at` on retry: after that, the first attempt's window is gone.
+   */
+  getSendLedger(draftId: Ulid): SendLedgerView | null;
+  /**
+   * s10 Slice 2: the late-verify sweep's bounded read. State 'failed' with
+   * error code 'unverified' and state_changed_at >= since, oldest first,
+   * at most `limit` rows.
+   */
+  listRecentUnverified(since: IsoUtc, limit: number): Draft[];
   /** Drafts stuck in 'sending' + their ledger row (T-9.3 reconciliation). */
   listSendingDrafts(): SendingDraft[];
   /** sending -> sent: records the verified guid on draft + ledger (§2.2.2). */
@@ -301,6 +313,13 @@ export interface Store {
     error?: DraftError;
     /** Approve-with-edit; `original_body` is never written. */
     body?: string;
+    /**
+     * s10 Slice 2, late verification only: the chat.db guid that proves the
+     * send. Sets drafts.sent_message_guid, clears drafts.error, and closes
+     * the ledger (verified_guid, finished_at) INSIDE the same transaction
+     * as the `from` re-assert, so a lost race writes nothing at all.
+     */
+    sentMessageGuid?: MessageGuid;
   }): Draft;
   /**
    * Body edit, legal only while 'pending' (asserted in-transaction).
@@ -419,6 +438,13 @@ export interface Store {
 }
 
 /** A draft in state 'sending' joined with its send-ledger attempt (§2.3). */
+/** s10 Slice 2: one draft's send_ledger row, as late verification needs it. */
+export interface SendLedgerView {
+  attempt: number;
+  startedAt: IsoUtc;
+  verifiedGuid: MessageGuid | null;
+}
+
 export interface SendingDraft {
   id: Ulid;
   chatGuid: ChatGuid;

@@ -537,7 +537,8 @@ describe('SSE, event filters and WS/SSE parity (s7 Scenario 3, ★)', () => {
     expect(source).not.toContain('dispatchApproved');
     expect(source).not.toMatch(/from '[^']*sending/);
     expect(source).not.toMatch(/from '[^']*@wemessage\/core/);
-    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+    // 16 since s10 Slice 2 (#25, late-verify.ts).
+    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
     expect(PORT_IMPORTER_ALLOWLIST).not.toContain(
       'packages/daemon/src/routes/events-sse.ts',
     );

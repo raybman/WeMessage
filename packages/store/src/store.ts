@@ -25,6 +25,7 @@ import type {
   Schedule,
   ScheduleWindow,
   SendingDraft,
+  SendLedgerView,
   Store,
   Ulid,
 } from '@wemessage/core';
@@ -408,6 +409,9 @@ export class SqliteStore implements Store {
   readonly #latestApproveApproval: Database.Statement;
   readonly #listGraceElapsed: Database.Statement;
   readonly #listExpiredPending: Database.Statement;
+  readonly #getSendLedger: Database.Statement;
+  readonly #listRecentUnverified: Database.Statement;
+  readonly #closeLedgerVerified: Database.Statement;
   readonly #batchReport: Database.Statement;
   readonly #getContactPolicy: Database.Statement;
   readonly #setContactPolicy: Database.Statement;
@@ -423,6 +427,7 @@ export class SqliteStore implements Store {
       sendNotBefore?: IsoUtc | null;
       error?: DraftError;
       body?: string;
+      sentMessageGuid?: string;
     }) => Draft
   >;
   readonly #updateDraftBodyTxn: Database.Transaction<
@@ -753,6 +758,22 @@ export class SqliteStore implements Store {
       "SELECT * FROM drafts WHERE state = 'pending' AND expires_at <= ? " +
         'ORDER BY expires_at ASC, id ASC',
     );
+    // s10 Slice 2: late verification reads the FIRST attempt's window here,
+    // before beginSendAttempt's bump overwrites started_at.
+    this.#getSendLedger = this.db.prepare(
+      'SELECT attempt, started_at, verified_guid FROM send_ledger ' +
+        'WHERE draft_id = ?',
+    );
+    this.#listRecentUnverified = this.db.prepare(
+      "SELECT * FROM drafts WHERE state = 'failed' " +
+        "AND json_extract(error, '$.code') = 'unverified' " +
+        'AND state_changed_at >= ? ' +
+        'ORDER BY state_changed_at ASC, id ASC LIMIT ?',
+    );
+    this.#closeLedgerVerified = this.db.prepare(
+      'UPDATE send_ledger SET verified_guid = ?, finished_at = ? ' +
+        'WHERE draft_id = ?',
+    );
     this.#batchReport = this.db.prepare(
       'SELECT d.state AS state, COUNT(DISTINCT d.id) AS n FROM drafts d ' +
         'JOIN approvals a ON a.draft_id = d.id WHERE a.batch_id = ? ' +
@@ -789,6 +810,7 @@ export class SqliteStore implements Store {
         sendNotBefore?: IsoUtc | null;
         error?: DraftError;
         body?: string;
+        sentMessageGuid?: string;
       }): Draft => {
         const current = this.#getDraft.get(input.id) as DraftRow | undefined;
         if (!current) {
@@ -818,10 +840,25 @@ export class SqliteStore implements Store {
           sets.push('body = ?');
           params.push(input.body);
         }
+        if (input.sentMessageGuid !== undefined) {
+          // s10 Slice 2: late verification. The guid is the evidence that
+          // supersedes the 'unverified' error, so the error goes with it.
+          sets.push('sent_message_guid = ?', 'error = NULL');
+          params.push(input.sentMessageGuid);
+        }
         params.push(input.id);
         this.db
           .prepare(`UPDATE drafts SET ${sets.join(', ')} WHERE id = ?`)
           .run(...params);
+        if (input.sentMessageGuid !== undefined) {
+          // Same transaction as the `from` re-assert above: a lost race has
+          // already thrown, so the ledger is closed only by the winner.
+          this.#closeLedgerVerified.run(
+            input.sentMessageGuid,
+            input.at,
+            input.id,
+          );
+        }
         return draftFromRow(this.#getDraft.get(input.id) as DraftRow);
       },
     );
@@ -1505,6 +1542,7 @@ export class SqliteStore implements Store {
     sendNotBefore?: IsoUtc | null;
     error?: DraftError;
     body?: string;
+    sentMessageGuid?: string;
   }): Draft {
     return this.#applyDraftTransitionTxn.immediate(input);
   }
@@ -1524,6 +1562,24 @@ export class SqliteStore implements Store {
     const row = this.#sendAttemptOf.get(draftId) as
       { attempt: number } | undefined;
     return row?.attempt ?? 0;
+  }
+
+  getSendLedger(draftId: Ulid): SendLedgerView | null {
+    const row = this.#getSendLedger.get(draftId) as
+      | { attempt: number; started_at: string; verified_guid: string | null }
+      | undefined;
+    if (row === undefined) return null;
+    return {
+      attempt: row.attempt,
+      startedAt: row.started_at,
+      verifiedGuid: row.verified_guid,
+    };
+  }
+
+  listRecentUnverified(since: IsoUtc, limit: number): Draft[] {
+    return (this.#listRecentUnverified.all(since, limit) as DraftRow[]).map(
+      draftFromRow,
+    );
   }
 
   listApprovals(draftId: string): Approval[] {

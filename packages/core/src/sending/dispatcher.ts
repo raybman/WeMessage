@@ -31,13 +31,13 @@ import type {
   ChatGuid,
   DraftError,
   GateDenyReason,
-  Handle,
   IsoUtc,
   MessageGuid,
-  Service,
   Ulid,
 } from '../domain/types.js';
 import { applyDraftTransition } from '../drafts/transitions.js';
+import { parseChatGuid } from './chat-guid.js';
+import { findLanded, LATE_VERIFY_ACTOR } from './late-verify.js';
 import {
   evaluateGate,
   readGateCounters,
@@ -121,32 +121,7 @@ async function verifyPoll(
   }
 }
 
-/**
- * Apple 1:1 chat guids are "service;-;handle" (the only format any fixture
- * uses); group guids ("service;+;roomName") carry no single counterparty
- * handle at all. Used to (a) populate GateContext.message ahead of the gate
- * call and (b) short-circuit group sends before wasting a resolveChat call
- * (S3 ships no group-send path).
- */
-export function parseChatGuid(chatGuid: ChatGuid): {
-  handle: Handle;
-  service: Service;
-  isGroup: boolean;
-} {
-  const ONE_ON_ONE_SEP = ';-;';
-  const prefix = chatGuid.split(';')[0]?.toLowerCase();
-  const service: Service =
-    prefix === 'imessage' ? 'imessage' : prefix === 'sms' ? 'sms' : 'unknown';
-  const idx = chatGuid.indexOf(ONE_ON_ONE_SEP);
-  if (idx === -1) {
-    return { handle: '', service, isGroup: true };
-  }
-  return {
-    handle: chatGuid.slice(idx + ONE_ON_ONE_SEP.length),
-    service,
-    isGroup: false,
-  };
-}
+export { parseChatGuid } from './chat-guid.js';
 
 // Process-wide send mutex (§2.4.1: "one physical Messages.app, one send at a
 // time"). A promise-chain queue, not a real lock — deliberately serializes
@@ -440,6 +415,40 @@ export async function dispatchApproved(
         message: 'group sends are not supported (S3)',
         at: clock.now(),
       });
+    }
+
+    // s10 Slice 2: no blind re-send. An open ledger (attempted, never
+    // verified) means an earlier attempt may have landed after its verify
+    // budget. Look once from THAT attempt's start, here, because
+    // beginSendAttempt below overwrites started_at. Found -> approved ->
+    // sent, and the backend is never called.
+    const ledger = store.getSendLedger(draftId);
+    if (ledger !== null && ledger.verifiedGuid === null) {
+      const landed = await findLanded(reader, {
+        chatGuid: resolved.chatGuid,
+        body: draft.body,
+        ledger,
+      });
+      if (landed !== null) {
+        applyDraftTransition({
+          from: 'approved',
+          event: 'late-verified',
+          actor: LATE_VERIFY_ACTOR,
+        });
+        store.applyDraftTransition({
+          id: draftId,
+          from: 'approved',
+          to: 'sent',
+          at: clock.now(),
+          sentMessageGuid: landed,
+        });
+        appendAudit(store, clock, LATE_VERIFY_ACTOR, {
+          type: 'draft.sent',
+          draftId,
+          sentMessageGuid: landed,
+        });
+        return { outcome: 'sent', sentMessageGuid: landed };
+      }
     }
 
     const attempt = store.beginSendAttempt(draftId, backendName, clock.now());

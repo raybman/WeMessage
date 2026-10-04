@@ -34,6 +34,7 @@ import {
   SETTING_KILL_SWITCH,
   SETTING_USER_DISCONNECTED,
   type StartupRecoveryResult,
+  verifyLate,
 } from '@wemessage/core';
 import {
   createAuditSink as defaultCreateAuditSink,
@@ -309,6 +310,15 @@ export async function startDaemon(
   const sendReaderHandle = createReaderHandle(() =>
     createChatDbReader(options.chatDbPath, { clock: options.clock }),
   );
+  // s10 Slice 2: ONE look-before-resend closure, shared by the retry route
+  // and the scheduler sweep so the two can never disagree about what landed.
+  // It reads through the same handle `/v1/send` does; while disconnected the
+  // handle throws, which both callers treat as "could not look".
+  const lateVerify = (draftId: Ulid) =>
+    verifyLate(
+      { store, reader: sendReaderHandle.reader, clock: options.clock },
+      draftId,
+    );
 
   // s3-execution Scenario 9: a prior run's user-initiated disconnect must
   // survive a restart (RED row 2). Recorded decision: still open the
@@ -503,7 +513,7 @@ export async function startDaemon(
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
     rules: { store, clock: options.clock, sink },
     // s4-execution Scenario 5: the draft review surface, same shared sink.
-    drafts: { store, clock: options.clock, sink },
+    drafts: { store, clock: options.clock, sink, lateVerify },
     // s5 Scenario 6: the composed daemon serves the adapter registry and the
     // `/v1/agent` socket, which is what makes the dispatch above reachable at
     // all — without it every match would audit `adapter.unreachable` forever.
@@ -635,6 +645,7 @@ export async function startDaemon(
     store,
     clock: options.clock,
     sink,
+    lateVerify,
     dispatch: server.agentFeedback?.observeDispatch(rawDispatch) ?? rawDispatch,
     onExpired: (draftId) =>
       server.agentFeedback?.emit({

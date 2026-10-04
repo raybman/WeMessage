@@ -340,20 +340,27 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     expect(GATEWAY_EVENT_NAMES.length).toBe(21);
     expect(EMITTED_WS_EVENTS.length).toBe(21);
     expect(UNEMITTED_WS_EVENTS).toEqual([]);
-    expect(PORT_IMPORTER_ALLOWLIST.length).toBe(15);
+    // 15 at S9 close. s10 Slice 2 (#25) added core late-verify.ts, a
+    // chat.db reader with no send port; every wire count above is S8's.
+    expect(PORT_IMPORTER_ALLOWLIST.length).toBe(16);
     // `Object.keys`, not `.length`: `FRAME_SPECS` is a key table, and
     // `.length` on it is `undefined`, which would pass a `not.toBe(9)` and
     // fail a `toBe(9)` for a reason unrelated to the wire.
     expect(Object.keys(FRAME_SPECS).length).toBe(9);
   });
 
-  it('the highest deliberate update is #24, and S9 minted no #25', () => {
-    const seen = deliberateUpdates(read(RATCHET));
-    expect(Math.max(...seen)).toBe(24);
-    expect(seen).not.toContain(25);
+  it('S9 closed at #24; the only later update is s10 Slice 2 (#25), and #26 was never minted', () => {
+    // S9 itself minted nothing, which is what this row was written to prove.
+    // s10 Slice 2 minted #25 for the PORT allowlist (late verification reads
+    // chat.db), not for the wire, and says so in the ratchet file itself.
+    const text = read(RATCHET);
+    const seen = deliberateUpdates(text);
+    expect(Math.max(...seen)).toBe(25);
+    expect(seen).not.toContain(26);
+    expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
   });
 
-  it('TEETH: a planted #25 in a temp copy is caught by this same extractor', () => {
+  it('TEETH: a planted #26 in a temp copy is caught by this same extractor', () => {
     /*
      * The row above is an absence, and an absence proves nothing unless the
      * thing looking for it can see a presence. So a real copy of the real
@@ -366,12 +373,12 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     const planted = join(dir, 'transport-surface.snapshot.ts');
     writeFileSync(
       planted,
-      `${read(RATCHET)}\n// #25 deliberate (s9 Scenario 15): a new route.\n`,
+      `${read(RATCHET)}\n// #26 deliberate (s9 Scenario 15): a new route.\n`,
       'utf8',
     );
     const seen = deliberateUpdates(readFileSync(planted, 'utf8'));
-    expect(seen).toContain(25);
-    expect(Math.max(...seen)).toBe(25);
+    expect(seen).toContain(26);
+    expect(Math.max(...seen)).toBe(26);
   });
 
   it('the guard that runs on every `pnpm test` is still in the tree', () => {

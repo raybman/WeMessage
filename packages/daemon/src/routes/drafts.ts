@@ -44,6 +44,7 @@ import {
   type Clock,
   type Draft,
   type DraftState,
+  type LateVerifyResult,
   type Store,
   type Ulid,
 } from '@wemessage/core';
@@ -76,6 +77,13 @@ export interface DraftRouteDeps {
    * copy, whose behaviour is identical whether the callback is wired or not.
    */
   onRedraft?: (source: Draft) => void;
+  /**
+   * s10 Slice 2: ask chat.db whether a failed/unverified draft actually went
+   * out before agreeing to send it again. Optional so a server with no
+   * chat.db reader registers the route unchanged; absent means "cannot
+   * look", and the retry proceeds exactly as it did before s10.
+   */
+  lateVerify?: (draftId: Ulid) => Promise<LateVerifyResult>;
 }
 
 /** F-22: the reserved, permanently-disabled adapter row humans draft under. */
@@ -792,6 +800,38 @@ export function registerDraftRoutes(
     async (req, reply) => {
       const draft = store.getDraft(req.params.id);
       if (draft === null) return reply.code(404).send({ error: 'not-found' });
+
+      // s10 Slice 2: look before re-sending. A send Messages accepted but
+      // wrote late is not a failure, and pressing Retry on it would put the
+      // same text in front of a real person twice. This runs BEFORE the
+      // ceiling on purpose: a draft that went out is reported as sent, not
+      // as "retry limit reached". `verifyLate` itself skips anything that is
+      // not failed/unverified, so other failures pay one store read.
+      //
+      // A lookup that throws (chat.db unreadable mid-reconnect) proceeds to
+      // the ordinary retry: the dispatcher's own ledger guard looks again
+      // inside the send mutex, so "could not look here" is never "sent blind".
+      if (deps.lateVerify !== undefined && draft.state === 'failed') {
+        let late: LateVerifyResult | null = null;
+        try {
+          late = await deps.lateVerify(draft.id);
+        } catch {
+          late = null;
+        }
+        if (late?.outcome === 'sent') {
+          // verifyLate made the audit row durable; the frame follows (§1.8).
+          sink.broadcast({
+            event: 'draft.sent',
+            draftId: draft.id,
+            sentMessageGuid: late.sentMessageGuid,
+          });
+          return reply.code(409).send({
+            error: 'already-sent',
+            from: 'sent',
+            sentMessageGuid: late.sentMessageGuid,
+          });
+        }
+      }
 
       // C-10: refuse at the ceiling BEFORE the transition, so the user
       // gets 'retry-limit' rather than the table's generic

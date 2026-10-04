@@ -112,7 +112,13 @@ export type Actor =
             // machine that approved is not the machine that withdrew), and it
             // is not 'expiry' or 'circuit-breaker' (nothing expired and
             // nothing broke). One reason, one row, one meaning.
-            | 'window-closed' };
+            | 'window-closed'
+            // s10 Slice 2, additive under the same precedent. The ONE actor
+            // that may drive `late-verified -> sent`: the reconciler that
+            // found the outbound row in chat.db after verify gave up. Its
+            // authority is evidence, never a claim, so no human or agent
+            // wears it.
+            | 'late-verify' };
 
 export interface Approval {
   id: Ulid; draftId: Ulid;

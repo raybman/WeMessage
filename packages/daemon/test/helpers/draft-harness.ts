@@ -18,6 +18,7 @@ import { expect } from 'vitest';
 import type { AuditEvent, Clock, Draft, Ulid } from '@wemessage/core';
 import {
   dispatchApproved,
+  verifyLate,
   systemActor,
   SETTING_CONNECTION_STATE,
 } from '@wemessage/core';
@@ -203,9 +204,14 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     },
   };
 
+  // s10 Slice 2: composed exactly as `daemon.ts` composes it, one closure
+  // for the retry route and the scheduler sweep.
+  const lateVerify = (draftId: Ulid) =>
+    verifyLate({ store, reader, clock: clockCtl.clock }, draftId);
+
   const server = await buildServer({
     configDir: dir,
-    drafts: { store, clock: clockCtl.clock, sink },
+    drafts: { store, clock: clockCtl.clock, sink, lateVerify },
     // s7 Sc3: ONE greeting closure, read by BOTH event transports inside
     // `server.ts` — the parity rows would be meaningless if WS and SSE each
     // built their own idea of what "connection.state" says.
@@ -283,6 +289,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     clock: clockCtl.clock,
     sink,
     dispatch,
+    lateVerify,
     onExpired: (draftId) =>
       server.agentFeedback?.emit({
         draftId,

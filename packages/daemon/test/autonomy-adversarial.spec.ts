@@ -945,8 +945,9 @@ describe('s6 Sc13 (f): dispatch without an approval that authorises it', () => {
     // The runtime half above says an approval is required. This says nobody
     // outside the allowlist can reach `SendBackend` to try. `test/arch.spec.ts`
     // rows (a)-(c) enforce it against the real dependency graph; naming the
-    // number here is what makes an adversarial suite notice a sixteenth file.
-    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(15);
+    // number here is what makes an adversarial suite notice a seventeenth file.
+    // 16 since s10 Slice 2 (#25, late-verify.ts).
+    expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);
   });
 });
 

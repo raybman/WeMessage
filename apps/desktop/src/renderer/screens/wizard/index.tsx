@@ -42,6 +42,7 @@
  * quieter costume.
  */
 import type { ComponentChildren, VNode } from 'preact';
+import { APPROVAL_LINE, LEAVES_THIS_MAC } from '../../derive/disclosure.js';
 import { CARD_GLYPH, type CardState } from '../../derive/permissionCards.js';
 import {
   exitView,
@@ -248,6 +249,26 @@ export function WizardScreen(props: WizardScreenProps): VNode {
             {line}
           </p>
         ))}
+        {/* s10 Slice 6: the two promises a person deciding whether to trust
+            this app needs before step two, as data from derive/disclosure
+            so the copy and its test read the same strings. Welcome only:
+            repeated on every step it would become furniture. */}
+        {props.step !== 'welcome' ? null : (
+          <section id="wizard-disclosure" class="wiz-disclosure">
+            <p id="wizard-approval" class="wiz-para">
+              {APPROVAL_LINE}
+            </p>
+            <h2 class="wiz-disclosure-title">WHAT LEAVES THIS MAC</h2>
+            <ul id="wizard-leaves" class="wiz-leaves">
+              {LEAVES_THIS_MAC.map((row) => (
+                <li key={row.what} class="wiz-leaves-row">
+                  <span class="wiz-leaves-what">{row.what}</span>
+                  <span class="wiz-leaves-where">{row.where}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {props.down === null ? null : <NotFoundCard stream={props.down} />}
         {!last ? null : (
           <div class="wiz-test">

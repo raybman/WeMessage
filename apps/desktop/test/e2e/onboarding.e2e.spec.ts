@@ -856,6 +856,45 @@ describe('s8 Sc15 — onboarding: the wizard through every exit state', () => {
     ).toEqual([]);
   }, 600_000);
 
+  it('s10 Sl6: Welcome says who approves and what leaves this Mac, and only Welcome says it', async () => {
+    const scripted = scriptedProbes();
+    const fixture = await boot({ probes: scripted.probes });
+    const app = await launch(fixture);
+    await waitForConnected(app.page);
+    await openWizard(app);
+    const welcome = await settledWizard(app);
+    expect(welcome.step).toBe('welcome');
+    const disclosure = await app.page.evaluate(() => ({
+      approval:
+        document.querySelector('#wizard-approval')?.textContent?.trim() ?? '',
+      title:
+        document
+          .querySelector('#wizard-disclosure .wiz-disclosure-title')
+          ?.textContent?.trim() ?? '',
+      rows: [
+        ...document.querySelectorAll('#wizard-leaves .wiz-leaves-what'),
+      ].map((el) => el.textContent?.trim() ?? ''),
+    }));
+    expect(disclosure).toEqual({
+      approval: 'You approve every message.',
+      title: 'WHAT LEAVES THIS MAC',
+      rows: [
+        'A message you approved',
+        'An incoming message a rule sends to an agent',
+        'Nothing else',
+      ],
+    });
+
+    // Step two does not repeat it: a promise on every screen is furniture.
+    const keys = new Presses(app);
+    await keys.tabTo('wizard-continue');
+    await keys.key('Enter');
+    await app.page.waitForSelector('#wizard[data-step="full-disk"]', {
+      timeout: 30_000,
+    });
+    expect(await app.page.$('#wizard-disclosure')).toBeNull();
+  }, 600_000);
+
   it('the danger zone leaves the wizard where Sc14 said it does, with a dead bearer', async () => {
     // The S8 plan's Scenario 14 row 8 says the app "then shows the wizard
     // WELCOME step with RECONNECT". Half right, and the wrong half matters.

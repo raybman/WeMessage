@@ -434,6 +434,25 @@ describe('s9 Sc13 rows 10 and 11: the site and its five docs pages', () => {
     expect(text).toContain('Automation');
   });
 
+  /* ── s10 Sl6: the home page claims only what the wizard does ────── */
+
+  it('s10 Sl6: the onboarding step claims no live checks, and the never-list owns up to the agent', () => {
+    const text = read(INDEX);
+    // The wizard re-probes on a gesture (arch row 6 forbids a timer and a
+    // focus listener), so "live" was the one word it could not back.
+    expect(text).not.toMatch(/Live checks confirm every grant/i);
+    expect(text).toMatch(/run again when you press Re-check/);
+    // And a check nobody ran is never drawn as a pass, which is the claim
+    // the wizard actually makes.
+    expect(text).toMatch(/never as a pass/);
+    // A connected agent DOES see message text. The never-list may say
+    // nothing else leaves; it may not say nothing leaves.
+    expect(text).not.toMatch(/no message content leaving your Mac,/);
+    expect(text).toMatch(
+      /no message content leaving your Mac except to the agent you connect/,
+    );
+  });
+
   /* ── row 8: the unsigned lane, said on the page that sells the download */
 
   it('row 8: install.html documents Open Anyway and pins no version', () => {

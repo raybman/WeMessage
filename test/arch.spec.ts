@@ -907,6 +907,42 @@ describe('arch invariants (dependency-cruiser)', () => {
       expect(src).not.toMatch(/SendBackend|\bbackend\b|\.send\(/);
     });
 
+    /**
+     * s10 Slice 4: approval binds content. What a person approved is what
+     * goes out. The body changes in exactly one place, the approve
+     * transition (`editedBody` inside `applyDraftTransition`); agents
+     * supersede, they never edit. `Store.updateDraftBody` (pending-only) is
+     * declared on the port and implemented by the store, and nothing in
+     * production calls it. A caller appearing anywhere else is a new path
+     * that could change a body after a human looked at it, and must arrive
+     * as a reviewed diff to this list.
+     */
+    const UPDATE_DRAFT_BODY_FILES = [
+      'packages/core/src/ports/index.ts',
+      'packages/store/src/store.ts',
+    ];
+    function updateDraftBodyFiles(): string[] {
+      return productionSrcFiles()
+        .filter((f) =>
+          readFileSync(join(repoRoot, f), 'utf8').includes('updateDraftBody'),
+        )
+        .sort();
+    }
+
+    it('s10 Sl4: updateDraftBody has no production caller beyond its port and impl', () => {
+      expect(updateDraftBodyFiles()).toEqual(UPDATE_DRAFT_BODY_FILES);
+    });
+
+    it('s10 Sl4: the one send call puts draft.body on the wire, nothing else', () => {
+      const src = readFileSync(
+        join(repoRoot, 'packages/core/src/sending/dispatcher.ts'),
+        'utf8',
+      );
+      const calls = src.match(/backend\.send\(\{[^}]*\}\)/g) ?? [];
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatch(/\bbody:\s*draft\.body\s*,?\s*\}/);
+    });
+
     it('(b) no production file derives a setTimeout horizon from expiresAt/sendNotBefore', () => {
       expect(computedHorizonSetTimeoutOffenders()).toEqual([]);
     });
@@ -929,10 +965,31 @@ describe('arch invariants (dependency-cruiser)', () => {
         'packages/core/src/__arch_s4_auto_respond_probe__.ts',
       );
 
+      const bodyEditProbe = join(
+        repoRoot,
+        'packages/daemon/src/__arch_s10_body_edit_probe__.ts',
+      );
+
       afterEach(() => {
         rmSync(schedulerProbe, { force: true });
         rmSync(horizonProbe, { force: true });
         rmSync(autoRespondProbe, { force: true });
+        rmSync(bodyEditProbe, { force: true });
+      });
+
+      it('planting an updateDraftBody caller in daemon/src fails the approval-content row (s10 Sl4)', () => {
+        writeFileSync(
+          bodyEditProbe,
+          "import type { Store } from '@wemessage/core';\n" +
+            'export function rewrite(store: Store, id: string): void {\n' +
+            "  store.updateDraftBody(id, 'changed after approval', '2026-10-04T00:00:00.000Z');\n" +
+            '}\n',
+        );
+        const found = updateDraftBodyFiles();
+        expect(found).toContain(
+          'packages/daemon/src/__arch_s10_body_edit_probe__.ts',
+        );
+        expect(found).not.toEqual(UPDATE_DRAFT_BODY_FILES);
       });
 
       it('planting a SendBackend import in a scratch scheduler.ts grows the allowlist (a)', () => {

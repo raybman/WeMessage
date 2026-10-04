@@ -29,6 +29,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  EMPTY_KEYS,
   legendFor,
   moveTo,
   PAGE,
@@ -383,5 +384,33 @@ describe('s8 Sc9 — the selection keymap', () => {
     expect(legendFor({ group: true, retry: false })).toContain(
       'A approve (drafts only in v1)',
     );
+  });
+});
+
+describe('s10 Sl7: the empty queue teaches the keys the keymap really has', () => {
+  const bare = (key: string): KeyStroke => ({
+    key,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+  });
+
+  it('shows exactly A, E, R, Z, in that order', () => {
+    expect(EMPTY_KEYS.map((c) => c.key)).toEqual(['a', 'e', 'r', 'z']);
+  });
+
+  it('every chip is the verb verbOf gives that key in list mode', () => {
+    for (const chip of EMPTY_KEYS) {
+      expect(verbOf(bare(chip.key), { mode: 'list', selected: 0 })).toBe(
+        chip.verb,
+      );
+    }
+  });
+
+  it('every label is its verb, upper-cased', () => {
+    for (const chip of EMPTY_KEYS) {
+      expect(chip.label).toBe(chip.verb.toUpperCase());
+    }
   });
 });

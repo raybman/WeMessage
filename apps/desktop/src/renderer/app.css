@@ -485,6 +485,26 @@ body {
   color: var(--ink-dim);
 }
 
+/* s10 Slice 7: the four triage keys, taught before there is a card to legend. */
+#queue-empty-keys {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+#queue-empty-keys kbd {
+  padding: 0 5px;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--ink);
+}
+
 /*
  * The stale banner is a BANNER and not a scrim. A stale queue is still a
  * usable queue — every row on it was real when it was fetched and a refetch

@@ -331,3 +331,30 @@ export function legendFor(options: {
       : 'A approve';
   return `${first} · R reject · E edit · SPACE context · J/K move · X select`;
 }
+
+/** One key the empty queue teaches, and the verb `verbOf` gives it in list mode. */
+export interface KeyChip {
+  readonly key: 'a' | 'e' | 'r' | 'z';
+  readonly verb: QueueVerb;
+  readonly label: string;
+}
+
+/**
+ * s10 Slice 7: the four keys the empty queue shows before there is anything
+ * to press them on.
+ *
+ * The empty state is where a first-run operator spends their first minutes,
+ * and the legend only ever renders on an ACTIVE card, so until a draft
+ * arrives nothing on screen says how triage works. These are the four verbs
+ * a day is made of; navigation and selection are left to the card legend.
+ *
+ * Data rather than markup so a unit row can prove every chip is the verb
+ * `verbOf` really gives that key: a chip that drifted from the keymap would
+ * be teaching the wrong key, which is worse than teaching none.
+ */
+export const EMPTY_KEYS: readonly KeyChip[] = [
+  { key: 'a', verb: 'approve', label: 'APPROVE' },
+  { key: 'e', verb: 'edit', label: 'EDIT' },
+  { key: 'r', verb: 'reject', label: 'REJECT' },
+  { key: 'z', verb: 'undo', label: 'UNDO' },
+];

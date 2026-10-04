@@ -170,6 +170,8 @@ interface EdgeView {
   readonly emptyHead: string | null;
   readonly emptyArming: string | null;
   readonly emptyRules: string[];
+  readonly emptyKeys: string[];
+  readonly emptyKeyChips: string[];
   /** The disconnected overlay, or nulls when the link is up. */
   readonly overlayHead: string | null;
   readonly overlayDetail: string | null;
@@ -259,6 +261,12 @@ function readEdge(app: LaunchedApp): Promise<EdgeView> {
       emptyRules: [...document.querySelectorAll('.watched-rule')].map((r) =>
         (r.textContent ?? '').trim(),
       ),
+      emptyKeys: [...document.querySelectorAll('#queue-empty-keys kbd')].map(
+        (k) => (k.textContent ?? '').trim(),
+      ),
+      emptyKeyChips: [...document.querySelectorAll('.empty-key')].map((k) =>
+        (k.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
       overlayHead: maybe('#queue-overlay-head'),
       overlayDetail: maybe('#queue-overlay-detail'),
       overlayRefused: maybe('#queue-overlay-refused'),
@@ -307,6 +315,16 @@ describe('s8 Sc7 row 1: nothing waiting is still something to say', () => {
     // reasonable for it to be empty. A queue with no rules watching is a
     // queue that will stay empty, and that is a different fact.
     expect(view.emptyRules).toEqual(['WEEKNIGHT REPLIES']);
+    // s10 Slice 7: the four triage keys, taught before there is a card to
+    // legend. Each one is a real <kbd>, so the row is keys, not prose that
+    // happens to contain capital letters.
+    expect(view.emptyKeys).toEqual(['A', 'E', 'R', 'Z']);
+    expect(view.emptyKeyChips).toEqual([
+      'A APPROVE',
+      'E EDIT',
+      'R REJECT',
+      'Z UNDO',
+    ]);
 
     // The listbox is still MOUNTED, with zero options. An empty state that
     // unmounts the list takes the window's only tab stop with it, and the

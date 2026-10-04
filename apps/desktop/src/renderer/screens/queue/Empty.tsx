@@ -22,8 +22,15 @@
  * no roles: an arch row pins `role="listbox"` and `role="option"` to one
  * file, and a second list here would be a second list to assistive
  * technology whatever it was called.
+ *
+ * s10 Slice 7 adds a fourth fact: the four keys a day is made of. The card
+ * legend only renders on an active card, so before the first draft arrives
+ * nothing else says how triage works. Each key is a `<kbd>`, which says
+ * "this is a key" without minting a role, and the row is a plain block
+ * like the rules row above it, not a list.
  */
 import type { VNode } from 'preact';
+import { EMPTY_KEYS } from '../../keys/index.js';
 
 export interface EmptyProps {
   /** The schedule glance, already rendered by `derive/armingGlance`. */
@@ -49,6 +56,14 @@ export function Empty(props: EmptyProps): VNode {
             </span>
           ))
         )}
+      </div>
+      <div id="queue-empty-keys">
+        <span class="empty-keys-lead">WHEN ONE ARRIVES</span>
+        {EMPTY_KEYS.map((chip) => (
+          <span key={chip.key} class="empty-key">
+            <kbd>{chip.key.toUpperCase()}</kbd> {chip.label}
+          </span>
+        ))}
       </div>
     </div>
   );

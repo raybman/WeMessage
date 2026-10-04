@@ -53,6 +53,7 @@ import {
   MODES,
   NARROW_ORDER,
   UNKNOWN_MODE_SENTENCE,
+  autoCell,
   filterRows,
   modeCell,
   peopleRows,
@@ -156,6 +157,38 @@ describe('s8 Sc12: the grid draws handles that have no policy at all', () => {
     // AUTO is reachable for her. `unknown` rather than a guess of
     // `imessage`, which is the guess that would make the clamp invisible.
     expect(byHandle.get(CARLA)?.service).toBe('unknown');
+  });
+
+  it('s10 Sl3: an any;-; guid names no service, so it reads SERVICE NOT OBSERVED, not SMS', () => {
+    // macOS 26 writes new 1:1 chats as 'any;-;'. The prefix is not a
+    // service, and reading every non-iMessage prefix as SMS drew a false
+    // HELD on chats the send moment now resolves to iMessage.
+    const rows = peopleRows({
+      contacts: [policy(ALICE, 'auto')],
+      drafts: [draft(`any;-;${ALICE}`)],
+    });
+    const alice = rows.find((r) => r.handle === ALICE);
+    expect(alice?.service).toBe('unknown');
+    const cell = autoCell({
+      isGroup: false,
+      effective: 'auto',
+      service: alice?.service ?? 'sms',
+      count: 2,
+      capped: false,
+    });
+    expect(cell.text).toBe('2 · LAST HOUR · SERVICE NOT OBSERVED');
+    expect(cell.held).toBe('');
+    // The two prefixes that DO name a service still read as before.
+    const named = peopleRows({
+      contacts: [],
+      drafts: [
+        draft(`SMS;-;${BRUNO}`, 'd1'),
+        draft(`iMessage;-;${CARLA}`, 'd2'),
+      ],
+    });
+    const byHandle = new Map(named.map((r) => [r.handle, r.service]));
+    expect(byHandle.get(BRUNO)).toBe('sms');
+    expect(byHandle.get(CARLA)).toBe('imessage');
   });
 
   it('gives a group its guid and no counterparty, and marks it observe-only', () => {

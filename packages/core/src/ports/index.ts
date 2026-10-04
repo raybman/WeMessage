@@ -437,7 +437,6 @@ export interface Store {
   close(): void;
 }
 
-/** A draft in state 'sending' joined with its send-ledger attempt (§2.3). */
 /** s10 Slice 2: one draft's send_ledger row, as late verification needs it. */
 export interface SendLedgerView {
   attempt: number;
@@ -445,6 +444,7 @@ export interface SendLedgerView {
   verifiedGuid: MessageGuid | null;
 }
 
+/** A draft in state 'sending' joined with its send-ledger attempt (§2.3). */
 export interface SendingDraft {
   id: Ulid;
   chatGuid: ChatGuid;

@@ -148,10 +148,19 @@ export function handleOf(guid: string): string | null {
   return handle.length > 0 ? handle : null;
 }
 
+/**
+ * The service a guid's prefix NAMES. s10 Slice 3: only 'iMessage' and 'SMS'
+ * name one. macOS 26's 'any;-;' (and any prefix not seen yet) names none, so
+ * it reads 'unknown', the same answer the daemon's parseChatGuid gives, and
+ * the row says SERVICE NOT OBSERVED instead of a HELD it may not deserve.
+ */
 function serviceOf(guid: string): PersonService {
   const at = guid.indexOf(';');
   if (at <= 0) return 'unknown';
-  return guid.slice(0, at).toLowerCase() === 'imessage' ? 'imessage' : 'sms';
+  const prefix = guid.slice(0, at).toLowerCase();
+  if (prefix === 'imessage') return 'imessage';
+  if (prefix === 'sms') return 'sms';
+  return 'unknown';
 }
 
 interface Draft {

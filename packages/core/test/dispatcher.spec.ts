@@ -23,6 +23,7 @@ import type {
   ContactPolicy,
   Draft,
   DraftError,
+  Message,
   Rule,
   Schedule,
   SendBackend,
@@ -99,6 +100,11 @@ function makeStore(cfg: {
    * before beginSendAttempt. Default null: never dispatched, guard inert.
    */
   ledger?: SendLedgerView | null;
+  /**
+   * s10 Slice 3: the inbound row behind `draft.inboundGuid`. The send moment
+   * reads its service FIRST for an 'any;-;' chat (amendment 6). Default null.
+   */
+  inbound?: Message | null;
 }): Store {
   const settings = cfg.settings ?? {};
   return {
@@ -148,7 +154,14 @@ function makeStore(cfg: {
     recentSentBodies: () => [],
     lastAutoSentAt: () => null,
     listRecentInboundMessages: () => [],
-    getInboundMessage: () => null,
+    getInboundMessage: (guid) => {
+      cfg.calls.push(`getInboundMessage:${guid}`);
+      return cfg.inbound !== undefined &&
+        cfg.inbound !== null &&
+        cfg.inbound.guid === guid
+        ? cfg.inbound
+        : null;
+    },
     updateInboundMessage: () => undefined,
     appendAudit: (entry) => {
       const event = JSON.parse(entry.eventJson) as AuditEvent;
@@ -256,6 +269,8 @@ function makeReader(cfg: {
     isGroup: boolean;
   } | null;
   calls: string[];
+  /** s10 Slice 3: resolveChat rejects (chat.db disconnected). */
+  resolveChatThrows?: boolean;
   /** Sequence of results returned across successive poll calls; last value repeats past its end. */
   findOutboundQueue?: ({ guid: string } | null)[];
 }): ChatDbReader {
@@ -265,6 +280,9 @@ function makeReader(cfg: {
     readMutatedSince: () => Promise.resolve([]),
     resolveChat: (handle) => {
       cfg.calls.push(`resolveChat:${handle}`);
+      if (cfg.resolveChatThrows === true) {
+        return Promise.reject(new Error('chat.db reader is not connected'));
+      }
       return Promise.resolve(cfg.resolveChatResult);
     },
     findOutboundMessage: () => {
@@ -1607,5 +1625,247 @@ describe('s10 Sl2: the dispatcher late-verify guard', () => {
     const outcome = await dispatchApproved(deps, 'D1', 'A1');
     expect(outcome.outcome).toBe('failed');
     expect(calls.some((c) => c.startsWith('getSendLedger:'))).toBe(false);
+  });
+});
+
+/**
+ * s10 Slice 3: the send-moment service for an 'any;-;' chat.
+ *
+ * Since macOS 26 Messages writes new 1:1 chats with the 'any;-;' prefix, so
+ * `parseChatGuid` reads their service as 'unknown', and the SMS clamp
+ * (fail-closed on anything that is not 'imessage') refused every AUTO send
+ * to them, iMessage included. The send moment now resolves the real
+ * service, in plan amendment 6's order: the draft's own inbound row FIRST,
+ * then chat.db's chat.service_name via resolveChat. Anything it cannot
+ * resolve stays 'unknown' and stays clamped. A human approval is not
+ * affected either way: the SMS rule is a clamp, and clamps bind autonomy.
+ *
+ * Teeth (each verified red, then restored):
+ *  TS1. the gate reads parsed.service again -> the three send rows are
+ *       refused sms-auto-forbidden.
+ *  TS2. an unresolved service is promoted to 'imessage' (fail-open) -> the
+ *       unresolvable, unreachable and group rows send.
+ *  TS3. resolveChat runs before the inbound read -> the order pin and the
+ *       resolved-once row fail.
+ */
+describe('s10 Sl3: send-moment service for any;-; chats', () => {
+  const ANY_GUID = 'any;-;+15551234567';
+  const INBOUND_GUID = 'IN-1';
+
+  function inbound(service: Message['service']): Message {
+    return {
+      guid: INBOUND_GUID,
+      sourceRowid: 1,
+      chatGuid: ANY_GUID,
+      handle: '+15551234567',
+      isFromMe: false,
+      isGroup: false,
+      service,
+      kind: 'text',
+      text: 'you around?',
+      attachments: [],
+      sentAt: NOW,
+      receivedAt: NOW,
+    };
+  }
+
+  function anyDeps(opts: {
+    calls: string[];
+    auditEvents: AuditEvent[];
+    backendCalls: string[];
+    inbound: Message | null;
+    resolved: {
+      chatGuid: string;
+      service: 'imessage' | 'sms' | 'rcs' | 'unknown';
+      isGroup: boolean;
+    } | null;
+    resolveChatThrows?: boolean;
+  }): DispatchApprovedDeps {
+    return baseDeps({
+      store: makeStore({
+        draft: makeDraft({
+          id: 'D1',
+          chatGuid: ANY_GUID,
+          adapterId: AUTO_ADAPTER_ID,
+          inboundGuid: opts.inbound === null ? null : INBOUND_GUID,
+        }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1', actor: AUTO_ACTOR }),
+        settings: { ...ALLOW_SETTINGS, 'send.globalMode': 'auto' },
+        adapter: LIVE_ADAPTER,
+        calls: opts.calls,
+        auditEvents: opts.auditEvents,
+        inbound: opts.inbound,
+      }),
+      reader: makeReader({
+        resolveChatResult: opts.resolved,
+        calls: opts.calls,
+        findOutboundQueue: [{ guid: 'guid-any' }],
+        ...(opts.resolveChatThrows === true ? { resolveChatThrows: true } : {}),
+      }),
+      backend: makeBackend({
+        result: { accepted: true },
+        calls: opts.backendCalls,
+      }),
+    });
+  }
+
+  const RESOLVED_IMESSAGE = {
+    chatGuid: 'iMessage;-;+15551234567',
+    service: 'imessage' as const,
+    isGroup: false,
+  };
+  const RESOLVED_SMS = {
+    chatGuid: 'SMS;-;+15551234567',
+    service: 'sms' as const,
+    isGroup: false,
+  };
+
+  async function expectSmsClamped(
+    deps: DispatchApprovedDeps,
+    backendCalls: string[],
+  ): Promise<void> {
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({
+        code: 'gate-denied',
+        message: 'gate denied: sms-auto-forbidden',
+      }),
+    });
+    expect(backendCalls).toEqual([]);
+  }
+
+  it('an iMessage inbound -> auto send goes out, and resolveChat is NOT read before the gate', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = anyDeps({
+      calls,
+      auditEvents: [],
+      backendCalls,
+      inbound: inbound('imessage'),
+      // chat.db would say SMS. The inbound row is read first and wins
+      // (amendment 6), so this answer must never reach the gate.
+      resolved: { ...RESOLVED_SMS, chatGuid: 'iMessage;-;+15551234567' },
+    });
+    expect(await dispatchApproved(deps, 'D1', 'A1')).toEqual({
+      outcome: 'sent',
+      sentMessageGuid: 'guid-any',
+    });
+    expect(backendCalls).toHaveLength(1);
+    const inboundAt = calls.indexOf(`getInboundMessage:${INBOUND_GUID}`);
+    const gateAt = calls.indexOf('getContactPolicy:+15551234567');
+    const resolves = calls
+      .map((c, i) => (c.startsWith('resolveChat:') ? i : -1))
+      .filter((i) => i >= 0);
+    expect(inboundAt).toBeGreaterThanOrEqual(0);
+    expect(inboundAt).toBeLessThan(gateAt);
+    // Exactly one resolve, the post-gate one that picks the send target.
+    expect(resolves).toHaveLength(1);
+    expect(resolves[0]).toBeGreaterThan(gateAt);
+  });
+
+  it('no inbound -> chat.service_name via resolveChat says iMessage -> sent, resolved once', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = anyDeps({
+      calls,
+      auditEvents: [],
+      backendCalls,
+      inbound: null,
+      resolved: RESOLVED_IMESSAGE,
+    });
+    expect(await dispatchApproved(deps, 'D1', 'A1')).toEqual({
+      outcome: 'sent',
+      sentMessageGuid: 'guid-any',
+    });
+    expect(backendCalls).toHaveLength(1);
+    // The pre-gate answer is reused for the send target, not read twice.
+    expect(calls.filter((c) => c.startsWith('resolveChat:'))).toHaveLength(1);
+  });
+
+  it('an SMS inbound -> auto send refused sms-auto-forbidden', async () => {
+    const backendCalls: string[] = [];
+    await expectSmsClamped(
+      anyDeps({
+        calls: [],
+        auditEvents: [],
+        backendCalls,
+        inbound: inbound('sms'),
+        resolved: RESOLVED_IMESSAGE,
+      }),
+      backendCalls,
+    );
+  });
+
+  it('no inbound, chat.db says SMS -> refused', async () => {
+    const backendCalls: string[] = [];
+    await expectSmsClamped(
+      anyDeps({
+        calls: [],
+        auditEvents: [],
+        backendCalls,
+        inbound: null,
+        resolved: RESOLVED_SMS,
+      }),
+      backendCalls,
+    );
+  });
+
+  it('unresolvable (no chat row, or an unknown inbound and no chat row) -> refused, fail-closed', async () => {
+    for (const ib of [null, inbound('unknown')]) {
+      const backendCalls: string[] = [];
+      await expectSmsClamped(
+        anyDeps({
+          calls: [],
+          auditEvents: [],
+          backendCalls,
+          inbound: ib,
+          resolved: null,
+        }),
+        backendCalls,
+      );
+    }
+  });
+
+  it('chat.db unreachable before the gate -> refused by the gate, not thrown', async () => {
+    const backendCalls: string[] = [];
+    await expectSmsClamped(
+      anyDeps({
+        calls: [],
+        auditEvents: [],
+        backendCalls,
+        inbound: null,
+        resolved: RESOLVED_IMESSAGE,
+        resolveChatThrows: true,
+      }),
+      backendCalls,
+    );
+  });
+
+  it('an unknown inbound falls through to chat.db, which says iMessage -> sent', async () => {
+    const backendCalls: string[] = [];
+    const deps = anyDeps({
+      calls: [],
+      auditEvents: [],
+      backendCalls,
+      inbound: inbound('unknown'),
+      resolved: RESOLVED_IMESSAGE,
+    });
+    expect((await dispatchApproved(deps, 'D1', 'A1')).outcome).toBe('sent');
+    expect(backendCalls).toHaveLength(1);
+  });
+
+  it('a resolved chat that turns out to be a group never lends its service', async () => {
+    const backendCalls: string[] = [];
+    await expectSmsClamped(
+      anyDeps({
+        calls: [],
+        auditEvents: [],
+        backendCalls,
+        inbound: null,
+        resolved: { ...RESOLVED_IMESSAGE, isGroup: true },
+      }),
+      backendCalls,
+    );
   });
 });

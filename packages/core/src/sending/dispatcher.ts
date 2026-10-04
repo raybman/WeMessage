@@ -33,6 +33,7 @@ import type {
   GateDenyReason,
   IsoUtc,
   MessageGuid,
+  Service,
   Ulid,
 } from '../domain/types.js';
 import { applyDraftTransition } from '../drafts/transitions.js';
@@ -227,6 +228,27 @@ export async function dispatchApproved(
   const parsed = parseChatGuid(draft.chatGuid);
 
   return withSendMutex(async () => {
+    /** Set only by a SUCCESSFUL pre-gate resolve; reused as the send target. */
+    let resolvedEarly:
+      Awaited<ReturnType<typeof reader.resolveChat>> | undefined;
+    const resolveSendService = async (): Promise<Service> => {
+      if (parsed.service !== 'unknown' || parsed.isGroup) return parsed.service;
+      const inbound =
+        draft.inboundGuid === null
+          ? null
+          : store.getInboundMessage(draft.inboundGuid);
+      if (inbound !== null && inbound.service !== 'unknown') {
+        return inbound.service;
+      }
+      try {
+        resolvedEarly = await reader.resolveChat(parsed.handle);
+      } catch {
+        return 'unknown';
+      }
+      if (resolvedEarly === null || resolvedEarly.isGroup) return 'unknown';
+      return resolvedEarly.service;
+    };
+
     // THE re-gate, read after mutex acquisition (see the header note).
     //
     // s6 Scenario 10 (F-59): the context is the DRAFT'S OWN, rebuilt here.
@@ -242,6 +264,17 @@ export async function dispatchApproved(
     // moment reads at one instant (`adapters/dispatch.ts`): a window edge
     // that moved between two reads is a decision that is off by whatever
     // the reads cost.
+    //
+    // s10 Slice 3: the service, resolved BEFORE that instant because it may
+    // need chat.db. An 'any;-;' guid (macOS 26's prefix for new 1:1 chats)
+    // carries no service, and 'unknown' is clamped as SMS, which refused
+    // every auto send to such a chat, iMessage included. Plan amendment 6's
+    // order: the draft's own inbound row first (no chat.db read at all),
+    // then chat.service_name via resolveChat. Whatever stays unresolved
+    // stays 'unknown' and stays clamped (fail-closed); a reader that throws
+    // here is the same answer, so a disconnected chat.db still reaches the
+    // gate and is refused by it rather than escaping as an exception.
+    const service = await resolveSendService();
     const now = clock.now();
     const rule = draft.ruleId === null ? null : store.getRule(draft.ruleId);
     const scheduleId = rule === null ? null : rule.scheduleId;
@@ -253,7 +286,7 @@ export async function dispatchApproved(
       contact: store.getContactPolicy(parsed.handle),
       message: {
         isGroup: parsed.isGroup,
-        service: parsed.service,
+        service,
         handle: parsed.handle,
         chatGuid: draft.chatGuid,
       },
@@ -401,7 +434,11 @@ export async function dispatchApproved(
         at: clock.now(),
       });
     }
-    const resolved = await reader.resolveChat(parsed.handle);
+    // Reuse the pre-gate answer when there is one: one chat.db read per send.
+    const resolved =
+      resolvedEarly !== undefined
+        ? resolvedEarly
+        : await reader.resolveChat(parsed.handle);
     if (resolved === null) {
       return fail(store, clock, actor, draftId, {
         code: 'no-conversation',

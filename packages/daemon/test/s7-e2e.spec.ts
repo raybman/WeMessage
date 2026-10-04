@@ -1731,9 +1731,10 @@ describe('s7 Scenario 13: the surface did not move', () => {
      *
      * s10 Slice 2 moved the line (the ledger guard and late-verify import
      * sit above it), not the count: still one site, still the dispatcher.
+     * s10 Slice 3 moved it again (the pre-gate service resolve), same count.
      */
     expect(sendBackendCallSites()).toEqual([
-      'packages/core/src/sending/dispatcher.ts:463',
+      'packages/core/src/sending/dispatcher.ts:500',
     ]);
   });
 

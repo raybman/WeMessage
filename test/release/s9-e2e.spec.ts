@@ -857,15 +857,59 @@ describe('s9 Sc15 row 7: the seams are byte-clean, and the audit union only grew
     );
   });
 
-  it('every frozen seam is unchanged since the S8 close', () => {
+  /**
+   * The commit s10 Slice 1 was built on. S9's promise is about S9, so it is
+   * measured up to here. s10 is a later slice with a reviewed plan that
+   * EXTENDS the port (Slice 2's getSendLedger, listRecentUnverified, the
+   * sentMessageGuid CAS key); the row below holds it to growth only.
+   */
+  const S10_START = 'fa9a885';
+
+  it('every frozen seam is unchanged from the S8 close to the start of s10', () => {
+    expect(git('log', '-1', '--pretty=format:%s', S10_START)).toContain(
+      'G2 even frost slice 2',
+    );
     const moved = FROZEN.filter(
       (f) =>
-        git('diff', '--name-only', `${S8_CLOSE}..HEAD`, '--', f).trim() !== '',
+        git(
+          'diff',
+          '--name-only',
+          `${S8_CLOSE}..${S10_START}`,
+          '--',
+          f,
+        ).trim() !== '',
     );
     expect(moved).toEqual([]);
     // NOT VACUOUS: each path must actually exist, or "unchanged" is the
     // answer a typo gives.
     for (const f of FROZEN) expect(existsSync(join(repoRoot, f)), f).toBe(true);
+  });
+
+  it('since s10 started, the schema and the wire are still byte-clean and the ports only grew', () => {
+    for (const f of [
+      'packages/store/migrations/0001_init.sql',
+      'packages/protocol/src/events.ts',
+    ]) {
+      expect(
+        git('diff', '--name-only', `${S10_START}..HEAD`, '--', f).trim(),
+        f,
+      ).toBe('');
+    }
+    // `added<TAB>deleted<TAB>path`. Deleted must be 0: s10 may add to the
+    // contract, never take anything out of it or rewrite a line of it.
+    const [added, deleted] = git(
+      'diff',
+      '--numstat',
+      `${S10_START}..HEAD`,
+      '--',
+      'packages/core/src/ports/index.ts',
+    )
+      .trim()
+      .split('\t');
+    // NOT VACUOUS: s10 Slice 2 did grow the port, so an empty numstat would
+    // mean this row is reading the wrong path or the wrong range.
+    expect(Number(added)).toBeGreaterThan(0);
+    expect(Number(deleted)).toBe(0);
   });
 
   it('the migrations directory gained no file', () => {

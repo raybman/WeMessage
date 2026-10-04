@@ -33,6 +33,61 @@ function corpusBlob(name: string): Buffer {
   return readFileSync(join(CORPUS_DIR, `${name}.bin`));
 }
 
+/** typedstream integer: literal below 0x80, else 0x81 + 2 bytes LE. */
+function typedstreamInt(n: number): Buffer {
+  if (n < 0x80) return Buffer.from([n]);
+  if (n > 0xffff) throw new Error(`typedstreamWithText: length ${n} too long`);
+  return Buffer.from([0x81, n & 0xff, (n >> 8) & 0xff]);
+}
+
+/** Reads a typedstream integer at `at`; returns [value, bytes consumed]. */
+function readTypedstreamInt(b: Buffer, at: number): [number, number] {
+  const first = b[at];
+  if (first === undefined) throw new Error('typedstreamWithText: short blob');
+  if (first < 0x80) return [first, 1];
+  if (first === 0x81) return [b.readUInt16LE(at + 1), 3];
+  throw new Error(
+    `typedstreamWithText: unexpected int tag 0x${first.toString(16)}`,
+  );
+}
+
+// The NSString "+" value opens with these bytes; the attribute-run array
+// ("iI": run index, run length) closes it. Both anchors are read from
+// Apple's own plain-ascii.bin, never typed in from memory.
+const STRING_OPEN = Buffer.from([0x84, 0x01, 0x2b]);
+const RUN_OPEN = Buffer.from([0x86, 0x84, 0x02, 0x69, 0x49, 0x01]);
+
+/**
+ * s10 Slice 1: a macOS 26 attributedBody blob for an arbitrary body, made
+ * by splicing it into the real plain-ascii.bin. Two lengths move with the
+ * text: the NSString prefix in UTF-8 BYTES and the attribute run in UTF-16
+ * CODE UNITS. Proven against three other real blobs byte for byte
+ * (fixtures/test/typedstream-encode.spec.ts).
+ */
+export function typedstreamWithText(text: string): Buffer {
+  if (text.length === 0) throw new Error('typedstreamWithText: empty body');
+  const base = corpusBlob('plain-ascii');
+  const open = base.indexOf(STRING_OPEN);
+  if (open === -1) throw new Error('typedstreamWithText: no NSString in base');
+  const lenAt = open + STRING_OPEN.length;
+  const [oldBytes, oldLenSize] = readTypedstreamInt(base, lenAt);
+  const runAt = lenAt + oldLenSize + oldBytes;
+  if (!base.subarray(runAt, runAt + RUN_OPEN.length).equals(RUN_OPEN)) {
+    throw new Error('typedstreamWithText: no attribute run after the string');
+  }
+  const runLenAt = runAt + RUN_OPEN.length;
+  const [, oldRunSize] = readTypedstreamInt(base, runLenAt);
+  const utf8 = Buffer.from(text, 'utf8');
+  return Buffer.concat([
+    base.subarray(0, lenAt),
+    typedstreamInt(utf8.length),
+    utf8,
+    RUN_OPEN,
+    typedstreamInt(text.length),
+    base.subarray(runLenAt + oldRunSize),
+  ]);
+}
+
 const SCHEMA = `
 CREATE TABLE message (
   ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +181,11 @@ export interface AddMessageOptions {
   text?: string | null;
   /** Named corpus blob (fixtures/typedstream/<name>.bin); forces text NULL. */
   attributedBodyFixture?: string;
+  /**
+   * s10 Slice 1: the macOS 26 shape for an arbitrary body, an attributedBody
+   * built by `typedstreamWithText`; forces text NULL like a real send.
+   */
+  attributedBodyText?: string;
   /** ISO instant; stored as Apple-epoch ns. */
   at?: string;
   isFromMe?: boolean;
@@ -167,6 +227,12 @@ export interface ChatDbFixture {
      * no message history yet).
      */
     handleIds?: number[];
+    /**
+     * s10 Slice 1: the guid prefix. Defaults to the service name (the
+     * pre-macOS-26 shape). macOS 26 writes "any" for every chat and keeps
+     * the real service only in chat.service_name.
+     */
+    guidPrefix?: string;
   }): number;
   addGroupChat(handleIds: number[], opts?: { displayName?: string }): number;
   addMessage(opts: AddMessageOptions): MessageRef;
@@ -197,6 +263,8 @@ export interface ChatDbFixture {
     chatGuid: string;
     text: string;
     atIso: string;
+    /** s10: land the macOS 26 shape (text NULL, attributedBody). */
+    asAttributedBody?: boolean;
   }): MessageRef;
   addSmsMessage(opts: Omit<AddMessageOptions, 'service'>): MessageRef;
   /** T-9.3 crash-window seeding: N sequential messages, 1s apart. */
@@ -257,7 +325,7 @@ export function createChatDb(path: string): ChatDbFixture {
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
         .run(
-          `${service};-;${identifier}`,
+          `${opts?.guidPrefix ?? service};-;${identifier}`,
           opts?.style ?? 45, // 45 = one-to-one in the real schema
           identifier,
           service,
@@ -302,7 +370,9 @@ export function createChatDb(path: string): ChatDbFixture {
       const attributedBody =
         opts.attributedBodyFixture !== undefined
           ? corpusBlob(opts.attributedBodyFixture)
-          : null;
+          : opts.attributedBodyText !== undefined
+            ? typedstreamWithText(opts.attributedBodyText)
+            : null;
       const chat = db
         .prepare('SELECT room_name FROM chat WHERE ROWID = ?')
         .get(opts.chatId) as { room_name: string | null } | undefined;
@@ -416,7 +486,9 @@ export function createChatDb(path: string): ChatDbFixture {
       }
       return fixture.addSelfMessage({
         chatId: chat.rowid,
-        text: opts.text,
+        ...(opts.asAttributedBody === true
+          ? { attributedBodyText: opts.text }
+          : { text: opts.text }),
         at: opts.atIso,
       });
     },

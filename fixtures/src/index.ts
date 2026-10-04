@@ -3,6 +3,7 @@
 export {
   createChatDb,
   appleEpochNs,
+  typedstreamWithText,
   APPLE_EPOCH_OFFSET_SECONDS,
   type ChatDbFixture,
   type AddMessageOptions,

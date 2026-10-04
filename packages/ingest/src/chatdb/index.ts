@@ -31,6 +31,7 @@ import {
   type DecodeFailedSignal,
   type RawMessageRow,
 } from '../normalize/index.js';
+import { decodeTypedstreamText } from '../typedstream/index.js';
 
 export interface ChatDbReaderOptions {
   clock: Clock;
@@ -134,23 +135,44 @@ const LAST_MESSAGE_DATE_SQL = `
 `;
 
 /**
- * findOutboundMessage (Scenario 4, §1.5): every predicate is independently
- * load-bearing — chat scope, direction, exact text, and the since-watermark
- * (teeth: relaxing text to a LIKE prefix or dropping the date bound must
- * each fail their respective negative-case tests).
+ * findOutboundMessage (Scenario 4, §1.5; s10 Slice 1): every predicate is
+ * independently load-bearing: chat scope, direction, exact body, and the
+ * since-watermark (teeth: relaxing the body to a prefix or dropping the date
+ * bound must each fail their respective negative-case tests).
+ *
+ * s10: on macOS 26 an outbound row's body lives in attributedBody and
+ * `text` is NULL (live chat.db, 90 days: 10,238 of 10,264). SQL can only
+ * narrow to candidates; the exact-equality decision is made in JS after
+ * decoding, with `text` authoritative when present (the same rule
+ * normalizeRow applies). No LIMIT: a late check looks for the FIRST attempt,
+ * which is the oldest row in the window, and a busy chat outran a LIMIT 50
+ * on live data. The date bound caps the scan; iterate stops at first match.
  */
 const FIND_OUTBOUND_SQL = `
-  SELECT m.guid AS guid
+  SELECT m.guid AS guid, m.text AS text, m.attributedBody AS attributedBody
   FROM message m
   JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
   JOIN chat c ON c.ROWID = cmj.chat_id
   WHERE c.guid = ?
     AND m.is_from_me = 1
-    AND m.text = ?
+    AND (m.text = ? OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
     AND m.date >= ?
   ORDER BY m.ROWID DESC
-  LIMIT 1
 `;
+
+interface OutboundCandidateRow {
+  guid: string;
+  text: string | null;
+  attributedBody: Uint8Array | null;
+}
+
+/** Exact-body test for one candidate: `text` first, else the decoded blob. */
+function outboundBodyEquals(row: OutboundCandidateRow, body: string): boolean {
+  if (row.text !== null) return row.text === body;
+  if (row.attributedBody === null) return false;
+  const decoded = decodeTypedstreamText(row.attributedBody);
+  return decoded.ok && decoded.text === body;
+}
 
 /**
  * readChatTurns (Scenario 6, §1.5 F-46): the tail of one conversation, both
@@ -364,9 +386,16 @@ export function createChatDbReader(
       sinceIso: string;
     }): Promise<{ guid: MessageGuid } | null> {
       const sinceNs = isoToAppleNs(q.sinceIso);
-      const row = findOutboundStmt.get(q.chatGuid, q.text, sinceNs) as
-        { guid: string } | undefined;
-      return Promise.resolve(row === undefined ? null : { guid: row.guid });
+      for (const row of findOutboundStmt.iterate(
+        q.chatGuid,
+        q.text,
+        sinceNs,
+      ) as IterableIterator<OutboundCandidateRow>) {
+        if (outboundBodyEquals(row, q.text)) {
+          return Promise.resolve({ guid: row.guid });
+        }
+      }
+      return Promise.resolve(null);
     },
 
     close() {

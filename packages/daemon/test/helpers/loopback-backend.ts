@@ -43,9 +43,20 @@ export interface LoopbackSendBackend extends SendBackend {
   unsabotageBody(body: string): void;
 }
 
+export interface LoopbackOptions {
+  /**
+   * s10 Slice 1: which outbound row shape `send()` lands. 'legacy' writes
+   * the body to `text` (pre-macOS-26). 'macos26' writes text NULL and the
+   * body as an attributedBody blob, which is what a real send on this
+   * machine produces (10,238 of 10,264 recent outbound rows).
+   */
+  rowShape?: 'legacy' | 'macos26';
+}
+
 export function createLoopbackSendBackend(
   fixture: ChatDbFixture,
   clock: Clock,
+  opts: LoopbackOptions = {},
 ): LoopbackSendBackend {
   const seen: SendInput[] = [];
   let sabotaged = false;
@@ -60,6 +71,7 @@ export function createLoopbackSendBackend(
           chatGuid: input.chatGuid,
           text: input.body,
           atIso: clock.now(),
+          asAttributedBody: opts.rowShape === 'macos26',
         });
       }
       return Promise.resolve({ accepted: true });

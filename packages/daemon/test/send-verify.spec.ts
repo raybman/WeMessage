@@ -103,7 +103,9 @@ interface Harness {
 }
 
 /** Real fully-connected gate state by default (§2.4.1: unset -> disconnected -> gate-denied). */
-async function boot(): Promise<Harness> {
+async function boot(
+  backendOpts: Parameters<typeof createLoopbackSendBackend>[2] = {},
+): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'wm-send-verify-'));
   dirs.push(dir);
   const chatDbPath = join(dir, 'chat.db');
@@ -117,7 +119,11 @@ async function boot(): Promise<Harness> {
 
   const reader = createChatDbReader(chatDbPath, { clock: clockCtl.clock });
   readers.push(reader);
-  const backend = createLoopbackSendBackend(fixture, clockCtl.clock);
+  const backend = createLoopbackSendBackend(
+    fixture,
+    clockCtl.clock,
+    backendOpts,
+  );
 
   const server = await buildServer({
     configDir: dir,
@@ -410,5 +416,42 @@ describe('POST /v1/send — row 6: auth posture inherited unchanged (§2.4.2/§2
     });
     expect(res.statusCode).toBe(503);
     expect(res.json()).toEqual({ error: 'no-auth-token' });
+  });
+});
+
+/**
+ * s10 Slice 1 (P0-a), the full loop on the macOS 26 shape: an "any;-;" chat
+ * and a send that lands as text NULL + attributedBody. Before s10 this was
+ * 200 failed 'unverified' for every real send on macOS 26, and a retry of
+ * that "failure" sent the message a second time.
+ */
+describe('POST /v1/send: s10 verified send on the macOS 26 row shape', () => {
+  it('any;-; chat + attributedBody outbound row -> 200 sent with the landed guid', async () => {
+    const h = await boot({ rowShape: 'macos26' });
+    const handleId = h.fixture.addHandle('+15557654321');
+    h.fixture.addChat({
+      identifier: '+15557654321',
+      guidPrefix: 'any',
+      handleIds: [handleId],
+    });
+
+    const res = await send(h, {
+      chatGuid: 'any;-;+15557654321',
+      body: 'on my way \u{1F697}',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json as { outcome: string; sentMessageGuid?: string };
+    expect(body.outcome).toBe('sent');
+    const landed = h.fixture.db
+      .prepare(
+        'SELECT guid, text, attributedBody IS NOT NULL AS hasBlob FROM message WHERE is_from_me = 1',
+      )
+      .all() as { guid: string; text: string | null; hasBlob: number }[];
+    expect(landed).toHaveLength(1);
+    expect(landed[0]?.text).toBeNull();
+    expect(landed[0]?.hasBlob).toBe(1);
+    expect(body.sentMessageGuid).toBe(landed[0]?.guid);
+    expect(h.backend.callCount()).toBe(1);
   });
 });

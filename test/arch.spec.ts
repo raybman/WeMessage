@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 // s7 Sc9: the verification ledger reads BUILT modules, so it needs a file URL.
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -5530,13 +5530,16 @@ describe('S8 extensions (s8-execution Scenario 8: keyboard triage)', () => {
     return rel;
   }
   afterEach(() => {
-    for (const rel of sc8Planted.splice(0))
+    // The probe DIRECTORY goes with each planted file, derived from the
+    // file's own path rather than listed here: a fixed list missed derive/
+    // and left an empty `__s8_sc8_probe__` in the renderer after every run.
+    // The basename guard means only a probe directory is ever removed.
+    for (const rel of sc8Planted.splice(0)) {
       rmSync(join(repoRoot, rel), { force: true });
-    for (const dir of [
-      'apps/desktop/src/renderer/screens/queue/__s8_sc8_probe__',
-      'apps/desktop/src/renderer/store/__s8_sc8_probe__',
-    ])
-      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+      const dir = dirname(rel);
+      if (basename(dir) === '__s8_sc8_probe__')
+        rmSync(join(repoRoot, dir), { recursive: true, force: true });
+    }
   });
 
   const RENDERER = 'apps/desktop/src/renderer';

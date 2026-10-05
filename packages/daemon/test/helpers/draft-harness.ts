@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { expect } from 'vitest';
 import type {
   AuditEvent,
+  Autonomy,
   ChannelSource,
   Clock,
   Draft,
@@ -161,6 +162,12 @@ export interface BootOptions {
    * default, for the same reason as every other route here.
    */
   threads?: boolean | ChannelSource;
+  /**
+   * v2 A0p: the park. Suites here exercise autonomy, so the harness lifts the
+   * park by default; `park.spec` passes 'parked' to prove the default build.
+   * `null` composes exactly as production does, with the field absent.
+   */
+  autonomy?: Autonomy | null;
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -172,6 +179,8 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
       return d;
     })();
   const chatDbPath = join(dir, 'chat.db');
+  const autonomyOpt: { autonomy?: Autonomy } =
+    opts.autonomy === null ? {} : { autonomy: opts.autonomy ?? 'live' };
 
   // On a restart the chat.db is already built — rebuilding it would throw,
   // and more to the point the whole premise is that nothing on disk is lost.
@@ -224,6 +233,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     verifyLate({ store, reader, clock: clockCtl.clock }, draftId);
 
   const server = await buildServer({
+    ...autonomyOpt,
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink, lateVerify },
     // s7 Sc3: ONE greeting closure, read by BOTH event transports inside
@@ -295,6 +305,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const rawDispatch = (draftId: Ulid, approvalId: Ulid) =>
     dispatchApproved(
       {
+        ...autonomyOpt,
         store,
         reader,
         backend,
@@ -315,6 +326,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     server.agentFeedback?.observeDispatch(rawDispatch) ?? rawDispatch;
 
   const scheduler = createScheduler({
+    ...autonomyOpt,
     store,
     clock: clockCtl.clock,
     sink,

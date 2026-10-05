@@ -47,6 +47,7 @@ import type {
   ChatGuid,
   Clock,
   Draft,
+  Autonomy,
   GateDenyReason,
   Handle,
   MessageGuid,
@@ -187,6 +188,8 @@ export interface AgentSubmitDeps {
   reader?: Pick<ChatDbReader, 'resolveChat'>;
   /** s5 Sc 9: tell an adapter its proposal was refused before it existed. */
   refuse?: DraftRefusalTap;
+  /** v2 A0p. Absent = parked: every proposal waits for a human. */
+  autonomy?: Autonomy;
 }
 
 export interface AgentSubmitHandler {
@@ -378,7 +381,16 @@ export function createAgentSubmitHandler(
     // only fact it is in a position to know. `maybeAutoApprove` returns
     // 'withheld' for every reason it declines, and the draft simply stays in
     // the human's queue — the outcome is deliberately not branched on.
-    await maybeAutoApprove({ store, clock, sink, newId: ulid }, draft.id);
+    await maybeAutoApprove(
+      {
+        store,
+        clock,
+        sink,
+        newId: ulid,
+        ...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
+      },
+      draft.id,
+    );
   };
 
   /**

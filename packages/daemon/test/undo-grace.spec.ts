@@ -140,6 +140,7 @@ async function boot(
   const sink = createAuditSink({ store, clock: clockCtl.clock });
 
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink },
   });
@@ -147,12 +148,14 @@ async function boot(
   if (server.token === null) throw new Error('harness: no token');
 
   const scheduler = createScheduler({
+    autonomy: 'live',
     store,
     clock: clockCtl.clock,
     sink,
     dispatch: (draftId: Ulid, approvalId: Ulid) =>
       dispatchApproved(
         {
+          autonomy: 'live',
           store,
           reader,
           backend,

@@ -399,6 +399,7 @@ function pending(h: Harness, opts: PendingOptions = {}): Draft {
 function auto(h: Harness, draftId: Ulid): Promise<'approved' | 'withheld'> {
   return maybeAutoApprove(
     {
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,
@@ -1252,7 +1253,11 @@ describe('s6 Sc13 (i): a pause with every other input at its most permissive', (
     ).toEqual([]);
     expect(events(h, 'auto.approved')).toEqual([]);
     expect(
-      resolveArming({ store: h.store, clock: h.clockCtl.clock }),
+      resolveArming({
+        autonomy: 'live',
+        store: h.store,
+        clock: h.clockCtl.clock,
+      }),
     ).toMatchObject({
       armed: false,
       reason: 'paused',
@@ -1265,7 +1270,11 @@ describe('s6 Sc13 (i): a pause with every other input at its most permissive', (
     const h = await armed({ rule: { scheduleId: null }, noSchedule: true });
     await post(h, '/v1/toggles/pause', { until: '1h' });
     const armingReason = (): string =>
-      resolveArming({ store: h.store, clock: h.clockCtl.clock }).reason;
+      resolveArming({
+        autonomy: 'live',
+        store: h.store,
+        clock: h.clockCtl.clock,
+      }).reason;
 
     expect(armingReason()).toBe('paused');
     // A kill switch outranks a hand.

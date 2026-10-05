@@ -93,6 +93,7 @@ async function boot(): Promise<Harness> {
   const store = openStore({ dir, clock: clockCtl.clock });
   stores.push(store);
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     rules: { store, clock: clockCtl.clock },
   });
@@ -555,6 +556,7 @@ describe('auth posture per route (§2.4.2 unchanged by S2 routes)', () => {
     stores.push(store);
     chmodSync(dir, 0o500); // token can be neither read nor generated
     const server = await buildServer({
+      autonomy: 'live',
       configDir: dir,
       rules: { store, clock: clockCtl.clock },
     });

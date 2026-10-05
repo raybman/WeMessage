@@ -159,6 +159,7 @@ interface Correlation {
 
 function deliverer(h: AgentHarness): (message: Message) => Promise<void> {
   const dispatch = createInboundDispatch({
+    autonomy: 'live',
     store: h.store,
     clock: h.clockCtl.clock,
     sink: h.sink,

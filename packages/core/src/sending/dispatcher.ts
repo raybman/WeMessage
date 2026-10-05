@@ -28,6 +28,7 @@
 import type { AuditEvent } from '../audit/events.js';
 import type {
   Actor,
+  Autonomy,
   ChatGuid,
   DraftError,
   GateDenyReason,
@@ -76,6 +77,13 @@ export interface DispatchApprovedDeps {
   backendName: string;
   /** Fired exactly once, only on a gate denial; never on any other failure path. */
   emit: (event: DispatchGateDenied) => void;
+  /**
+   * v2 A0p. Absent means 'parked'. While parked an AUTO approval is taken
+   * back at the send moment (requeued to the human queue, F-72's edge), so
+   * no stored auto approval can send however it got into the table. Human
+   * approvals are untouched.
+   */
+  autonomy?: Autonomy;
 }
 
 export type DispatchOutcome =
@@ -396,6 +404,13 @@ export async function dispatchApproved(
      * from its operator (Sc 6 row 7 and Sc 8 row 7 are the pins).
      */
     if (isAutoApproval) {
+      // v2 A0p: parked autonomy has no window open anywhere, so the
+      // approval goes back to a human exactly as a shut schedule sends it
+      // back (F-72). First in this block: nothing a machine decided is
+      // honoured while the park is on, whatever the gate would have said.
+      if ((deps.autonomy ?? 'parked') !== 'live') {
+        return requeue('outside-window');
+      }
       // Fail-closed on the adapter row itself, exactly as the draft moment
       // does it, and checked here rather than inside `evaluateGate` because
       // core is adapter-blind by construction (INV-1) — the gate takes a

@@ -39,11 +39,13 @@ import {
   SETTING_PAUSE_UNTIL,
   type ArmingReason,
   type ArmingState,
+  type Autonomy,
   type Clock,
   type IsoUtc,
   type Store,
 } from '@wemessage/core';
 import { readConnectionState } from './doctor.js';
+import { isParked } from './park.js';
 import type { AuditSink } from './audit-sink.js';
 
 /**
@@ -62,6 +64,14 @@ export const SETTING_ARMING_LAST_BROADCAST = 'arming.lastBroadcast';
 export interface ArmingDeps {
   store: Pick<Store, 'getSetting' | 'setSetting' | 'listRules' | 'getSchedule'>;
   clock: Clock;
+  /**
+   * v2 A0p. Absent means 'parked', and a parked daemon is never 'armed': no
+   * window is open to autonomy anywhere, so the schedule dimension reads
+   * shut and its horizon is dropped (a window closing would change nothing).
+   * No new reason word: the operator vocabulary, the wire enum and the
+   * renderer's "DISARMED · QUEUE-ONLY" already say the true thing.
+   */
+  autonomy?: Autonomy;
 }
 
 export interface ArmingSweepDeps extends ArmingDeps {
@@ -152,6 +162,7 @@ function scheduleHold(
  * pause for the rest of their window did not ask about the breaker.
  */
 export function armedWindowClose(deps: ArmingDeps): IsoUtc | null {
+  if (isParked(deps.autonomy)) return null;
   const hold = scheduleHold(deps.store, deps.clock.now());
   return hold.armed ? hold.until : null;
 }
@@ -182,7 +193,9 @@ export function resolveArming(deps: ArmingDeps): ArmingState {
   const now = clock.now();
 
   const pause = pauseHold(store, now);
-  const schedule = scheduleHold(store, now);
+  const schedule = isParked(deps.autonomy)
+    ? { armed: false, until: null }
+    : scheduleHold(store, now);
   const circuitUntil = circuitOpenUntil(store, now);
   const until = earliest([pause.until, schedule.until, circuitUntil]);
 

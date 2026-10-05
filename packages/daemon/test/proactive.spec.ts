@@ -313,6 +313,7 @@ describe('s5 Sc 9 — proactive proposals', () => {
     expect(
       await maybeAutoApprove(
         {
+          autonomy: 'live',
           store: h.store,
           clock: h.clockCtl.clock,
           sink: h.sink,

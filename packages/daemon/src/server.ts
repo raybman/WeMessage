@@ -16,6 +16,7 @@ import type { GatewayEventPayload } from '@wemessage/protocol';
 import { CLOSE_CODES } from '@wemessage/protocol';
 import { SETTING_KILL_SWITCH } from '@wemessage/core';
 import type {
+  Autonomy,
   ChannelSource,
   ChatDbReader,
   Clock,
@@ -69,6 +70,13 @@ import { resolveArming } from './arming.js';
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
   configDir: string;
+  /**
+   * v2 A0p. Whether auto-send and schedules may act. Absent means
+   * 'parked', which is the only value production ever passes: no setting,
+   * env key, route body or CLI flag reaches this field. Test seams that
+   * exercise the parked machinery pass 'live'.
+   */
+  autonomy?: Autonomy;
   /** F-5 status payload provider; Scenario 11 wires the real one. */
   getStatus?: () => unknown;
   /** Called with each authenticated WS /v1/events socket (event fan-out). */
@@ -257,6 +265,8 @@ const AGENT_PATH = '/v1/agent';
 export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   const bootToken = loadOrCreateToken(opts.configDir);
   const app = Fastify({ logger: false });
+  // v2 A0p: resolved once, handed to every consumer as the same value.
+  const autonomy: Autonomy = opts.autonomy ?? 'parked';
 
   // INV-3/F-17: record the full reachable surface. Registered before any
   // route (hooks only see routes added after them).
@@ -354,6 +364,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
             armed: resolveArming({
               store: sinkSource.store,
               clock: sinkSource.clock,
+              autonomy,
             }),
           }
         : {
@@ -412,6 +423,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       store: opts.rules.store,
       clock: opts.rules.clock,
       sink,
+      autonomy,
     });
     // §1.6 routes 8-9 (S2 Scenario 11): audit reads share the rules gate —
     // there is no standalone opt-in, audit only exists where rules do.
@@ -419,7 +431,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // §1.6 `/v1/schedules` (s6 Scenario 3). Same gate as rules and audit:
     // a schedule only means anything as a rule's arming window, so there is
     // no world where schedules are wanted and rules are not. Ratchet #19.
-    registerScheduleRoutes(app, { store: opts.rules.store, sink });
+    registerScheduleRoutes(app, { store: opts.rules.store, sink, autonomy });
   }
 
   /*
@@ -488,11 +500,13 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,
+      autonomy,
     });
     registerToggleRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,
+      autonomy,
     });
     // s7 Sc4: the settings surface rides with the toggles for the same
     // reason the contact policies do — a toggle is a setting an operator
@@ -548,6 +562,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
           ? { reader: adapterOpts.reader }
           : {}),
         refuse: (input) => agentFeedback?.refuse(input),
+        autonomy,
       }),
       ...(adapterOpts.helloDeadlineMs !== undefined
         ? { helloDeadlineMs: adapterOpts.helloDeadlineMs }
@@ -567,6 +582,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
         store: adapterOpts.store,
         clock: adapterOpts.clock,
         sink,
+        autonomy,
         reader,
         transport: {
           isConnected: (id) => agentTransport?.isConnected(id) ?? false,

@@ -115,6 +115,7 @@ async function boot(): Promise<Ctx> {
 
   const configDir = join(dir, 'config');
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

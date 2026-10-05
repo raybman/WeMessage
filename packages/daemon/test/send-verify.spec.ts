@@ -126,6 +126,7 @@ async function boot(
   );
 
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     send: {
       store,
@@ -389,6 +390,7 @@ describe('POST /v1/send — row 6: auth posture inherited unchanged (§2.4.2/§2
     chmodSync(configDir, 0o500);
 
     const server = await buildServer({
+      autonomy: 'live',
       configDir,
       send: {
         store,

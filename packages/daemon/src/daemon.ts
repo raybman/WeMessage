@@ -17,6 +17,7 @@ import type {
   Clock,
   CursorHealReason,
   DraftError,
+  Autonomy,
   FsWatcher,
   Message,
   MessageGuid,
@@ -66,6 +67,14 @@ import { rotateToken as rotateTokenOnDisk } from './auth.js';
 export interface StartDaemonOptions {
   /** Config dir: token file + our SQLite store live here (§2.6, §2.3). */
   configDir: string;
+  /**
+   * v2 A0p. Absent = 'parked': auto approvals are requeued to a human,
+   * schedules never arm, and the routes that would create either answer
+   * 409. `main.ts` passes 'parked' literally; nothing reads this from a
+   * setting, env key, route body or flag. Tests that exercise the parked
+   * machinery pass 'live'.
+   */
+  autonomy?: Autonomy;
   /** Path to the chat.db to tail (fixture in tests, ~/Library/Messages live). */
   chatDbPath: string;
   clock: Clock;
@@ -188,8 +197,9 @@ export interface RunningDaemon {
   recovery: StartupRecoveryResult;
   /**
    * s4 Scenario 6: run the grace/TTL sweep once, now. Exposed so tests can
-   * drive time by hand instead of racing a real interval — production also
-   * calls exactly this, on a loop.
+   * drive time by hand instead of racing a real interval. Production calls
+   * exactly this from `main.ts`, once a second (v2 A0t; before A0t nothing
+   * did, which is why this sentence used to be false).
    */
   tick(): Promise<void>;
   stop(): Promise<void>;
@@ -378,10 +388,13 @@ export async function startDaemon(
   const agentRequests: { current: AgentRequests | undefined } = {
     current: undefined,
   };
+  // v2 A0p: resolved once, before the first consumer, and handed to all.
+  const autonomy: Autonomy = options.autonomy ?? 'parked';
   const dispatcher = createInboundDispatch({
     store,
     clock: options.clock,
     sink,
+    autonomy,
     reader: sendReaderHandle.reader,
     transport: {
       isConnected: (id) => agentTransport.current?.isConnected(id) ?? false,
@@ -517,6 +530,7 @@ export async function startDaemon(
   };
   const server = await buildServer({
     configDir: options.configDir,
+    autonomy,
     // S2 Scenario 7: rule CRUD + test routes on the composed daemon.
     rules: { store, clock: options.clock, sink },
     // s4-execution Scenario 5: the draft review surface, same shared sink.
@@ -594,7 +608,7 @@ export async function startDaemon(
       // payload can never disagree with the decision the daemon would make a
       // millisecond later. Neither is cached and neither is a column.
       killSwitch: store.getSetting(SETTING_KILL_SWITCH) === '1',
-      armed: resolveArming({ store, clock: options.clock }),
+      armed: resolveArming({ store, clock: options.clock, autonomy }),
     }),
     onEventsClient: (socket) => {
       sockets.add(socket);
@@ -627,9 +641,10 @@ export async function startDaemon(
   agentRequests.current = server.agentRequests;
   // s4-execution Scenario 6: the grace scheduler. It owns WHEN; the core
   // dispatcher owns HOW, so it gets a dispatch closure rather than the
-  // backend. No interval is armed here — startDaemon's caller drives
-  // `tick()`, which keeps the deadline where it belongs (the DB) and keeps
-  // tests off wall-clock time.
+  // backend. No interval is armed here: startDaemon's caller drives
+  // `tick()`. Tests call it by hand; `main.ts` (v2 A0t) is the one
+  // production caller, on a one-second loop. The deadlines stay in the DB.
+  // Until A0t that loop did not exist, and this comment claimed it did.
   // s5 Scenario 8: the send path's outcome becomes `draft.feedback` through
   // this daemon-side wrapper. Core still knows nothing about adapters
   // (INV-1) — it returns a DispatchOutcome, and the daemon decides who, if
@@ -643,6 +658,7 @@ export async function startDaemon(
         backendName: options.backendName,
         clock: options.clock,
         delay: options.delay ?? realDelay,
+        autonomy,
         emit: (event: DispatchGateDenied) => {
           for (const socket of sockets) {
             socket.send(
@@ -663,6 +679,7 @@ export async function startDaemon(
     store,
     clock: options.clock,
     sink,
+    autonomy,
     lateVerify,
     dispatch: server.agentFeedback?.observeDispatch(rawDispatch) ?? rawDispatch,
     onExpired: (draftId) =>

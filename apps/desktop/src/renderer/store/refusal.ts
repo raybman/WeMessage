@@ -22,9 +22,32 @@
  */
 import type { SettingsRefusal } from '@wemessage/client';
 
-/** Whatever the thrown thing had to say, as a string. */
-export function errorText(error: unknown): string {
+/**
+ * v2 A0p: the one sentence a parked refusal becomes, on every screen.
+ *
+ * The daemon answers `409 {error:'parked'}` to anything that would create or
+ * enable an auto rule or a schedule. An operator should read what happened,
+ * not a status code wrapped twice, and should read the SAME words wherever
+ * they tried it.
+ */
+export const PARKED_SENTENCE =
+  'Auto-replies and schedules are parked in this build. Nothing changed.';
+
+function rawText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** True when the daemon refused because autonomy is parked (v2 A0p). */
+export function isParkedRefusal(error: unknown): boolean {
+  return refusalBody(error)?.['error'] === 'parked';
+}
+
+/**
+ * Whatever the thrown thing had to say, as a string. A parked refusal says
+ * `PARKED_SENTENCE` and nothing else.
+ */
+export function errorText(error: unknown): string {
+  return isParkedRefusal(error) ? PARKED_SENTENCE : rawText(error);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -43,7 +66,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * mangled body would send an operator hunting for a field they never sent.
  */
 export function refusalBody(error: unknown): Record<string, unknown> | null {
-  const text = errorText(error);
+  const text = rawText(error);
   const open = text.indexOf('{');
   const close = text.lastIndexOf('}');
   if (open === -1 || close <= open) return null;

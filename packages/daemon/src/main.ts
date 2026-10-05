@@ -144,6 +144,9 @@ wake.start();
 const daemon = await startDaemon({
   configDir,
   chatDbPath,
+  // v2 A0p: written out, never read from a setting, env key or flag.
+  // Lifting it is its own future slice, with its own UI.
+  autonomy: 'parked',
   clock,
   watcher: createNodeFsWatcher(),
   wake,
@@ -220,7 +223,56 @@ const daemon = await startDaemon({
  * `shutdown` closes over (`wake`, `daemon`, `lock`) already exists here, so
  * there is nothing to trade for it.
  */
+/*
+ * v2 A0t: THE TICK LOOP, the one production caller of `daemon.tick()`.
+ *
+ * Until this slice nothing called it. Every sweep the scheduler owns (grace,
+ * TTL, late-verify, breaker, arming) ran in tests that tick by hand and never
+ * on a real install, so an approved draft waited forever. The loop holds no
+ * deadline: each tick re-reads the store against the clock, which is why a
+ * restart cannot lose one. Overlap is refused inside `tick()` itself; the
+ * `inFlight` handle below exists so shutdown can wait for the last one.
+ *
+ * `unref` because the loop is not a reason to stay alive: the listening
+ * server is. Autonomy is parked (A0p), so a tick can expire, verify and send
+ * what a human approved, and nothing else.
+ */
+const TICK_EVERY_MS = 1_000;
+const TICK_DRAIN_MS = 5_000;
+let inFlight: Promise<void> | null = null;
+const tickLoop = setInterval(() => {
+  if (inFlight !== null) return;
+  inFlight = daemon
+    .tick()
+    .catch((error: unknown) => {
+      console.error('wemessage daemon: tick failed (loop continues):', error);
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+}, TICK_EVERY_MS);
+tickLoop.unref();
+
+const drainTick = async (): Promise<void> => {
+  const pending = inFlight;
+  if (pending === null) return;
+  let bound: NodeJS.Timeout | undefined;
+  await Promise.race([
+    pending,
+    new Promise<void>((resolve) => {
+      bound = setTimeout(resolve, TICK_DRAIN_MS);
+      bound.unref();
+    }),
+  ]);
+  clearTimeout(bound);
+};
+
 const shutdown = async (): Promise<void> => {
+  // The loop first, so no new tick starts against a store that is closing;
+  // then the tick already running, so a send in progress finishes its audit
+  // row instead of losing it to `daemon.stop()`.
+  clearInterval(tickLoop);
+  await drainTick();
   wake.stop();
   await daemon.stop();
   // Last, and after the server is down: while the lock is on disk this

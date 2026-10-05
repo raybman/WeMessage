@@ -44,7 +44,7 @@ function tempDir(): string {
 }
 
 async function boot(configDir: string): Promise<DaemonServer> {
-  const server = await buildServer({ configDir });
+  const server = await buildServer({ autonomy: 'live', configDir });
   servers.push(server);
   return server;
 }

@@ -220,7 +220,11 @@ async function world(opts: WorldOptions = {}): Promise<Harness> {
 }
 
 function arming(h: Harness): ArmingState {
-  return resolveArming({ store: h.store, clock: h.clockCtl.clock });
+  return resolveArming({
+    autonomy: 'live',
+    store: h.store,
+    clock: h.clockCtl.clock,
+  });
 }
 
 /**
@@ -293,6 +297,7 @@ function pending(h: Harness, ttlMinutes = 480): Draft {
 function auto(h: Harness, draftId: Ulid): Promise<'approved' | 'withheld'> {
   return maybeAutoApprove(
     {
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,
@@ -507,6 +512,7 @@ describe('s6 Sc11 row 3: pause suppresses autonomy only', () => {
     // wire and a draft still gets made.
     const frames: Array<{ type?: string }> = [];
     const dispatch = createInboundDispatch({
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,

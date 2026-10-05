@@ -230,6 +230,7 @@ export async function bootFixtureDaemon(
   };
   const broadcasts: BroadcastWitness[] = [];
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

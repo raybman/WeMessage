@@ -108,6 +108,7 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
     const store = openStore({ dir, clock });
     stores.push(store);
     const server = await buildServer({
+      autonomy: 'live',
       configDir: dir,
       rules: { store, clock },
       // s4 Scenario 5: the drafts block must be passed here or the ratchet

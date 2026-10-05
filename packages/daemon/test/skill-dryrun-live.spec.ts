@@ -151,6 +151,7 @@ async function boot(): Promise<Ctx> {
   const configDir = join(dir, 'config');
   const loopback = createLoopbackSendBackend(fixture, clock);
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

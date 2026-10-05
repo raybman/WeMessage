@@ -489,6 +489,7 @@ async function poll(
 /** The daemon's `deliver` in miniature, composed exactly as `daemon.ts` does. */
 function deliverer(h: AgentHarness): (message: Message) => Promise<void> {
   const dispatch = createInboundDispatch({
+    autonomy: 'live',
     store: h.store,
     clock: h.clockCtl.clock,
     sink: h.sink,
@@ -1734,9 +1735,10 @@ describe('s7 Scenario 13: the surface did not move', () => {
      * s10 Slice 2 moved the line (the ledger guard and late-verify import
      * sit above it), not the count: still one site, still the dispatcher.
      * s10 Slice 3 moved it again (the pre-gate service resolve), same count.
+     * v2 A0p moved it again (the parked auto-approval requeue), same count.
      */
     expect(sendBackendCallSites()).toEqual([
-      'packages/core/src/sending/dispatcher.ts:500',
+      'packages/core/src/sending/dispatcher.ts:515',
     ]);
   });
 

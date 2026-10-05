@@ -375,6 +375,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const backendCalls: string[] = [];
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({ draft: null, approval: null, calls, auditEvents }),
       reader: makeReader({ resolveChatResult: null, calls: [] }),
       backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
@@ -395,6 +396,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({ draft, approval, calls, auditEvents }),
       reader: makeReader({ resolveChatResult: null, calls: [] }),
       backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
@@ -424,6 +426,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const draft = makeDraft({ id: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({ draft, approval, calls, auditEvents }),
       reader: makeReader({ resolveChatResult: null, calls: [] }),
       backend: makeBackend({ result: { accepted: true }, calls: backendCalls }),
@@ -443,6 +446,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({
         draft,
         approval,
@@ -515,6 +519,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({
         draft,
         approval,
@@ -595,6 +600,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
         delayMs: 15,
       });
       const deps: DispatchApprovedDeps = {
+        autonomy: 'live',
         store,
         reader,
         backend,
@@ -648,6 +654,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({
         draft,
         approval,
@@ -700,6 +707,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
       const approval = makeApproval({ id: 'A1', draftId: 'D1' });
       const { clock, delay } = makeVirtualClock();
       const deps: DispatchApprovedDeps = {
+        autonomy: 'live',
         store: makeStore({
           draft,
           approval,
@@ -737,6 +745,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({
         draft,
         approval,
@@ -781,6 +790,7 @@ describe('dispatchApproved (s3 Scenario 6)', () => {
     const approval = makeApproval({ id: 'A1', draftId: 'D1' });
     const { clock, delay } = makeVirtualClock();
     const deps: DispatchApprovedDeps = {
+      autonomy: 'live',
       store: makeStore({
         draft,
         approval,
@@ -848,6 +858,7 @@ const LIVE_ADAPTER: AdapterRecord = {
 function baseDeps(over: Partial<DispatchApprovedDeps>): DispatchApprovedDeps {
   const { clock, delay } = makeVirtualClock();
   return {
+    autonomy: 'live',
     reader: makeReader({ resolveChatResult: null, calls: [] }),
     backend: makeBackend({ result: { accepted: true }, calls: [] }),
     clock,

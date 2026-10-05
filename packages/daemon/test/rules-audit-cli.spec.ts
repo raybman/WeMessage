@@ -142,6 +142,7 @@ async function boot(): Promise<Ctx> {
   // buildServer with rules (no injected sink) wires the REAL store-backed
   // audit sink (server.ts) — CLI rule ops append real §2.4.4 audit rows.
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     rules: { store, clock: clockCtl.clock },
   });

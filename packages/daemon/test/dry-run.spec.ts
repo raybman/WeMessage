@@ -82,7 +82,11 @@ async function boot(): Promise<Harness> {
   const clock = fixedClock();
   const store = openStore({ dir, clock });
   stores.push(store);
-  const server = await buildServer({ configDir: dir, rules: { store, clock } });
+  const server = await buildServer({
+    autonomy: 'live',
+    configDir: dir,
+    rules: { store, clock },
+  });
   servers.push(server);
   if (server.token === null) throw new Error('harness: no token');
   return {

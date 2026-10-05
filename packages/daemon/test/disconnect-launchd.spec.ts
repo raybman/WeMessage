@@ -621,6 +621,7 @@ describe('s9 Sc4 rows 12-13: the route fires phase B, and never waits for it', (
     const unloadErrors: unknown[] = [];
 
     const daemon = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock,

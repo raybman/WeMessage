@@ -94,6 +94,7 @@ async function boot(): Promise<Ctx> {
   fixture.addChat({ identifier: HANDLE, handleIds: [handleId] });
 
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir: join(dir, 'config'),
     chatDbPath,
     clock,

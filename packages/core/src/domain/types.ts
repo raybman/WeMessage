@@ -175,6 +175,20 @@ export type ConnectionState =
  * at all outranks a switch, which outranks a pause, which outranks a
  * schedule, which outranks a breaker.
  */
+/**
+ * v2 A0p (ruling 2026-10-05): is autonomy allowed to act at all in this
+ * process? Auto-send and schedules are PARKED, not deleted: the code stays
+ * compiled and tested, and every consumer reads an absent value as
+ * 'parked', so a call site nobody threaded is fail-closed by construction.
+ *
+ * This is never a setting, an env var, a route body or a CLI flag. The only
+ * production writer is the composition root, which passes 'parked'; 'live'
+ * exists so the specs that pin the autonomy machinery can still run it, and
+ * so the future slice that ships a UI for autonomy has a switch to throw in
+ * code (arch row "v2 A0p: no production file lifts the park").
+ */
+export type Autonomy = 'parked' | 'live';
+
 export type ArmingReason =
   | 'disconnected' | 'read-only' | 'unsupported'
   | 'kill-switch' | 'paused' | 'outside-window' | 'circuit-open'

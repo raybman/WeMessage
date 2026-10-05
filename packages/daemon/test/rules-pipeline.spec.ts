@@ -143,6 +143,7 @@ async function boot(opts?: {
   const chatId = fixture.addChat({ identifier: '+15550002222' });
   const watcher = fakeWatcher();
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

@@ -144,6 +144,7 @@ function hostile(over: Partial<Message> = {}): Message {
 /** The daemon's `deliver` in miniature — mirror, broadcast, then match. */
 function deliverer(h: AgentHarness): (message: Message) => Promise<void> {
   const dispatch = createInboundDispatch({
+    autonomy: 'live',
     store: h.store,
     clock: h.clockCtl.clock,
     sink: h.sink,

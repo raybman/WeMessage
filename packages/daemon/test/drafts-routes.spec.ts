@@ -85,6 +85,7 @@ async function boot(): Promise<Harness> {
   store.setSetting('connection.state', 'fully-connected');
   store.setSetting('send.globalMode', 'auto');
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     drafts: { store, clock: clockCtl.clock },
   });

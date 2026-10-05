@@ -250,6 +250,7 @@ function refusalOf(error: unknown): {
   const body = refusalBody(error);
   if (body === null) return { issues: [], reason: text };
   const named = body['error'];
+  if (named === 'parked') return { issues: [], reason: text };
   const reason = typeof named === 'string' ? named : text;
   const rows = asRecord(body['detail'])?.['issues'];
   if (!Array.isArray(rows)) return { issues: [], reason };

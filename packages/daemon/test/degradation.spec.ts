@@ -227,6 +227,7 @@ async function boot(backend: SendBackend): Promise<Ctx> {
   let sink!: ReturnType<typeof recordingAuditSink>;
 
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

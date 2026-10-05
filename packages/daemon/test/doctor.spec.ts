@@ -600,6 +600,7 @@ describe('startDaemon integration: probe-driven state reaches GET /v1/status + t
       messagesRunning: async () => true,
     };
     const daemon = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock: fixedClock,
@@ -658,6 +659,7 @@ describe('GET /v1/doctor (s3-execution Scenario 8, §1.6 route): thin wrapper ov
     const store = openStore({ dir, clock: fixedClock });
     stores.push(store);
     const server = await buildServer({
+      autonomy: 'live',
       configDir: dir,
       send: {
         store,
@@ -730,6 +732,7 @@ describe('GET /v1/doctor (s3-execution Scenario 8, §1.6 route): thin wrapper ov
     stores.push(store);
     chmodSync(configDir, 0o500); // unwritable: first-run token generation must fail
     const server = await buildServer({
+      autonomy: 'live',
       configDir,
       send: {
         store,

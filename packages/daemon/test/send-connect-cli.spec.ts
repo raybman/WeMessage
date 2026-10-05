@@ -134,6 +134,7 @@ async function boot(): Promise<Ctx> {
   const backend = createLoopbackSendBackend(fixture, clock);
 
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

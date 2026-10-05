@@ -291,6 +291,7 @@ function pending(h: Harness, opts: PendingOptions = {}): Draft {
 function auto(h: Harness, draftId: Ulid): Promise<'approved' | 'withheld'> {
   return maybeAutoApprove(
     {
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,
@@ -727,6 +728,7 @@ describe('s6 Sc10 row 7: ignore drops, draft-only waits (Sc 5, re-asserted compo
     h.store.setSetting(SETTING_GLOBAL_MODE, 'auto');
 
     const dispatch = createInboundDispatch({
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,

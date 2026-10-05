@@ -62,6 +62,7 @@ import {
   SETTING_GLOBAL_MODE,
   SETTING_KILL_SWITCH,
   systemActor,
+  type Autonomy,
   type Clock,
   type IsoUtc,
   type Store,
@@ -69,11 +70,14 @@ import {
 import type { AuditSink } from '../audit-sink.js';
 import { closeCircuit } from '../circuit.js';
 import { armedWindowClose, setPause, sweepArming } from '../arming.js';
+import { isParked, refuseParked } from '../park.js';
 
 export interface ToggleRouteDeps {
   store: Store;
   clock: Clock;
   sink: Pick<AuditSink, 'append' | 'broadcast'>;
+  /** v2 A0p: absent means parked. */
+  autonomy?: Autonomy;
 }
 
 /**
@@ -121,7 +125,7 @@ const globalModeBody = z.strictObject({
  */
 function resolveDeadline(
   raw: string,
-  deps: { store: Store; clock: Clock },
+  deps: { store: Store; clock: Clock; autonomy?: Autonomy },
 ): { ok: true; until: IsoUtc } | { ok: false; code: 'not-armed' | 'invalid' } {
   const now = deps.clock.now();
   const nowMs = Date.parse(now);
@@ -153,6 +157,13 @@ export function registerToggleRoutes(
 ): void {
   const { store, clock, sink } = deps;
   const actor = humanApiActor();
+  // Every posture this route reports is read with the same park.
+  const arming = {
+    store,
+    clock,
+    sink,
+    ...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
+  };
 
   app.post('/v1/toggles/kill-switch', async (req, reply) => {
     const parsed = toggleBody.safeParse(req.body);
@@ -230,11 +241,11 @@ export function registerToggleRoutes(
       return reply.send({
         key: 'pause',
         until: null,
-        armed: setPause({ store, clock, sink }, null),
+        armed: setPause(arming, null),
       });
     }
 
-    const resolved = resolveDeadline(raw, { store, clock });
+    const resolved = resolveDeadline(raw, arming);
     if (!resolved.ok) {
       // 409, not 400: `rest-of-window` is a perfectly well-formed request
       // that this daemon's current state cannot satisfy, and telling an
@@ -250,7 +261,7 @@ export function registerToggleRoutes(
     return reply.send({
       key: 'pause',
       until: resolved.until,
-      armed: setPause({ store, clock, sink }, resolved.until),
+      armed: setPause(arming, resolved.until),
     });
   });
 
@@ -263,6 +274,8 @@ export function registerToggleRoutes(
       });
     }
     const { mode } = parsed.data;
+    // v2 A0p: 'draft-only' is always allowed; 'auto' is parked.
+    if (mode === 'auto' && isParked(deps.autonomy)) return refuseParked(reply);
     store.setSetting(SETTING_GLOBAL_MODE, mode);
     sink.append({ type: 'arming.mode-changed', mode }, actor);
 
@@ -274,7 +287,7 @@ export function registerToggleRoutes(
     return reply.send({
       key: SETTING_GLOBAL_MODE,
       mode,
-      armed: sweepArming({ store, clock, sink }, { alwaysBroadcast: true }),
+      armed: sweepArming(arming, { alwaysBroadcast: true }),
     });
   });
 }

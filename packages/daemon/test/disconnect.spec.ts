@@ -373,6 +373,7 @@ async function boot(): Promise<Ctx> {
 
   const watcher = fakeWatcher();
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,
@@ -489,6 +490,7 @@ describe('POST /v1/disconnect — row 2: state persisted, fail-closed, survives 
 
     const watcher2 = fakeWatcher();
     const daemon2 = await startDaemon({
+      autonomy: 'live',
       configDir: ctx.configDir,
       chatDbPath: ctx.chatDbPath,
       clock,

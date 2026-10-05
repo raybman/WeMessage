@@ -132,23 +132,27 @@ function exitFor(error: unknown): never {
       id,
     } = error.detail;
     fail(
-      kind === 'retry-limit'
-        ? `retry limit reached after ${String(attempts ?? 0)} attempt(s)`
-        : // s5 Sc11: the adapter registry's two 409s. Naming the rules that
-          // block a delete is the entire actionable content of that refusal.
-          // s6 Sc12. `not-armed` is not a draft transition and must not be
-          // rendered as one: `rest-of-window` asked for a horizon this
-          // daemon's schedule does not have, so the message points at the
-          // schedule rather than at the word the operator typed.
-          kind === 'not-armed'
-          ? 'not-armed: nothing to rest out — no enabled rule has a window open right now (see `wemessage windows list`)'
-          : kind === 'schedule-in-use'
-            ? 'schedule-in-use: a rule still points at this window — repoint or delete the rule first (see `wemessage rules list`)'
-            : kind === 'adapter-referenced'
-              ? `adapter-referenced: still used by rule(s) ${(ruleIds ?? []).join(', ')} — delete or repoint them first`
-              : kind === 'adapter-exists'
-                ? `adapter-exists: an adapter with id "${String(id)}" already exists`
-                : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
+      // v2 A0p. The daemon refused before writing anything, and the CLI has
+      // no way to lift the park, so the message says both and points nowhere.
+      kind === 'parked'
+        ? 'parked: auto-send and schedules are parked in this build; nothing changed'
+        : kind === 'retry-limit'
+          ? `retry limit reached after ${String(attempts ?? 0)} attempt(s)`
+          : // s5 Sc11: the adapter registry's two 409s. Naming the rules that
+            // block a delete is the entire actionable content of that refusal.
+            // s6 Sc12. `not-armed` is not a draft transition and must not be
+            // rendered as one: `rest-of-window` asked for a horizon this
+            // daemon's schedule does not have, so the message points at the
+            // schedule rather than at the word the operator typed.
+            kind === 'not-armed'
+            ? 'not-armed: nothing to rest out — no enabled rule has a window open right now (see `wemessage windows list`)'
+            : kind === 'schedule-in-use'
+              ? 'schedule-in-use: a rule still points at this window — repoint or delete the rule first (see `wemessage rules list`)'
+              : kind === 'adapter-referenced'
+                ? `adapter-referenced: still used by rule(s) ${(ruleIds ?? []).join(', ')} — delete or repoint them first`
+                : kind === 'adapter-exists'
+                  ? `adapter-exists: an adapter with id "${String(id)}" already exists`
+                  : `${kind}: draft is ${String(from)}, cannot ${String(requested)}`,
       EXIT_FAILED,
     );
   }

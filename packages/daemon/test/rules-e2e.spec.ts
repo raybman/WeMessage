@@ -170,6 +170,7 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
     const clockCtl = fakeClock();
     const watcher1 = fakeWatcher();
     const daemon1 = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock: clockCtl.clock,
@@ -384,6 +385,7 @@ describe('S2 end-to-end: the demo in test form (Scenario 12)', () => {
 
     const watcher2 = fakeWatcher();
     const daemon2 = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock: clockCtl.clock,

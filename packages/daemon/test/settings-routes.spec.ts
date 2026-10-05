@@ -519,6 +519,7 @@ describe('s7 Sc4 row 9: the cap the route wrote is the cap the gate reads', () =
     h.store.setSetting(SETTING_GLOBAL_MODE, 'auto');
 
     const dispatch = createInboundDispatch({
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,

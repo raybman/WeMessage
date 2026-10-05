@@ -97,6 +97,7 @@ async function boot(
   spy: Spy,
 ): Promise<RunningDaemon> {
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir: b.configDir,
     chatDbPath: b.chatDbPath,
     clock,

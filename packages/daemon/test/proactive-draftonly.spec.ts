@@ -118,6 +118,7 @@ function auto(
 ): Promise<'approved' | 'withheld'> {
   return maybeAutoApprove(
     {
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,

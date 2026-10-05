@@ -40,7 +40,7 @@
  *
  * The tick is idempotent by construction: both sweeps transition rows OUT of
  * the states they select on, so a redundant tick finds nothing. It is also
- * re-entrant-unsafe by design — `runTick` guards against overlap rather than
+ * re-entrant-unsafe by design, so `tick` guards against overlap rather than
  * interleaving two sweeps, because interleaving is how a draft gets sent
  * twice.
  */
@@ -50,6 +50,7 @@ import {
   type DraftError,
   type LateVerifyResult,
   type MessageGuid,
+  type Autonomy,
   type Store,
   type Ulid,
 } from '@wemessage/core';
@@ -106,6 +107,13 @@ export interface SchedulerDeps {
    * landed, and this file never holds a chat.db reader.
    */
   lateVerify?: (draftId: Ulid) => Promise<LateVerifyResult>;
+  /**
+   * v2 A0p. Read by the arming sweep only: a parked daemon announces the
+   * shut posture. The grace sweep needs nothing from it, because the park is
+   * enforced where an auto approval would be honoured (`dispatchApproved`),
+   * so a sweep that hands one over gets a requeue back. Absent = parked.
+   */
+  autonomy?: Autonomy;
 }
 
 /** s10 Slice 2: the sweep looks at most this often... */
@@ -259,7 +267,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         // sweep that ran first would announce a state that was already stale
         // by the end of the same tick. On-change only: twenty ticks inside
         // one window write one audit row, not twenty.
-        sweepArming({ store, clock, sink });
+        sweepArming({
+          store,
+          clock,
+          sink,
+          ...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
+        });
         const now = clock.now();
         sweepExpired(now);
         await sweepGrace(now);

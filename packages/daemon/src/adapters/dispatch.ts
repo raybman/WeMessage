@@ -59,6 +59,7 @@
  */
 import { ulid } from 'ulid';
 import type {
+  Autonomy,
   ChatDbReader,
   Clock,
   GateDenyReason,
@@ -74,6 +75,7 @@ import {
   readGateSettings,
   systemActor,
 } from '@wemessage/core';
+import { isParked } from '../park.js';
 import {
   WIRE_VERSION,
   type ConversationTurn,
@@ -114,6 +116,12 @@ export interface InboundDispatchDeps {
   issueRequest?: (req: IssuedRequest) => void;
   /** Test seam for the correlation id; production mints a real ulid. */
   newRequestId?: () => string;
+  /**
+   * v2 A0p. While parked nothing this request produces can send itself, so
+   * the agent is told 'draft-only' (F-60: the resolved mode, never the
+   * declared one). Absent = parked.
+   */
+  autonomy?: Autonomy;
 }
 
 /**
@@ -253,7 +261,11 @@ export function createRequestSender(deps: InboundDispatchDeps): RequestSender {
         // to 'auto' whose contact is 'draft-only', or whose window is shut,
         // cannot auto-send; telling the agent 'auto' would be telling it
         // something false about its own draft's future.
-        rule: { id: rule.id, name: rule.name, respondMode: decision.mode },
+        rule: {
+          id: rule.id,
+          name: rule.name,
+          respondMode: isParked(deps.autonomy) ? 'draft-only' : decision.mode,
+        },
         constraints: {
           maxChars: DRAFT_REQUEST_CONSTRAINTS.maxChars,
           deadlineMs: DRAFT_REQUEST_CONSTRAINTS.deadlineMs,

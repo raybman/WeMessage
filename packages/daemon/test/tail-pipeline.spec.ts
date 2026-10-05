@@ -136,6 +136,7 @@ async function boot(): Promise<Ctx> {
 
   const watcher = fakeWatcher();
   const daemon = await startDaemon({
+    autonomy: 'live',
     configDir,
     chatDbPath,
     clock,

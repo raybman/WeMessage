@@ -26,16 +26,20 @@ import { z } from 'zod';
 import {
   humanApiActor,
   normalizeHandle,
+  type Autonomy,
   type Clock,
   type ContactMode,
   type Store,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
+import { isParked, refuseParked } from '../park.js';
 
 export interface ContactRouteDeps {
   store: Store;
   clock: Clock;
   sink: Pick<AuditSink, 'append'>;
+  /** v2 A0p: absent means parked. */
+  autonomy?: Autonomy;
 }
 
 const putBody = z.strictObject({
@@ -63,6 +67,10 @@ export function registerContactRoutes(
           error: 'invalid-contact-policy',
           detail: { issues: parsed.error.issues },
         });
+      }
+      // v2 A0p: deny and draft-only always; auto is parked.
+      if (parsed.data.mode === 'auto' && isParked(deps.autonomy)) {
+        return refuseParked(reply);
       }
       const handle = normalizeHandle(decodeURIComponent(req.params.handle));
       const previous = store.getContactPolicy(handle);

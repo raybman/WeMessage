@@ -34,16 +34,20 @@ import {
   validateTimezone,
   validateWindow,
   type AuditEvent,
+  type Autonomy,
   type Schedule,
   type ScheduleWindow,
   type Store,
   type Weekday,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
+import { isParked, refuseParked, schedulePatchArms } from '../park.js';
 
 export interface ScheduleRouteDeps {
   store: Store;
   sink: AuditSink;
+  /** v2 A0p: absent means parked. */
+  autonomy?: Autonomy;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +170,8 @@ export function registerScheduleRoutes(
       parsed.data.windows,
     );
     if (rejection !== null) return reply.code(400).send(rejection);
+    // v2 A0p: a schedule only exists to arm autonomy, so none is created.
+    if (isParked(deps.autonomy)) return refuseParked(reply);
     const schedule: Schedule = {
       ...parsed.data,
       windows: canonicalWindows(parsed.data.windows),
@@ -202,6 +208,10 @@ export function registerScheduleRoutes(
     ) as Partial<Schedule>;
     const rejection = validateSchedule(patch.timezone, patch.windows);
     if (rejection !== null) return reply.code(400).send(rejection);
+    // v2 A0p: rename and disable only.
+    if (isParked(deps.autonomy) && schedulePatchArms(patch)) {
+      return refuseParked(reply);
+    }
     const updated: Schedule = {
       ...existing,
       ...patch,

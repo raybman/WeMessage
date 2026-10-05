@@ -90,6 +90,7 @@ async function boot(): Promise<Harness> {
   const store = openStore({ dir, clock: clockCtl.clock });
   stores.push(store);
   const server = await buildServer({
+    autonomy: 'live',
     configDir: dir,
     rules: { store, clock: clockCtl.clock },
   });

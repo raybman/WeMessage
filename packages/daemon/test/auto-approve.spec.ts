@@ -279,6 +279,7 @@ function pending(h: Harness, opts: PendingOptions = {}): Draft {
 function auto(h: Harness, draftId: Ulid): Promise<'approved' | 'withheld'> {
   return maybeAutoApprove(
     {
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,
@@ -1110,6 +1111,7 @@ describe('s6 Sc9: the ONE call site is `adapters/submit.ts`', () => {
 
     // The daemon's own `deliver`, composed exactly as `daemon.ts` composes it.
     const dispatch = createInboundDispatch({
+      autonomy: 'live',
       store: h.store,
       clock: h.clockCtl.clock,
       sink: h.sink,
@@ -1169,5 +1171,35 @@ describe('s6 Sc9: the ONE call site is `adapters/submit.ts`', () => {
     await h.scheduler.tick();
     expect(h.store.getDraft(draft.id)?.state).toBe('sent');
     expect(h.backend.callCount()).toBe(1);
+  });
+});
+
+// --- v2 A0p: the park ------------------------------------------------------
+
+describe('v2 A0p: a parked daemon never auto-approves', () => {
+  it('the fully armed ladder still withholds when autonomy is absent', async () => {
+    const h = await armed();
+    capsOutOfTheWay(h);
+    const draft = pending(h);
+    // The gate itself would allow it: the park is the only thing in the way.
+    expect(decisionFor(h, draft)).toEqual({ allow: true, mode: 'auto' });
+
+    const parked = await maybeAutoApprove(
+      {
+        store: h.store,
+        clock: h.clockCtl.clock,
+        sink: h.sink,
+        newId: () => newUlid(Date.parse(h.clockCtl.clock.now())) as Ulid,
+      },
+      draft.id,
+    );
+    expect(parked).toBe('withheld');
+    expect(h.store.getDraft(draft.id)?.state).toBe('pending');
+    expect(approvals(h, draft.id)).toEqual([]);
+    expect(autoRows(h)).toEqual([]);
+
+    // And the same draft, same ladder, with the park lifted, does approve:
+    // the row above is attributable to the park and nothing else.
+    expect(await auto(h, draft.id)).toBe('approved');
   });
 });

@@ -257,6 +257,7 @@ describe('S3 end-to-end: fresh Mac to fully-connected to send to restart to fail
     const watcher1 = fakeWatcher();
 
     const daemon1 = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock: clockCtl.clock,
@@ -379,6 +380,7 @@ describe('S3 end-to-end: fresh Mac to fully-connected to send to restart to fail
 
     const watcher2 = fakeWatcher();
     const daemon2 = await startDaemon({
+      autonomy: 'live',
       configDir,
       chatDbPath,
       clock: clockCtl.clock,

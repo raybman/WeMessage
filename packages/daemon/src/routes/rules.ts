@@ -43,6 +43,7 @@ import {
   humanApiActor,
   validateSafeRegex,
   type AuditEvent,
+  type Autonomy,
   type Clock,
   type Message,
   type Rule,
@@ -50,11 +51,19 @@ import {
   type Store,
 } from '@wemessage/core';
 import type { AuditSink } from '../audit-sink.js';
+import {
+  isParked,
+  refuseParked,
+  ruleCreateArms,
+  rulePatchArms,
+} from '../park.js';
 
 export interface RuleRouteDeps {
   store: Store;
   clock: Clock;
   sink: AuditSink;
+  /** v2 A0p: absent means parked. */
+  autonomy?: Autonomy;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +299,10 @@ export function registerRuleRoutes(
         detail: { code: 'schedule-not-found' },
       });
     }
+    // v2 A0p: refused after validation, before any write.
+    if (isParked(deps.autonomy) && ruleCreateArms(parsed.data)) {
+      return refuseParked(reply);
+    }
     const now = clock.now();
     const rule: Rule = {
       ...parsed.data,
@@ -356,6 +369,10 @@ export function registerRuleRoutes(
       createdAt: existing.createdAt,
       updatedAt: clock.now(),
     };
+    // v2 A0p: escalation toward autonomy is refused; de-escalation is not.
+    if (isParked(deps.autonomy) && rulePatchArms(existing, updated)) {
+      return refuseParked(reply);
+    }
     store.updateRule(updated);
     const changed = (Object.keys(patch) as Array<keyof Rule>).filter(
       (key) => JSON.stringify(existing[key]) !== JSON.stringify(updated[key]),

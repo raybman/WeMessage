@@ -160,6 +160,7 @@ function inbound(h: Harness, over: Partial<Message> = {}): Message {
 /** The Sc 6 inbound pipeline in miniature, wired to the request registry. */
 function deliverer(h: AgentHarness): (message: Message) => Promise<void> {
   const dispatch = createInboundDispatch({
+    autonomy: 'live',
     store: h.store,
     clock: h.clockCtl.clock,
     sink: h.sink,
@@ -482,6 +483,7 @@ describe('s8 Sc3 row 4: a hold taken during the grace broadcasts draft.requeued'
     expect(
       await maybeAutoApprove(
         {
+          autonomy: 'live',
           store: h.store,
           clock: h.clockCtl.clock,
           sink: h.sink,

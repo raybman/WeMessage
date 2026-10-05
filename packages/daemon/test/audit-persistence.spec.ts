@@ -107,6 +107,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
     const draftId = '01TESTDRAFTAUDITPERSIST001';
     const seeded = seed((store) => seedSendingDraft(store, draftId));
     const daemon = await startDaemon({
+      autonomy: 'live',
       ...seeded,
       clock,
       watcher: idleWatcher,
@@ -142,6 +143,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       });
     });
     const daemon = await startDaemon({
+      autonomy: 'live',
       ...seeded,
       clock,
       watcher: idleWatcher,
@@ -178,6 +180,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
       },
     };
     const daemon = await startDaemon({
+      autonomy: 'live',
       ...seeded,
       clock,
       watcher,
@@ -210,6 +213,7 @@ describe('S1 recovery trails persisted to audit_log (phase 1, §2.5)', () => {
   it('a clean boot (nothing to recover) appends zero recovery rows', async () => {
     const seeded = seed();
     const daemon = await startDaemon({
+      autonomy: 'live',
       ...seeded,
       clock,
       watcher: idleWatcher,

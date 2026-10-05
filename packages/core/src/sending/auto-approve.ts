@@ -44,6 +44,7 @@
  */
 import type {
   Actor,
+  Autonomy,
   ContactPolicy,
   Rule,
   Schedule,
@@ -133,6 +134,12 @@ export interface AutoApproveDeps {
    * two approvals written in the same millisecond order arbitrarily.
    */
   newId(): Ulid;
+  /**
+   * v2 A0p. Absent means 'parked': the decision is withheld before a single
+   * row is read or written, so a parked draft spends no rate budget, writes
+   * no `auto.approved` row and simply stays in the human queue.
+   */
+  autonomy?: Autonomy;
 }
 
 /** The system actor autonomy wears. The one mint site (F-74, S6 row (a)). */
@@ -167,6 +174,8 @@ export function maybeAutoApprove(
 
 function decide(deps: AutoApproveDeps, draftId: Ulid): 'approved' | 'withheld' {
   const { store, clock, sink } = deps;
+  // v2 A0p: first, before any read. Parked autonomy decides nothing.
+  if ((deps.autonomy ?? 'parked') !== 'live') return 'withheld';
   const now = clock.now();
 
   const draft = store.getDraft(draftId);

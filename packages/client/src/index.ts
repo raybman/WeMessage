@@ -138,6 +138,20 @@ export class DaemonSourceUnavailableError extends DaemonRequestError {
   }
 }
 
+/**
+ * v2 A2: `GET /v1/threads/:guid/messages` was asked for a chat its source
+ * has never seen. A 404 that names itself, `{error:'unknown-chat'}`
+ * exactly, so a caller can tell "that conversation is gone" from "there is
+ * no such route" (an older daemon) without reading prose. Every other 404
+ * stays a plain `DaemonRequestError`.
+ */
+export class DaemonUnknownChatError extends DaemonRequestError {
+  constructor() {
+    super(404, JSON.stringify({ error: 'unknown-chat' }));
+    this.name = 'DaemonUnknownChatError';
+  }
+}
+
 /** Read the daemon token from the config dir; null when absent (§2.6). */
 export function readTokenFile(configDir: string): string | null {
   try {
@@ -846,6 +860,30 @@ function asSettingsRefusal(err: unknown): unknown {
 }
 
 /**
+ * Promote a 404 to `DaemonUnknownChatError` when, and only when, the body is
+ * exactly `{error:'unknown-chat'}`. Any other error is returned untouched.
+ */
+function asUnknownChat(err: unknown): unknown {
+  if (!(err instanceof DaemonRequestError) || err.statusCode !== 404) {
+    return err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.body);
+  } catch {
+    return err;
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    (parsed as { error?: unknown }).error !== 'unknown-chat'
+  ) {
+    return err;
+  }
+  return new DaemonUnknownChatError();
+}
+
+/**
  * s5 adapter-registry DTOs (Scenario 11) — client-local, same "no
  * @wemessage/core dep" convention as every DTO above; mirrors
  * `AdapterRecord` in packages/core/src/domain/types.ts.
@@ -931,6 +969,54 @@ export interface ThreadsPage {
   total: number;
   /** ISO-8601 UTC: when the daemon read the list. */
   asOf: string;
+}
+
+/**
+ * v2 A2: `GET /v1/threads/:guid/messages`, one page of one conversation
+ * (route ratchet #27). Client-local, mirroring the daemon's wire turn.
+ */
+
+/** What a turn carries: words, only attachments, or a voice note. */
+export type ThreadTurnKind = 'text' | 'attachment-only' | 'audio';
+
+/** One message in a transcript. Reactions and group events are not turns. */
+export interface ThreadTurn {
+  guid: string;
+  from: 'me' | 'them';
+  kind: ThreadTurnKind;
+  /** The latest text (an edit's newest revision); null when unsent or none. */
+  text: string | null;
+  /** ISO-8601 UTC: when it was sent. */
+  at: string;
+  /** Who sent it, for a turn from someone else when the source knows. */
+  handle?: string;
+  /** ISO-8601 UTC, present when the sender edited it. */
+  editedAt?: string;
+  /** ISO-8601 UTC, present when the sender unsent it; `text` is then null. */
+  unsentAt?: string;
+  /** How many attachments it carries. Counted, never opened. */
+  attachments: number;
+}
+
+/** One page, oldest turn first, dated by the daemon's clock. */
+export interface ThreadMessagesPage {
+  chatGuid: string;
+  channel: ThreadChannel;
+  turns: ThreadTurn[];
+  /** Pass back as `before` for the page older than this one. Null at the start. */
+  nextBefore: string | null;
+  /** ISO-8601 UTC: when the daemon read the page. */
+  asOf: string;
+}
+
+/** `before` and `until` are mutually exclusive; the daemon 400s on both. */
+export interface ThreadMessagesParams {
+  /** 1..200; the daemon defaults to 50. */
+  limit?: number;
+  /** A `nextBefore`, verbatim. Opaque: never build or edit one. */
+  before?: string;
+  /** ISO-8601 with offset: the newest turn at or before this instant. */
+  until?: string;
 }
 
 export interface ThreadListParams {
@@ -1071,6 +1157,18 @@ export interface WeMessageClient {
    * not mint.
    */
   listThreads(params?: ThreadListParams): Promise<ThreadsPage>;
+
+  /**
+   * v2 A2: one page of one conversation, newest page first, turns oldest
+   * first. A read only. Rejects with `DaemonUnknownChatError` for a chat
+   * the source has never seen, `DaemonSourceUnavailableError` when the
+   * source is down, and a 400 `DaemonRequestError` for a cursor the daemon
+   * did not mint or for `before` and `until` together.
+   */
+  readThread(
+    chatGuid: string,
+    params?: ThreadMessagesParams,
+  ): Promise<ThreadMessagesPage>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -1363,6 +1461,23 @@ export function createClient(options: ClientOptions): WeMessageClient {
       return get(
         `/v1/threads${suffix.length > 0 ? `?${suffix}` : ''}`,
       ) as Promise<ThreadsPage>;
+    },
+
+    readThread: async (chatGuid, params) => {
+      const qs = new URLSearchParams();
+      if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+      if (params?.before !== undefined) qs.set('before', params.before);
+      if (params?.until !== undefined) qs.set('until', params.until);
+      const suffix = qs.toString();
+      // One path segment, whatever the guid holds: `;`, `+`, `/`, `?`, `#`.
+      const path = `/v1/threads/${encodeURIComponent(chatGuid)}/messages`;
+      try {
+        return (await get(
+          `${path}${suffix.length > 0 ? `?${suffix}` : ''}`,
+        )) as ThreadMessagesPage;
+      } catch (err) {
+        throw asUnknownChat(err);
+      }
     },
 
     events(onEvent, opts) {

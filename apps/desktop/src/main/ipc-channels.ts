@@ -91,6 +91,15 @@ export const CHANNELS = {
    * renderer cannot ask for more rows than the daemon chose to serve.
    */
   threads: 'wm:threads',
+  /**
+   * v2 A2: one page of one conversation, `GET /v1/threads/:guid/messages`.
+   * A read and only a read. Takes the chat guid and, optionally, ONE of
+   * `{before}` (the `nextBefore` of the page after it, verbatim) or
+   * `{until}` (an instant, for the date jump). There is no `limit`: the page
+   * size is the route's default, so the renderer cannot ask for a whole
+   * history in one request.
+   */
+  transcript: 'wm:transcript',
 
   // ---- main -> renderer (webContents.send) ------------------------------
   /**

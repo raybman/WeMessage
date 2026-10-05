@@ -127,6 +127,11 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
               'listChats must not be called: route-table test only',
             );
           },
+          readChatPage: () => {
+            throw new Error(
+              'readChatPage must not be called: route-table test only',
+            );
+          },
         },
         clock,
       },

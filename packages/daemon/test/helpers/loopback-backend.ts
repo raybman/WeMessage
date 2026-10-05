@@ -133,5 +133,7 @@ export function createUnusedChatDbReader(): ChatDbReader {
     readChatTurns: boom,
     // v2 A1: the conversations list. Unused here for the same reason.
     listChats: boom,
+    // v2 A2: one conversation's history. Unused here for the same reason.
+    readChatPage: boom,
   };
 }

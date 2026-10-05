@@ -25,9 +25,14 @@ import type {
   MessageGuid,
   MutatedMessage,
   Service,
+  TranscriptTurn,
+  TurnKind,
+  TurnsPage,
+  TurnsQuery,
 } from '@wemessage/core';
 import {
   InvalidCursorError,
+  UnknownChatError,
   normalizeHandle,
   parseChatGuid,
 } from '@wemessage/core';
@@ -292,6 +297,78 @@ const LIST_CHATS_SQL = `
   ORDER BY p.lastDate DESC, p.chatRowid DESC
 `;
 
+/** SECONDS_ERA_LIMIT as a SQL literal (see below). */
+const SECONDS_ERA_LIMIT_SQL = '100000000000';
+
+/** v2 A2: a chat's ROWID by its guid, or nothing for a chat never seen. */
+const CHAT_ROWID_SQL = `SELECT ROWID AS chatRowid FROM chat WHERE guid = ?`;
+
+/**
+ * readChatPage (v2 A2): one page of one conversation, newest first.
+ *
+ * A turn is a message somebody said: not a reaction (the same tapback test
+ * listChats and normalizeRow apply) and not a group event such as a rename
+ * (\`item_type != 0\`). Paging is keyset on (date DESC, message ROWID DESC)
+ * over the chat's own join rows, the way LIST_CHATS_SQL pages chats, so a
+ * boundary inside a tie neither repeats a turn nor skips one and a message
+ * arriving mid-walk never shifts an older page. The date is clamped once
+ * (NULL or negative sorts as 0) and that one expression orders, filters,
+ * dates the turn and mints the cursor.
+ *
+ * \`until\` compares RAW, per era: a seconds-era row against the instant in
+ * seconds, a nanosecond-era row against it in nanoseconds. Every
+ * seconds-era value is below every nanosecond-era one, so the ordering is
+ * chronological across the two.
+ *
+ * Attachments are counted, never opened.
+ */
+const CHAT_PAGE_SQL = `
+  SELECT
+    p.rowid                    AS rowid,
+    p.d                        AS d,
+    m.guid                     AS guid,
+    m.text                     AS text,
+    m.attributedBody           AS attributedBody,
+    m.date_edited              AS dateEdited,
+    m.date_retracted           AS dateRetracted,
+    m.is_from_me               AS isFromMe,
+    m.is_audio_message         AS isAudioMessage,
+    m.message_summary_info     AS summaryInfo,
+    h.id                       AS handle,
+    (SELECT COUNT(*)
+       FROM message_attachment_join maj
+      WHERE maj.message_id = p.rowid) AS attachments
+  FROM (
+    SELECT
+      cmj.message_id AS rowid,
+      MAX(COALESCE(cmj.message_date, 0), 0) AS d
+    FROM chat_message_join cmj
+    JOIN message m ON m.ROWID = cmj.message_id
+    WHERE cmj.chat_id = @chatRowid
+      AND m.item_type = 0
+      AND NOT (m.associated_message_guid IS NOT NULL
+               AND m.associated_message_type != 0)
+  ) p
+  JOIN message m ON m.ROWID = p.rowid
+  LEFT JOIN handle h ON h.ROWID = m.handle_id
+  WHERE (@beforeDate IS NULL
+         OR p.d < @beforeDate
+         OR (p.d = @beforeDate AND p.rowid < @beforeRowid))
+    AND (@untilNs IS NULL
+         OR (p.d < ${SECONDS_ERA_LIMIT_SQL} AND p.d <= @untilSeconds)
+         OR (p.d >= ${SECONDS_ERA_LIMIT_SQL} AND p.d <= @untilNs))
+  ORDER BY p.d DESC, p.rowid DESC
+  LIMIT @limit
+`;
+
+/** The most turns one transcript page holds, whatever the caller asks for. */
+const CHAT_PAGE_MAX = 200;
+/**
+ * A transcript cursor's decoded form. The leading \`t.\` keeps it from ever
+ * reading as a conversations-list cursor, and the reverse.
+ */
+const TURN_CURSOR_RE = /^t\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
 /** The most rows one page holds, whatever the caller asks for. */
 const LIST_CHATS_MAX = 200;
 /** SQLite INTEGER is a signed 64-bit value; a cursor beyond it was not minted. */
@@ -359,6 +436,100 @@ function readCursor(cursor: string): { lastDate: bigint; chatRowid: bigint } {
     throw new InvalidCursorError();
   }
   return { lastDate, chatRowid };
+}
+
+/** The opaque transcript cursor for "every turn older than this one". */
+function mintTurnCursor(date: bigint, rowid: bigint): string {
+  return Buffer.from(
+    `t.${date.toString()}.${rowid.toString()}`,
+    'utf8',
+  ).toString('base64url');
+}
+
+/**
+ * The keyset a transcript cursor stands for, or an \`InvalidCursorError\`.
+ * Same strictness as \`readCursor\`: only the exact bytes
+ * \`mintTurnCursor\` writes are accepted.
+ */
+function readTurnCursor(cursor: string): { date: bigint; rowid: bigint } {
+  const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+  if (
+    cursor.length === 0 ||
+    Buffer.from(decoded, 'utf8').toString('base64url') !== cursor
+  ) {
+    throw new InvalidCursorError();
+  }
+  const m = TURN_CURSOR_RE.exec(decoded);
+  if (m === null) throw new InvalidCursorError();
+  const date = BigInt(m[1] ?? '');
+  const rowid = BigInt(m[2] ?? '');
+  if (date > INT64_MAX || rowid > INT64_MAX) throw new InvalidCursorError();
+  return { date, rowid };
+}
+
+interface ChatPageDbRow {
+  rowid: bigint;
+  d: bigint;
+  guid: string;
+  text: string | null;
+  attributedBody: Uint8Array | null;
+  dateEdited: bigint | null;
+  dateRetracted: bigint | null;
+  isFromMe: bigint | null;
+  isAudioMessage: bigint | null;
+  summaryInfo: Uint8Array | null;
+  handle: string | null;
+  attachments: bigint;
+}
+
+/**
+ * One transcript turn from one row. The text is read the way normalizeRow
+ * reads it (text column, else the decoded attributedBody, an edit's newest
+ * revision when its summary decodes, nothing for an unsend), then the
+ * attachment placeholder is dropped and the ends trimmed. A row that fails
+ * to decode is no text: it is NOT reported, because a page view is a read
+ * and the decode-failure sink writes audit rows.
+ */
+function turnOf(r: ChatPageDbRow): TranscriptTurn {
+  const unsent = (r.dateRetracted ?? 0n) > 0n;
+  const edited = (r.dateEdited ?? 0n) > 0n;
+  let text: string | null = null;
+  if (!unsent) {
+    text = r.text;
+    if (text === null && r.attributedBody !== null) {
+      const decoded = decodeTypedstreamText(r.attributedBody);
+      if (decoded.ok) text = decoded.text;
+    }
+    if (edited && r.summaryInfo !== null) {
+      const latest = decodeSummaryInfoLatestText(r.summaryInfo);
+      if (latest.ok) text = latest.text;
+    }
+    if (text !== null) {
+      const line = text.replace(OBJECT_REPLACEMENT, '').trim();
+      text = line.length > 0 ? line : null;
+    }
+  }
+  const attachments = Number(r.attachments);
+  const fromMe = r.isFromMe === 1n;
+  const kind: TurnKind =
+    r.isAudioMessage === 1n
+      ? 'audio'
+      : text === null && !unsent && attachments > 0
+        ? 'attachment-only'
+        : 'text';
+  return {
+    guid: r.guid,
+    from: fromMe ? 'me' : 'them',
+    kind,
+    text,
+    at: chatDbDateToIso(r.d),
+    ...(!fromMe && r.handle !== null ? { handle: r.handle } : {}),
+    ...(edited && !unsent
+      ? { editedAt: chatDbDateToIso(r.dateEdited ?? 0n) }
+      : {}),
+    ...(unsent ? { unsentAt: chatDbDateToIso(r.dateRetracted ?? 0n) } : {}),
+    attachments,
+  };
 }
 
 /**
@@ -475,6 +646,10 @@ export function createChatDbReader(
   chatTurnsStmt.safeIntegers(true);
   const listChatsStmt = db.prepare(LIST_CHATS_SQL);
   listChatsStmt.safeIntegers(true); // dates exceed 2^53, and so may a cursor
+  const chatRowidStmt = db.prepare(CHAT_ROWID_SQL);
+  chatRowidStmt.safeIntegers(true);
+  const chatPageStmt = db.prepare(CHAT_PAGE_SQL);
+  chatPageStmt.safeIntegers(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -659,6 +834,56 @@ export function createChatDbReader(
             ? mintCursor(tail.lastDate, tail.chatRowid)
             : null;
         return Promise.resolve({ chats, nextCursor, total });
+      } catch (err) {
+        return Promise.reject(
+          err instanceof Error ? err : new Error(String(err)),
+        );
+      }
+    },
+
+    readChatPage(q: TurnsQuery): Promise<TurnsPage> {
+      // One error channel, as for listChats: every failure is a rejection.
+      try {
+        const limit = Math.min(
+          CHAT_PAGE_MAX,
+          Math.max(1, Math.trunc(q.limit) || 1),
+        );
+        const before = q.before === undefined ? null : readTurnCursor(q.before);
+        let untilNs: bigint | null = null;
+        if (q.until !== undefined) {
+          const ms = Date.parse(q.until);
+          if (Number.isNaN(ms)) throw new RangeError('until is not an instant');
+          untilNs = isoToAppleNs(new Date(ms).toISOString());
+        }
+        const chat = chatRowidStmt.get(q.chatGuid) as
+          { chatRowid: bigint } | undefined;
+        if (chat === undefined) throw new UnknownChatError();
+        const rows = chatPageStmt.all({
+          chatRowid: chat.chatRowid,
+          beforeDate: before?.date ?? null,
+          beforeRowid: before?.rowid ?? null,
+          untilNs,
+          // Floor division toward -inf, so a pre-2001 instant stays below 0.
+          untilSeconds:
+            untilNs === null
+              ? null
+              : untilNs >= 0n
+                ? untilNs / 1_000_000_000n
+                : -((-untilNs + 999_999_999n) / 1_000_000_000n),
+          limit: BigInt(limit + 1),
+        }) as ChatPageDbRow[];
+        const pageRows = rows.slice(0, limit);
+        const oldest = pageRows[pageRows.length - 1];
+        const nextBefore =
+          rows.length > limit && oldest !== undefined
+            ? mintTurnCursor(oldest.d, oldest.rowid)
+            : null;
+        // Fetched newest first so the LIMIT bites on the newest rows; read
+        // top to bottom, so handed back oldest first.
+        return Promise.resolve({
+          turns: pageRows.reverse().map(turnOf),
+          nextBefore,
+        });
       } catch (err) {
         return Promise.reject(
           err instanceof Error ? err : new Error(String(err)),

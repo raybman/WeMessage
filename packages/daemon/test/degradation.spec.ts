@@ -147,6 +147,7 @@ function controllableOpenReader(): ControllableOpenReader {
         readChatTurns: boom,
         // v2 A1: the conversations list fails the same way when unreadable.
         listChats: boom,
+        readChatPage: boom,
         close: () => undefined,
       };
     },

@@ -303,6 +303,11 @@ function makeReader(cfg: {
       cfg.calls.push('listChats');
       return Promise.resolve({ chats: [], nextCursor: null, total: 0 });
     },
+    // v2 A2: nor does it read a transcript page.
+    readChatPage: () => {
+      cfg.calls.push('readChatPage');
+      return Promise.resolve({ turns: [], nextBefore: null });
+    },
   };
 }
 

@@ -590,8 +590,9 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   }
 
   if (opts.threads) {
-    // v2 A1: route ratchet #26. Behind the operator bearer like everything
-    // but health and the adapter socket: an adapter token is not a bearer.
+    // v2 A1: route ratchet #26, and v2 A2's transcript page #27. Behind the
+    // operator bearer like everything but health and the adapter socket: an
+    // adapter token is not a bearer.
     registerThreadRoutes(app, opts.threads);
   }
 

@@ -243,6 +243,8 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       // which the route answers as source-unavailable. That is the honest
       // answer: a disconnected gateway is not reading the Messages database.
       listChats: (q) => live().listChats(q),
+      // v2 A2: one conversation's history, under the same rule as the list.
+      readChatPage: (q) => live().readChatPage(q),
     },
     close: () => {
       current?.close();
@@ -605,6 +607,7 @@ export async function startDaemon(
       source: {
         channel: 'imessage',
         listChats: (q) => sendReaderHandle.reader.listChats(q),
+        readChatPage: (q) => sendReaderHandle.reader.readChatPage(q),
       },
       clock: options.clock,
     },

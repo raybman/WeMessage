@@ -22,9 +22,8 @@
  *    `aria-activedescendant`, a mounted window of at most 60 options with the
  *    active one always inside it, no interactive node inside any option, and
  *    the next page fetched when the cursor reaches the end of what is held.
- *    Enter and Escape do nothing yet, on purpose: opening a conversation is a
- *    later slice, and a key that half-did it would be worse than one that
- *    does nothing.
+ *    Return opens the conversation under the cursor and Escape closes it
+ *    (v2 A2), without the focus ever leaving the list.
  *  - **It is the operator's list, nobody else's.** An adapter token presented
  *    as a bearer is a 401 on the composed daemon's real socket, not only on
  *    `inject` in the route suite.
@@ -491,12 +490,25 @@ describe('v2 A1: the conversations list', () => {
     // mounted, so this is a slice and not a list that only grows.
     expect(view.options.some((o) => o.id === 'thread-0')).toBe(false);
 
-    // Enter and Escape are not bound yet, and say nothing by doing nothing.
-    view = await press('Enter');
+    // v2 A2: Return opens the conversation under the cursor beside the list,
+    // and Escape closes it again. Neither moves the focus off the list or
+    // the cursor off its row, and neither writes. (transcript.e2e owns the
+    // pane itself; this row only proves the keys are bound and harmless.)
+    await app.page.keyboard.press('Enter');
+    await app.page.waitForSelector('html[data-transcript="ready"]', {
+      timeout: 15_000,
+    });
+    view = await readThreads(app);
     expect(view.mode).toBe('ready');
     expect(view.active).toBe(`thread-${String(PAGE * 2 - 1)}`);
-    view = await press('Escape');
+    expect(view.focus).toBe('threads-list');
+    await app.page.keyboard.press('Escape');
+    await app.page.waitForSelector('html:not([data-transcript])', {
+      timeout: 15_000,
+    });
+    view = await readThreads(app);
     expect(view.mode).toBe('ready');
+    expect(view.active).toBe(`thread-${String(PAGE * 2 - 1)}`);
     expect(view.focus).toBe('threads-list');
     expect(writes(asked())).toEqual([]);
   }, 120_000);

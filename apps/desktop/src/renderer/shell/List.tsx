@@ -31,7 +31,11 @@
 import type { VNode } from 'preact';
 import { Listbox, type ListboxOption } from '../components/Listbox.js';
 import { windowAround, type ThreadRow } from '../derive/threads.js';
-import { threadsVerbOf, type ThreadsVerb } from '../keys/threads.js';
+import {
+  messengerVerbOf,
+  type MessengerMode,
+  type MessengerVerb,
+} from '../keys/transcript.js';
 
 /** The most options mounted at once, the queue's number for the queue's reason. */
 const LIST_WINDOW = 60;
@@ -61,7 +65,13 @@ export interface ThreadListProps {
   readonly note: string;
   /** Whether the daemon answered and the answer was an empty list. */
   readonly empty: boolean;
-  readonly onMove: (verb: ThreadsVerb) => void;
+  /**
+   * What the messenger is doing (v2 A2). Focus never leaves this list, so
+   * the same stroke means a move, a line of the open transcript, or a digit
+   * of a date, and the mode is what says which.
+   */
+  readonly mode: MessengerMode;
+  readonly onVerb: (verb: MessengerVerb) => void;
 }
 
 export function ThreadList(props: ThreadListProps): VNode {
@@ -94,18 +104,22 @@ export function ThreadList(props: ThreadListProps): VNode {
     });
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    const verb = threadsVerbOf({
-      key: event.key,
-      metaKey: event.metaKey,
-      ctrlKey: event.ctrlKey,
-      altKey: event.altKey,
-      shiftKey: event.shiftKey,
-    });
+    const verb = messengerVerbOf(
+      {
+        key: event.key,
+        code: event.code,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+      },
+      props.mode,
+    );
     if (verb === null) return;
-    // Only for keys we claimed. Enter and Escape fall through untouched,
-    // which is what "not bound yet" means.
+    // Only for keys we claimed. Everything else falls through untouched,
+    // the screen chords included.
     event.preventDefault();
-    props.onMove(verb);
+    props.onVerb(verb);
   };
 
   return (

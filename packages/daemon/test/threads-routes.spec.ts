@@ -133,6 +133,7 @@ function fakeSource(
       asked.push(q);
       return answer(q);
     },
+    readChatPage: () => Promise.reject(new Error('not this route')),
   };
 }
 
@@ -291,6 +292,9 @@ describe('GET /v1/threads (v2 A1)', () => {
     const throwing: ChannelSource = {
       channel: 'imessage',
       listChats: () => {
+        throw new Error('not connected');
+      },
+      readChatPage: () => {
         throw new Error('not connected');
       },
     };

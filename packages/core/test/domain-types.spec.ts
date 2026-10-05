@@ -391,6 +391,8 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       // v2 A1: the conversations list, the port's one v2 body extension.
       listChats: () =>
         Promise.resolve({ chats: [], nextCursor: null, total: 0 }),
+      // v2 A2: one conversation's history.
+      readChatPage: () => Promise.resolve({ turns: [], nextBefore: null }),
     };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {

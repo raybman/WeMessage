@@ -1693,7 +1693,8 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // vacuous. This row only records the arithmetic so an S7 reader sees
     // where the numbers went. v2 A1 (ratchet #26) then added the first v2
     // route, `GET /v1/threads` and its twin: 67 -> 69, no frame, no event.
-    expect(ROUTE_TABLE).toHaveLength(69);
+    // v2 A2 (#27) added `GET /v1/threads/:guid/messages` and its twin: 71.
+    expect(ROUTE_TABLE).toHaveLength(71);
     expect(WS_EVENT_VOCABULARY).toHaveLength(21);
     expect(EMITTED_WS_EVENTS).toHaveLength(21);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);

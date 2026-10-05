@@ -25,7 +25,12 @@ import type {
   Service,
   Ulid,
 } from '../domain/types.js';
-import type { ChatsPage, ChatsQuery } from '../threads/index.js';
+import type {
+  ChatsPage,
+  ChatsQuery,
+  TurnsPage,
+  TurnsQuery,
+} from '../threads/index.js';
 
 /** Injected time source — "never Date.now in core" (§3.2 GateContext comment). */
 export interface Clock {
@@ -533,6 +538,18 @@ export interface ChatDbReader {
    * `readChatTurns`.
    */
   listChats(q: ChatsQuery): Promise<ChatsPage>;
+  /**
+   * v2 A2: one page of one conversation, newest first, handed back oldest
+   * first. Keyset on (message date, message ROWID), so a page boundary inside
+   * a tie neither repeats a turn nor skips one, and a message that arrives
+   * while someone walks back does not shift the older pages. Reactions and
+   * group events are not turns. A chat this reader has never seen rejects
+   * with `UnknownChatError`, a cursor it did not mint with
+   * `InvalidCursorError`. Text is RAW, as for `readChatTurns`, and a row
+   * that fails to decode is drawn as no text, never audited: looking at a
+   * transcript writes nothing.
+   */
+  readChatPage(q: TurnsQuery): Promise<TurnsPage>;
 }
 
 /** One prior turn of a conversation ({@link ChatDbReader.readChatTurns}). */

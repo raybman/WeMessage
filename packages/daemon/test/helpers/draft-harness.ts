@@ -245,6 +245,8 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
               channel: 'imessage' as const,
               listChats: (q: Parameters<ChannelSource['listChats']>[0]) =>
                 reader.listChats(q),
+              readChatPage: (q: Parameters<ChannelSource['readChatPage']>[0]) =>
+                reader.readChatPage(q),
             },
             clock: clockCtl.clock,
           },

@@ -460,7 +460,8 @@ describe('SSE, event filters and WS/SSE parity (s7 Scenario 3, ★)', () => {
     // two SSE entries named above; the total is the tripwire that catches a
     // route nobody meant to add, so it moves with the ratchet rather than
     // being deleted. v2 A1 (ratchet #26): `GET /v1/threads` + twin, 67 -> 69.
-    expect(ROUTE_TABLE).toHaveLength(69);
+    // v2 A2 (#27): `GET /v1/threads/:guid/messages` + twin, 69 -> 71.
+    expect(ROUTE_TABLE).toHaveLength(71);
 
     const h = await bootAgent({ greeting: true });
     const before = h.sink.subscriberCount();

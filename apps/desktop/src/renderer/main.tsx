@@ -49,6 +49,24 @@ import {
 } from './store/threads.js';
 import { Messenger, type MessengerProps } from './shell/Messenger.js';
 import { threadOptionId } from './shell/List.js';
+import { TRANSCRIPT_ID, type TranscriptProps } from './shell/Transcript.js';
+import {
+  dayGroups,
+  JUMP_DIGITS,
+  jumpMask,
+  jumpUntil,
+  type DayGroup,
+} from './derive/transcript.js';
+import type {
+  MessengerMode,
+  MessengerVerb,
+  ReadVerb,
+} from './keys/transcript.js';
+import {
+  bindTranscript,
+  type TranscriptBinding,
+  type TranscriptData,
+} from './store/transcript.js';
 import {
   DEFAULT_SCREEN,
   WIZARD_STEPS,
@@ -2113,6 +2131,59 @@ let threadsDrawn: {
   readonly rows: readonly ThreadRow[];
 } | null = null;
 
+/* ── v2 A2: one conversation ──────────────────────────────────────────── */
+
+/** One GET channel, paged by cursor. Nothing this binding can reach writes. */
+const transcript: TranscriptBinding = bindTranscript(window.wm);
+
+/**
+ * The conversation open beside the list, or `null`. ONE piece of state for
+ * "is a conversation open", so the keymap's mode, the pane and the refresh
+ * edge cannot disagree about it.
+ *
+ * Its title and kind are SNAPSHOTTED from the list row at open: the
+ * messages route answers turns, not a conversation's name, and a title
+ * re-read from the list on every paint would change under a reader the
+ * moment ⇧⌘R re-read the list.
+ */
+let openChat: {
+  readonly guid: string;
+  readonly title: string;
+  readonly isGroup: boolean;
+} | null = null;
+/** The ⌘J prompt's digits while a date is being typed, else `null`. */
+let jumpDigits: string | null = null;
+/** The date the transcript jumped to, in words, or `''` at the head. */
+let jumpedSpoken = '';
+/** The messenger's one polite announcement. */
+let messengerSays = '';
+/**
+ * How many inbound turns the optimistic store had seen in the OPEN chat at
+ * the last paint. The refresh edge is this number moving, and nothing else:
+ * an event for any other conversation leaves it where it was.
+ */
+let openSeen = 0;
+/** An inbound turn arrived while the first page was in flight. */
+let refreshOnReady = false;
+/**
+ * What to do with the pane's scroll position after the next paint.
+ *
+ * `bottom` after a page that replaced what was held (open, jump, back to
+ * the latest). `anchor` after an older page went in front: the turn that
+ * WAS first keeps the distance from the pane's top it had before, so the
+ * text being read does not move.
+ */
+let transcriptScroll:
+  | { readonly kind: 'bottom' }
+  | { readonly kind: 'anchor'; readonly guid: string; readonly offset: number }
+  | null = null;
+/** The groups as drawn, derived once per page rather than once per paint. */
+let transcriptDrawn: {
+  readonly from: TranscriptData['turns'];
+  readonly asOf: string;
+  readonly groups: readonly DayGroup[];
+} | null = null;
+
 /**
  * The instant this screen was last entered.
  *
@@ -2765,6 +2836,24 @@ function closeThreads(): void {
   threadsActive = 0;
   threadsDrawn = null;
   threads.reset();
+  closeTranscript();
+  messengerSays = '';
+}
+
+/**
+ * Close the open conversation, if there is one. Does not paint. The pages
+ * are DROPPED for the list's reason, and any answer still in flight is
+ * discarded by the binding's generation, so a slow page cannot paint into
+ * the next conversation opened.
+ */
+function closeTranscript(): void {
+  openChat = null;
+  jumpDigits = null;
+  jumpedSpoken = '';
+  refreshOnReady = false;
+  transcriptScroll = null;
+  transcriptDrawn = null;
+  transcript.reset();
 }
 
 /** Whether this paint draws the list: open, and nothing laid over it. */
@@ -2813,6 +2902,272 @@ function threadsRows(data: ThreadsData): readonly ThreadRow[] {
   return threadsDrawn.rows;
 }
 
+/** What a stroke on the list means right now. */
+function messengerMode(): MessengerMode {
+  if (openChat === null) return 'list';
+  return jumpDigits === null ? 'open' : 'jumping';
+}
+
+/** The pane the composition root scrolls, when one is mounted. */
+function transcriptPane(): HTMLElement | null {
+  return document.getElementById(TRANSCRIPT_ID);
+}
+
+/** A nominal line, in pixels, for `j` and `k` on the transcript. */
+const TRANSCRIPT_LINE = 40;
+
+/** Open the conversation under the list's cursor. */
+function openTranscript(): void {
+  const data = threads.data();
+  if (data.status !== 'ready') return;
+  const row = threadsRows(data)[threadsActive];
+  if (row === undefined) return;
+  closeTranscript();
+  openChat = { guid: row.key, title: row.title, isGroup: row.isGroup };
+  openSeen = binding.store.conversation(row.key).total;
+  transcriptScroll = { kind: 'bottom' };
+  messengerSays = `Opened ${row.title}.`;
+  void transcript.open(row.key);
+}
+
+/** Back to the head, from a jump into the past. */
+function backToLatest(): void {
+  if (openChat === null) return;
+  jumpedSpoken = '';
+  transcriptScroll = { kind: 'bottom' };
+  messengerSays = 'Latest messages.';
+  void transcript.open(openChat.guid);
+}
+
+/**
+ * Reach for the page before the oldest held. PageUp at the top is the only
+ * stroke that does, and both of its refusals say why in words.
+ */
+function readOlder(): void {
+  const data = transcript.data();
+  if (data.status !== 'ready') return;
+  if (data.paging) {
+    messengerSays = 'Still reading older messages.';
+    return;
+  }
+  if (data.nextBefore === null) {
+    messengerSays = 'Beginning of conversation.';
+    return;
+  }
+  const first = data.turns[0];
+  const pane = transcriptPane();
+  const anchor =
+    first === undefined || pane === null
+      ? null
+      : pane.querySelector(`[data-guid="${CSS.escape(first.guid)}"]`);
+  transcriptScroll =
+    first === undefined || pane === null || anchor === null
+      ? null
+      : {
+          kind: 'anchor',
+          guid: first.guid,
+          offset:
+            anchor.getBoundingClientRect().top -
+            pane.getBoundingClientRect().top,
+        };
+  messengerSays = 'Reading older messages.';
+  void transcript.older().then(() => {
+    const after = transcript.data();
+    if (after.status === 'ready' && after.chatGuid === data.chatGuid)
+      messengerSays =
+        after.nextBefore === null
+          ? 'Older messages loaded. Beginning of conversation.'
+          : 'Older messages loaded.';
+    schedulePaint();
+  });
+}
+
+/** One reading verb on the open transcript. */
+function readTranscript(verb: ReadVerb): void {
+  const pane = transcriptPane();
+  if (pane === null) return;
+  const page = Math.max(TRANSCRIPT_LINE, pane.clientHeight - TRANSCRIPT_LINE);
+  switch (verb) {
+    case 'line-down':
+      pane.scrollBy(0, TRANSCRIPT_LINE);
+      return;
+    case 'line-up':
+      pane.scrollBy(0, -TRANSCRIPT_LINE);
+      return;
+    case 'page-down':
+      pane.scrollBy(0, page);
+      return;
+    case 'page-up':
+      if (pane.scrollTop <= 0) readOlder();
+      else pane.scrollBy(0, -page);
+      return;
+    case 'top':
+      pane.scrollTop = 0;
+      return;
+    case 'bottom':
+      // After a jump, End is the way back: the head is what "the bottom" of
+      // a conversation means, not the bottom of the page jumped to.
+      if (!transcript.data().atHead && transcript.data().status === 'ready')
+        backToLatest();
+      else pane.scrollTop = pane.scrollHeight;
+      return;
+  }
+}
+
+/** Commit the typed date: a jump, or a refusal that says why. */
+function commitJump(): void {
+  if (jumpDigits === null) return;
+  const target = jumpUntil(jumpDigits, HOST_ZONE);
+  if (!target.ok) {
+    messengerSays = target.reason;
+    return;
+  }
+  jumpDigits = null;
+  jumpedSpoken = target.spoken;
+  transcriptScroll = { kind: 'bottom' };
+  messengerSays = `Jumping to ${target.spoken}.`;
+  void transcript.jump(target.until);
+}
+
+/**
+ * Every stroke the focused list claimed, in whatever mode the messenger is
+ * in. Paints once at the end, on `onThreadsMove`'s terms.
+ */
+function onMessengerVerb(verb: MessengerVerb): void {
+  switch (verb.kind) {
+    case 'move':
+      onThreadsMove(verb.verb);
+      return;
+    case 'open':
+      openTranscript();
+      break;
+    case 'close': {
+      const title = openChat?.title ?? '';
+      closeTranscript();
+      messengerSays = `Closed ${title}.`;
+      break;
+    }
+    case 'read':
+      readTranscript(verb.verb);
+      break;
+    case 'jump-start':
+      jumpDigits = '';
+      messengerSays = 'Jump to a date. Type the year, month and day.';
+      break;
+    case 'jump-digit':
+      if (jumpDigits !== null && jumpDigits.length < JUMP_DIGITS)
+        jumpDigits += verb.digit;
+      break;
+    case 'jump-erase':
+      if (jumpDigits !== null) jumpDigits = jumpDigits.slice(0, -1);
+      break;
+    case 'jump-commit':
+      commitJump();
+      break;
+    case 'jump-cancel':
+      jumpDigits = null;
+      messengerSays = 'Jump cancelled.';
+      break;
+  }
+  paint();
+}
+
+/** The groups as drawn, re-derived only when a page has landed. */
+function transcriptGroups(data: TranscriptData): readonly DayGroup[] {
+  if (openChat === null) return [];
+  if (
+    transcriptDrawn === null ||
+    transcriptDrawn.from !== data.turns ||
+    transcriptDrawn.asOf !== data.asOf
+  )
+    transcriptDrawn = {
+      from: data.turns,
+      asOf: data.asOf,
+      groups: dayGroups(
+        data.turns,
+        data.asOf,
+        HOST_ZONE,
+        openChat.title,
+        openChat.isGroup,
+      ),
+    };
+  return transcriptDrawn.groups;
+}
+
+function transcriptView(): TranscriptProps | null {
+  if (openChat === null) return null;
+  const data = transcript.data();
+  return {
+    status: data.status,
+    title: openChat.title,
+    groups: transcriptGroups(data),
+    paging: data.paging,
+    atStart: data.nextBefore === null,
+    jumpedTo: data.atHead ? '' : jumpedSpoken,
+    prompt: jumpDigits === null ? '' : jumpMask(jumpDigits),
+  };
+}
+
+/**
+ * The refresh edge. Seen HERE, through the one event subscription the app
+ * already holds, as the open conversation's inbound count moving. An event
+ * for any other conversation does not move it, so it asks for nothing.
+ */
+function noticeInbound(): void {
+  if (openChat === null) return;
+  const total = binding.store.conversation(openChat.guid).total;
+  const grew = total > openSeen;
+  openSeen = total;
+  const data = transcript.data();
+  if (grew && data.status === 'loading') refreshOnReady = true;
+  if (data.status !== 'ready') return;
+  if (refreshOnReady && data.atHead) {
+    refreshOnReady = false;
+    void transcript.refresh();
+    return;
+  }
+  if (!grew) return;
+  if (data.atHead) {
+    messengerSays = 'New message.';
+    void transcript.refresh();
+  } else {
+    messengerSays = 'New messages. End returns to the latest.';
+  }
+}
+
+/** Whether the pane is scrolled to (within a pixel of) its end. */
+function atPaneEnd(pane: HTMLElement | null): boolean {
+  return (
+    pane !== null && pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2
+  );
+}
+
+/** Apply the scroll the last action asked for, once its page is drawn. */
+function settleTranscriptScroll(followEnd: boolean): void {
+  const pane = transcriptPane();
+  if (pane === null) return;
+  const data = transcript.data();
+  const intent = transcriptScroll;
+  if (intent !== null && data.status !== 'loading' && !data.paging) {
+    transcriptScroll = null;
+    if (intent.kind === 'bottom') pane.scrollTop = pane.scrollHeight;
+    else {
+      const anchor = pane.querySelector(
+        `[data-guid="${CSS.escape(intent.guid)}"]`,
+      );
+      if (anchor !== null)
+        pane.scrollTop +=
+          anchor.getBoundingClientRect().top -
+          pane.getBoundingClientRect().top -
+          intent.offset;
+    }
+    return;
+  }
+  // A refreshed head lands under a reader who was at the end: they stay at
+  // the end. One who had scrolled up to read is left where they are.
+  if (intent === null && followEnd) pane.scrollTop = pane.scrollHeight;
+}
+
 function messengerView(): MessengerProps {
   const data = threads.data();
   return {
@@ -2824,7 +3179,10 @@ function messengerView(): MessengerProps {
     chip: data.asOf === '' ? '' : scopeChip(data.total, data.asOf, HOST_ZONE),
     activeIndex: threadsActive,
     paging: data.paging,
-    onMove: onThreadsMove,
+    mode: messengerMode(),
+    onVerb: onMessengerVerb,
+    transcript: transcriptView(),
+    announce: messengerSays,
   };
 }
 
@@ -3099,6 +3457,23 @@ function paint(): void {
     html.removeAttribute('data-threads-rows');
     html.removeAttribute('data-threads-total');
   }
+  // v2 A2: the open conversation's readiness idiom, on the same terms. The
+  // edge is noticed BEFORE the attributes are written, so a refresh it asks
+  // for is already in flight when a harness reads them.
+  if (shown) noticeInbound();
+  const read = transcript.data();
+  if (shown && openChat !== null) {
+    html.setAttribute('data-transcript', read.status);
+    html.setAttribute('data-transcript-turns', String(read.turns.length));
+    html.setAttribute('data-transcript-head', read.atHead ? 'yes' : 'no');
+  } else {
+    html.removeAttribute('data-transcript');
+    html.removeAttribute('data-transcript-turns');
+    html.removeAttribute('data-transcript-head');
+  }
+  const paneBefore = shown ? transcriptPane() : null;
+  const followEnd = atPaneEnd(paneBefore);
+  const turnsBefore = paneBefore === null ? null : transcriptDrawn?.from;
   if (screen === 'audit') html.setAttribute('data-now-iso', auditNow);
   else if (screen === 'settings') html.setAttribute('data-now-iso', configNow);
   // The DAEMON's instant the times on the rows were measured back from,
@@ -3136,8 +3511,9 @@ function paint(): void {
   // already removed the textarea by the time this runs, and a removed element
   // takes the focus to `<body>` with it — where the listbox's key handler is
   // not, so the next `a` would vanish with no visible cause. This and the
-  // two moves below are the app's only imperative focus moves, and all three
-  // exist for the same reason: the alternative silently breaks the keyboard.
+  // two moves below, and `keepFocusOffTranscript`, are the app's only
+  // imperative focus moves, and all four exist for the same reason: the
+  // alternative silently breaks the keyboard.
   if (wasEditing !== null && editing === null) {
     document.getElementById('queue-list')?.focus();
   }
@@ -3159,6 +3535,13 @@ function paint(): void {
     document.getElementById('queue-list')?.focus();
   }
   threadsPainted = shown;
+  if (shown && openChat !== null)
+    settleTranscriptScroll(
+      followEnd &&
+        turnsBefore !== undefined &&
+        turnsBefore !== null &&
+        turnsBefore !== transcript.data().turns,
+    );
 }
 
 /** What the LAST paint rendered, so the unmount above can be detected. */
@@ -3193,7 +3576,36 @@ audits.subscribe(schedulePaint);
 config.subscribe(schedulePaint);
 wizard.subscribe(schedulePaint);
 threads.subscribe(schedulePaint);
+transcript.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
+
+/**
+ * v2 A2: the transcript is read through the list, so it never keeps focus.
+ *
+ * Chromium makes an overflowing element with no focusable child a tab stop
+ * by itself (keyboard-focusable scrollers, shipped and no longer switchable
+ * off), and reports it with `tabIndex` -1 and as unfocusable in the
+ * accessibility tree while doing so. A long conversation is exactly that, so
+ * without this Tab, or a click on the pane, would carry the focus off the
+ * conversations list, whose keydown is the only thing that reads the pane,
+ * and every key after it would do nothing. The window keeps one tab stop
+ * per mode: any focus that lands in the pane is handed straight back.
+ *
+ * A click is the other door, and a different one: where the pane is NOT
+ * focusable, a click in it moves the focus to `<body>`, so no `focusin`
+ * names the pane at all. The click is caught too. Focusing the list leaves
+ * the document's selection alone, so a turn can still be selected and
+ * copied with a pointer.
+ */
+function keepFocusOffTranscript(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest(`#${TRANSCRIPT_ID}`) === null) return;
+  const list = document.getElementById('threads-list');
+  if (list !== null && document.activeElement !== list) list.focus();
+}
+document.addEventListener('focusin', keepFocusOffTranscript);
+document.addEventListener('click', keepFocusOffTranscript);
 
 window.wm.on('stream', (payload: unknown) => {
   const next = asStream(payload);

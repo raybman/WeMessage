@@ -187,6 +187,23 @@ export const ROUTE_TABLE: readonly string[] = [
   // from `daemon.ts` (the composition root, already on the list) and never
   // names the port, so PORT_IMPORTER_ALLOWLIST stays at 16 and the importer
   // scan fails the moment the route file reaches for the reader directly.
+  //
+  // #27 deliberate (v2 A2): `GET /v1/threads/:guid/messages`, one page of
+  // one conversation, the transcript the messenger opens a thread into,
+  // 69 -> 71.
+  //   1 route + 1 auto-HEAD twin = +2; 69 + 2 = 71.
+  // A read under every rule #26 set: behind the operator bearer (an adapter
+  // token is a 401), rows only through the source the daemon was handed,
+  // control characters stripped at the wire, dated by the daemon clock. It
+  // pages back with an opaque cursor the source mints, or jumps to a date
+  // with `until`, never both. A chat the source has never seen is a 404.
+  //
+  // NO WS event moves and NO frame moves: a new message reaches an open
+  // transcript as the existing `message.received`, and the GUI refetches
+  // the head of the page; nothing new is pushed.
+  //
+  // NO port importer moves, enforced as for #26: `routes/threads.ts` still
+  // receives its reader as a closure from `daemon.ts`.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -212,6 +229,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/settings',
   'GET /v1/status',
   'GET /v1/threads',
+  'GET /v1/threads/:guid/messages',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
   'HEAD /v1/agent',
@@ -233,6 +251,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/settings',
   'HEAD /v1/status',
   'HEAD /v1/threads',
+  'HEAD /v1/threads/:guid/messages',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
   'PATCH /v1/schedules/:id',

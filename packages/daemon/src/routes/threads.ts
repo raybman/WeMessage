@@ -1,5 +1,7 @@
 /**
  * v2 A1: `GET /v1/threads`, the conversations list the v2 messenger opens on.
+ * v2 A2: `GET /v1/threads/:guid/messages`, one page of one conversation,
+ * under every rule below; the list's cursor becomes the page's `before`.
  *
  * A read, and only a read. The route asks the channel source it was handed
  * for one page, copies that source's channel tag onto every row, strips
@@ -25,12 +27,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   InvalidCursorError,
+  UnknownChatError,
   type ChannelName,
   type ChannelSource,
   type ChatSummary,
   type ChatsPage,
   type ChatsQuery,
   type Clock,
+  type TranscriptTurn,
+  type TurnKind,
+  type TurnsPage,
+  type TurnsQuery,
 } from '@wemessage/core';
 import { stripControlChars } from '../sanitize.js';
 
@@ -77,6 +84,54 @@ function toWire(channel: ChannelName, chat: ChatSummary): WireThread {
   };
 }
 
+// v2 A2. A cursor walks back, `until` jumps to a date; one page cannot do
+// both, so asking for both is refused before the source is asked anything.
+// `until` must be a full instant: a bare date has no zone, and which day it
+// means is the GUI's call, made before it asks.
+const pageQuery = z
+  .strictObject({
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    before: z.string().min(1).optional(),
+    until: z.iso.datetime({ offset: true }).optional(),
+  })
+  .refine((q) => q.before === undefined || q.until === undefined, {
+    message: 'before and until are mutually exclusive',
+  });
+
+// A chat guid is the source's to judge; the route only bounds its size.
+const pageParams = z.strictObject({ guid: z.string().min(1).max(512) });
+
+/** One transcript turn as the wire carries it. */
+interface WireTurn {
+  guid: string;
+  from: 'me' | 'them';
+  kind: TurnKind;
+  text: string | null;
+  at: string;
+  handle?: string;
+  editedAt?: string;
+  unsentAt?: string;
+  attachments: number;
+}
+
+/** Field by field, as for a list row; a text of only controls is none. */
+function turnToWire(turn: TranscriptTurn): WireTurn {
+  const text = turn.text === null ? null : stripControlChars(turn.text);
+  return {
+    guid: turn.guid,
+    from: turn.from,
+    kind: turn.kind,
+    text: text !== null && text.trim().length > 0 ? text : null,
+    at: turn.at,
+    ...(turn.handle !== undefined
+      ? { handle: stripControlChars(turn.handle) }
+      : {}),
+    ...(turn.editedAt !== undefined ? { editedAt: turn.editedAt } : {}),
+    ...(turn.unsentAt !== undefined ? { unsentAt: turn.unsentAt } : {}),
+    attachments: turn.attachments,
+  };
+}
+
 export function registerThreadRoutes(
   app: FastifyInstance,
   deps: ThreadRouteDeps,
@@ -112,6 +167,51 @@ export function registerThreadRoutes(
       threads: page.chats.map((chat) => toWire(source.channel, chat)),
       nextCursor: page.nextCursor,
       total: page.total,
+      asOf: clock.now(),
+    };
+  });
+  // GET, and fastify's auto-HEAD twin (route ratchet #27).
+  app.get('/v1/threads/:guid/messages', async (req, reply) => {
+    const params = pageParams.safeParse(req.params);
+    const parsed = pageQuery.safeParse(req.query);
+    if (!params.success || !parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-query',
+        detail: {
+          issues: [
+            ...(params.success ? [] : params.error.issues),
+            ...(parsed.success ? [] : parsed.error.issues),
+          ],
+        },
+      });
+    }
+    const { guid } = params.data;
+    const { limit, before, until } = parsed.data;
+    const query: TurnsQuery = {
+      chatGuid: guid,
+      limit,
+      ...(before !== undefined ? { before } : {}),
+      ...(until !== undefined ? { until } : {}),
+    };
+
+    let page: TurnsPage;
+    try {
+      page = await Promise.resolve().then(() => source.readChatPage(query));
+    } catch (err) {
+      if (err instanceof InvalidCursorError) {
+        return reply.code(400).send({ error: 'invalid-cursor' });
+      }
+      if (err instanceof UnknownChatError) {
+        return reply.code(404).send({ error: 'unknown-chat' });
+      }
+      return reply.code(503).send({ error: 'source-unavailable' });
+    }
+
+    return {
+      chatGuid: guid,
+      channel: source.channel,
+      turns: page.turns.map(turnToWire),
+      nextBefore: page.nextBefore,
       asOf: clock.now(),
     };
   });

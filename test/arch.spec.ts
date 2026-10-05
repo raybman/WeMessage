@@ -5484,7 +5484,13 @@ describe('S8 extensions (s8-execution Scenario 7: the queue’s edge states)', (
     }
 
     it('one polite region, in the screen that owns the queue', () => {
-      expect(regionSites('status')).toEqual([`${QUEUE}/index.tsx`]);
+      // v2 A2 adds the messenger's status line. The two are never mounted
+      // together: the messenger replaces the queue's region while it is open
+      // and gives it back on close, so there is still one per window.
+      expect(regionSites('status')).toEqual([
+        `${QUEUE}/index.tsx`,
+        `${RENDERER}/shell/Messenger.tsx`,
+      ]);
     });
 
     it('and no assertive one anywhere', () => {
@@ -6256,6 +6262,19 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // never computes that; it refetches on the lens chord instead.
       members: ['threads'],
     },
+    [`${STORE_ROOT}/transcript.ts`]: {
+      constant: 'TRANSCRIPT_CHANNELS',
+      // v2 A2. One conversation, read a page at a time, and again one read
+      // and nothing else. Open, jump, older and refresh are four ways of
+      // asking the same route; the answer is laid over what is held by the
+      // pure `mergeHead` / `prependOlder`, never patched from an event.
+      //
+      // No `on`, for the list's reason and one more: the inbound edge that
+      // calls `refresh` is seen by the composition root through the one
+      // subscription it already holds, and a second subscriber here would
+      // be a second opinion about which conversation an event belongs to.
+      members: ['transcript'],
+    },
   };
 
   it('every file under store/ that reaches the bridge is a declared binding', () => {
@@ -6502,7 +6521,11 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
     ]);
     expect(withRole('alert')).toEqual([]);
     expect(withRole('alertdialog')).toEqual([]);
-    expect(withRole('status')).toEqual([`${QUEUE}/index.tsx`]);
+    // v2 A2: the messenger's status line, drawn in the queue's place.
+    expect(withRole('status')).toEqual([
+      `${QUEUE}/index.tsx`,
+      `${RENDERER}/shell/Messenger.tsx`,
+    ]);
   });
 
   it('PLANTED: a button smuggled into the queue is caught', () => {
@@ -6682,7 +6705,29 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
     // delegate standing in for the controls the queue may not have.
     const code = codeOf(archRead(`${RENDERER}/main.tsx`));
     expect(code).toContain("addEventListener('keydown'");
-    expect(/addEventListener\(\s*'click'/.test(code)).toBe(false);
+    // v2 A2 admits exactly ONE click listener, and it is a focus repair,
+    // not a verb: a click in the transcript (no tab stop of its own) drops
+    // the focus to <body>, where no key handler reads anything, and
+    // `keepFocusOffTranscript` hands it back to the conversations list.
+    // The handler is pinned by name and by body, so a click delegate that
+    // approves, sends or navigates cannot ride in under the same exception.
+    const clicks = [
+      ...code.matchAll(
+        /addEventListener\(\s*'click'\s*,\s*([A-Za-z_$][\w$]*)/g,
+      ),
+    ].map((m) => m[1]);
+    expect(clicks).toEqual(['keepFocusOffTranscript']);
+    expect(
+      /addEventListener\(\s*'click'\s*,\s*(?![\sA-Za-z_$])/.test(code),
+    ).toBe(false);
+    const repair =
+      /function keepFocusOffTranscript\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(
+        code,
+      )?.[1] ?? '';
+    expect(repair).toContain('.focus()');
+    expect(
+      repair.replace(/\.focus\(\)|\.closest\(|getElementById\(/g, ''),
+    ).not.toMatch(/\w+\(/);
   });
 
   it('PLANTED: a second window-level listener is caught', () => {
@@ -10243,9 +10288,11 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // checked for the shape of drift a count alone would miss.
     //
     // 67 at S7 close; 69 since v2 A1 (#26): `GET /v1/threads`, the v2
-    // conversations list, plus its auto-HEAD twin. A read behind the
-    // operator bearer; the frame table and the port allowlist did not move.
-    expect(ROUTE_TABLE.length).toBe(69);
+    // conversations list, plus its auto-HEAD twin. 71 since v2 A2 (#27):
+    // `GET /v1/threads/:guid/messages`, one conversation's page, plus its
+    // twin. Reads behind the operator bearer; the frame table and the port
+    // allowlist did not move.
+    expect(ROUTE_TABLE.length).toBe(71);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -12156,11 +12203,13 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged, except the route table (#26)', () => {
+    it('the S8-close counts are unchanged, except the route table (#26, #27)', () => {
       // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
       // twin), the conversations list the v2 messenger opens on: 67 -> 69.
-      // No WS event, no frame and no port importer moved with it.
-      expect(ROUTE_TABLE.length).toBe(69);
+      // v2 A2 minted #27 for `GET /v1/threads/:guid/messages` (+ HEAD
+      // twin), one conversation's page: 69 -> 71. No WS event, no frame and
+      // no port importer moved with either.
+      expect(ROUTE_TABLE.length).toBe(71);
       expect(WS_EVENT_VOCABULARY.length).toBe(21);
       expect(GATEWAY_EVENT_NAMES.length).toBe(21);
       expect(EMITTED_WS_EVENTS.length).toBe(21);
@@ -12174,19 +12223,21 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25) and v2 A1 (#26), and #27 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26) and v2 A2 (#27), and #28 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
-      // one read route, `GET /v1/threads`, and nothing else on the wire: the
-      // event and frame counts in the row above are S8's. #27 is the next
+      // one read route, `GET /v1/threads`, and v2 A2 #27 for one more,
+      // `GET /v1/threads/:guid/messages`, and nothing else on the wire: the
+      // event and frame counts in the row above are S8's. #28 is the next
       // tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(26);
-      expect(seen).not.toContain(27);
+      expect(Math.max(...seen)).toBe(27);
+      expect(seen).not.toContain(28);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
+      expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {
@@ -12889,9 +12940,10 @@ describe('v2 extensions (A1: the conversations list)', () => {
       'zod',
     ]);
     const code = codeOf(archRead(ROUTE));
-    // The rows arrive through `source.listChats`, and that is the only
-    // read in the file.
+    // The rows arrive through `source.listChats` (A1) and
+    // `source.readChatPage` (A2), and those are the only reads in the file.
     expect(code).toMatch(/\bsource\s*\.\s*listChats\s*\(/);
+    expect(code).toMatch(/\bsource\s*\.\s*readChatPage\s*\(/);
     expect(code).not.toMatch(/better-sqlite3|chat\.db|readFileSync|node:fs/);
   });
 
@@ -12933,5 +12985,147 @@ describe('v2 extensions (A1: the conversations list)', () => {
     // And the messenger's chrome lives beside the screens, not under them.
     expect(archFiles(`${RENDERER}/screens/threads`)).toEqual([]);
     expect(archFiles(SHELL).length).toBeGreaterThan(0);
+  });
+});
+
+describe('v2 extensions (A2: one conversation)', () => {
+  /**
+   * v2 A2 opens a conversation: `GET /v1/threads/:guid/messages`, one page
+   * at a time, over a bridge channel the renderer can only ask through.
+   * The claim that is structural, and so lives here, is the page size. A
+   * real Messages thread runs to tens of thousands of turns, and the one
+   * request that would make the transcript slow, hot and unbounded is the
+   * one that asks for all of them. So neither bridge handler carries a
+   * page size at all: the route's default is the only one there is, and a
+   * renderer that wants more asks again with the cursor it was handed.
+   */
+  const GATEWAY = 'apps/desktop/src/main/gateway.ts';
+  const CHANNEL_FILE = 'apps/desktop/src/main/ipc-channels.ts';
+
+  /** One handler's body in the handler table, braces matched, comments out. */
+  function handlerOf(code: string, key: string): string {
+    const head = new RegExp(
+      `\\b${key}\\s*:\\s*async\\s*\\([^)]*\\)\\s*=>\\s*\\{`,
+    ).exec(code);
+    if (head === null) return '';
+    let depth = 1;
+    let i = head.index + head[0].length;
+    const start = i;
+    while (i < code.length && depth > 0) {
+      const ch = code[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    return code.slice(start, i - 1);
+  }
+
+  /** Every way a handler could hand the renderer a say in the page size. */
+  function pageSizeLeaks(code: string, key: string): string[] {
+    const body = handlerOf(code, key);
+    const out: string[] = [];
+    if (body === '') out.push(`${key}: no handler`);
+    if (/\blimit\b/.test(body)) out.push(`${key}: names a limit`);
+    // A spread forwards whatever the renderer put in its object, `limit`
+    // included, without this file ever spelling the word.
+    if (/\.\.\./.test(body)) out.push(`${key}: spreads an argument`);
+    return out;
+  }
+
+  it('the transcript is one more request channel, `wm:transcript`', () => {
+    expect(codeOf(archRead(CHANNEL_FILE))).toContain(
+      "transcript: 'wm:transcript'",
+    );
+  });
+
+  it('neither the list nor the transcript handler can carry a page size', () => {
+    const code = codeOf(archRead(GATEWAY));
+    expect([
+      ...pageSizeLeaks(code, 'threads'),
+      ...pageSizeLeaks(code, 'transcript'),
+    ]).toEqual([]);
+    // And each reaches the daemon through its one client verb, with the
+    // arguments this file built, not the ones it was handed.
+    expect(handlerOf(code, 'threads')).toMatch(/\.listThreads\s*\(/);
+    expect(handlerOf(code, 'transcript')).toMatch(
+      /\.readThread\s*\(\s*chatGuid\s*,\s*params\s*\)/,
+    );
+    // The shape is closed: exactly one key, `before` or `until`.
+    expect(handlerOf(code, 'transcript')).toMatch(/keys\.length\s*!==\s*1/);
+  });
+
+  it('PLANTED: a handler that asks for the whole history, or forwards the renderer’s object, is caught', () => {
+    const code = codeOf(archRead(GATEWAY));
+    const body = handlerOf(code, 'transcript');
+    expect(body.length).toBeGreaterThan(0);
+    const withLimit = code.replace(
+      body,
+      `${body}\n      void requireClient().readThread(chatGuid, { limit: 1_000_000 });\n`,
+    );
+    expect(pageSizeLeaks(withLimit, 'transcript')).toEqual([
+      'transcript: names a limit',
+    ]);
+    const withSpread = code.replace(
+      body,
+      `${body}\n      void requireClient().readThread(chatGuid, { ...at });\n`,
+    );
+    expect(pageSizeLeaks(withSpread, 'transcript')).toEqual([
+      'transcript: spreads an argument',
+    ]);
+    expect(pageSizeLeaks('const handlers = {};', 'transcript')).toEqual([
+      'transcript: no handler',
+    ]);
+  });
+
+  /* ── the pane: one log, drawn and never computed ─────────────────────── */
+
+  const A2_RENDERER = 'apps/desktop/src/renderer';
+  const PANE = `${A2_RENDERER}/shell/Transcript.tsx`;
+
+  /** Every renderer file that declares a given ARIA role, comments out. */
+  function roleSites(role: string): string[] {
+    return archFiles(A2_RENDERER)
+      .filter((rel) => codeOf(archRead(rel)).includes(`role="${role}"`))
+      .map((rel) => rel);
+  }
+
+  /**
+   * Everything the pane would have to do to compute its own headings: a
+   * VALUE import from `derive/`, or a call to the grouping itself. A type
+   * import is how it names what it is handed, so it is allowed.
+   */
+  function paneComputes(code: string): string[] {
+    const out: string[] = [];
+    for (const m of code.matchAll(
+      /import\s+(type\s+)?\{[^}]*\}\s+from\s+['"]([^'"]+)['"]/g,
+    )) {
+      if (m[1] === undefined && /\/derive\//.test(m[2] ?? ''))
+        out.push(`value import from ${m[2] ?? ''}`);
+    }
+    if (/\bdayGroups\s*\(/.test(code)) out.push('calls dayGroups(');
+    return out;
+  }
+
+  it('the transcript is the one role="log", in the pane that draws it', () => {
+    expect(roleSites('log')).toEqual([PANE]);
+  });
+
+  it('the pane draws the groups it is handed and computes none', () => {
+    expect(paneComputes(codeOf(archRead(PANE)))).toEqual([]);
+  });
+
+  it('PLANTED: a pane that groups its own turns is caught', () => {
+    const code = codeOf(archRead(PANE));
+    const planted = code
+      .replace(
+        "import type { DayGroup } from '../derive/transcript.js';",
+        "import { dayGroups, type DayGroup } from '../derive/transcript.js';",
+      )
+      .replace('props.groups.reduce(', 'dayGroups([], "", "").reduce(');
+    expect(planted).not.toBe(code);
+    expect(paneComputes(planted)).toEqual([
+      'value import from ../derive/transcript.js',
+      'calls dayGroups(',
+    ]);
   });
 });

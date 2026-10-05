@@ -278,6 +278,15 @@ function localMidnightMs(date: string, zone: string): number | null {
   return guess;
 }
 
+/**
+ * `localMidnightMs` as a UTC instant, or `null`. v2 A2's date jump ends a
+ * typed day one millisecond before the next one starts, by this.
+ */
+export function localMidnightIso(date: string, zone: string): string | null {
+  const ms = localMidnightMs(date, zone);
+  return ms === null ? null : new Date(ms).toISOString();
+}
+
 /** What a DST transition did to one local day. */
 export interface DayShift {
   /**

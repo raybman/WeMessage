@@ -32,6 +32,7 @@ import {
   DaemonConflictError,
   DaemonGateDeniedError,
   DaemonSourceUnavailableError,
+  DaemonUnknownChatError,
   type BulkSelector,
   type ContactMode,
   type DisconnectInput,
@@ -716,6 +717,44 @@ export function createGateway(options: GatewayOptions): Gateway {
       } catch (error) {
         if (error instanceof DaemonSourceUnavailableError)
           return { refused: 'source-unavailable' };
+        throw error;
+      }
+    },
+    /**
+     * v2 A2: one page of one conversation. The guid, then optionally ONE of
+     * `{before}` or `{until}`, and nothing else: the shape is closed, so a
+     * `limit` (or anything a later renderer thinks of) is refused here
+     * instead of being forwarded. The page size is the route's default, and
+     * that is the whole guard against a renderer asking for a 61,000-message
+     * history in one request.
+     *
+     * Two refusals are ANSWERS, as for the list: a source that is down, and
+     * a chat the source has never seen (deleted since the list was read).
+     * Both are things the transcript says in words, and neither should
+     * cross IPC as an `Error` the renderer would have to parse.
+     */
+    transcript: async (a) => {
+      const chatGuid = str(a, 0);
+      const at = maybeRecord(a, 1);
+      let params: { before: string } | { until: string } | undefined;
+      if (at !== undefined) {
+        const keys = Object.keys(at);
+        if (keys.length !== 1) throw new Error('bad-argument:1');
+        const before = at.before;
+        const until = at.until;
+        if (typeof before === 'string' && keys[0] === 'before')
+          params = { before };
+        else if (typeof until === 'string' && keys[0] === 'until')
+          params = { until };
+        else throw new Error('bad-argument:1');
+      }
+      try {
+        return await requireClient().readThread(chatGuid, params);
+      } catch (error) {
+        if (error instanceof DaemonSourceUnavailableError)
+          return { refused: 'source-unavailable' };
+        if (error instanceof DaemonUnknownChatError)
+          return { refused: 'unknown-chat' };
         throw error;
       }
     },

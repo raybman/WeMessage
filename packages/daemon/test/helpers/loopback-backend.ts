@@ -131,5 +131,7 @@ export function createUnusedChatDbReader(): ChatDbReader {
     // `tsconfig.vitest.json`, so its tests were transpiled and never
     // typechecked — this omission IS the argument for that file existing.
     readChatTurns: boom,
+    // v2 A1: the conversations list. Unused here for the same reason.
+    listChats: boom,
   };
 }

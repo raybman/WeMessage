@@ -15,7 +15,13 @@
  *  - `aria-multiselectable` declared NOW rather than when Sc9 needs it,
  *    because assistive technology describes a list once and an operator who
  *    has learned "this list is single-select" should not have that quietly
- *    changed under them;
+ *    changed under them. Always declared, never omitted: the queue marks
+ *    (`true`, the default), and v2 A1's conversations list selects one
+ *    conversation at a time (`false`);
+ *  - `aria-setsize` and `aria-posinset` when the caller holds only part of
+ *    the list (v2 A1 pages 4,000 conversations a hundred at a time, and
+ *    mounts sixty of those). Without them a screen reader counts the
+ *    mounted window and announces "1 of 60" over a list of thousands;
  *  - every child is a `role="option"`, which is why the virtualization
  *    window is a SLICE rather than a pair of spacer elements: a container
  *    whose children are not all options is not a listbox, whatever its role
@@ -48,6 +54,12 @@ export interface ListboxOption {
   /** `data-*` attributes, decided by the screen that owns the row. */
   readonly attrs: Readonly<Record<string, string>>;
   readonly body: VNode;
+  /**
+   * This option's 1-based place in the WHOLE list, when the caller passes
+   * `setSize`. Ignored without it: a position in a set of unknown size is
+   * a number with nothing to be a fraction of.
+   */
+  readonly position?: number;
 }
 
 export interface ListboxProps {
@@ -67,15 +79,23 @@ export interface ListboxProps {
    */
   readonly disabled: boolean;
   readonly onKeyDown: (event: KeyboardEvent) => void;
+  /** Whether options can be MARKED as well as selected. Default `true`. */
+  readonly multiselectable?: boolean;
+  /**
+   * How many options the whole list has, when that is more than the caller
+   * mounted. Set together with each option's `position`.
+   */
+  readonly setSize?: number;
 }
 
 export function Listbox(props: ListboxProps): VNode {
+  const { setSize } = props;
   return (
     <ul
       id={props.id}
       role="listbox"
       aria-label={props.label}
-      aria-multiselectable="true"
+      aria-multiselectable={props.multiselectable === false ? 'false' : 'true'}
       aria-disabled={props.disabled ? 'true' : 'false'}
       // Omitted rather than empty when there is no active row: an
       // `aria-activedescendant` pointing at nothing is a dangling reference,
@@ -93,6 +113,13 @@ export function Listbox(props: ListboxProps): VNode {
           role="option"
           aria-selected={option.selected ? 'true' : 'false'}
           aria-label={option.label}
+          {...(setSize === undefined || option.position === undefined
+            ? {}
+            : {
+                // Numbers, as Preact types them; the DOM serialises both.
+                'aria-setsize': setSize,
+                'aria-posinset': option.position,
+              })}
           data-active={option.active ? 'true' : 'false'}
           {...option.attrs}
         >

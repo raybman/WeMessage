@@ -168,6 +168,25 @@ export const ROUTE_TABLE: readonly string[] = [
   // open a path to the send backend that goes around `dispatchApproved`
   // (INV-2); the only effect any key in the list has is a row some reader
   // consults later.
+  //
+  // #26 deliberate (v2 A1): `GET /v1/threads`, the conversations list the
+  // v2 messenger opens on, 67 -> 69.
+  //   1 route + 1 auto-HEAD twin = +2; 67 + 2 = 69.
+  // A read, and only a read: a page of chats from chat.db, newest first,
+  // with the total and an `asOf` in the same answer so the count on screen
+  // is dated (plan rule 8). It sits behind the operator bearer like every
+  // route except health; an adapter token presented as a bearer is a 401
+  // here, exactly as it is on `/v1/drafts`, because adapters authenticate
+  // in `hello` on `/v1/agent` and nowhere else.
+  //
+  // NO WS event moves and NO frame moves: nothing about a conversation is
+  // pushed in A1, and `FRAME_SPECS` gains no thread, items or holds frame.
+  //
+  // NO port importer moves, and as with #21 and #22 that is enforced rather
+  // than observed: `routes/threads.ts` receives its page reader as a closure
+  // from `daemon.ts` (the composition root, already on the list) and never
+  // names the port, so PORT_IMPORTER_ALLOWLIST stays at 16 and the importer
+  // scan fails the moment the route file reaches for the reader directly.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -192,6 +211,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/schedules/:id',
   'GET /v1/settings',
   'GET /v1/status',
+  'GET /v1/threads',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
   'HEAD /v1/agent',
@@ -212,6 +232,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/schedules/:id',
   'HEAD /v1/settings',
   'HEAD /v1/status',
+  'HEAD /v1/threads',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
   'PATCH /v1/schedules/:id',

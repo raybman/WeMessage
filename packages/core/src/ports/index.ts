@@ -25,6 +25,7 @@ import type {
   Service,
   Ulid,
 } from '../domain/types.js';
+import type { ChatsPage, ChatsQuery } from '../threads/index.js';
 
 /** Injected time source — "never Date.now in core" (§3.2 GateContext comment). */
 export interface Clock {
@@ -522,6 +523,16 @@ export interface ChatDbReader {
    * with the same sanitizer every other outbound shape uses, not here.
    */
   readChatTurns(q: { chatGuid: ChatGuid; limit: number }): Promise<ChatTurn[]>;
+  /**
+   * v2 A1: one page of the conversations list, newest first by each chat's
+   * newest non-reaction message, with the total in the same read so the
+   * count on screen and the rows under it cannot disagree. Chats with no
+   * such message are not conversations yet and are neither listed nor
+   * counted. The cursor is opaque and minted here; a cursor this reader did
+   * not mint rejects with `InvalidCursorError`. Text is RAW, as for
+   * `readChatTurns`.
+   */
+  listChats(q: ChatsQuery): Promise<ChatsPage>;
 }
 
 /** One prior turn of a conversation ({@link ChatDbReader.readChatTurns}). */

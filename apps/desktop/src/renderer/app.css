@@ -715,6 +715,227 @@ body {
   resize: none;
 }
 
+/* ── the conversations list (v2 A1) ─────────────────────────────────────
+ *
+ * Board 01's frame, in G2 glass: a rail of channels on the left, and the
+ * list beside it under its header. Both halves are `--pane`, which is
+ * nothing at all over the glass and `--layer-0` where transparency is
+ * reduced, so the whole mode is the window's one material, split by a
+ * real 1px hairline rather than by a gap over a painted ground.
+ *
+ * The rows are NOT filled, unlike the queue's cards. The queue's cards sit
+ * on a pane of their own; this list IS the pane, and a fill on every row
+ * would lay a second ground across nearly the whole of it, which is the
+ * one thing even frost forbids. A row is a hairline-free band of words,
+ * and the cursor is a bar and a border, never a fill, as in every list in
+ * this app.
+ *
+ * Row height is load-bearing: 48px plus the list's 8px gap is the 56px
+ * nominal row `shell/List.tsx` sizes its spacers from. Change one and the
+ * scrollbar stops describing the list.
+ *
+ * No transition and no animation, for the queue's reason.
+ */
+
+#threads {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  margin-top: 16px;
+  min-height: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#threads-rail,
+#threads-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--pane);
+}
+
+/* The rail/list seam, a real hairline for G2's reason (see `.rules-pane`). */
+#threads-rail {
+  border-right: 1px solid var(--stroke);
+}
+
+.threads-rail-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.threads-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.threads-rail-entry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+/* The current scope: a bar and a border, the lists' cursor carrier. The
+   word beside it and `aria-current` say the same thing without colour. */
+.threads-rail-entry[data-current='true'] {
+  border-color: var(--tint);
+  box-shadow: inset 3px 0 0 0 var(--tint);
+}
+
+.threads-rail-mark {
+  min-width: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+#threads-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+#threads-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#threads-lens,
+#threads-chip {
+  color: var(--ink-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+#threads-chip {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+#threads-scroll {
+  min-height: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Stand-ins for the rows outside the mounted window, as the queue's are. */
+#threads-spacer-top,
+#threads-spacer-bottom {
+  flex: none;
+}
+
+#threads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#threads-list:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 3px;
+}
+
+#threads-list [role='option'] {
+  box-sizing: border-box;
+  height: 48px;
+  display: grid;
+  grid-template-columns: 28px auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'mono mark title time'
+    'mono preview preview preview';
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  line-height: 1.3;
+  overflow: hidden;
+}
+
+#threads-list [role='option'][data-active='true'] {
+  border-color: var(--tint);
+  box-shadow: inset 3px 0 0 0 var(--tint);
+}
+
+.thread-monogram {
+  grid-area: mono;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.thread-mark {
+  grid-area: mark;
+  padding: 0 4px;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.thread-title {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.thread-time {
+  grid-area: time;
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-preview {
+  grid-area: preview;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+#threads-empty,
+#threads-note {
+  margin: 12px 0 0;
+  color: var(--ink-dim);
+}
+
 /*
  * The rules editor.
  *

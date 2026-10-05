@@ -755,12 +755,17 @@ describe('s8 Sc3 row 7: clampedBy on the draft.created frame', () => {
  * on core and dev-depends on client), which is the whole argument for the row
  * living here rather than in `packages/client/test`.
  *
- * The mirror is a strict NARROWING, not a variation. Where core answers with
- * a known service the two agree field for field; where core would answer
- * `service:'unknown'` — a guid whose prefix is neither iMessage nor SMS — the
- * client refuses instead of handing a caller a shape that means nothing. A
- * GUI that renders `service` as an icon has no icon for 'unknown' and would
- * silently draw the wrong one.
+ * The mirror is a NARROWING with one named exception, not a variation. Where
+ * core answers with a known service the two agree field for field; where
+ * core would answer `service:'unknown'` (a guid whose prefix is neither
+ * iMessage nor SMS), the client refuses instead of handing a caller a shape
+ * that means nothing. A GUI that renders `service` as an icon has no icon for
+ * 'unknown' and would silently draw the wrong one.
+ *
+ * The exception is macOS 26's `any;` prefix (v2 A1). It is not garbage:
+ * Messages writes every new chat that way, so the client accepts it, and on
+ * it the two agree field for field, `service: 'unknown'` included. Every
+ * other unknown prefix is still refused.
  */
 describe('s8 Sc3: the client parseChatGuid mirror agrees with core', () => {
   const SHARED = [
@@ -768,16 +773,24 @@ describe('s8 Sc3: the client parseChatGuid mirror agrees with core', () => {
     'SMS;-;+15550000002',
     'iMessage;+;chat123',
     'SMS;+;chat456',
+    'any;-;+15550000005',
+    'any;+;chat789',
   ];
 
-  it('field for field, on every guid core recognises', () => {
+  it('field for field, on every guid both accept, any; included', () => {
     for (const guid of SHARED) {
       expect(clientParseChatGuid(guid), guid).toEqual(coreParseChatGuid(guid));
     }
   });
 
-  it('and refuses exactly what core would have called unknown', () => {
-    for (const garbage of ['', 'garbage', 'whatsapp;-;+15550000003', ';-;x']) {
+  it('and refuses what core would have called unknown, except any;', () => {
+    for (const garbage of [
+      '',
+      'garbage',
+      'whatsapp;-;+15550000003',
+      ';-;x',
+      'anything;-;x',
+    ]) {
       expect(coreParseChatGuid(garbage).service, garbage).toBe('unknown');
       expect(() => clientParseChatGuid(garbage), garbage).toThrow();
     }

@@ -116,6 +116,20 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
       // s5 Scenario 4: same obligation as drafts — the adapter registry is
       // real reachable surface, so the ratchet has to see it.
       adapters: { store, clock },
+      // v2 A1 (#26): the conversations list is real reachable surface too.
+      // The page reader throws, because a route-table test lists routes and
+      // never serves one.
+      threads: {
+        source: {
+          channel: 'imessage',
+          listChats: () => {
+            throw new Error(
+              'listChats must not be called: route-table test only',
+            );
+          },
+        },
+        clock,
+      },
       send: {
         store,
         reader: createUnusedChatDbReader(),

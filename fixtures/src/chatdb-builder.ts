@@ -234,7 +234,17 @@ export interface ChatDbFixture {
      */
     guidPrefix?: string;
   }): number;
-  addGroupChat(handleIds: number[], opts?: { displayName?: string }): number;
+  addGroupChat(
+    handleIds: number[],
+    opts?: {
+      displayName?: string;
+      /**
+       * v2 A1: the guid prefix, as on `addChat`. macOS 26 writes "any" for
+       * groups too ("any;+;chat…"), keeping the service in service_name.
+       */
+      guidPrefix?: string;
+    },
+  ): number;
   addMessage(opts: AddMessageOptions): MessageRef;
   addTapback(
     targetGuid: string,
@@ -350,7 +360,7 @@ export function createChatDb(path: string): ChatDbFixture {
            VALUES (?, 43, ?, 'iMessage', ?, ?, ?)`,
         )
         .run(
-          `iMessage;+;${roomName}`,
+          `${opts?.guidPrefix ?? 'iMessage'};+;${roomName}`,
           roomName,
           roomName,
           opts?.displayName ?? null,

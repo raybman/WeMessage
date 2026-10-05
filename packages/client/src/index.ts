@@ -119,6 +119,25 @@ export class DaemonGateDeniedError extends DaemonRequestError {
   }
 }
 
+/**
+ * v2 A1: the daemon is up and the caller IS the operator, but the source
+ * behind `GET /v1/threads` could not answer (the reader is disconnected, or
+ * the database would not open). The route says so with a 503, and so does
+ * the bearer hook when there is no token at all, which is why this needs a
+ * class of its own: left to the shared mapping it would surface as
+ * `DaemonAuthError`, and send someone to rotate a token that was never the
+ * problem. Told apart by the body, `{error:'source-unavailable'}` exactly;
+ * every other 503 keeps the auth mapping. Extends `DaemonRequestError`, as
+ * the gate denial does, so `.statusCode` survives without implying an auth
+ * failure.
+ */
+export class DaemonSourceUnavailableError extends DaemonRequestError {
+  constructor() {
+    super(503, JSON.stringify({ error: 'source-unavailable' }));
+    this.name = 'DaemonSourceUnavailableError';
+  }
+}
+
 /** Read the daemon token from the config dir; null when absent (§2.6). */
 export function readTokenFile(configDir: string): string | null {
   try {
@@ -565,7 +584,11 @@ export class ChatGuidParseError extends Error {
 export interface ChatGuidParts {
   /** The counterparty, or `''` for a group — a room has no single one. */
   handle: string;
-  service: 'imessage' | 'sms';
+  /**
+   * 'unknown' only for macOS 26's `any;` prefix, which names no service on
+   * purpose: which one a chat rides is decided per message, not per chat.
+   */
+  service: 'imessage' | 'sms' | 'unknown';
   isGroup: boolean;
 }
 
@@ -579,22 +602,28 @@ export interface ChatGuidParts {
  * core to reach fifteen lines of string handling would drag the store, the
  * gate and the dispatcher along with it.
  *
- * It is a strict NARROWING of core's function, not a copy: identical for
- * every guid core resolves a service for, and a throw exactly where core
- * would have answered `service: 'unknown'`. Core cannot throw — it runs
- * inside the dispatcher, where a malformed guid has to degrade to a refusal
- * rather than an exception in the send path — but a caller choosing an icon
- * is better served by a failure than by a service picked at random. The two
- * are pinned to each other in the daemon's own tests, the one package that
- * can import both.
+ * It is a NARROWING of core's function with one named exception, not a
+ * copy: identical for every guid core resolves a service for, identical for
+ * the `any;` prefix (both answer `service: 'unknown'`), and a throw
+ * everywhere else core would have answered 'unknown'. Core cannot throw: it
+ * runs inside the dispatcher, where a malformed guid has to degrade to a
+ * refusal rather than an exception in the send path. But a caller choosing
+ * an icon is better served by a failure than by a service picked at random.
+ *
+ * `any;` is the exception because it is not malformed (v2 A1): since macOS
+ * 26 Messages writes every new chat that way, so a parser that threw on it
+ * could not draw most of a modern conversation list. It is a whole prefix,
+ * not a stem: `anything;-;x` still throws. The two parsers are pinned to each
+ * other in the daemon's own tests, the one package that can import both.
  */
 export function parseChatGuid(chatGuid: string): ChatGuidParts {
   const ONE_ON_ONE_SEP = ';-;';
   const prefix = chatGuid.split(';')[0]?.toLowerCase();
-  if (prefix !== 'imessage' && prefix !== 'sms') {
+  if (prefix !== 'imessage' && prefix !== 'sms' && prefix !== 'any') {
     throw new ChatGuidParseError(chatGuid);
   }
-  const service: 'imessage' | 'sms' = prefix;
+  const service: ChatGuidParts['service'] =
+    prefix === 'any' ? 'unknown' : prefix;
   const idx = chatGuid.indexOf(ONE_ON_ONE_SEP);
   // No 1:1 separator means a room, which has no counterparty to name.
   if (idx === -1) return { handle: '', service, isGroup: true };
@@ -869,6 +898,48 @@ export interface AdapterCredential {
   connectCmd: string;
 }
 
+/**
+ * v2 A1: `GET /v1/threads`, the conversations list (route ratchet #26).
+ * Client-local, mirroring packages/daemon/src/routes/threads.ts verbatim,
+ * by the same "no @wemessage/core dep" convention as every DTO above.
+ */
+
+/** The channels a thread can arrive on. Phase B widens this, nothing else. */
+export type ThreadChannel = 'imessage';
+
+/** One conversation, newest message first in the list it came in. */
+export interface ThreadSummary {
+  chatGuid: string;
+  channel: ThreadChannel;
+  /** The chat's own name, else its participants, else its identifier. */
+  title: string;
+  isGroup: boolean;
+  /** The newest readable line, or null when there is none to show. */
+  lastLine: string | null;
+  /** Whether that newest message was ours. */
+  lastFromMe: boolean;
+  /** ISO-8601 UTC: when that newest message was sent. */
+  lastAt: string;
+}
+
+/** One page of the list, dated by the daemon's clock. */
+export interface ThreadsPage {
+  threads: ThreadSummary[];
+  /** Pass back verbatim for the next page. Null on the last one. */
+  nextCursor: string | null;
+  /** Every conversation the source would list, not just this page's. */
+  total: number;
+  /** ISO-8601 UTC: when the daemon read the list. */
+  asOf: string;
+}
+
+export interface ThreadListParams {
+  /** 1..200; the daemon defaults to 100. */
+  limit?: number;
+  /** A `nextCursor`, verbatim. Opaque: never build or edit one. */
+  cursor?: string;
+}
+
 export interface WeMessageClient {
   health(): Promise<{ status: string }>;
   status(): Promise<StatusPayload>;
@@ -992,6 +1063,14 @@ export interface WeMessageClient {
   setSettings(
     patch: Record<string, SettingPatchValue>,
   ): Promise<SettingsPatchResult>;
+
+  /**
+   * v2 A1: one page of the conversations list, and a read only. Rejects
+   * with `DaemonSourceUnavailableError` when the daemon is up but cannot
+   * read the list, and with a 400 `DaemonRequestError` for a cursor it did
+   * not mint.
+   */
+  listThreads(params?: ThreadListParams): Promise<ThreadsPage>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -1017,7 +1096,23 @@ export function createClient(options: ClientOptions): WeMessageClient {
     } catch (cause) {
       throw new DaemonUnreachableError(options.baseUrl, cause);
     }
-    if (res.status === 401 || res.status === 503) {
+    if (res.status === 503) {
+      // Two 503s exist. The bearer hook's (no token, or a purged daemon) is
+      // an auth state; the threads route's is a source that is down while
+      // auth is fine. Only that exact body is the second one.
+      const text = await res.text();
+      let parsed: { error?: unknown } | null = null;
+      try {
+        parsed = JSON.parse(text) as { error?: unknown };
+      } catch {
+        parsed = null;
+      }
+      if (parsed?.error === 'source-unavailable') {
+        throw new DaemonSourceUnavailableError();
+      }
+      throw new DaemonAuthError(res.status);
+    }
+    if (res.status === 401) {
       throw new DaemonAuthError(res.status);
     }
     if (res.status === 403) {
@@ -1258,6 +1353,16 @@ export function createClient(options: ClientOptions): WeMessageClient {
       } catch (err) {
         throw asSettingsRefusal(err);
       }
+    },
+
+    listThreads: (params) => {
+      const qs = new URLSearchParams();
+      if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+      if (params?.cursor !== undefined) qs.set('cursor', params.cursor);
+      const suffix = qs.toString();
+      return get(
+        `/v1/threads${suffix.length > 0 ? `?${suffix}` : ''}`,
+      ) as Promise<ThreadsPage>;
     },
 
     events(onEvent, opts) {

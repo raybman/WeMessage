@@ -298,6 +298,11 @@ function makeReader(cfg: {
     // s5 Scenario 6 (F-46): dispatch-time conversation context. The send
     // path never reads it; present so the fake still satisfies the port.
     readChatTurns: () => Promise.resolve([]),
+    // v2 A1: the conversations list. The send path never lists chats.
+    listChats: () => {
+      cfg.calls.push('listChats');
+      return Promise.resolve({ chats: [], nextCursor: null, total: 0 });
+    },
   };
 }
 

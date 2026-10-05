@@ -15,7 +15,13 @@ import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import type { AuditEvent, Clock, Draft, Ulid } from '@wemessage/core';
+import type {
+  AuditEvent,
+  ChannelSource,
+  Clock,
+  Draft,
+  Ulid,
+} from '@wemessage/core';
 import {
   dispatchApproved,
   verifyLate,
@@ -147,6 +153,14 @@ export interface BootOptions {
    * by hand; production defaults to a real unref'd interval inside the route.
    */
   sse?: { keepaliveMs?: number; timer?: SseTimer };
+  /**
+   * v2 A1: also register `GET /v1/threads`. `true` serves it from this
+   * harness's own chat.db reader, composed exactly as `daemon.ts` composes
+   * it; a `ChannelSource` serves it from that source instead, which is how
+   * a suite proves the route is not chat.db-shaped. Opt-in and off by
+   * default, for the same reason as every other route here.
+   */
+  threads?: boolean | ChannelSource;
 }
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
@@ -224,6 +238,20 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
         }
       : {}),
     ...(opts.sse !== undefined ? { sse: opts.sse } : {}),
+    ...(opts.threads === true
+      ? {
+          threads: {
+            source: {
+              channel: 'imessage' as const,
+              listChats: (q: Parameters<ChannelSource['listChats']>[0]) =>
+                reader.listChats(q),
+            },
+            clock: clockCtl.clock,
+          },
+        }
+      : opts.threads !== undefined && opts.threads !== false
+        ? { threads: { source: opts.threads, clock: clockCtl.clock } }
+        : {}),
     ...(opts.rules === true
       ? { rules: { store, clock: clockCtl.clock, sink } }
       : {}),

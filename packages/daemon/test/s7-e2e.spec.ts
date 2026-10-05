@@ -1691,8 +1691,9 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // is empty, and the partition rows in
     // `transport-surface.ratchet.spec.ts` assert that the empty case is not
     // vacuous. This row only records the arithmetic so an S7 reader sees
-    // where the numbers went.
-    expect(ROUTE_TABLE).toHaveLength(67);
+    // where the numbers went. v2 A1 (ratchet #26) then added the first v2
+    // route, `GET /v1/threads` and its twin: 67 -> 69, no frame, no event.
+    expect(ROUTE_TABLE).toHaveLength(69);
     expect(WS_EVENT_VOCABULARY).toHaveLength(21);
     expect(EMITTED_WS_EVENTS).toHaveLength(21);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);

@@ -1,19 +1,24 @@
 /**
  * What a chat guid says about who is on the other end.
  *
- * A local NARROWING of `parseChatGuid` from `@wemessage/client`, and the
+ * A local copy of `parseChatGuid` from `@wemessage/client`, and the
  * duplication is forced rather than chosen: that package imports `ws` and
  * `node:fs` and authenticates a socket with a header a sandboxed renderer
  * cannot set, so it lives in the MAIN process (F-101) and importing it here
- * would drag a Node-only module into a Chromium bundle. `test/unit/derive.
- * spec.ts` imports BOTH and pins them to each other on a table of guids,
- * which is the only place in the app allowed to hold the two side by side.
+ * would drag a Node-only module into a Chromium bundle.
+ * `test/unit/chat-derive.spec.ts` imports BOTH and pins them to each other
+ * on a table of guids, which is the only place in the app allowed to hold
+ * the two side by side.
  *
- * One deliberate difference: the client THROWS for a guid it cannot name a
- * service for, and this answers `'unknown'`. The client's caller is choosing
- * an icon and is better served by a failure; this one is painting a card
- * that has already been drafted against, and an exception mid-render blanks
- * a window over a string the daemon accepted.
+ * Where they agree: `iMessage;`, `SMS;` and (since v2 A1) `any;` all parse,
+ * and `any;` is `'unknown'` in both, because a guid that says "any service"
+ * names none.
+ *
+ * One deliberate difference: for every OTHER prefix the client THROWS, and
+ * this answers `'unknown'`. The client's caller is choosing an icon and is
+ * better served by a failure; this one is painting a card that has already
+ * been drafted against, and an exception mid-render blanks a window over a
+ * string the daemon accepted.
  */
 
 export interface ChatParts {

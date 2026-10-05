@@ -37,6 +37,19 @@ import { byAge, cardOf, type CardModel } from './derive/queue.js';
 import { moveTo, type QueueVerb } from './keys/index.js';
 import { screenFor } from './keys/screens.js';
 import {
+  isThreadsChord,
+  threadsMoveTo,
+  type ThreadsVerb,
+} from './keys/threads.js';
+import { scopeChip, threadRows, type ThreadRow } from './derive/threads.js';
+import {
+  bindThreads,
+  type ThreadsBinding,
+  type ThreadsData,
+} from './store/threads.js';
+import { Messenger, type MessengerProps } from './shell/Messenger.js';
+import { threadOptionId } from './shell/List.js';
+import {
   DEFAULT_SCREEN,
   WIZARD_STEPS,
   type Screen,
@@ -2059,6 +2072,47 @@ let wizardStep: WizardStep = 'welcome';
 /** What the operator typed on the last step. Never persisted. */
 let wizardHandle = '';
 
+/* ── v2 A1: the conversations list ────────────────────────────────────── */
+
+/** One GET channel, paged by cursor. Nothing this binding can reach writes. */
+const threads: ThreadsBinding = bindThreads(window.wm);
+
+/**
+ * Whether the conversations list is laid over the queue.
+ *
+ * A MODE, on the setup flow's terms and for the setup flow's reason:
+ * `screen` is one of six things reachable by a ⌘-digit, and the messenger
+ * is not a seventh. ⇧⌘R enters it from any screen, every screen chord
+ * leaves it, and `screen` reads "queue" the whole time it is up, because
+ * the queue is what it is laid over and what leaving it returns to.
+ */
+let threadsOpen = false;
+/**
+ * The cursor, as an INDEX into the rows held.
+ *
+ * The queue holds its cursor as an id, because drafts leave from under it
+ * and an index would re-aim the next `a`. This list is the opposite case:
+ * it is one dated read that only ever grows at its end, nothing in the mode
+ * can act on a row, and asking again (⇧⌘R) starts the cursor over on the
+ * fresh read.
+ */
+let threadsActive = 0;
+/** Whether the LAST paint drew the list, so arriving and leaving are seen. */
+let threadsPainted = false;
+/**
+ * The rows as drawn, derived once per page rather than once per paint.
+ *
+ * Every `j` repaints, and deriving four thousand held rows (two zoned
+ * clock reads each) on every keystroke is the lag this slice's budget
+ * exists to rule out. Keyed on the store's own array and instant, both of
+ * which are replaced, never mutated, when a page lands.
+ */
+let threadsDrawn: {
+  readonly from: ThreadsData['rows'];
+  readonly asOf: string;
+  readonly rows: readonly ThreadRow[];
+} | null = null;
+
 /**
  * The instant this screen was last entered.
  *
@@ -2380,6 +2434,10 @@ function wizardStepNow(): WizardStep {
 function openWizardMode(): void {
   wizardOpen = true;
   wizardStep = 'welcome';
+  // Setup is laid over the app, so the conversations list comes down
+  // first: a mode left up underneath would reappear when setup finishes,
+  // holding a read from before it.
+  closeThreads();
   // The POSITION resets; the RECORD does not. Re-entering setup starts at
   // the first question again, but the code that was already sent and the
   // handle it went to stay on screen — they are facts about a message that
@@ -2630,6 +2688,13 @@ function settingsView(): SettingsScreenProps {
  * behaviour on elements that never announce they have any.
  */
 function onWindowKey(event: KeyboardEvent): void {
+  // v2 A1: ⇧⌘R is CLAIMED in every state, before any guard below can
+  // return. Electron's default menu binds the same chord to Force Reload,
+  // and this app sets no menu of its own, so a chord the renderer let past
+  // would reload the window underneath whatever the operator was doing,
+  // the typed confirm and the setup flow included.
+  const threadsChord = isThreadsChord(event);
+  if (threadsChord) event.preventDefault();
   // ESCAPE and ENTER both CANCEL while the confirm is up. Enter especially:
   // the whole point of a typed confirm is that the sentence is typed and
   // then the button is chosen, and an Enter that submitted would put the
@@ -2646,15 +2711,121 @@ function onWindowKey(event: KeyboardEvent): void {
   // underneath it, and a flow the operator can walk away from mid-step
   // without leaving it is a flow whose "did you finish?" has no answer.
   if (wizardOpen) return;
+  if (threadsChord) {
+    openThreads();
+    return;
+  }
   const next = screenFor(event);
   if (next === null || !MOUNTED.has(next)) return;
   event.preventDefault();
-  if (next === screen) return;
+  // Not a no-op while the conversations list is up, even for ⌘1: the list
+  // is laid over the queue, and the queue's own chord is how the operator
+  // gets back to it.
+  if (next === screen && !threadsOpen) return;
   // An operator navigating themselves has answered the chip: they have gone
   // somewhere on purpose and the link that missed is over.
   linkNotFound = null;
   goToScreen(next);
   paint();
+}
+
+/**
+ * Enter the conversations list, or ask again when it is already up.
+ *
+ * Through `goToScreen('queue')`, the one door, so arriving from the rules
+ * screen drops a half-typed rule exactly as ⌘1 would have. The first page
+ * is asked for HERE, in the gesture, and `load()` marks itself in flight
+ * synchronously, so the first paint of the mode already says it is reading.
+ *
+ * Not while the link is down. The setup flow is what is on screen then,
+ * and a list opened underneath it would be a request guaranteed to fail
+ * and a mode nobody can see.
+ */
+function openThreads(): void {
+  if (stream.state === 'down') return;
+  linkNotFound = null;
+  goToScreen('queue');
+  threadsOpen = true;
+  threadsActive = 0;
+  void threads.load();
+  paint();
+}
+
+/**
+ * Leave the conversations list. Does not paint, on `goToScreen`'s terms:
+ * every caller has more to say first.
+ *
+ * The rows are DROPPED, not kept for next time. The list is a read of
+ * now, and a list reopened from what was held would be a read of then
+ * drawn under a fresh "as of".
+ */
+function closeThreads(): void {
+  if (!threadsOpen) return;
+  threadsOpen = false;
+  threadsActive = 0;
+  threadsDrawn = null;
+  threads.reset();
+}
+
+/** Whether this paint draws the list: open, and nothing laid over it. */
+function threadsShown(): boolean {
+  return threadsOpen && stream.state !== 'down' && !wizardOpen;
+}
+
+/**
+ * Move the cursor, and fetch the next page when it reaches the end.
+ *
+ * Only over a list that answered: while a read is in flight, or after one
+ * failed, there is no row to be on. The cursor arriving on the LAST row
+ * held is what asks for more, so `End` lands on a real row first and the
+ * page after it is fetched behind that, never skipped over; `more()`
+ * itself refuses while a page is already in flight or the list is all held.
+ */
+function onThreadsMove(verb: ThreadsVerb): void {
+  const data = threads.data();
+  if (data.status !== 'ready') return;
+  const held = data.rows.length;
+  const next = threadsMoveTo(verb, threadsActive, held);
+  if (next < 0) return;
+  threadsActive = next;
+  if (next === held - 1) void threads.more();
+  paint();
+  // The scroller follows the cursor. Nothing else would: the cursor is an
+  // `aria-activedescendant`, which moves no focus and scrolls nothing, and
+  // without this a cursor sent to row 100 by `End` is off-screen.
+  document
+    .getElementById(threadOptionId(next))
+    ?.scrollIntoView({ block: 'nearest' });
+}
+
+/** The rows as drawn, re-derived only when a page has landed. */
+function threadsRows(data: ThreadsData): readonly ThreadRow[] {
+  if (
+    threadsDrawn === null ||
+    threadsDrawn.from !== data.rows ||
+    threadsDrawn.asOf !== data.asOf
+  )
+    threadsDrawn = {
+      from: data.rows,
+      asOf: data.asOf,
+      rows: threadRows(data.rows, data.asOf, HOST_ZONE),
+    };
+  return threadsDrawn.rows;
+}
+
+function messengerView(): MessengerProps {
+  const data = threads.data();
+  return {
+    status: data.status,
+    rows: threadsRows(data),
+    total: data.total,
+    // Dated by the page, drawn in this Mac's zone, and absent until there
+    // is a page to date.
+    chip: data.asOf === '' ? '' : scopeChip(data.total, data.asOf, HOST_ZONE),
+    activeIndex: threadsActive,
+    paging: data.paging,
+    onMove: onThreadsMove,
+  };
 }
 
 /**
@@ -2675,6 +2846,9 @@ function onWindowKey(event: KeyboardEvent): void {
  */
 function goToScreen(next: Screen): void {
   screen = next;
+  // Every screen chord leaves the conversations list, ⌘1 included: it is a
+  // mode laid over the queue, and `openThreads` raises it AFTER this call.
+  closeThreads();
   closeRuleForm();
   closeScheduleForm();
   // RESET, then load. The catalogue held from a previous visit is a set of
@@ -2748,6 +2922,11 @@ function Shell({
           }}
           detail={scheduleDetail()}
         />
+      ) : threadsOpen ? (
+        // v2 A1. In the queue's place, not beside it: one screen is drawn
+        // at a time, and the root still says `queue` because the registry
+        // of screens does not grow for a mode.
+        <Messenger {...messengerView()} />
       ) : (
         <QueueScreen
           cards={view.cards}
@@ -2904,8 +3083,28 @@ function paint(): void {
   // moment it was computed from. `setAttribute` rather than `dataset`
   // because the ATTRIBUTE name is the contract, and `dataset['nowIso']`
   // spells it nowhere a reader (or a grep) can see it.
+  // The conversations list's readiness idiom, on the same terms: the mode's
+  // status, the rows HELD (not the sixty mounted), and the daemon's total
+  // once there is a page that counted it. All three come off while the mode
+  // is down, so `:not([data-threads])` is how a harness waits for it to go.
+  const shown = threadsShown();
+  const listed = threads.data();
+  if (shown) {
+    html.setAttribute('data-threads', listed.status);
+    html.setAttribute('data-threads-rows', String(listed.rows.length));
+    if (listed.asOf === '') html.removeAttribute('data-threads-total');
+    else html.setAttribute('data-threads-total', String(listed.total));
+  } else {
+    html.removeAttribute('data-threads');
+    html.removeAttribute('data-threads-rows');
+    html.removeAttribute('data-threads-total');
+  }
   if (screen === 'audit') html.setAttribute('data-now-iso', auditNow);
   else if (screen === 'settings') html.setAttribute('data-now-iso', configNow);
+  // The DAEMON's instant the times on the rows were measured back from,
+  // never this window's clock: the list is dated by the page it came on.
+  else if (shown && listed.asOf !== '')
+    html.setAttribute('data-now-iso', listed.asOf);
   else html.removeAttribute('data-now-iso');
   // The id a deep link named and this queue does not have, published at the
   // document level so a harness can wait on the REFUSAL rather than on the
@@ -2936,12 +3135,30 @@ function paint(): void {
   // Focus handed BACK, in the same paint the editor unmounted in. Preact has
   // already removed the textarea by the time this runs, and a removed element
   // takes the focus to `<body>` with it — where the listbox's key handler is
-  // not, so the next `a` would vanish with no visible cause. This is the one
-  // imperative focus move in the app and it exists because the alternative
-  // silently breaks the keyboard.
+  // not, so the next `a` would vanish with no visible cause. This and the
+  // two moves below are the app's only imperative focus moves, and all three
+  // exist for the same reason: the alternative silently breaks the keyboard.
   if (wasEditing !== null && editing === null) {
     document.getElementById('queue-list')?.focus();
   }
+  // v2 A1, on the same terms. Raising the conversations list unmounts the
+  // queue's listbox and taking it down unmounts its own, and either one
+  // would leave the focus on `<body>` with no key handler under it. On the
+  // EDGES only, never every paint: a paint that re-took the focus would
+  // pull it back from wherever the operator had just put it.
+  if (shown && !threadsPainted) {
+    document.getElementById('threads-list')?.focus();
+  } else if (
+    !shown &&
+    threadsPainted &&
+    screen === 'queue' &&
+    stream.state !== 'down' &&
+    !wizardOpen &&
+    editing === null
+  ) {
+    document.getElementById('queue-list')?.focus();
+  }
+  threadsPainted = shown;
 }
 
 /** What the LAST paint rendered, so the unmount above can be detected. */
@@ -2975,6 +3192,7 @@ people.subscribe(schedulePaint);
 audits.subscribe(schedulePaint);
 config.subscribe(schedulePaint);
 wizard.subscribe(schedulePaint);
+threads.subscribe(schedulePaint);
 window.addEventListener('keydown', onWindowKey);
 
 window.wm.on('stream', (payload: unknown) => {
@@ -2989,6 +3207,10 @@ window.wm.on('stream', (payload: unknown) => {
     wizardStep = 'welcome';
     wizardHandle = '';
     wizard.reset();
+    // The conversations list is a read of a daemon this window can no
+    // longer reach, so it goes too, on the same edge and for the same
+    // reason. Coming back is ⇧⌘R, which asks again.
+    closeThreads();
   }
   stream = next;
   // The catalogue is fetchable only while there is a daemon to fetch it
@@ -3054,7 +3276,9 @@ window.wm.on('navigate', (payload: unknown) => {
   // a keystroke reset exactly the same things. Skipped when the screen has
   // not moved, because re-entering the screen you are on would drop a
   // half-typed rule for no reason.
-  if (link.screen !== screen) goToScreen(link.screen);
+  // Unless the conversations list is up: a link names a screen, and the
+  // list laid over the queue is not the queue it names.
+  if (link.screen !== screen || threadsOpen) goToScreen(link.screen);
   // The cursor. `derive()` resolves an id that is not in the queue to the
   // top rather than to nothing, so a link naming a draft that has since
   // gone leaves the operator somewhere real.

@@ -16,6 +16,7 @@ import type { GatewayEventPayload } from '@wemessage/protocol';
 import { CLOSE_CODES } from '@wemessage/protocol';
 import { SETTING_KILL_SWITCH } from '@wemessage/core';
 import type {
+  ChannelSource,
   ChatDbReader,
   Clock,
   Draft,
@@ -58,6 +59,7 @@ import { registerContactRoutes } from './routes/contacts.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
+import { registerThreadRoutes } from './routes/threads.js';
 import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
 import { closeReasonFor, parseEventFilter } from './events-filter.js';
@@ -181,6 +183,16 @@ export interface DaemonOptions {
    * connection state from. `daemon.ts` always passes it.
    */
   greeting?: () => GatewayEventPayload;
+
+  /**
+   * v2 A1: when provided, registers `GET /v1/threads` (and its HEAD twin),
+   * the conversations list. It needs a channel source and a clock to date
+   * the answer with, and nothing else: no store, because looking at a list
+   * writes nothing, and no sink, because it broadcasts nothing either.
+   * Optional on the same terms as every other surface here. `daemon.ts`
+   * passes the iMessage source.
+   */
+  threads?: { source: ChannelSource; clock: Clock };
 
   /**
    * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they
@@ -575,6 +587,12 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
         void sender.send(rule, message);
       };
     }
+  }
+
+  if (opts.threads) {
+    // v2 A1: route ratchet #26. Behind the operator bearer like everything
+    // but health and the adapter socket: an adapter token is not a bearer.
+    registerThreadRoutes(app, opts.threads);
   }
 
   if (opts.connection && sink) {

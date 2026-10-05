@@ -31,6 +31,7 @@ import {
   createClient,
   DaemonConflictError,
   DaemonGateDeniedError,
+  DaemonSourceUnavailableError,
   type BulkSelector,
   type ContactMode,
   type DisconnectInput,
@@ -692,6 +693,31 @@ export function createGateway(options: GatewayOptions): Gateway {
       if (!isSystemSettingsPane(pane)) throw new Error('unknown-pane');
       await shell.openExternal(SYSTEM_SETTINGS_PANES[pane]);
       return { opened: pane };
+    },
+    /**
+     * v2 A1: one page of the conversations list. The only argument is the
+     * previous page's `nextCursor`, carried verbatim; there is no `limit`,
+     * so the page size is the route's default and the renderer cannot ask
+     * for the whole history in one request.
+     *
+     * A source that is down is an ANSWER, not a fault, for the same reason
+     * the draft refusals are: the daemon is up and the operator's token is
+     * fine, and an `Error` crossing IPC would arrive as prose the renderer
+     * would have to parse to tell this apart from "no daemon at all".
+     */
+    threads: async (a) => {
+      const cursor = a[0];
+      if (cursor !== undefined && cursor !== null && typeof cursor !== 'string')
+        throw new Error('bad-argument:0');
+      try {
+        return await requireClient().listThreads(
+          typeof cursor === 'string' ? { cursor } : undefined,
+        );
+      } catch (error) {
+        if (error instanceof DaemonSourceUnavailableError)
+          return { refused: 'source-unavailable' };
+        throw error;
+      }
     },
   };
 

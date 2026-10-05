@@ -37,14 +37,18 @@
  * this package depends on `@wemessage/protocol` and `ws` and nothing else,
  * deliberately, because it ships to third parties and core would drag the
  * store, the gate and the dispatcher behind it. So the client owns a small
- * copy. The copy is a strict NARROWING: identical where core resolves a
- * service it knows, and a thrown error exactly where core would have
- * answered `service: 'unknown'`. Core cannot throw — it runs inside the
+ * copy. The copy is a NARROWING with one named exception: identical where
+ * core resolves a service it knows, identical for macOS 26's `any;` prefix
+ * (both answer `service: 'unknown'`), and a thrown error everywhere else core
+ * would have answered 'unknown'. Core cannot throw: it runs inside the
  * dispatcher, where a malformed guid must degrade to a refusal and not to an
- * exception in the send path — but a caller drawing a screen is better served
- * by a failure than by an icon chosen at random. The two are pinned to each
- * other in `packages/daemon/test/drafts-lifecycle-events.spec.ts`, the one
- * package that can import both.
+ * exception in the send path. But a caller drawing a screen is better served
+ * by a failure than by an icon chosen at random. `any;` is the exception
+ * because it is not malformed: since macOS 26 Messages writes every new chat
+ * that way, so a parser that threw on it could not draw most of a modern
+ * conversation list (v2 A1). The two are pinned to each other in
+ * `packages/daemon/test/drafts-lifecycle-events.spec.ts`, the one package
+ * that can import both.
  *
  * Handles are synthetic (`+1555…`).
  */
@@ -351,8 +355,36 @@ describe('s8 Sc3 client: parseChatGuid', () => {
     expect(parseChatGuid('iMessage;-;a;-;b').handle).toBe('a;-;b');
   });
 
+  it("accepts macOS 26's any; prefix and names no service for it (v2 A1)", () => {
+    // Since macOS 26 Messages writes new chats as `any;-;handle` and
+    // `any;+;room`, so a parser that threw here could not draw most of a
+    // modern conversation list. The prefix names no service, because which
+    // one a chat rides is decided per message, so the honest answer is
+    // 'unknown' and the caller draws no service mark rather than a guessed one.
+    expect(parseChatGuid('any;-;+15550000005')).toEqual({
+      handle: '+15550000005',
+      service: 'unknown',
+      isGroup: false,
+    });
+    expect(parseChatGuid('any;+;chat789')).toEqual({
+      handle: '',
+      service: 'unknown',
+      isGroup: true,
+    });
+    // Case-insensitive, like the other two prefixes, because core is.
+    expect(parseChatGuid('ANY;-;+15550000006').service).toBe('unknown');
+  });
+
   it('throws on a guid whose service it cannot name', () => {
-    for (const bad of ['', 'garbage', 'whatsapp;-;+15550000003', ';-;x']) {
+    // `any;` is a whole prefix, not a stem: 'anything' and 'anyx' still throw.
+    for (const bad of [
+      '',
+      'garbage',
+      'whatsapp;-;+15550000003',
+      ';-;x',
+      'anything;-;x',
+      'anyx;+;room',
+    ]) {
       expect(() => parseChatGuid(bad), bad).toThrow(/chat guid/i);
     }
   });

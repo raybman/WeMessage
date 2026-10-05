@@ -3221,7 +3221,7 @@ describe('s7-execution Scenario 12 — the public document set', () => {
         if (!known.has(route)) offenders.push(`${rel}: ${route}`);
       }
     expect(offenders).toEqual([]);
-    // The noun set is derived from a table this suite pins at 67 rows, so it
+    // The noun set is derived from a table this suite pins at 69 rows, so it
     // cannot quietly empty out and turn the loop above into a no-op.
     expect(ourNouns.has('drafts') && ourNouns.has('send')).toBe(true);
     expect(ourNouns.has('runs')).toBe(false);
@@ -5110,6 +5110,9 @@ describe('S8 extensions (s8-execution Scenario 6: the queue’s structure)', () 
       'apps/desktop/src/renderer/screens',
       'apps/desktop/src/renderer/keys',
       'apps/desktop/src/renderer/derive',
+      // v2 A1: the messenger's chrome (rail, list, header). A view tree
+      // like the four above, and so held to the same ban.
+      'apps/desktop/src/renderer/shell',
     ];
     /** The composition root, and the only renderer file allowed the bridge. */
     const ROOTS = [
@@ -6237,6 +6240,18 @@ describe('S8 extensions (s8-execution Scenario 10: the rules editor)', () => {
       // subscriber would be a second opinion about whether the daemon is
       // there, and the whole screen is about there being one.
       members: ['doctor', 'openSystemSettings', 'sendTest', 'wizardArm'],
+    },
+    [`${STORE_ROOT}/threads.ts`]: {
+      constant: 'THREADS_CHANNELS',
+      // v2 A1, and the first binding of the v2 messenger. One read and
+      // nothing else. The conversations list is what `GET /v1/threads`
+      // says, in the order it says it, dated by the `asOf` it carries.
+      //
+      // No `on`: a list patched from a stream is a list the renderer has to
+      // re-sort, and a renderer that re-sorts is a renderer deciding which
+      // conversation moved. The plan's cohesion rule is that the renderer
+      // never computes that; it refetches on the lens chord instead.
+      members: ['threads'],
     },
   };
 
@@ -10223,7 +10238,11 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // the one thing a relationship cannot express: "no new route" has no
     // second source to compare against inside this repo. Each is also
     // checked for the shape of drift a count alone would miss.
-    expect(ROUTE_TABLE.length).toBe(67);
+    //
+    // 67 at S7 close; 69 since v2 A1 (#26): `GET /v1/threads`, the v2
+    // conversations list, plus its auto-HEAD twin. A read behind the
+    // operator bearer; the frame table and the port allowlist did not move.
+    expect(ROUTE_TABLE.length).toBe(69);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -12134,8 +12153,11 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged', () => {
-      expect(ROUTE_TABLE.length).toBe(67);
+    it('the S8-close counts are unchanged, except the route table (#26)', () => {
+      // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
+      // twin), the conversations list the v2 messenger opens on: 67 -> 69.
+      // No WS event, no frame and no port importer moved with it.
+      expect(ROUTE_TABLE.length).toBe(69);
       expect(WS_EVENT_VOCABULARY.length).toBe(21);
       expect(GATEWAY_EVENT_NAMES.length).toBe(21);
       expect(EMITTED_WS_EVENTS.length).toBe(21);
@@ -12149,16 +12171,19 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; the only later update is s10 Slice 2 (#25), and #26 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25) and v2 A1 (#26), and #27 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
-      // verification reads chat.db), not for the wire: every S8 wire count
-      // in the row above is untouched. #26 is the next tooth.
+      // verification reads chat.db), not for the wire. v2 A1 minted #26 for
+      // one read route, `GET /v1/threads`, and nothing else on the wire: the
+      // event and frame counts in the row above are S8's. #27 is the next
+      // tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(25);
-      expect(seen).not.toContain(26);
+      expect(Math.max(...seen)).toBe(26);
+      expect(seen).not.toContain(27);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
+      expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {
@@ -12749,5 +12774,161 @@ describe('S9 extensions (s9-execution Scenario 2: the two deferred guards)', () 
         .map((o) => `${o + 1}: ${lines[o]?.trim() ?? ''}`);
       expect(unearned).toEqual([]);
     });
+  });
+});
+
+describe('v2 extensions (A1: the conversations list)', () => {
+  /**
+   * v2 A1 opens the messenger on one list: every conversation, newest
+   * first, as `GET /v1/threads` returns it. Three of the claims that make
+   * that list honest are structural, and so they live here rather than in
+   * the e2e, which can only ever see one rendering of them.
+   *
+   *  - The list is a pure function of the page it was handed and the
+   *    instant `main.tsx` read. A row that read its own clock would label
+   *    "9:41" against a different now than the header's "as of", and the
+   *    two would disagree on screen by however long Preact took.
+   *  - The route reaches its rows through the `ChannelSource` it is handed,
+   *    never through chat.db. iMessage is the first source, not the only
+   *    shape a source can have; that is the seam phase B plugs into.
+   *  - The messenger is a MODE, not a seventh screen. The six screens are
+   *    what v1 shipped and what later slices delete one at a time.
+   */
+  const RENDERER = 'apps/desktop/src/renderer';
+  const SHELL = `${RENDERER}/shell`;
+  const ROUTE = 'packages/daemon/src/routes/threads.ts';
+  const CLOCK_READ = /\bDate\s*\.\s*now\s*\(|\bnew\s+Date\s*\(\s*\)/;
+
+  const a1Planted: string[] = [];
+  function a1Plant(rel: string, body: string): string {
+    const abs = join(repoRoot, rel);
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body);
+    a1Planted.push(rel);
+    return rel;
+  }
+  afterEach(() => {
+    for (const rel of a1Planted.splice(0))
+      rmSync(join(repoRoot, rel), { force: true });
+    for (const dir of [
+      `${SHELL}/__v2_a1_probe__`,
+      'packages/daemon/src/routes/__v2_a1_probe__',
+    ])
+      rmSync(join(repoRoot, dir), { recursive: true, force: true });
+  });
+
+  /** Every module specifier one file's CODE imports from, sorted. */
+  function importsOf(rel: string): string[] {
+    const out = new Set<string>();
+    for (const m of archRead(rel).matchAll(
+      /^\s*import\s[^;]*?from\s+'([^']+)'/gm,
+    ))
+      out.add(m[1] ?? '');
+    return [...out].sort();
+  }
+
+  /* ── row 1: no clock in the messenger's chrome ─────────────────────── */
+
+  it('no file under shell/ reads a clock', () => {
+    const files = archFiles(SHELL);
+    // Non-vacuous: the shell is a real tree with the three parts the
+    // board draws (rail, list, header).
+    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(
+      files.filter((rel) => CLOCK_READ.test(codeOf(archRead(rel)))),
+    ).toEqual([]);
+    // And the one file that may read it still does: `data-now-iso` is
+    // stamped from the composition root, not from a row.
+    expect(CLOCK_READ.test(codeOf(archRead(`${RENDERER}/main.tsx`)))).toBe(
+      true,
+    );
+  });
+
+  it('PLANTED: a row that dates itself against its own clock is caught', () => {
+    const rel = a1Plant(
+      `${SHELL}/__v2_a1_probe__/Row.tsx`,
+      [
+        'export function When(props: { at: string }): unknown {',
+        '  const age = Date.now() - Date.parse(props.at);',
+        '  return <time>{age}</time>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(
+      archFiles(SHELL).filter((r) => CLOCK_READ.test(codeOf(archRead(r)))),
+    ).toEqual([rel]);
+  });
+
+  it('LEGITIMATE NEAR-MISS: a row handed its instant, explaining the ban, is clean', () => {
+    const rel = a1Plant(
+      `${SHELL}/__v2_a1_probe__/Given.tsx`,
+      [
+        '/**',
+        ' * Never Date.now() here, never new Date(): the instant is a prop.',
+        ' */',
+        'export function When(props: { at: string; nowIso: string }): unknown {',
+        '  return <time dateTime={props.at}>{props.nowIso}</time>;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(CLOCK_READ.test(codeOf(archRead(rel)))).toBe(false);
+  });
+
+  /* ── row 2: the route reads a source, never the database ───────────── */
+
+  it('routes/threads.ts imports core, fastify, zod and the sanitiser, and nothing that opens a file', () => {
+    expect(importsOf(ROUTE)).toEqual([
+      '../sanitize.js',
+      '@wemessage/core',
+      'fastify',
+      'zod',
+    ]);
+    const code = codeOf(archRead(ROUTE));
+    // The rows arrive through `source.listChats`, and that is the only
+    // read in the file.
+    expect(code).toMatch(/\bsource\s*\.\s*listChats\s*\(/);
+    expect(code).not.toMatch(/better-sqlite3|chat\.db|readFileSync|node:fs/);
+  });
+
+  it('PLANTED: a route that opens chat.db itself is caught', () => {
+    const rel = a1Plant(
+      'packages/daemon/src/routes/__v2_a1_probe__/threads.ts',
+      [
+        "import Database from 'better-sqlite3';",
+        "import type { FastifyInstance } from 'fastify';",
+        'export function register(app: FastifyInstance): void {',
+        "  const db = new Database('/Users/x/Library/Messages/chat.db');",
+        "  app.get('/v1/threads', () => db.prepare('SELECT 1').all());",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect(importsOf(rel)).toContain('better-sqlite3');
+    expect(codeOf(archRead(rel))).toMatch(/chat\.db/);
+  });
+
+  /* ── row 3: a mode, not a seventh screen ───────────────────────────── */
+
+  it('SCREENS still names the six v1 screens, and the messenger is not one of them', () => {
+    // Row 9 of Sc17 pins the registry and the directory set; this row says
+    // why A1 did not move either. The messenger is entered by a chord and
+    // left by a screen chord, and it has no sidebar slot to be navigated to.
+    const router = archRead(`${RENDERER}/router.ts`);
+    const m = /SCREENS\s*=\s*\[([^\]]*)\]/.exec(router);
+    const names = [...(m?.[1] ?? '').matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    expect(names).toEqual([
+      'queue',
+      'rules',
+      'schedule',
+      'people',
+      'audit',
+      'settings',
+    ]);
+    expect(names).not.toContain('threads');
+    // And the messenger's chrome lives beside the screens, not under them.
+    expect(archFiles(`${RENDERER}/screens/threads`)).toEqual([]);
+    expect(archFiles(SHELL).length).toBeGreaterThan(0);
   });
 });

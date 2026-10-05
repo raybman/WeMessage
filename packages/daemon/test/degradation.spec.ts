@@ -145,6 +145,8 @@ function controllableOpenReader(): ControllableOpenReader {
         findOutboundMessage: boom,
         // s7 Sc1: the port grew this in s5 Sc6 (F-46); the fake did not.
         readChatTurns: boom,
+        // v2 A1: the conversations list fails the same way when unreadable.
+        listChats: boom,
         close: () => undefined,
       };
     },

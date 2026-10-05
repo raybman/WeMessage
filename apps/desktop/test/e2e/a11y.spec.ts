@@ -549,13 +549,31 @@ const KEY: Readonly<Record<Screen, string>> = {
   settings: 'Meta+Digit6',
 };
 
+/**
+ * Arrive on `screen`, and on the screen itself rather than on a mode laid
+ * over it.
+ *
+ * v2 A1 is why the second half exists. The conversations list is a MODE
+ * over the queue (`data-threads` on the root, `data-screen` left at
+ * "queue"), so "already on the queue" stopped meaning "looking at the
+ * queue" the day it shipped. Judged by `data-screen` alone, a driver that
+ * ran after the list opened would skip the stroke, wait for an attribute
+ * that was already true and scan the conversations list under the queue's
+ * name. A screen's own stroke is what takes the mode down, so the stroke
+ * is pressed whenever the mode is up, and arrival is the screen WITHOUT it.
+ */
 async function go(s: Sweep, screen: Screen): Promise<void> {
   const at = await s.app.page.getAttribute('html', 'data-screen');
-  if (at !== screen) await s.app.page.keyboard.press(KEY[screen]);
-  await s.app.page.waitForSelector(`html[data-screen="${screen}"]`, {
-    timeout: 30_000,
-  });
+  const underMode = (await s.app.page.$('html[data-threads]')) !== null;
+  if (at !== screen || underMode) await s.app.page.keyboard.press(KEY[screen]);
+  await s.app.page.waitForSelector(
+    `html[data-screen="${screen}"]:not([data-threads])`,
+    { timeout: 30_000 },
+  );
 }
+
+/** The stroke that opens the conversations list (v2 A1). */
+const THREADS_KEY = 'Meta+Shift+KeyR';
 
 /**
  * Wait for the store to report EXACTLY `n` rows, and say what it saw instead.
@@ -887,6 +905,79 @@ const SURFACES: Readonly<Record<Screen, readonly SurfaceState[]>> = {
   ],
 };
 
+/**
+ * The modes: surfaces reached by a stroke that is not a screen's, laid over
+ * a screen without becoming one.
+ *
+ * v2 A1 adds the first that the sweep has to walk. The wizard is a mode too,
+ * and it has its own walk below because it has its own exit vocabulary; the
+ * conversations list has states, not exits, so it goes through the same
+ * per-state loop as a screen. It is NOT added to `SCREENS`: that registry is
+ * closed at six by the router and pinned by an arch row, and the list is
+ * laid over the queue (`data-screen` stays "queue") rather than replacing
+ * one. The record is still typed total over its keys, and the registry row
+ * reads the keys back, so a second mode added here has to be added on
+ * purpose.
+ */
+type Mode = 'threads';
+
+const MODE_SURFACES: Readonly<Record<Mode, readonly SurfaceState[]>> = {
+  threads: [
+    {
+      /**
+       * Nothing to list, which is a real state: the fixture's one chat has
+       * never carried a message, and a chat with no messages is not a
+       * conversation. Entered from the queue, because that is the screen the
+       * mode is laid over.
+       */
+      id: 'empty',
+      witness: '#threads-empty',
+      enter: async (s) => {
+        await go(s, 'queue');
+        await s.app.page.keyboard.press(THREADS_KEY);
+        await s.app.page.waitForSelector(
+          'html[data-threads="ready"][data-threads-total="0"]',
+          { timeout: 30_000 },
+        );
+      },
+    },
+    {
+      /**
+       * One conversation, whose last line is OURS, so the row carries the
+       * "You: " preview and every ink a row can paint.
+       *
+       * Seeded straight into chat.db as an OUTBOUND line, and outbound on
+       * purpose: rules never read a from-me message (INV-6), so this seeds a
+       * conversation without seeding a draft, and the INV-2 rows at the end
+       * of the sweep still compare exactly the drafts the queue seeded. The
+       * list is a read of now, so it is closed and reopened to see it.
+       */
+      id: 'populated',
+      witness: '#threads-list [role="option"]',
+      enter: async (s) => {
+        const chat = s.fixture.fixture.db
+          .prepare('SELECT ROWID AS id FROM chat WHERE guid = ?')
+          .get(CHAT) as { id: number } | undefined;
+        if (chat === undefined) throw new Error(`no fixture chat ${CHAT}`);
+        s.fixture.fixture.addMessage({
+          chatId: chat.id,
+          isFromMe: true,
+          text: 'On my way, see you at six.',
+        });
+        await go(s, 'queue');
+        await s.app.page.keyboard.press(THREADS_KEY);
+        await s.app.page.waitForSelector(
+          'html[data-threads="ready"][data-threads-rows="1"]',
+          { timeout: 30_000 },
+        );
+      },
+      leave: async (s) => {
+        await go(s, 'queue');
+      },
+    },
+  ],
+};
+
 /* ── the wizard, enumerated from its own exit vocabulary ──────────────── */
 
 interface Reached {
@@ -1029,15 +1120,29 @@ describe('s8 Sc17 — the surface is enumerated from the product, not from a lis
     expect(Object.keys(WIZARD_EXIT_SPEC).sort()).toEqual([...WIZARD_EXITS]);
     expect(WIZARD_EXITS).toHaveLength(8);
     expect(Object.keys(KEY).sort()).toEqual([...SCREENS].sort());
+    // v2 A1: the modes the sweep walks, read back the same way. A mode is
+    // never a screen, so the two key sets may not meet either.
+    expect(Object.keys(MODE_SURFACES).sort()).toEqual(['threads']);
+    expect(
+      Object.keys(MODE_SURFACES).filter((m) =>
+        (SCREENS as readonly string[]).includes(m),
+      ),
+    ).toEqual([]);
 
     // Every state has a name and a witness, and no two states of a screen
     // share either — two entries with one id would silently halve coverage
-    // while the count still looked right.
+    // while the count still looked right. Modes share the namespace, so a
+    // mode state that watched a screen's witness is caught here too.
     const ids: string[] = [];
     const witnesses: string[] = [];
     for (const screen of SCREENS)
       for (const state of SURFACES[screen]) {
         ids.push(`${screen}/${state.id}`);
+        witnesses.push(state.witness);
+      }
+    for (const [mode, states] of Object.entries(MODE_SURFACES))
+      for (const state of states) {
+        ids.push(`${mode}/${state.id}`);
         witnesses.push(state.witness);
       }
     expect(new Set(ids).size).toBe(ids.length);
@@ -1054,6 +1159,8 @@ describe('s8 Sc17 — the surface is enumerated from the product, not from a lis
     // be "six screens once each" wearing a bigger word.
     for (const screen of SCREENS)
       expect(SURFACES[screen].length, screen).toBeGreaterThan(1);
+    for (const [mode, states] of Object.entries(MODE_SURFACES))
+      expect(states.length, mode).toBeGreaterThan(1);
   });
 
   it('the wizard walk covers every step in the registry', () => {
@@ -1488,31 +1595,37 @@ describe('s8 Sc17 — every screen, every state, every rendering variant', () =>
      * it holds the product still and changes only the appearance, which is
      * precisely the variable under study.
      */
-    for (const screen of SCREENS)
-      for (const state of SURFACES[screen]) {
-        await state.enter(sweep);
-        for (const variant of VARIANTS) {
-          await applyVariant(app, variant);
-          const s = await scan(
-            app,
-            `${screen}/${state.id}`,
-            variant,
-            state.witness,
-          );
-          const t = triage(s, variant);
-          defects.push(...t.defects);
-          for (const c of t.causes) causes.add(c);
-          const byVariant = census.get(`${screen}/${state.id}`) ?? new Map();
-          byVariant.set(variant.id, s.elements);
-          census.set(`${screen}/${state.id}`, byVariant);
-          const bucket = variant.reduced ? judgedBy : deferredBy;
-          const set = bucket.get(variant.scheme) ?? new Set<string>();
-          for (const d of t.deferred) set.add(d);
-          bucket.set(variant.scheme, set);
-          expectClean(s);
-        }
-        await state.leave?.(sweep);
+    const visit = async (
+      surface: string,
+      state: SurfaceState,
+    ): Promise<void> => {
+      await state.enter(sweep);
+      for (const variant of VARIANTS) {
+        await applyVariant(app, variant);
+        const s = await scan(app, surface, variant, state.witness);
+        const t = triage(s, variant);
+        defects.push(...t.defects);
+        for (const c of t.causes) causes.add(c);
+        const byVariant = census.get(surface) ?? new Map();
+        byVariant.set(variant.id, s.elements);
+        census.set(surface, byVariant);
+        const bucket = variant.reduced ? judgedBy : deferredBy;
+        const set = bucket.get(variant.scheme) ?? new Set<string>();
+        for (const d of t.deferred) set.add(d);
+        bucket.set(variant.scheme, set);
+        expectClean(s);
       }
+      await state.leave?.(sweep);
+    };
+    for (const screen of SCREENS)
+      for (const state of SURFACES[screen])
+        await visit(`${screen}/${state.id}`, state);
+    // The modes LAST, for the reason the queue's disconnected state is last
+    // among the screens: the conversations list's populated state writes a
+    // line into chat.db, and no screen should be scanned over a fixture a
+    // mode has changed.
+    for (const [mode, states] of Object.entries(MODE_SURFACES))
+      for (const state of states) await visit(`${mode}/${state.id}`, state);
 
     // The DOM is the same in all four variants of a state. This is what
     // makes deferring a contrast finding to the opaque variant honest
@@ -1620,8 +1733,11 @@ describe('s8 Sc17 — every screen, every state, every rendering variant', () =>
       ).toEqual([]);
 
     // The coverage claim, stated as a number derived from the table rather
-    // than typed in: six screens, fifteen states, four variants.
-    const states = SCREENS.reduce((n, s) => n + SURFACES[s].length, 0);
+    // than typed in: six screens and one mode, seventeen states, four
+    // variants.
+    const states =
+      SCREENS.reduce((n, s) => n + SURFACES[s].length, 0) +
+      Object.values(MODE_SURFACES).reduce((n, m) => n + m.length, 0);
     expect(scans.length).toBe(states * VARIANTS.length);
     expect(new Set(scans.map((s) => s.surface)).size).toBe(states);
     expect(new Set(scans.map((s) => s.variant)).size).toBe(VARIANTS.length);
@@ -1993,6 +2109,90 @@ describe('s8 Sc17 — the tree the platform computes, not the attributes we wrot
     ).toEqual([]);
   }, 300_000);
 
+  /**
+   * v2 A1: the conversations list, read from the same computed tree.
+   *
+   * The e2e asserts the list's markup: one listbox, a roving
+   * `aria-activedescendant`, a label per option. This row asks the question
+   * that markup cannot answer, which is what Chromium HANDS a screen reader
+   * from it: one focusable node besides the document, options parented by
+   * that listbox and named by their labels word for word, and a cursor
+   * whose idref resolves to a live node. Three conversations, each ending
+   * on a line of ours, so the spoken name carries the "You: " preview.
+   */
+  it('is what the conversations list exposes: one tab stop, named options, a cursor that resolves (v2 A1)', async () => {
+    const fixture = await bootHere({
+      seed: (f) => {
+        for (const [i, handle] of [
+          '+15550002221',
+          '+15550002222',
+          '+15550002223',
+        ].entries()) {
+          const h = f.addHandle(handle);
+          const chatId = f.addChat({ identifier: handle, handleIds: [h] });
+          f.addMessage({ chatId, handleId: h, text: `Line ${String(i + 1)}.` });
+          f.addMessage({
+            chatId,
+            isFromMe: true,
+            text: `Reply ${String(i + 1)}.`,
+          });
+        }
+      },
+    });
+    const app = await launchHere(fixture);
+    await waitForConnected(app.page);
+    await applyVariant(app, VARIANTS[0] as Variant);
+    await app.page.keyboard.press(THREADS_KEY);
+    await app.page.waitForSelector(
+      'html[data-threads="ready"][data-threads-rows="3"]',
+      { timeout: 30_000 },
+    );
+    await settle(app);
+    const tree = await axTree(app.app, app.page);
+
+    expect(
+      tree
+        .filter((n) => !n.ignored && n.properties.focusable === 'true')
+        .map((n) => n.role)
+        .sort(),
+      'the conversations list should expose the listbox and nothing else as focusable',
+    ).toEqual(['RootWebArea', 'listbox']);
+
+    const parents = axParentRole(tree);
+    const options = axByRole(tree, 'option');
+    expect(options.map((n) => parents.get(n.nodeId) ?? 'ORPHAN')).toEqual([
+      'listbox',
+      'listbox',
+      'listbox',
+    ]);
+    const labels = await app.page.evaluate(() =>
+      [...document.querySelectorAll('#threads-list [role="option"]')].map(
+        (e) => e.getAttribute('aria-label') ?? '',
+      ),
+    );
+    expect(options.map((n) => n.name)).toEqual(labels);
+    for (const label of labels) {
+      expect(label).toMatch(/^\+1555000222\d · iMessage · /);
+      expect(label).toMatch(/ · You: Reply \d\.$/);
+    }
+    expect(
+      options
+        .filter((n) => n.properties.focusable === 'true')
+        .map((n) => n.name),
+      'an option owns focus, which virtualization will drop',
+    ).toEqual([]);
+
+    const listbox = axByRole(tree, 'listbox')[0];
+    expect(listbox, 'the conversations list exposes no listbox').toBeDefined();
+    expect(listbox?.name).toBe('Conversations');
+    expect(
+      listbox?.related.activedescendant ?? [],
+      'the cursor did not resolve to a live node',
+    ).toEqual([
+      await app.page.getAttribute('#threads-list', 'aria-activedescendant'),
+    ]);
+  }, 300_000);
+
   it('notices a planted option that owns focus and one that claims to expand', async () => {
     const fixture = await bootHere();
     const app = await launchHere(fixture);
@@ -2274,11 +2474,42 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
     });
     await app.page.locator('#queue-pane').first().waitFor({ timeout: 15_000 });
 
-    /** Screen stroke, then the panes it must show as glass. */
-    const PANES: readonly (readonly [string, string, readonly string[]])[] = [
-      ['queue', 'Meta+Digit1', ['#queue-pane']],
-      ['rules', 'Meta+Digit2', ['.rules-pane', '.rules-detail']],
-      ['schedule', 'Meta+Digit3', ['.rules-pane', '.sched-pane']],
+    /**
+     * Surface, stroke, what arrival looks like, then the panes it must show
+     * as glass. Arrival is spelled per surface since v2 A1, because the
+     * conversations list is a mode over the queue and `data-screen` alone
+     * cannot tell the two apart.
+     */
+    const PANES: readonly (readonly [
+      string,
+      string,
+      string,
+      readonly string[],
+    ])[] = [
+      [
+        'queue',
+        'Meta+Digit1',
+        'html[data-screen="queue"]:not([data-threads])',
+        ['#queue-pane'],
+      ],
+      [
+        'rules',
+        'Meta+Digit2',
+        'html[data-screen="rules"]',
+        ['.rules-pane', '.rules-detail'],
+      ],
+      [
+        'schedule',
+        'Meta+Digit3',
+        'html[data-screen="schedule"]',
+        ['.rules-pane', '.sched-pane'],
+      ],
+      [
+        'threads',
+        'Meta+Shift+KeyR',
+        'html[data-threads="ready"]',
+        ['#threads-rail', '#threads-pane'],
+      ],
     ];
     for (const variant of VARIANTS) {
       await applyVariant(app, variant);
@@ -2300,11 +2531,9 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
             .first()
             .screenshot({ omitBackground: true }),
         );
-      for (const [screen, key, panes] of PANES) {
+      for (const [screen, key, arrived, panes] of PANES) {
         await app.page.keyboard.press(key);
-        await app.page.waitForSelector(`html[data-screen="${screen}"]`, {
-          timeout: 30_000,
-        });
+        await app.page.waitForSelector(arrived, { timeout: 30_000 });
         const ground = await alphaOf('#app');
         expect(ground, `${variant.id}: #app is not glass`).toBeLessThan(255);
         for (const sel of panes) {
@@ -2319,20 +2548,36 @@ describe('s8 Sc17 — reduced transparency, in pixels, because there is no gette
       }
       // Back where the loop found it, so the next variant starts alike.
       await app.page.keyboard.press('Meta+Digit1');
-      await app.page.waitForSelector('html[data-screen="queue"]');
+      await app.page.waitForSelector(
+        'html[data-screen="queue"]:not([data-threads])',
+      );
     }
 
     // The hairline survives: the list pane is split from its detail by a
-    // real 1px stroke, not by a gap over a painted ground.
-    for (const [screen, key] of PANES.slice(1)) {
+    // real 1px stroke, not by a gap over a painted ground. The conversations
+    // list's rail is split from its list the same way (v2 A1).
+    const SEAMS: readonly (readonly [string, string, string, string])[] = [
+      ['rules', 'Meta+Digit2', 'html[data-screen="rules"]', '.rules-pane'],
+      [
+        'schedule',
+        'Meta+Digit3',
+        'html[data-screen="schedule"]',
+        '.rules-pane',
+      ],
+      [
+        'threads',
+        'Meta+Shift+KeyR',
+        'html[data-threads="ready"]',
+        '#threads-rail',
+      ],
+    ];
+    for (const [screen, key, arrived, left] of SEAMS) {
       await app.page.keyboard.press(key);
-      await app.page.waitForSelector(`html[data-screen="${screen}"]`);
-      const seam = await app.page.evaluate(() => {
-        const cs = getComputedStyle(
-          document.querySelector('.rules-pane') as Element,
-        );
+      await app.page.waitForSelector(arrived);
+      const seam = await app.page.evaluate((sel) => {
+        const cs = getComputedStyle(document.querySelector(sel) as Element);
         return { width: cs.borderRightWidth, style: cs.borderRightStyle };
-      });
+      }, left);
       expect(seam, `${screen}: the list/detail hairline`).toEqual({
         width: '1px',
         style: 'solid',

@@ -238,6 +238,11 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       resolveChat: (handle) => live().resolveChat(handle),
       findOutboundMessage: (q) => live().findOutboundMessage(q),
       readChatTurns: (q) => live().readChatTurns(q),
+      // v2 A1: the conversations list. Unlike a send, nothing gates this
+      // read upstream, so while disconnected it reaches `live()` and throws,
+      // which the route answers as source-unavailable. That is the honest
+      // answer: a disconnected gateway is not reading the Messages database.
+      listChats: (q) => live().listChats(q),
     },
     close: () => {
       current?.close();
@@ -592,6 +597,16 @@ export async function startDaemon(
     onEventsClient: (socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
+    },
+    // v2 A1: the conversations list. iMessage is the first channel source
+    // (TN-imessage-is-just-a-source), read through the same handle the send
+    // path holds, so a disconnect closes the list along with everything else.
+    threads: {
+      source: {
+        channel: 'imessage',
+        listChats: (q) => sendReaderHandle.reader.listChats(q),
+      },
+      clock: options.clock,
     },
     // greeting frame (§3.4 connection.state): proves the stream is live.
     //

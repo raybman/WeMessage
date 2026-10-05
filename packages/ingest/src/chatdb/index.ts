@@ -15,6 +15,9 @@ import type {
   AttachmentRef,
   ChatDbReader,
   ChatGuid,
+  ChatSummary,
+  ChatsPage,
+  ChatsQuery,
   ChatTurn,
   Clock,
   Handle,
@@ -23,15 +26,23 @@ import type {
   MutatedMessage,
   Service,
 } from '@wemessage/core';
-import { normalizeHandle } from '@wemessage/core';
 import {
+  InvalidCursorError,
+  normalizeHandle,
+  parseChatGuid,
+} from '@wemessage/core';
+import {
+  appleNsToIso,
   isoToAppleNs,
   mapService,
   normalizeRow,
   type DecodeFailedSignal,
   type RawMessageRow,
 } from '../normalize/index.js';
-import { decodeTypedstreamText } from '../typedstream/index.js';
+import {
+  decodeSummaryInfoLatestText,
+  decodeTypedstreamText,
+} from '../typedstream/index.js';
 
 export interface ChatDbReaderOptions {
   clock: Clock;
@@ -186,6 +197,213 @@ const CHAT_TURNS_SQL = `${MESSAGE_SELECT_SQL}
   LIMIT ?
 `;
 
+/**
+ * listChats (v2 A1): one page of the conversations list AND the size of the
+ * whole list, in ONE statement, so both come from the same read snapshot of
+ * chat.db and the count on screen can never disagree with the rows under it.
+ *
+ * `conv` holds one row per conversation: each chat's newest message that is
+ * not a reaction. A tapback (`associated_message_guid` set and a nonzero
+ * `associated_message_type`, the same test normalizeRow applies) is a
+ * reaction TO a message, so it neither dates nor previews a chat, and a chat
+ * holding nothing but reactions, or nothing at all, is not a conversation
+ * yet. The correlated subquery walks one chat's join rows newest first and
+ * stops at the first real message, so a chat costs a read of its own rows,
+ * never of the whole message table.
+ *
+ * Dates are compared RAW. A pre-High Sierra row is seconds since 2001 and a
+ * modern one nanoseconds, and every seconds-era value is smaller than every
+ * nanosecond-era one, which is also the right chronological order. A NULL or
+ * negative date sorts as 0; the same clamped expression orders, filters and
+ * mints the cursor, so the keyset stays consistent even then.
+ *
+ * Paging is keyset on (lastDate DESC, chatRowid DESC): a page boundary that
+ * lands inside a tie neither repeats a chat nor skips one, and a newer chat
+ * wins a tie. Bound parameters, in order: the cursor date (or NULL for the
+ * first page), the same date twice more, the cursor chat ROWID, and the row
+ * limit. The total row always comes back, even on an empty page, through the
+ * LEFT JOIN, and its page columns are NULL then.
+ */
+const LIST_CHATS_SQL = `
+  WITH last AS MATERIALIZED (
+    SELECT
+      c.ROWID AS chatRowid,
+      (SELECT cmj.message_id
+         FROM chat_message_join cmj
+         JOIN message m ON m.ROWID = cmj.message_id
+        WHERE cmj.chat_id = c.ROWID
+          AND NOT (m.associated_message_guid IS NOT NULL
+                   AND m.associated_message_type != 0)
+        ORDER BY cmj.message_date DESC, cmj.message_id DESC
+        LIMIT 1) AS messageRowid
+    FROM chat c
+  ),
+  conv AS MATERIALIZED (
+    SELECT
+      l.chatRowid AS chatRowid,
+      l.messageRowid AS messageRowid,
+      MAX(COALESCE(cmj.message_date, 0), 0) AS lastDate
+    FROM last l
+    JOIN chat_message_join cmj
+      ON cmj.chat_id = l.chatRowid AND cmj.message_id = l.messageRowid
+    WHERE l.messageRowid IS NOT NULL
+  )
+  SELECT
+    t.total            AS total,
+    p.chatRowid        AS chatRowid,
+    p.lastDate         AS lastDate,
+    p.chatGuid         AS chatGuid,
+    p.displayName      AS displayName,
+    p.chatIdentifier   AS chatIdentifier,
+    p.participants     AS participants,
+    p.text             AS text,
+    p.attributedBody   AS attributedBody,
+    p.isFromMe         AS isFromMe,
+    p.dateEdited       AS dateEdited,
+    p.dateRetracted    AS dateRetracted,
+    p.summaryInfo      AS summaryInfo
+  FROM (SELECT COUNT(*) AS total FROM conv) t
+  LEFT JOIN (
+    SELECT
+      conv.chatRowid             AS chatRowid,
+      conv.lastDate              AS lastDate,
+      c.guid                     AS chatGuid,
+      c.display_name             AS displayName,
+      c.chat_identifier          AS chatIdentifier,
+      (SELECT json_group_array(h.id)
+         FROM chat_handle_join chj
+         JOIN handle h ON h.ROWID = chj.handle_id
+        WHERE chj.chat_id = conv.chatRowid) AS participants,
+      m.text                     AS text,
+      m.attributedBody           AS attributedBody,
+      m.is_from_me               AS isFromMe,
+      m.date_edited              AS dateEdited,
+      m.date_retracted           AS dateRetracted,
+      m.message_summary_info     AS summaryInfo
+    FROM conv
+    JOIN chat c ON c.ROWID = conv.chatRowid
+    JOIN message m ON m.ROWID = conv.messageRowid
+    WHERE ? IS NULL
+       OR conv.lastDate < ?
+       OR (conv.lastDate = ? AND conv.chatRowid < ?)
+    ORDER BY conv.lastDate DESC, conv.chatRowid DESC
+    LIMIT ?
+  ) p ON 1
+  ORDER BY p.lastDate DESC, p.chatRowid DESC
+`;
+
+/** The most rows one page holds, whatever the caller asks for. */
+const LIST_CHATS_MAX = 200;
+/** SQLite INTEGER is a signed 64-bit value; a cursor beyond it was not minted. */
+const INT64_MAX = 9_223_372_036_854_775_807n;
+/**
+ * Below this a chat.db date is SECONDS since 2001, not nanoseconds: 1e11
+ * seconds is the year 5170, and 1e11 nanoseconds is 100 seconds into 2001.
+ */
+const SECONDS_ERA_LIMIT = 100_000_000_000n;
+/** The attachment placeholder Messages writes into `text`. */
+const OBJECT_REPLACEMENT = /\uFFFC/g;
+/** A cursor's decoded form: two canonical non-negative integers. */
+const CURSOR_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+interface ListChatsDbRow {
+  total: bigint;
+  chatRowid: bigint | null;
+  lastDate: bigint | null;
+  chatGuid: string | null;
+  displayName: string | null;
+  chatIdentifier: string | null;
+  participants: string | null;
+  text: string | null;
+  attributedBody: Uint8Array | null;
+  isFromMe: bigint | null;
+  dateEdited: bigint | null;
+  dateRetracted: bigint | null;
+  summaryInfo: Uint8Array | null;
+}
+
+/** A chat.db date (seconds or nanoseconds since 2001) as ISO-8601 UTC. */
+function chatDbDateToIso(raw: bigint): string {
+  return raw < SECONDS_ERA_LIMIT
+    ? appleNsToIso(raw * 1_000_000_000n)
+    : appleNsToIso(raw);
+}
+
+/** The opaque cursor for "everything after this row". */
+function mintCursor(lastDate: bigint, chatRowid: bigint): string {
+  return Buffer.from(
+    `${lastDate.toString()}.${chatRowid.toString()}`,
+    'utf8',
+  ).toString('base64url');
+}
+
+/**
+ * The keyset a cursor stands for, or an `InvalidCursorError`. Only the exact
+ * bytes `mintCursor` writes are accepted: base64url that re-encodes to
+ * itself (no padding, no stray characters, valid UTF-8), two canonical
+ * decimal integers, each within SQLite's integer range.
+ */
+function readCursor(cursor: string): { lastDate: bigint; chatRowid: bigint } {
+  const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+  if (
+    cursor.length === 0 ||
+    Buffer.from(decoded, 'utf8').toString('base64url') !== cursor
+  ) {
+    throw new InvalidCursorError();
+  }
+  const m = CURSOR_RE.exec(decoded);
+  if (m === null) throw new InvalidCursorError();
+  const lastDate = BigInt(m[1] ?? '');
+  const chatRowid = BigInt(m[2] ?? '');
+  if (lastDate > INT64_MAX || chatRowid > INT64_MAX) {
+    throw new InvalidCursorError();
+  }
+  return { lastDate, chatRowid };
+}
+
+/**
+ * The newest line, as normalizeRow would read it, ready for one row of a
+ * list: the text column when present, else the decoded attributedBody; an
+ * edit's latest revision when its summary decodes; nothing for an unsend.
+ * The attachment placeholder is dropped and the ends trimmed, and what is
+ * left empty is no line at all. Internal whitespace is left RAW: collapsing
+ * it is presentation, and the renderer owns presentation.
+ */
+function lastLineOf(row: ListChatsDbRow): string | null {
+  if ((row.dateRetracted ?? 0n) > 0n) return null;
+  let text = row.text;
+  if (text === null && row.attributedBody !== null) {
+    const decoded = decodeTypedstreamText(row.attributedBody);
+    if (decoded.ok) text = decoded.text;
+  }
+  if ((row.dateEdited ?? 0n) > 0n && row.summaryInfo !== null) {
+    const latest = decodeSummaryInfoLatestText(row.summaryInfo);
+    if (latest.ok) text = latest.text;
+  }
+  if (text === null) return null;
+  const line = text.replace(OBJECT_REPLACEMENT, '').trim();
+  return line.length > 0 ? line : null;
+}
+
+/**
+ * The chat's own name, else (for a group) its participants sorted and
+ * comma-separated, else its identifier. chat.db writes "" for an unnamed
+ * chat, so a name that is only whitespace is no name.
+ */
+function titleOf(row: ListChatsDbRow, isGroup: boolean): string {
+  const named = row.displayName?.trim() ?? '';
+  if (named.length > 0) return named;
+  if (isGroup) {
+    const ids = (JSON.parse(row.participants ?? '[]') as unknown[]).filter(
+      (id): id is string => typeof id === 'string',
+    );
+    // One handle id can appear once per service; it is one participant.
+    const people = [...new Set(ids)].sort();
+    if (people.length > 0) return people.join(', ');
+  }
+  return row.chatIdentifier ?? '';
+}
+
 interface DbMessageRow {
   rowid: bigint;
   guid: string;
@@ -255,6 +473,8 @@ export function createChatDbReader(
   const findOutboundStmt = db.prepare(FIND_OUTBOUND_SQL);
   const chatTurnsStmt = db.prepare(CHAT_TURNS_SQL);
   chatTurnsStmt.safeIntegers(true);
+  const listChatsStmt = db.prepare(LIST_CHATS_SQL);
+  listChatsStmt.safeIntegers(true); // dates exceed 2^53, and so may a cursor
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -396,6 +616,54 @@ export function createChatDbReader(
         }
       }
       return Promise.resolve(null);
+    },
+
+    listChats(q: ChatsQuery): Promise<ChatsPage> {
+      // Every failure is a rejection, never a throw: a caller that awaits
+      // this sees one error channel whether the cursor was forged or the
+      // database went away.
+      try {
+        const limit = Math.min(
+          LIST_CHATS_MAX,
+          Math.max(1, Math.trunc(q.limit) || 1),
+        );
+        const after = q.cursor === undefined ? null : readCursor(q.cursor);
+        const rows = listChatsStmt.all(
+          after?.lastDate ?? null,
+          after?.lastDate ?? null,
+          after?.lastDate ?? null,
+          after?.chatRowid ?? null,
+          BigInt(limit + 1),
+        ) as ListChatsDbRow[];
+        const total = Number(rows[0]?.total ?? 0n);
+        const held = rows.filter(
+          (r): r is ListChatsDbRow & { chatRowid: bigint; lastDate: bigint } =>
+            r.chatRowid !== null && r.lastDate !== null,
+        );
+        const pageRows = held.slice(0, limit);
+        const chats: ChatSummary[] = pageRows.map((r) => {
+          const chatGuid = r.chatGuid ?? '';
+          const { isGroup } = parseChatGuid(chatGuid);
+          return {
+            chatGuid,
+            title: titleOf(r, isGroup),
+            isGroup,
+            lastLine: lastLineOf(r),
+            lastFromMe: r.isFromMe === 1n,
+            lastAt: chatDbDateToIso(r.lastDate),
+          };
+        });
+        const tail = pageRows[pageRows.length - 1];
+        const nextCursor =
+          held.length > limit && tail !== undefined
+            ? mintCursor(tail.lastDate, tail.chatRowid)
+            : null;
+        return Promise.resolve({ chats, nextCursor, total });
+      } catch (err) {
+        return Promise.reject(
+          err instanceof Error ? err : new Error(String(err)),
+        );
+      }
     },
 
     close() {

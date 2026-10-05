@@ -84,6 +84,13 @@ export const CHANNELS = {
   wizardArm: 'wm:wizard.arm',
   /** `shell.openExternal` on an allowlisted `x-apple.systempreferences:` URL. */
   openSystemSettings: 'wm:open-system-settings',
+  /**
+   * v2 A1: one page of the conversations list, `GET /v1/threads`. A read
+   * and only a read. Takes one optional argument, the `nextCursor` of the
+   * page before, verbatim; the page size is the route's default, so the
+   * renderer cannot ask for more rows than the daemon chose to serve.
+   */
+  threads: 'wm:threads',
 
   // ---- main -> renderer (webContents.send) ------------------------------
   /**

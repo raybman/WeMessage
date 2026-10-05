@@ -269,12 +269,13 @@ describe('GET /v1/threads (v2 A1)', () => {
   });
 
   it('503 source-unavailable when the source fails, and the failure does not leak', async () => {
-    // A path-shaped message, deliberately not the live one: the S3 guard
-    // forbids that string in any test file.
+    // A path-shaped message, deliberately neither the live one nor a home
+    // directory: the S3 guard forbids the first in any test file, and the
+    // public-repo sweep forbids the second anywhere in the tree.
     const rejecting = fakeSource(() =>
       Promise.reject(
         new Error(
-          'EPERM: operation not permitted, open /Users/someone/chat.db',
+          'EPERM: operation not permitted, open /private/var/fixture/chat.db',
         ),
       ),
     );
@@ -283,7 +284,7 @@ describe('GET /v1/threads (v2 A1)', () => {
     expect(res.statusCode).toBe(503);
     expect(res.json()).toEqual({ error: 'source-unavailable' });
     expect(res.body).not.toContain('EPERM');
-    expect(res.body).not.toContain('/Users/');
+    expect(res.body).not.toContain('/private/');
     expect(res.body).not.toContain('chat.db');
 
     // A source that throws before it returns a promise is the same answer.

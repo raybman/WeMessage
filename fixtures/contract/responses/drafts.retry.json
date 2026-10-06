@@ -1,0 +1,27 @@
+{
+  "route": "POST /v1/drafts/:id/retry",
+  "status": 200,
+  "body": {
+    "draft": {
+      "id": "id-0011",
+      "inboundGuid": null,
+      "chatGuid": "iMessage;-;+15551234567",
+      "ruleId": null,
+      "adapterId": "human",
+      "idempotencyKey": "id-0012",
+      "body": "try this again",
+      "originalBody": "try this again",
+      "state": "approved",
+      "stateChangedAt": "2026-09-01T12:00:32.000Z",
+      "expiresAt": "2026-09-01T16:00:11.000Z",
+      "sendNotBefore": "2026-09-01T12:00:42.000Z",
+      "error": {
+        "code": "unverified",
+        "message": "send accepted but could not confirm in Messages history within 10s",
+        "at": "2026-09-01T12:00:32.000Z"
+      },
+      "createdAt": "2026-09-01T12:00:11.000Z"
+    },
+    "approvalId": "id-0013"
+  }
+}

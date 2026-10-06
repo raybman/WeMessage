@@ -1,0 +1,18 @@
+{
+  "route": "GET /v1/status",
+  "status": 200,
+  "body": {
+    "connectionState": "fully-connected",
+    "cursor": null,
+    "counts": {
+      "messagesToday": 0
+    },
+    "adapters": [],
+    "killSwitch": false,
+    "armed": {
+      "armed": true,
+      "until": null,
+      "reason": "armed"
+    }
+  }
+}

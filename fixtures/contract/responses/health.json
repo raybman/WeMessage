@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/health",
+  "status": 200,
+  "body": {
+    "status": "ok"
+  }
+}

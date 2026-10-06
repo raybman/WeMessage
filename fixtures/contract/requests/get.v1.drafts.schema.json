@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string"
+    },
+    "ruleId": {
+      "type": "string"
+    },
+    "contact": {
+      "type": "string"
+    },
+    "batchId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

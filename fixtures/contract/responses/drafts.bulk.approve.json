@@ -1,0 +1,14 @@
+{
+  "route": "POST /v1/drafts/bulk",
+  "status": 200,
+  "body": {
+    "batchId": "id-0016",
+    "matched": 2,
+    "applied": 2,
+    "appliedIds": [
+      "id-0014",
+      "id-0017"
+    ],
+    "refused": []
+  }
+}

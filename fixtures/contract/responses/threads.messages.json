@@ -1,0 +1,38 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15551234567",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0001",
+        "from": "them",
+        "kind": "text",
+        "text": "are we still on for nine?",
+        "at": "2026-09-01T11:50:00.000Z",
+        "handle": "+15551234567",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0002",
+        "from": "me",
+        "kind": "text",
+        "text": "yes, see you there",
+        "at": "2026-09-01T11:55:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0003",
+        "from": "them",
+        "kind": "text",
+        "text": "see you at nine",
+        "at": "2026-09-01T11:58:00.000Z",
+        "handle": "+15551234567",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "route": "POST /v1/schedules",
+  "status": 201,
+  "body": {
+    "schedule": {
+      "name": "Office hours",
+      "timezone": "America/Los_Angeles",
+      "windows": [
+        {
+          "days": [
+            "mon"
+          ],
+          "start": "09:00",
+          "end": "17:00"
+        }
+      ],
+      "enabled": true,
+      "id": "id-0019"
+    }
+  }
+}

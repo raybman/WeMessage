@@ -1,0 +1,8 @@
+{
+  "route": "POST /v1/schedules",
+  "status": 409,
+  "body": {
+    "error": "parked",
+    "detail": "auto-send and schedules are parked in this build; nothing changed"
+  }
+}

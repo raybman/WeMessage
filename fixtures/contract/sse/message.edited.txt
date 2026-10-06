@@ -1,0 +1,4 @@
+id: 18
+event: message.edited
+data: {"event":"message.edited","guid":"guid-inbound-0001","newText":"make it 7pm instead"}
+

@@ -1,0 +1,12 @@
+{
+  "route": "PUT /v1/contacts/:handle",
+  "status": 200,
+  "body": {
+    "contact": {
+      "handle": "+15551234567",
+      "mode": "draft-only",
+      "displayName": "Test User",
+      "updatedAt": "2026-09-01T12:00:43.000Z"
+    }
+  }
+}

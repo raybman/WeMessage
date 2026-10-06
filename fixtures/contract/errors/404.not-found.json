@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/drafts/:id",
+  "status": 404,
+  "body": {
+    "error": "not-found"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "route": "POST /v1/toggles/kill-switch",
+  "status": 200,
+  "body": {
+    "key": "send.killSwitch",
+    "on": true,
+    "version": 0,
+    "cancelled": [],
+    "circuitCleared": false
+  }
+}

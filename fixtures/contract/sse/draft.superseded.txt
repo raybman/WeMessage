@@ -1,0 +1,4 @@
+id: 15
+event: draft.superseded
+data: {"event":"draft.superseded","draftId":"01AAAAAAAAAAAAAAAAAAAAAAAA","byDraftId":"01BBBBBBBBBBBBBBBBBBBBBBBB"}
+

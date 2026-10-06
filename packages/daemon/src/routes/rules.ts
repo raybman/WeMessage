@@ -456,3 +456,16 @@ export function registerRuleRoutes(
     return dryRun(rule, store.listRecentInboundMessages(parsed.data.limit));
   });
 }
+
+/**
+ * v2 S0: this module's request schemas, by name, for `contract.ts`'s
+ * REQUEST_SCHEMAS and the contract ratchet. The same objects the handlers
+ * above parse with: nothing is copied, so the published shape cannot drift
+ * from the enforced one.
+ */
+export const ruleSchemas = {
+  createBody,
+  patchBody,
+  testBody,
+  dryRunQuery,
+} as const;

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "matcher": {},
+    "adapterId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "respondMode": {
+      "default": "draft-only",
+      "type": "string",
+      "enum": [
+        "draft-only",
+        "auto"
+      ]
+    },
+    "scheduleId": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outsideWindow": {
+      "default": "draft-only",
+      "type": "string",
+      "enum": [
+        "draft-only",
+        "queue",
+        "ignore"
+      ]
+    },
+    "allowGroupDrafts": {
+      "default": false,
+      "type": "boolean"
+    },
+    "matchAttachmentOnly": {
+      "default": false,
+      "type": "boolean"
+    },
+    "draftTtlMinutes": {
+      "default": 240,
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "priority": {
+      "default": 100,
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "enabled": {
+      "default": true,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "matcher",
+    "adapterId"
+  ],
+  "additionalProperties": false
+}

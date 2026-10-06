@@ -1,0 +1,17 @@
+{
+  "route": "POST /v1/adapters/:id/token",
+  "status": 200,
+  "body": {
+    "adapter": {
+      "id": "test-adapter",
+      "kind": "generic",
+      "displayName": "Test Two",
+      "enabled": true,
+      "hasToken": true,
+      "health": "unknown",
+      "config": {}
+    },
+    "token": "wm_0000000000000000000000000000000000000000000000000000000000000000",
+    "connectCmd": "wemessage-adapter-generic --url ws://127.0.0.1:47100/v1/agent --token wm_0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

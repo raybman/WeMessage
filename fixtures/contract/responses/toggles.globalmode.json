@@ -1,0 +1,13 @@
+{
+  "route": "POST /v1/toggles/global-mode",
+  "status": 200,
+  "body": {
+    "key": "send.globalMode",
+    "mode": "draft-only",
+    "armed": {
+      "armed": true,
+      "until": null,
+      "reason": "armed"
+    }
+  }
+}

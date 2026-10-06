@@ -1,0 +1,4 @@
+id: 3
+event: arming.changed
+data: {"event":"arming.changed","armed":true,"until":null,"reason":"armed"}
+

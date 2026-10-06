@@ -1,0 +1,8 @@
+{
+  "route": "GET /v1/audit/verify",
+  "status": 200,
+  "body": {
+    "ok": true,
+    "length": 40
+  }
+}

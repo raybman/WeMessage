@@ -1,0 +1,12 @@
+{
+  "route": "GET /v1/batches/:id",
+  "status": 200,
+  "body": {
+    "batchId": "id-0016",
+    "sent": 0,
+    "failed": 0,
+    "recalled": 0,
+    "approved": 2,
+    "sending": 0
+  }
+}

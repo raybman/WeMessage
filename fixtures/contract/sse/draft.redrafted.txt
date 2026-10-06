@@ -1,0 +1,4 @@
+id: 11
+event: draft.redrafted
+data: {"event":"draft.redrafted","draftId":"01AAAAAAAAAAAAAAAAAAAAAAAA","newDraftId":"01BBBBBBBBBBBBBBBBBBBBBBBB"}
+

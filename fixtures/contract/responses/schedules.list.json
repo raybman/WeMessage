@@ -1,0 +1,21 @@
+{
+  "route": "GET /v1/schedules",
+  "status": 200,
+  "body": [
+    {
+      "id": "id-0019",
+      "name": "Office hours",
+      "timezone": "America/Los_Angeles",
+      "windows": [
+        {
+          "days": [
+            "mon"
+          ],
+          "start": "09:00",
+          "end": "17:00"
+        }
+      ],
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "route": "PATCH /v1/schedules/:id",
+  "status": 200,
+  "body": {
+    "schedule": {
+      "id": "id-0019",
+      "name": "Weekday mornings",
+      "timezone": "America/Los_Angeles",
+      "windows": [
+        {
+          "days": [
+            "mon"
+          ],
+          "start": "09:00",
+          "end": "17:00"
+        }
+      ],
+      "enabled": true
+    }
+  }
+}

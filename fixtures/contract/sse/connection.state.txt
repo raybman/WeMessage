@@ -1,0 +1,4 @@
+id: 4
+event: connection.state
+data: {"event":"connection.state","state":"fully-connected"}
+

@@ -151,11 +151,29 @@ function topLevelTrackedDirs(): string[] {
 function publicRepoOffenders(): string[] {
   const offenders: string[] = [];
   for (const f of trackedTextFiles()) {
-    const content = readFileSync(join(repoRoot, f), 'utf8');
+    const content = publicSweepText(f, readFileSync(join(repoRoot, f), 'utf8'));
     for (const o of publicStringOffenders(content))
       offenders.push(`${f}: ${o.detail}`);
   }
   return offenders.sort();
+}
+
+/** The all-zero adapter token the S0 contract recorder mints in place of a real one. */
+const NULL_ADAPTER_TOKEN = `wm_${'0'.repeat(64)}`;
+
+/**
+ * What the public sweep reads of one tracked file. v2 S0, advisor item 5:
+ * the contract recorder rewrites every minted adapter token to the NULL
+ * token, so a client fixture keeps the shape it must parse and authenticates
+ * nothing. That one string is exempt in that one directory. The linter is
+ * not touched: the same string is still an offender in a transcript (it is
+ * skill-dryrun's own tooth), and any other hex after `wm_` under
+ * fixtures/contract still convicts.
+ */
+function publicSweepText(file: string, raw: string): string {
+  return file.startsWith('fixtures/contract/')
+    ? raw.split(NULL_ADAPTER_TOKEN).join('')
+    : raw;
 }
 
 /**
@@ -10401,6 +10419,15 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
 /* ════════════════════════════════════════════════════════════════════════ */
 
 /**
+ * A 64-hex run, and the one value of that shape a tracked file may hold
+ * without being a digest carrier. Lifted to module scope, unchanged, from
+ * S9 Sc1 row 11 so that the v2 S0 contract-fixture rows reuse the same two
+ * definitions instead of growing a second opinion about what a digest is.
+ */
+const HEX64 = /\b[0-9a-f]{64}\b/;
+const NULL_DIGEST = '0'.repeat(64);
+
+/**
  * S9 turns this repository into something a stranger downloads and a machine
  * signs. Both of those change what the guards have to be about.
  *
@@ -11912,7 +11939,6 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       'packages/core/test/audit-chain-core.spec.ts',
       'packages/store/test/audit-chain.spec.ts',
     ];
-    const HEX64 = /\b[0-9a-f]{64}\b/;
 
     function secretOffenders(): string[] {
       const out: string[] = [];
@@ -11983,7 +12009,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
      * one non-zero run in the same file moves that file straight back onto
      * the strict side, carrying the name that did it.
      */
-    const NULL_DIGEST = '0'.repeat(64);
+    // NULL_DIGEST is declared at module scope (shared with v2 S0).
 
     /** True when every 64-hex run in `text` is that placeholder. */
     const onlyNullDigests = (text: string): boolean =>
@@ -13127,5 +13153,114 @@ describe('v2 extensions (A2: one conversation)', () => {
       'value import from ../derive/transcript.js',
       'calls dayGroups(',
     ]);
+  });
+});
+
+describe('v2 S0: contract fixtures', () => {
+  /**
+   * v2 S0 freezes the daemon's wire into fixtures/contract/ for the Swift
+   * client: request JSON Schemas, golden responses and error envelopes, and
+   * the SSE bytes. The daemon ratchet (packages/daemon/test/
+   * contract.ratchet.spec.ts) owns their CONTENT. These rows own what is
+   * structural about them: that they are tracked, listed, public-safe, and
+   * produced by exactly one recorder. Text only (advisor 8): nothing here
+   * imports @wemessage/daemon.
+   */
+  const CONTRACT = 'fixtures/contract';
+  const RATCHET = 'packages/daemon/test/contract.ratchet.spec.ts';
+  const RECORDER = 'packages/daemon/test/helpers/contract-recorder.ts';
+
+  const tracked = (): string[] =>
+    execFileSync('git', ['ls-files', '--', CONTRACT], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => f.length > 0);
+
+  it('fixtures/contract is tracked and non-empty', () => {
+    expect(tracked().length).toBeGreaterThanOrEqual(60);
+  });
+
+  it('manifest.json equals the tracked list', () => {
+    const manifest = JSON.parse(archRead(`${CONTRACT}/manifest.json`)) as {
+      files: string[];
+    };
+    const expected = tracked()
+      .map((f) => f.slice(`${CONTRACT}/`.length))
+      .filter((f) => f !== 'manifest.json')
+      .sort();
+    expect(manifest.files).toEqual(expected);
+  });
+
+  it('no fixture under fixtures/contract carries a non-null 64-hex', () => {
+    // HEX64 is the row-11 shape; the lookaround form also sees a run glued
+    // to `wm_`, which `\b` cannot (an underscore is a word character).
+    const glued = /(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/g;
+    const offenders = tracked().filter((f) =>
+      [...archRead(f).matchAll(glued)].some((m) => m[0] !== NULL_DIGEST),
+    );
+    expect(offenders).toEqual([]);
+    // The glued form is a superset of HEX64: anything row 11 would see, it
+    // sees too, so widening the shape here cannot have narrowed it.
+    const real = `"${'c'.repeat(64)}"`;
+    expect(HEX64.test(real)).toBe(true);
+    expect([...real.matchAll(glued)]).toHaveLength(1);
+    expect(HEX64.test(`wm_${'c'.repeat(64)}`)).toBe(false);
+    expect([...`wm_${'c'.repeat(64)}`.matchAll(glued)]).toHaveLength(1);
+    // Non-vacuity: the stabilised digests are present, as the placeholder.
+    expect(tracked().some((f) => archRead(f).includes(NULL_DIGEST))).toBe(true);
+  });
+
+  it('the public sweep exempts the NULL adapter token under fixtures/contract and nothing else', () => {
+    const nul = `wm_${NULL_DIGEST}`;
+    const live = `wm_${'c'.repeat(64)}`;
+    const swept = (f: string, t: string): string[] =>
+      publicStringOffenders(publicSweepText(f, t)).map((o) => o.detail);
+    // The recorder's placeholder passes where the recorder writes it ...
+    expect(swept('fixtures/contract/responses/x.json', nul)).toEqual([]);
+    // ... and nowhere else: the linter still convicts it everywhere outside.
+    expect(swept('docs/x.md', nul)).toEqual(['adapter token']);
+    expect(swept('fixtures/events/x.json', nul)).toEqual(['adapter token']);
+    // A live-shaped token inside the directory still convicts, alone and
+    // sitting next to the exempt one.
+    expect(swept('fixtures/contract/responses/x.json', live)).toEqual([
+      'adapter token',
+    ]);
+    expect(
+      swept('fixtures/contract/responses/x.json', `${nul} ${live}`),
+    ).toEqual(['adapter token']);
+    // Non-vacuity: the fixtures really carry the placeholder token.
+    expect(tracked().some((f) => archRead(f).includes(nul))).toBe(true);
+  });
+
+  it('the contract recorder lives in packages/daemon/test only', () => {
+    const call = 'record' + 'Contract(';
+    const callers = execFileSync('git', ['ls-files'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f))
+      .filter((f) => f !== 'test/arch.spec.ts')
+      .filter((f) => archRead(f).includes(call));
+    expect(
+      callers.filter((f) => !f.startsWith('packages/daemon/test/')),
+    ).toEqual([]);
+    expect(callers.sort()).toEqual([RATCHET, RECORDER].sort());
+  });
+
+  it('the daemon ratchet owns REQUEST_SCHEMAS coverage of every ROUTE_TABLE body/query route', () => {
+    const text = archRead(RATCHET);
+    expect(text).toContain(
+      "'every body or query route has a REQUEST_SCHEMAS entry or is in NO_BODY_ROUTES'",
+    );
+    expect(text).toContain(
+      "'no REQUEST_SCHEMAS key is absent from ROUTE_TABLE'",
+    );
+    expect(text).toMatch(
+      /import \{ NO_BODY_ROUTES, ROUTE_TABLE \} from '\.\/transport-surface\.snapshot\.js'/,
+    );
+    expect(archRead('.prettierignore')).toMatch(/^fixtures\/contract\/$/m);
   });
 });

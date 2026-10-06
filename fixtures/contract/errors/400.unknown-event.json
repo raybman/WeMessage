@@ -1,0 +1,8 @@
+{
+  "route": "GET /v1/events/sse",
+  "status": 400,
+  "body": {
+    "error": "unknown-event",
+    "name": "nope"
+  }
+}

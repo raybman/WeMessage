@@ -1,0 +1,13 @@
+{
+  "route": "POST /v1/toggles/pause",
+  "status": 200,
+  "body": {
+    "key": "pause",
+    "until": null,
+    "armed": {
+      "armed": true,
+      "until": null,
+      "reason": "armed"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+id: 12
+event: draft.rejected
+data: {"event":"draft.rejected","draftId":"01AAAAAAAAAAAAAAAAAAAAAAAA","actor":{"kind":"system","reason":"kill-switch"}}
+

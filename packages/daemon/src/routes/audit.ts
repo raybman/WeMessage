@@ -55,3 +55,13 @@ export function registerAuditRoutes(
   // §1.6 route 9: audit verify (§2.3) — never cached, full walk every call.
   app.get('/v1/audit/verify', () => verifyAuditChain(store));
 }
+
+/**
+ * v2 S0: this module's request schemas, by name, for `contract.ts`'s
+ * REQUEST_SCHEMAS and the contract ratchet. The same objects the handlers
+ * above parse with: nothing is copied, so the published shape cannot drift
+ * from the enforced one.
+ */
+export const auditSchemas = {
+  listQuery,
+} as const;

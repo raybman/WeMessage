@@ -1,0 +1,21 @@
+{
+  "route": "POST /v1/drafts/:id/reject",
+  "status": 200,
+  "body": {
+    "draft": {
+      "id": "id-0007",
+      "inboundGuid": null,
+      "chatGuid": "iMessage;-;+15551234567",
+      "ruleId": null,
+      "adapterId": "human",
+      "idempotencyKey": "id-0008",
+      "body": "not this one",
+      "originalBody": "not this one",
+      "state": "rejected",
+      "stateChangedAt": "2026-09-01T12:00:11.000Z",
+      "expiresAt": "2026-09-01T16:00:11.000Z",
+      "createdAt": "2026-09-01T12:00:11.000Z"
+    },
+    "approvalId": "id-0009"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "route": "POST /v1/rules/:id/test",
+  "status": 200,
+  "body": {
+    "matched": false,
+    "detail": {
+      "matchedRuleIds": []
+    }
+  }
+}

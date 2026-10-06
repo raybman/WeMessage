@@ -1,0 +1,28 @@
+{
+  "route": "GET /v1/rules",
+  "status": 200,
+  "body": [
+    {
+      "id": "id-0018",
+      "name": "Greeting",
+      "enabled": true,
+      "matcher": {
+        "kind": "keyword",
+        "keywords": [
+          "hello"
+        ],
+        "mode": "any"
+      },
+      "adapterId": "echo",
+      "respondMode": "draft-only",
+      "scheduleId": null,
+      "outsideWindow": "draft-only",
+      "allowGroupDrafts": false,
+      "matchAttachmentOnly": false,
+      "draftTtlMinutes": 240,
+      "priority": 100,
+      "createdAt": "2026-09-01T12:00:43.000Z",
+      "updatedAt": "2026-09-01T12:00:43.000Z"
+    }
+  ]
+}

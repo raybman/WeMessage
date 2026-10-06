@@ -1,0 +1,40 @@
+{
+  "route": "POST /v1/disconnect",
+  "status": 200,
+  "body": {
+    "state": "disconnected",
+    "steps": [
+      {
+        "id": "watcher-stop",
+        "status": "done"
+      },
+      {
+        "id": "state",
+        "status": "done"
+      },
+      {
+        "id": "adapter-tokens",
+        "status": "done",
+        "detail": "revoked 0 adapter token(s)"
+      },
+      {
+        "id": "token-rotation",
+        "status": "done"
+      },
+      {
+        "id": "launchd-unload",
+        "status": "skipped",
+        "detail": "not supervised by launchd (supervisor: none)"
+      },
+      {
+        "id": "purge",
+        "status": "skipped",
+        "detail": "purge not requested"
+      }
+    ],
+    "manualRevocation": [
+      "Automation permission denied; run tccutil reset AppleEvents sh.wemessage.gateway and approve the prompt on the next send. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway.",
+      "Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items, and after an update to an unsigned build the existing entry stays switched on while no longer matching this binary. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, removing the entry already listed first if there is one, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway."
+    ]
+  }
+}

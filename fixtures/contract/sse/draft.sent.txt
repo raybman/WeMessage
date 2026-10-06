@@ -1,0 +1,4 @@
+id: 14
+event: draft.sent
+data: {"event":"draft.sent","draftId":"01AAAAAAAAAAAAAAAAAAAAAAAA","sentMessageGuid":"guid-outbound-0001"}
+

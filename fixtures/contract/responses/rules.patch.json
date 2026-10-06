@@ -1,0 +1,29 @@
+{
+  "route": "PATCH /v1/rules/:id",
+  "status": 200,
+  "body": {
+    "rule": {
+      "id": "id-0018",
+      "name": "Greeting",
+      "enabled": true,
+      "matcher": {
+        "kind": "keyword",
+        "keywords": [
+          "hello"
+        ],
+        "mode": "any"
+      },
+      "adapterId": "echo",
+      "respondMode": "draft-only",
+      "scheduleId": null,
+      "outsideWindow": "draft-only",
+      "allowGroupDrafts": false,
+      "matchAttachmentOnly": false,
+      "draftTtlMinutes": 240,
+      "priority": 50,
+      "createdAt": "2026-09-01T12:00:43.000Z",
+      "updatedAt": "2026-09-01T12:00:43.000Z"
+    },
+    "adapterKnown": false
+  }
+}

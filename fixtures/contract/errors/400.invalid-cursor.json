@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/threads",
+  "status": 400,
+  "body": {
+    "error": "invalid-cursor"
+  }
+}

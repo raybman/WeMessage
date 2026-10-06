@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/status",
+  "status": 401,
+  "body": {
+    "error": "unauthorized"
+  }
+}

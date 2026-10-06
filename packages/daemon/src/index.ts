@@ -26,6 +26,15 @@ export {
   type SseRouteDeps,
   type SseTimer,
 } from './routes/events-sse.js';
+// v2 S0: every request schema, public, keyed by route (fixtures/contract).
+export {
+  contractSlug,
+  PARAM_SCHEMAS,
+  paramJsonSchemas,
+  REQUEST_SCHEMAS,
+  requestJsonSchemas,
+  type RequestSchemaKey,
+} from './contract.js';
 export {
   createScheduler,
   type Scheduler,

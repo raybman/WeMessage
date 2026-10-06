@@ -521,3 +521,55 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
   'packages/sendkit/src/index.ts',
   'packages/sendkit/src/verify.ts',
 ];
+
+/**
+ * v2 S0 (contract freeze): the routes that take NO zod-parsed body or query.
+ *
+ * Every non-HEAD entry of ROUTE_TABLE is in exactly one of two places: here,
+ * or a key of `REQUEST_SCHEMAS` (packages/daemon/src/contract.ts), which is
+ * what the Swift client sends against and what fixtures/contract/requests/
+ * pins as JSON Schema. `contract.ratchet.spec.ts` asserts the partition, so a
+ * new route that parses a body has to name its schema, and a new route that
+ * parses nothing has to say so here, in a reviewed diff.
+ *
+ * HEAD twins are not listed: fastify's exposeHeadRoutes runs the GET handler
+ * for them, so a HEAD route is covered by whatever covers its GET twin.
+ *
+ * Path params are not bodies. `/:id`, `/:handle` and `/:guid` are read raw
+ * by every route except one, `GET /v1/threads/:guid/messages`, whose params
+ * schema is pinned separately in `PARAM_SCHEMAS`.
+ *
+ * `GET /v1/events` and `GET /v1/events/sse` read an `events` filter from the
+ * query, but by hand (events-filter.ts), not through zod: its refusal is
+ * pinned as fixtures/contract/errors/400.unknown-event.json instead.
+ * `GET /v1/agent` is the adapter socket; its frames are the adapter wire, not
+ * a request body.
+ */
+export const NO_BODY_ROUTES: readonly string[] = [
+  'DELETE /v1/adapters/:id',
+  'DELETE /v1/contacts/:handle',
+  'DELETE /v1/rules/:id',
+  'DELETE /v1/schedules/:id',
+  'GET /v1/adapters',
+  'GET /v1/adapters/:id',
+  'GET /v1/agent',
+  'GET /v1/audit/verify',
+  'GET /v1/batches/:id',
+  'GET /v1/contacts',
+  'GET /v1/doctor',
+  'GET /v1/drafts/:id',
+  'GET /v1/events',
+  'GET /v1/events/sse',
+  'GET /v1/health',
+  'GET /v1/rules',
+  'GET /v1/rules/:id',
+  'GET /v1/schedules',
+  'GET /v1/schedules/:id',
+  'GET /v1/settings',
+  'GET /v1/status',
+  'POST /v1/adapters/:id/token',
+  'POST /v1/connect',
+  'POST /v1/drafts/:id/recall',
+  'POST /v1/drafts/:id/redraft',
+  'POST /v1/drafts/:id/retry',
+];

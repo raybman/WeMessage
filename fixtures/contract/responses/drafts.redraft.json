@@ -1,0 +1,21 @@
+{
+  "route": "POST /v1/drafts/:id/redraft",
+  "status": 200,
+  "body": {
+    "fromDraftId": "id-0007",
+    "draft": {
+      "id": "id-0014",
+      "inboundGuid": null,
+      "chatGuid": "iMessage;-;+15551234567",
+      "ruleId": null,
+      "adapterId": "human",
+      "idempotencyKey": "id-0015",
+      "body": "not this one",
+      "originalBody": "not this one",
+      "state": "pending",
+      "stateChangedAt": "2026-09-01T12:00:11.000Z",
+      "expiresAt": "2026-09-01T16:00:11.000Z",
+      "createdAt": "2026-09-01T12:00:11.000Z"
+    }
+  }
+}

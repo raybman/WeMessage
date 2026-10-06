@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/status",
+  "status": 503,
+  "body": {
+    "error": "no-auth-token"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "route": "DELETE /v1/contacts/:handle",
+  "status": 200,
+  "body": {
+    "deleted": "+15551234567"
+  }
+}

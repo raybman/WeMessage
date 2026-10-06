@@ -1,0 +1,4 @@
+id: 2
+event: adapter.health
+data: {"event":"adapter.health","adapterId":"echo","status":"connected"}
+

@@ -1,0 +1,13 @@
+{
+  "route": "POST /v1/toggles/pause",
+  "status": 200,
+  "body": {
+    "key": "pause",
+    "until": "2026-09-01T13:00:43.000Z",
+    "armed": {
+      "armed": false,
+      "until": "2026-09-01T13:00:43.000Z",
+      "reason": "paused"
+    }
+  }
+}

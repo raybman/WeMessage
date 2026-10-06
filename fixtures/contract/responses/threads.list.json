@@ -1,0 +1,29 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "chatGuid": "iMessage;-;+15551234567",
+        "channel": "imessage",
+        "title": "Test User",
+        "isGroup": false,
+        "lastLine": "see you at nine",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:58:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;-;+15557654321",
+        "channel": "imessage",
+        "title": "+15557654321",
+        "isGroup": false,
+        "lastLine": "thanks",
+        "lastFromMe": true,
+        "lastAt": "2026-09-01T09:30:00.000Z"
+      }
+    ],
+    "nextCursor": null,
+    "total": 2,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

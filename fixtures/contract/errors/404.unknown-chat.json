@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 404,
+  "body": {
+    "error": "unknown-chat"
+  }
+}

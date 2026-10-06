@@ -1,0 +1,4 @@
+id: 17
+event: gateway.disconnected
+data: {"event":"gateway.disconnected","reason":"user-disconnect"}
+

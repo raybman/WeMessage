@@ -1,0 +1,8 @@
+{
+  "route": "PATCH /v1/settings",
+  "status": 400,
+  "body": {
+    "error": "unknown-key",
+    "key": "unknownKey"
+  }
+}

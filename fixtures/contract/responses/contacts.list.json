@@ -1,0 +1,14 @@
+{
+  "route": "GET /v1/contacts",
+  "status": 200,
+  "body": {
+    "contacts": [
+      {
+        "handle": "+15551234567",
+        "displayName": "Test User",
+        "mode": "draft-only",
+        "updatedAt": "2026-09-01T12:00:43.000Z"
+      }
+    ]
+  }
+}

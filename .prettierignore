@@ -10,6 +10,7 @@ docs/
 .vercel/
 fixtures/typedstream/
 # locked verbatim sources — plan §3.2 / §3.4 / §2.3 formatting is the contract
+fixtures/contract/
 packages/core/src/domain/types.ts
 packages/protocol/src/index.ts
 packages/store/migrations/

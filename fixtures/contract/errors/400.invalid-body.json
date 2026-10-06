@@ -1,0 +1,27 @@
+{
+  "route": "POST /v1/drafts",
+  "status": 400,
+  "body": {
+    "error": "invalid-draft",
+    "detail": {
+      "issues": [
+        {
+          "expected": "string",
+          "code": "invalid_type",
+          "path": [
+            "chatGuid"
+          ],
+          "message": "Invalid input: expected string, received undefined"
+        },
+        {
+          "expected": "string",
+          "code": "invalid_type",
+          "path": [
+            "body"
+          ],
+          "message": "Invalid input: expected string, received undefined"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "deny",
+        "draft-only",
+        "auto"
+      ]
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "mode"
+  ],
+  "additionalProperties": false
+}

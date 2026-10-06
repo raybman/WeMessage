@@ -1,0 +1,4 @@
+id: 5
+event: draft.approved
+data: {"event":"draft.approved","draftId":"01AAAAAAAAAAAAAAAAAAAAAAAA","actor":{"kind":"human","via":"cli"},"batchId":"01EEEEEEEEEEEEEEEEEEEEEEEE"}
+

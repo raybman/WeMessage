@@ -1,0 +1,4 @@
+id: 20
+event: message.unsent
+data: {"event":"message.unsent","guid":"guid-inbound-0001"}
+

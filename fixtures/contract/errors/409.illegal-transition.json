@@ -1,0 +1,9 @@
+{
+  "route": "POST /v1/drafts/:id/recall",
+  "status": 409,
+  "body": {
+    "error": "illegal-transition",
+    "from": "pending",
+    "requested": "recall"
+  }
+}

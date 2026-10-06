@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/threads",
+  "status": 503,
+  "body": {
+    "error": "source-unavailable"
+  }
+}

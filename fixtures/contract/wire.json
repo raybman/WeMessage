@@ -1,0 +1,56 @@
+{
+  "wireVersion": 1,
+  "eventNames": [
+    "adapter.health",
+    "arming.changed",
+    "connection.state",
+    "draft.approved",
+    "draft.created",
+    "draft.delta",
+    "draft.expired",
+    "draft.failed",
+    "draft.recalled",
+    "draft.redrafted",
+    "draft.rejected",
+    "draft.requeued",
+    "draft.sent",
+    "draft.superseded",
+    "gate.denied",
+    "gateway.disconnected",
+    "message.edited",
+    "message.received",
+    "message.unsent",
+    "rule.matched",
+    "toggle.changed"
+  ],
+  "draftStates": [
+    "pending",
+    "approved",
+    "sending",
+    "sent",
+    "rejected",
+    "expired",
+    "superseded",
+    "recalled",
+    "failed"
+  ],
+  "backoff": {
+    "steps": [
+      500,
+      1000,
+      2000,
+      4000,
+      8000
+    ],
+    "jitter": 0.2,
+    "auditGapLimit": 1000
+  },
+  "sse": {
+    "path": "/v1/events/sse",
+    "keepaliveMs": 15000
+  },
+  "defaults": {
+    "port": 47100,
+    "tokenFile": "daemon.token"
+  }
+}

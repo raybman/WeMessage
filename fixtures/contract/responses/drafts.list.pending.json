@@ -1,0 +1,36 @@
+{
+  "route": "GET /v1/drafts",
+  "status": 200,
+  "body": {
+    "drafts": [
+      {
+        "id": "id-0001",
+        "inboundGuid": null,
+        "chatGuid": "iMessage;-;+15551234567",
+        "ruleId": null,
+        "adapterId": "human",
+        "idempotencyKey": "id-0003",
+        "body": "hello",
+        "originalBody": "hello",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T12:00:00.000Z",
+        "expiresAt": "2026-09-01T16:00:00.000Z",
+        "createdAt": "2026-09-01T12:00:00.000Z"
+      },
+      {
+        "id": "id-0002",
+        "inboundGuid": null,
+        "chatGuid": "iMessage;-;+15551234567",
+        "ruleId": null,
+        "adapterId": "human",
+        "idempotencyKey": "id-0004",
+        "body": "hello again",
+        "originalBody": "hello again",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T12:00:00.000Z",
+        "expiresAt": "2026-09-01T16:00:00.000Z",
+        "createdAt": "2026-09-01T12:00:00.000Z"
+      }
+    ]
+  }
+}

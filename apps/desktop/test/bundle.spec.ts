@@ -262,11 +262,12 @@ describe('s9 Sc5 row 2: the workspace is inlined; the externals are a closed set
    * appear; a prefix test would quietly let a bare-named package through if
    * one ever shared a name with a builtin.
    *
-   * Three, not one. `bufferutil` and `utf-8-validate` are `ws`'s optional
-   * native accelerators, required inside a try/catch and absent from this
-   * workspace, so `ws` falls back to JavaScript. They are asserted here for
-   * the same reason they are named in the bundler: an external nobody
-   * declared is an external nobody reviewed.
+   * One, not three. `bufferutil` and `utf-8-validate` are `ws`'s optional
+   * native accelerators, and the bundler still names them in EXTERNALS, but
+   * since v2 S2c.1 its `define` of WS_NO_BUFFER_UTIL and WS_NO_UTF_8_VALIDATE
+   * makes both of `ws`'s requires dead code, so esbuild drops them and the
+   * built file imports neither. An external nobody declared is an external
+   * nobody reviewed, and one that reappears here means a require came back.
    */
   it('declares a closed set of externals, builtins aside', () => {
     const out = Object.entries(meta.outputs).find(([p]) =>
@@ -282,11 +283,7 @@ describe('s9 Sc5 row 2: the workspace is inlined; the externals are a closed set
     ]
       .filter((p) => !isBuiltin(p))
       .sort();
-    expect(externals).toEqual([
-      'better-sqlite3',
-      'bufferutil',
-      'utf-8-validate',
-    ]);
+    expect(externals).toEqual(['better-sqlite3']);
   });
 
   /*
@@ -926,8 +923,10 @@ describe('v2 S2b rows 2 to 7: the node flavour, built for the Swift host', () =>
      * guarded requires dead code; this reads the built files to prove they
      * are gone, not merely gated.
      */
+    // No leading \b: esbuild emits `__require(`, and `_` is a word character,
+    // so a word boundary before `require` would never match its output.
     const RUNTIME_REQUIRE =
-      /\brequire\(\s*["'](?:bufferutil|utf-8-validate)["']\s*\)/;
+      /require\(\s*["'](?:bufferutil|utf-8-validate)["']\s*\)/;
     // Non-vacuity: the reader convicts the exact shape esbuild emits.
     expect(RUNTIME_REQUIRE.test('m = __require("bufferutil");')).toBe(true);
     expect(RUNTIME_REQUIRE.test("require('utf-8-validate')")).toBe(true);

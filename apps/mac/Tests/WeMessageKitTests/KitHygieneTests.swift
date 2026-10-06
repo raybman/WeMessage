@@ -50,12 +50,15 @@ struct KitHygieneTests {
     }
   }
 
-  @Test("tests import only Foundation, Testing and WeMessageKit, and no file under apps/mac imports the XCTest framework")
+  @Test("tests import only Foundation, Testing and the target under test, and no file under apps/mac imports the XCTest framework")
   func testImports() throws {
-    let allowed: Set<String> = ["Foundation", "Testing", "WeMessageKit"]
     let tests = try Self.swiftFiles(under: "apps/mac/Tests")
     #expect(tests.count >= 8, "test files found: \(tests.count)")
     for file in tests {
+      // Tests/<Target>Tests/...: each test target may import its own target only.
+      let suite = String(file.split(separator: "/")[0])
+      #expect(suite.hasSuffix("Tests"), "\(file) sits outside a <Target>Tests directory")
+      let allowed: Set<String> = ["Foundation", "Testing", String(suite.dropLast("Tests".count))]
       let modules = Set(try Self.imports(try Repo.text("apps/mac/Tests/" + file)))
       #expect(modules.isSubset(of: allowed), "\(file) imports \(modules.subtracting(allowed).sorted())")
     }

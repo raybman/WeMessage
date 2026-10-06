@@ -2,17 +2,28 @@ name: ci-swift
 
 # v2 S1: the Swift lane, its own workflow rather than a step in ci-macos.
 #
-# apps/mac is a SwiftPM package (WeMessageKit) with no package dependencies,
-# so the lane needs nothing but a checkout and the runner's own toolchain:
-# no Node, no pnpm, no credentials. The vitest projects never spawn Swift;
-# they only read the tree as text, so this job is the one place in CI where
-# the kit's tests execute.
+# apps/mac is a SwiftPM package (WeMessageKit, and since v2 S2c the
+# WeMessageDaemonHost library and the WeMessage executable) with no package
+# dependencies, so the lane needs nothing but a checkout and the runner's own
+# toolchain: no Node, no pnpm, no credentials. The vitest projects never spawn
+# Swift; they only read the tree as text, so this job is the one place in CI
+# where the package's tests execute.
 #
 # One runner label and no fallback: tools-version 6.2 and the macOS 26
 # platform floor are what this image ships, and a lane that quietly moved to
 # a different image would be verifying a different toolchain than the one
 # the package declares. `swift --version` is printed first so every run
 # records which compiler it actually used.
+#
+# v2 S2c: this lane is the only place the built host ever runs. The otool step
+# proves the release executable links no UI framework at all, which is
+# stronger than "never starts one". The smoke runs `WeMessage --daemon` with a
+# stub node written to RUNNER_TEMP: the stub's exit code comes back as the
+# host's, a SIGTERM sent to the host reaches the stub (which exits 0 on it), a
+# missing node is 78, and the bare usage line is 0. GitHub runs each step
+# under bash -e without pipefail, so every command that may exit non-zero
+# runs between `set +e` and `set -e` and its code is tested on its own line,
+# and the one text match is done by awk.
 on:
   push:
     branches: ['**']
@@ -26,3 +37,60 @@ jobs:
       - run: swift --version
       - run: swift build --package-path apps/mac
       - run: swift test --package-path apps/mac
+      - name: Build the host (release)
+        run: swift build -c release --package-path apps/mac --product WeMessage
+      - name: Host links no UI framework
+        run: |
+          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
+          otool -L "$exe"
+          # Non-vacuity: the same reader finds the framework the host does link.
+          otool -L "$exe" | awk '/Foundation/ {found = 1} END {exit !found}'
+          if otool -L "$exe" | awk '/AppKit|SwiftUI/ {found = 1} END {exit !found}'; then
+            echo "host links a UI framework" >&2
+            exit 1
+          fi
+      - name: Host smoke with a stub node
+        run: |
+          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
+          stub="$RUNNER_TEMP/node"
+          main="$RUNNER_TEMP/main.mjs"
+          ready="$RUNNER_TEMP/ready"
+          : > "$main"
+
+          # 1. The stub's exit code is the host's, and the stub sees the host's contract.
+          cat > "$stub" <<'EOF'
+          #!/bin/sh
+          test "$WEMESSAGE_HOST" = swift || exit 9
+          case "$1" in *main.mjs) ;; *) exit 8 ;; esac
+          exit 7
+          EOF
+          chmod 755 "$stub"
+          set +e; WEMESSAGE_HOST_NODE="$stub" WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon; code=$?; set -e
+          test "$code" -eq 7 || { echo "expected 7, got $code" >&2; exit 1; }
+
+          # 2. A SIGTERM to the host is forwarded: the stub exits 0 on it, 6 if it never comes.
+          cat > "$stub" <<'EOF'
+          #!/bin/sh
+          trap 'kill "$s"; wait "$s"; exit 0' TERM
+          sleep 5 &
+          s=$!
+          : > "$SMOKE_READY"
+          wait "$s"
+          exit 6
+          EOF
+          SMOKE_READY="$ready" WEMESSAGE_HOST_NODE="$stub" WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon &
+          pid=$!
+          tries=0
+          while [ ! -e "$ready" ] && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+          kill -TERM "$pid" || true
+          set +e; wait "$pid"; code=$?; set -e
+          test "$code" -eq 0 || { echo "expected 0 after a forwarded TERM, got $code" >&2; exit 1; }
+
+          # 3. A missing node is EX_CONFIG.
+          set +e; WEMESSAGE_HOST_NODE=/nonexistent WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon; code=$?; set -e
+          test "$code" -eq 78 || { echo "expected 78 for a missing node, got $code" >&2; exit 1; }
+
+          # 4. No arguments prints the usage line and exits 0.
+          set +e; "$exe"; code=$?; set -e
+          test "$code" -eq 0 || { echo "expected 0 for the usage line, got $code" >&2; exit 1; }
+          echo "host smoke passed: 7, 0 after TERM, 78, 0"

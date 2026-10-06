@@ -13341,16 +13341,31 @@ describe('v2 S0: contract fixtures', () => {
 describe('v2 S1: the Swift tree', () => {
   /**
    * v2 S1 adds apps/mac: a SwiftPM package whose one library, WeMessageKit,
-   * speaks the S0 contract in fixtures/contract. Its tests run under
-   * `swift test`, on the ci-swift lane and on a laptop, never under vitest.
-   * These rows own what is structural about it: what the kit may import,
-   * that it has no package dependencies, that the public-repo sweeps read
-   * it, and that its lane is a real one. Text only: nothing here spawns a
-   * Swift toolchain.
+   * speaks the S0 contract in fixtures/contract. v2 S2c adds the host: the
+   * WeMessageDaemonHost library and the WeMessage executable, which launchd
+   * starts as `WeMessage --daemon` and which posix_spawns the bundled node
+   * as its own child. Their tests run under `swift test`, on the ci-swift
+   * lane and on a laptop, never under vitest. These rows own what is
+   * structural about the tree: what each target may import, that it has no
+   * package dependencies, that the host never leaves its own process tree,
+   * that the public-repo sweeps read it, and that its lane is a real one.
+   * Text only: nothing here spawns a Swift toolchain.
    */
   const MAC = 'apps/mac';
-  const SOURCES = `${MAC}/Sources/WeMessageKit`;
-  const TESTS = `${MAC}/Tests`;
+  const SOURCES: readonly string[] = [
+    `${MAC}/Sources/WeMessageKit`,
+    `${MAC}/Sources/WeMessageDaemonHost`,
+    `${MAC}/Sources/WeMessage`,
+  ];
+  const HOST_SOURCES: readonly string[] = [
+    `${MAC}/Sources/WeMessageDaemonHost`,
+    `${MAC}/Sources/WeMessage`,
+  ];
+  const MAIN_SWIFT = `${MAC}/Sources/WeMessage/main.swift`;
+  const TESTS: readonly string[] = [
+    `${MAC}/Tests/WeMessageKitTests`,
+    `${MAC}/Tests/WeMessageDaemonHostTests`,
+  ];
   const CI_SWIFT = '.github/workflows/ci-swift.yml';
   const CI_MACOS = '.github/workflows/ci-macos.yml';
   // Escaped so this file obeys the rule it enforces.
@@ -13392,18 +13407,41 @@ describe('v2 S1: the Swift tree', () => {
         .map((m) => `${f}: ${m}`),
     );
 
-  it('every Sources/WeMessageKit/*.swift imports Foundation only; tests add Testing and WeMessageKit', () => {
-    const sources = swiftUnder(SOURCES);
-    expect(sources.length).toBeGreaterThanOrEqual(10);
-    expect(offendingImports(sources, new Set(['Foundation']))).toEqual([]);
-    const tests = swiftUnder(TESTS);
-    expect(tests.length).toBeGreaterThanOrEqual(8);
+  it('every Sources/**/*.swift imports Foundation only (plus WeMessageDaemonHost in main.swift); tests add Testing and the target under test', () => {
+    const sources = SOURCES.flatMap(swiftUnder);
+    expect(sources.length).toBeGreaterThanOrEqual(19);
+    expect(sources).toContain(MAIN_SWIFT);
     expect(
       offendingImports(
-        tests,
-        new Set(['Foundation', 'Testing', 'WeMessageKit']),
+        sources.filter((f) => f !== MAIN_SWIFT),
+        new Set(['Foundation']),
       ),
     ).toEqual([]);
+    expect(
+      offendingImports(
+        [MAIN_SWIFT],
+        new Set(['Foundation', 'WeMessageDaemonHost']),
+      ),
+    ).toEqual([]);
+    // Every tracked Swift file under Sources and Tests sits in a listed
+    // directory, so a new target cannot pass this row by being unlisted.
+    const listed = [...SOURCES, ...TESTS];
+    expect(
+      [...swiftUnder(`${MAC}/Sources`), ...swiftUnder(`${MAC}/Tests`)].filter(
+        (f) => !listed.some((dir) => f.startsWith(`${dir}/`)),
+      ),
+    ).toEqual([]);
+    const tests = TESTS.flatMap(swiftUnder);
+    expect(tests.length).toBeGreaterThanOrEqual(15);
+    for (const dir of TESTS) {
+      const files = swiftUnder(dir);
+      expect([dir, files.length > 0]).toEqual([dir, true]);
+      // The target under test is the directory's name minus `Tests`.
+      const target = basename(dir).replace(/Tests$/, '');
+      expect(
+        offendingImports(files, new Set(['Foundation', 'Testing', target])),
+      ).toEqual([]);
+    }
     // Non-vacuity: the reader sees every import form it is there to deny.
     expect(
       swiftImports(
@@ -13439,6 +13477,56 @@ describe('v2 S1: the Swift tree', () => {
     // type into the main actor; the app target chooses its own isolation.
     expect(text).not.toContain('defaultIsolation');
     expect(swiftImports(text)).toEqual(['PackageDescription']);
+    // v2 S2c: exactly one executable target, WeMessage, and its only
+    // dependency is the host library, so the kit never links into the exe.
+    expect(text.split('.executableTarget(').length - 1).toBe(1);
+    const exe = /\.executableTarget\(([^)]*)\)/.exec(text)?.[1] ?? '';
+    expect(exe).toMatch(/name:\s*"WeMessage"/);
+    expect(/dependencies:\s*\[([^\]]*)\]/.exec(exe)?.[1]?.trim()).toBe(
+      '"WeMessageDaemonHost"',
+    );
+  });
+
+  it('the host never daemonises or disclaims', () => {
+    // v2 S2c: node stays the host's child and the host stays the
+    // responsible process, so no host source may exec away the host, start
+    // a new process group or session, daemonise, or disclaim. Not even in a
+    // comment: a spelling nobody wrote down is a call nobody brings back by
+    // accident. Mirrors HostHygieneTests row 17.
+    const NEVER: readonly string[] = [
+      'POSIX_SPAWN_SETEXEC',
+      'POSIX_SPAWN_SETPGROUP',
+      'setsid',
+      'setpgid',
+      'daemon(',
+      'responsibility_spawnattrs',
+    ];
+    const files = HOST_SOURCES.flatMap(swiftUnder);
+    expect(files.length).toBeGreaterThanOrEqual(9);
+    expect(
+      files.flatMap((f) =>
+        NEVER.filter((t) => archRead(f).includes(t)).map((t) => `${f}: ${t}`),
+      ),
+    ).toEqual([]);
+    // Non-vacuity: the spawner is in the sweep, and it sets what the host
+    // does need.
+    const spawner = `${MAC}/Sources/WeMessageDaemonHost/Spawner.swift`;
+    expect(files).toContain(spawner);
+    expect(archRead(spawner)).toContain('POSIX_SPAWN_SETSIGDEF');
+    expect(archRead(spawner)).toContain('POSIX_SPAWN_CLOEXEC_DEFAULT');
+  });
+
+  it('main.swift checks --daemon before anything else', () => {
+    // v2 S2c: the executable's first statement decides whether this is the
+    // launchd path, so nothing a later slice adds to main.swift (a window,
+    // an app delegate) runs ahead of it there.
+    const statements = archRead(MAIN_SWIFT)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '' && !l.startsWith('//'))
+      .filter((l) => !/^(?:@\w+\s+)*import\s/.test(l));
+    expect(statements[0] ?? '').toContain('HostArguments.isDaemon');
   });
 
   it('.swift is a text extension and at least one is tracked', () => {
@@ -13487,6 +13575,16 @@ describe('v2 S1: the Swift tree', () => {
     expect(text).toContain('swift test --package-path apps/mac');
     expect(text).toMatch(/^ {2}pull_request:/m);
     expect(text).not.toContain('workflow_dispatch');
+    // v2 S2c: the lane builds the release host, proves it links no UI
+    // framework, and smokes `--daemon` with a stub node.
+    for (const needed of [
+      'swift build -c release --package-path apps/mac',
+      '--daemon',
+      'otool -L',
+      'AppKit',
+      'SwiftUI',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
     // The word list of the Sc17 'neither signs' row, applied to this file.
     for (const forbidden of [
       'secrets.',
@@ -13525,9 +13623,11 @@ describe('v2 S1: the Swift tree', () => {
       expect([probe, r.status]).toEqual([probe, 0]);
     }
     // Non-vacuity: the sources themselves are not ignored.
-    const src = spawnSync('git', ['check-ignore', '-q', `${SOURCES}/x.swift`], {
-      cwd: repoRoot,
-    });
-    expect(src.status).toBe(1);
+    for (const dir of SOURCES) {
+      const src = spawnSync('git', ['check-ignore', '-q', `${dir}/x.swift`], {
+        cwd: repoRoot,
+      });
+      expect([dir, src.status]).toEqual([dir, 1]);
+    }
   });
 });

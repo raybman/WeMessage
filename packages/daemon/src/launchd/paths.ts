@@ -36,6 +36,7 @@ import {
 import {
   BUNDLE_DAEMON_MAIN_SUFFIX,
   BUNDLE_EXECUTABLE_SUFFIX,
+  HOST_DAEMON_FLAG,
 } from './plist.js';
 
 /** The environment this module reads. Passed in; never `process.env` here. */
@@ -93,21 +94,40 @@ export function resolveBundlePaths(
  * The argument vector the installed agent should run.
  *
  * Derived rather than configured, because a plist whose `ProgramArguments`
- * came from a flag is a plist that can run anything at every login. Two
+ * came from a flag is a plist that can run anything at every login. Three
  * shapes, in priority order:
  *
- *  1. the packaged app, when we can see one — either named explicitly, or
- *     inferred from the fact that THIS process is running out of one;
- *  2. the development layout: this node, and the built entrypoint.
+ *  1. the native host (S2a), when THIS process says it runs under one
+ *     (`WEMESSAGE_HOST=swift`, exactly, which only the Swift app sets on
+ *     the node child it spawns) AND an app root is known: named by
+ *     `WEMESSAGE_APP_PATH`, or read off the daemon entry's own location
+ *     inside a bundle. A dev tree has no host, so with neither it falls
+ *     through to 2 and 3 unchanged;
+ *  2. the packaged Electron app, when we can see one: either named
+ *     explicitly, or inferred from the fact that THIS process is running
+ *     out of one;
+ *  3. the development layout: this node, and the built entrypoint.
  *
- * `plist.ts` refuses anything that is neither, so a bad derivation here
- * becomes a refusal rather than a plist.
+ * `plist.ts` refuses anything that is none of these, so a bad derivation
+ * here becomes a refusal rather than a plist.
  */
 export function resolveProgramArguments(
   env: PathEnv,
   daemonMain: string,
   execPath: string,
 ): readonly string[] {
+  const marker = '/Contents/Resources/';
+
+  if (env['WEMESSAGE_HOST'] === 'swift') {
+    const named = env['WEMESSAGE_APP_PATH'];
+    const at = daemonMain.indexOf(marker);
+    let app: string | undefined;
+    if (named !== undefined && named.length > 0) app = named;
+    else if (at > 0) app = daemonMain.slice(0, at);
+    if (app !== undefined)
+      return [`${app}${BUNDLE_EXECUTABLE_SUFFIX}`, HOST_DAEMON_FLAG];
+  }
+
   const explicitApp = env['WEMESSAGE_APP_PATH'];
   if (explicitApp !== undefined && explicitApp.length > 0)
     return [
@@ -115,7 +135,6 @@ export function resolveProgramArguments(
       `${explicitApp}${BUNDLE_DAEMON_MAIN_SUFFIX}`,
     ];
 
-  const marker = '/Contents/Resources/';
   const at = daemonMain.indexOf(marker);
   if (at > 0) {
     const app = daemonMain.slice(0, at);

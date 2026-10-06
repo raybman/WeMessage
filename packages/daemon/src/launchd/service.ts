@@ -44,6 +44,7 @@ import {
   type ServiceManagerRun,
   type ServiceManagerRunOptions,
 } from './contract.js';
+import { plistDeclaredShape, type ProgramArgumentsShape } from './plist.js';
 
 /** The file that remembers what this directory installed. */
 export const SERVICE_STATE_FILENAME = 'service.json';
@@ -349,6 +350,12 @@ export interface StatusResult {
   readonly label: string | null;
   readonly plistPath: string | null;
   readonly lastExitStatus: number | null;
+  /**
+   * S2a: which of the three argument vectors the INSTALLED plist runs, read
+   * back from the file rather than derived again. Absent when there is no
+   * plist to read, or when the file on disk is not one this project wrote.
+   */
+  readonly shape?: ProgramArgumentsShape;
 }
 
 const ABSENT: StatusResult = {
@@ -370,6 +377,9 @@ export async function statusService(
 
   const label = asLaunchAgentLabel(state.label);
   const installed = isFile(state.plistPath);
+  const shape = installed ? installedShape(state.plistPath) : undefined;
+  // Spread, not `shape: undefined`: an unknown shape is an ABSENT key.
+  const reported = shape === undefined ? {} : { shape };
   const printed = await deps.run('print', label, runOptions(deps.uid));
   if (printed.code !== 0)
     return {
@@ -379,6 +389,7 @@ export async function statusService(
       label: state.label,
       plistPath: state.plistPath,
       lastExitStatus: null,
+      ...reported,
     };
   return {
     installed,
@@ -390,7 +401,23 @@ export async function statusService(
       /\blast exit code\s*=\s*(-?\d+)/,
       printed.stdout,
     ),
+    ...reported,
   };
+}
+
+/**
+ * The shape of the plist `service.json` points at, or undefined.
+ *
+ * Any failure is "unknown", never an error: status is a report, and a report
+ * that throws on a hand-edited or half-written file is a report nobody can
+ * run at the moment they most need one.
+ */
+function installedShape(plistPath: string): ProgramArgumentsShape | undefined {
+  try {
+    return plistDeclaredShape(readFileSync(plistPath, 'utf8')) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isFile(p: string): boolean {

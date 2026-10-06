@@ -366,6 +366,7 @@ async function dispatch(
     `running   ${String(result.running)}`,
     `label     ${String(result.label)}`,
     `pid       ${String(result.pid)}`,
+    `shape     ${String(result.shape ?? null)}`,
   ]);
   return 0;
 }

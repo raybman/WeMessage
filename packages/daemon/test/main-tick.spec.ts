@@ -48,3 +48,17 @@ describe('main.ts: the tick loop', () => {
     expect(stop).toBeGreaterThan(drain);
   });
 });
+
+describe('main.ts: who supervises it (S2a row 13)', () => {
+  it("WEMESSAGE_SUPERVISOR accepts 'launchd' and 'app' only", () => {
+    // S2a adds a third launch shape, not a third supervisor: under the host
+    // shape launchd still supervises (the host plist says so), and 'app'
+    // stays legal and unused in S2. Read from source because this file
+    // boots on import; the enum is the whole contract.
+    const hits = [
+      ...src.matchAll(/WEMESSAGE_SUPERVISOR: z\.enum\(\[([^\]]*)\]\)/g),
+    ];
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.[1]).toBe("'launchd', 'app'");
+  });
+});

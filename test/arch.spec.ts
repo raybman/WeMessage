@@ -11017,6 +11017,59 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
     });
   });
 
+  /* ── v2 S2a: the launch shapes are exactly bundle, dev and host ────── */
+
+  /**
+   * `plist.ts` grew a third argument vector for the native app, and with it
+   * the one key only that vector may carry. Both facts are about where a
+   * thing is SPELLED:
+   *
+   *  - the shape union is written once, with exactly three members, in the
+   *    module that refuses every other vector;
+   *  - `AssociatedBundleIdentifiers` appears in that module and in no other
+   *    SOURCE file under packages/ (paths with a `/src/` segment). Scoped to
+   *    source on purpose: the specs that pin the key must name it, and a
+   *    test naming it cannot put it into a plist. A second source file
+   *    naming it would be a second place able to attribute an agent to the
+   *    app, which is what the renderer's host-only rule exists to prevent.
+   */
+  describe('S2a: launchd shapes are exactly bundle, dev, host', () => {
+    const PLIST = 'packages/daemon/src/launchd/plist.ts';
+    const KEY = 'AssociatedBundleIdentifiers';
+    const sourceFiles = (): string[] =>
+      trackedTextFiles().filter(
+        (f) => f.startsWith('packages/') && f.includes('/src/'),
+      );
+    const carriers = (): string[] =>
+      sourceFiles()
+        .filter((f) => readFileSync(join(repoRoot, f), 'utf8').includes(KEY))
+        .sort();
+
+    it('the shape union is declared once, with three members', () => {
+      const decl =
+        "export type ProgramArgumentsShape = 'bundle' | 'dev' | 'host';";
+      expect(s9Read(PLIST).split(decl)).toHaveLength(2);
+    });
+
+    it('AssociatedBundleIdentifiers is in plist.ts and in no other source file under packages/', () => {
+      const swept = sourceFiles();
+      // Non-vacuity: the sweep reads the module that owns the key and its
+      // nearest neighbour, so an empty or misrooted list cannot pass.
+      expect(swept).toContain(PLIST);
+      expect(swept).toContain('packages/daemon/src/launchd/service.ts');
+      expect(carriers()).toEqual([PLIST]);
+    });
+
+    it('PLANTED: a second source file naming the key is caught', () => {
+      const rel = s9Plant(
+        'packages/daemon/src/__s9__/attribution.ts',
+        `export const planted = '${KEY}';\n`,
+        true,
+      );
+      expect(carriers()).toEqual([PLIST, rel].sort());
+    });
+  });
+
   /* ── row 5: exactly one file may spawn launchctl ───────────────────── */
 
   /**

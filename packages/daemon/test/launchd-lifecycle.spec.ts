@@ -600,7 +600,7 @@ describe.skipIf(!darwin)(
       expect(res.stderr).toBe(`already running (pid ${String(supervised)})\n`);
     }, 90_000);
 
-    it('row 11 — status reports the six fields, uninstall removes and audits', async () => {
+    it('row 11: status reports the seven fields, uninstall removes and audits', async () => {
       const before = await cli([
         'service',
         'status',
@@ -617,7 +617,11 @@ describe.skipIf(!darwin)(
         'pid',
         'plistPath',
         'running',
+        'shape',
       ]);
+      // S2a: read back from the installed plist. This lane installs the
+      // repository's own node and built entry, which is the dev shape.
+      expect(s['shape']).toBe('dev');
       expect(s['installed']).toBe(true);
       expect(s['running']).toBe(true);
       expect(s['label']).toBe(label);

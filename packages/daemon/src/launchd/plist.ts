@@ -56,13 +56,20 @@ export class LaunchdPlistRefused extends Error {
 }
 
 /**
- * Every key §1.7 names, sorted.
+ * Every key this module renders, sorted.
  *
  * Sorted because the renderer emits them in this order and a diff of two
  * plists that differ only in key order is a diff nobody reads. Exported so
  * the spec asserts a closed set rather than a spot check.
+ *
+ * Ten are the keys §1.7 names, and every plist carries them. The eleventh,
+ * `AssociatedBundleIdentifiers` (S2a), is the host shape's alone: it is how
+ * System Settings attributes a background item to an app, so only the plist
+ * whose process IS the app may make that claim. No caller can add any of
+ * the eleven through `extraKeys`.
  */
 export const LAUNCH_AGENT_PLIST_KEYS = [
+  'AssociatedBundleIdentifiers',
   'EnvironmentVariables',
   'KeepAlive',
   'Label',
@@ -94,17 +101,32 @@ export const BUNDLE_EXECUTABLE_SUFFIX = '/Contents/MacOS/WeMessage';
 export const BUNDLE_DAEMON_MAIN_SUFFIX = '/Contents/Resources/daemon/main.mjs';
 /** The development layout: the repository's own node against the built entry. */
 export const DEV_DAEMON_MAIN_SUFFIX = '/packages/daemon/dist/main.js';
+/**
+ * The host layout (S2a): the native app's own executable and this one flag.
+ * The app spawns the node daemon itself, so the plist names no script.
+ */
+export const HOST_DAEMON_FLAG = '--daemon' as const;
+/**
+ * The app a host plist attributes the agent to, and the only value
+ * `AssociatedBundleIdentifiers` ever holds.
+ */
+export const ASSOCIATED_BUNDLE_IDENTIFIER = 'sh.wemessage.gateway' as const;
 
 /**
- * The two argument vectors this project will supervise, and no third.
+ * The three argument vectors this project will supervise, and no fourth.
  *
  * `bundle` is what ships. `dev` exists because the packaged app does not
  * exist until Sc 6 and the lifecycle rows have to point launchd at something
  * real before then; making it a NAMED shape rather than "anything goes when
  * testing" is the difference between two supported layouts and a plist that
  * can run an arbitrary program under the operator's account at every login.
+ *
+ * `host` (S2a) is the native app: launchd supervises the app, and the app
+ * supervises the daemon. Its second entry is compared EXACTLY, never by
+ * prefix or suffix, so `--daemon=1`, `--DAEMON` and a third entry are
+ * refusals like any other vector.
  */
-export type ProgramArgumentsShape = 'bundle' | 'dev';
+export type ProgramArgumentsShape = 'bundle' | 'dev' | 'host';
 
 export function programArgumentsShape(
   args: readonly string[],
@@ -113,18 +135,21 @@ export function programArgumentsShape(
     throw new LaunchdPlistRefused(
       `ProgramArguments must be exactly two entries, got ${String(args.length)}`,
     );
-  const [exe, script] = args as [string, string];
+  const [exe, second] = args as [string, string];
+  if (exe.endsWith(BUNDLE_EXECUTABLE_SUFFIX) && second === HOST_DAEMON_FLAG)
+    return 'host';
   if (
     exe.endsWith(BUNDLE_EXECUTABLE_SUFFIX) &&
-    script.endsWith(BUNDLE_DAEMON_MAIN_SUFFIX)
+    second.endsWith(BUNDLE_DAEMON_MAIN_SUFFIX)
   )
     return 'bundle';
-  if (exe.startsWith('/') && script.endsWith(DEV_DAEMON_MAIN_SUFFIX))
+  if (exe.startsWith('/') && second.endsWith(DEV_DAEMON_MAIN_SUFFIX))
     return 'dev';
   throw new LaunchdPlistRefused(
-    `ProgramArguments ${JSON.stringify(args)} is neither the bundle shape ` +
-      `(…${BUNDLE_EXECUTABLE_SUFFIX}, …${BUNDLE_DAEMON_MAIN_SUFFIX}) nor the ` +
-      `dev shape (<node>, …${DEV_DAEMON_MAIN_SUFFIX})`,
+    `ProgramArguments ${JSON.stringify(args)} is none of the three shapes: ` +
+      `bundle (…${BUNDLE_EXECUTABLE_SUFFIX}, …${BUNDLE_DAEMON_MAIN_SUFFIX}), ` +
+      `dev (<node>, …${DEV_DAEMON_MAIN_SUFFIX}) or ` +
+      `host (…${BUNDLE_EXECUTABLE_SUFFIX}, ${HOST_DAEMON_FLAG})`,
   );
 }
 
@@ -171,10 +196,11 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
     WEMESSAGE_SUPERVISOR: 'launchd',
     WEMESSAGE_LAUNCHD_LABEL: spec.label,
   };
-  // Only under the packaged app: the variable tells Electron's binary to
-  // behave as node. Set for a plain `node` it means nothing, and a variable
-  // that means nothing in a plist is a variable somebody copies into one
-  // where it does.
+  // Only under the Electron bundle: the variable tells Electron's binary to
+  // behave as node. Set for a plain `node`, or for the native host, which
+  // has no Electron binary at all, it means nothing, and a variable that
+  // means nothing in a plist is a variable somebody copies into one where
+  // it does.
   if (shape === 'bundle') env['ELECTRON_RUN_AS_NODE'] = '1';
   if (spec.dir !== undefined) env['WEMESSAGE_DIR'] = spec.dir;
   if (spec.port !== undefined) env['WEMESSAGE_PORT'] = String(spec.port);
@@ -192,6 +218,11 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
     StandardOutPath: spec.stdoutPath,
     ThrottleInterval: spec.throttleInterval ?? 10,
   };
+  // S2a: the attribution is the host's alone. System Settings lists a
+  // background item under the app this key names, and only the plist whose
+  // process IS that app may claim it.
+  if (shape === 'host')
+    core['AssociatedBundleIdentifiers'] = [ASSOCIATED_BUNDLE_IDENTIFIER];
 
   const out: Record<string, PlistValue> = { ...core };
   for (const [key, value] of Object.entries(spec.extraKeys ?? {})) {
@@ -200,9 +231,16 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
         `${key} is not a key this project's agent may carry: it would change ` +
           `what kind of service launchd runs`,
       );
-    if (key in core)
+    // Every key this module owns, for every shape, not only the ones this
+    // spec's shape happens to emit: otherwise `extraKeys` would be a side
+    // door that hands a bundle or dev plist the host's attribution. The
+    // `in core` leg is the pre-S2a check, kept as it was.
+    if (
+      key in core ||
+      (LAUNCH_AGENT_PLIST_KEYS as readonly string[]).includes(key)
+    )
       throw new LaunchdPlistRefused(
-        `${key} is one of the §1.7 keys and cannot be overridden through extraKeys`,
+        `${key} is a key this module owns and cannot be set through extraKeys`,
       );
     out[key] = value;
   }
@@ -411,4 +449,30 @@ export function parseLaunchAgentPlist(xml: string): PlistDict {
 export function plistDeclaredLabel(xml: string): string | null {
   const label = parseLaunchAgentPlist(xml)['Label'];
   return typeof label === 'string' ? label : null;
+}
+
+/**
+ * Which of the three shapes a plist file RUNS, or null if it runs none of
+ * them (S2a: `service status` reports it).
+ *
+ * Same reasoning as `plistDeclaredLabel`: one question asked of a file,
+ * answered by the module that wrote it, so the caller never handles a parsed
+ * plist and the answer cannot drift from the renderer's own refusals. A
+ * vector that is none of the three is null rather than a throw. A file that
+ * is not a plist this module can read still throws, from the parser.
+ */
+export function plistDeclaredShape(xml: string): ProgramArgumentsShape | null {
+  const args = parseLaunchAgentPlist(xml)['ProgramArguments'];
+  if (args === undefined || !isPlistArray(args)) return null;
+  const vector: string[] = [];
+  for (const arg of args) {
+    if (typeof arg !== 'string') return null;
+    vector.push(arg);
+  }
+  try {
+    return programArgumentsShape(vector);
+  } catch (err) {
+    if (err instanceof LaunchdPlistRefused) return null;
+    throw err;
+  }
 }

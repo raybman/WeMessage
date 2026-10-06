@@ -37,7 +37,7 @@
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { asLaunchAgentLabel } from '../src/launchd/contract.js';
 import {
   FORBIDDEN_PLIST_KEYS,
@@ -48,6 +48,7 @@ import {
   programArgumentsShape,
   renderLaunchAgentPlist,
   type LaunchAgentSpec,
+  type ProgramArgumentsShape,
 } from '../src/launchd/plist.js';
 import { LaunchdLabelRefused } from '../src/launchd/contract.js';
 import { resolveBundlePaths } from '../src/launchd/paths.js';
@@ -71,6 +72,46 @@ const DEV_ARGS = [
   process.execPath,
   '/repo/packages/daemon/dist/main.js',
 ] as const;
+
+/**
+ * S2a: the host shape. The native app's own executable with one flag, and
+ * no script: the Swift host owns the node child, so launchd supervises the
+ * app and the app supervises the daemon.
+ */
+const HOST_ARGS = [`${APP}/Contents/MacOS/WeMessage`, '--daemon'] as const;
+
+/**
+ * The ten keys every plist carries, written out by hand rather than derived
+ * from the tuple, so a key deleted from the tuple fails a row instead of
+ * quietly shrinking the expectation with it.
+ */
+const TEN_KEYS = [
+  'EnvironmentVariables',
+  'KeepAlive',
+  'Label',
+  'LimitLoadToSessionType',
+  'ProcessType',
+  'ProgramArguments',
+  'RunAtLoad',
+  'StandardErrorPath',
+  'StandardOutPath',
+  'ThrottleInterval',
+] as const;
+
+/** The host plist: the ten, plus the one key only the host carries. */
+const ELEVEN_KEYS = ['AssociatedBundleIdentifiers', ...TEN_KEYS] as const;
+
+/**
+ * The keys a plist of `shape` is rendered with, read from the tuple. Widened
+ * to `string[]` on purpose: the tuple's literal type changes in S2a, and a
+ * row that compared it to a literal it did not yet contain would be a type
+ * error at the top of the file rather than a failing row.
+ */
+function keysFor(shape: 'bundle' | 'dev' | 'host'): string[] {
+  return (LAUNCH_AGENT_PLIST_KEYS as readonly string[]).filter(
+    (k) => shape === 'host' || k !== 'AssociatedBundleIdentifiers',
+  );
+}
 
 function spec(over: Partial<LaunchAgentSpec> = {}): LaunchAgentSpec {
   return {
@@ -154,23 +195,13 @@ describe('s9 Sc3 row 1: the plist round-trips, and plutil agrees', () => {
 describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
   it('the rendered key list is exactly the ten keys, sorted', () => {
     const parsed = parseLaunchAgentPlist(renderLaunchAgentPlist(spec()));
-    expect(Object.keys(parsed).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
-    // Equality against a pinned tuple AND against a second, independently
+    expect(Object.keys(parsed).sort()).toEqual(keysFor('bundle'));
+    // Equality against the tuple AND against a second, independently
     // written list: the tuple is what the renderer iterates, so a key
     // deleted from it would silently satisfy a row that only compared the
-    // renderer to itself.
-    expect([...LAUNCH_AGENT_PLIST_KEYS]).toEqual([
-      'EnvironmentVariables',
-      'KeepAlive',
-      'Label',
-      'LimitLoadToSessionType',
-      'ProcessType',
-      'ProgramArguments',
-      'RunAtLoad',
-      'StandardErrorPath',
-      'StandardOutPath',
-      'ThrottleInterval',
-    ]);
+    // renderer to itself. S2a: the bundle reading of the tuple is the ten;
+    // the eleventh key is the host's alone (S2a row 6b).
+    expect(keysFor('bundle')).toEqual([...TEN_KEYS]);
   });
 
   it('every §1.7 value is what the plan says it is', () => {
@@ -222,7 +253,7 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     const bare = parseLaunchAgentPlist(renderLaunchAgentPlist(spec()));
     const bareEnv = bare['EnvironmentVariables'] as Record<string, string>;
     expect('WEMESSAGE_CHATDB' in bareEnv).toBe(false);
-    expect(Object.keys(bare).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
+    expect(Object.keys(bare).sort()).toEqual(keysFor('bundle'));
 
     const set = parseLaunchAgentPlist(
       renderLaunchAgentPlist(spec({ chatDb: '/tmp/wm/chat.db' })),
@@ -230,7 +261,7 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     const setEnv = set['EnvironmentVariables'] as Record<string, string>;
     expect(setEnv['WEMESSAGE_CHATDB']).toBe('/tmp/wm/chat.db');
     // Non-vacuity: adding it changed the env dict and NOTHING else.
-    expect(Object.keys(set).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
+    expect(Object.keys(set).sort()).toEqual(keysFor('bundle'));
     expect(Object.keys(setEnv).sort()).toEqual(
       [...Object.keys(bareEnv), 'WEMESSAGE_CHATDB'].sort(),
     );
@@ -260,8 +291,10 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     const env = p['EnvironmentVariables'] as Record<string, string>;
     expect(env['ELECTRON_RUN_AS_NODE']).toBeUndefined();
     expect(env['WEMESSAGE_SUPERVISOR']).toBe('launchd');
-    // The key SET does not change with the shape: ten keys either way.
-    expect(Object.keys(p).sort()).toEqual([...LAUNCH_AGENT_PLIST_KEYS]);
+    // The key SET is the same for bundle and dev: ten keys either way. Only
+    // the host shape adds one (S2a row 6b).
+    expect(Object.keys(p).sort()).toEqual(keysFor('dev'));
+    expect(keysFor('dev')).toEqual([...TEN_KEYS]);
   });
 });
 
@@ -357,7 +390,7 @@ describe('s9 Sc3 row 3: what the renderer refuses to build', () => {
     );
     expect(p['ExitTimeOut']).toBe(30);
     expect(Object.keys(p).sort()).toEqual(
-      [...LAUNCH_AGENT_PLIST_KEYS, 'ExitTimeOut'].sort(),
+      [...keysFor('bundle'), 'ExitTimeOut'].sort(),
     );
   });
 
@@ -370,6 +403,153 @@ describe('s9 Sc3 row 3: what the renderer refuses to build', () => {
     const src = renderLaunchAgentPlist.toString();
     for (const forbidden of ['writeFile', 'mkdir', 'spawn', 'execFile'])
       expect(src.includes(forbidden), forbidden).toBe(false);
+  });
+});
+
+/* ── S2a: the third shape, 'host', for the native app ─────────────────── */
+
+describe('S2a rows 1-6: the host shape, and the one key only it carries', () => {
+  /*
+   * WHAT THE HOST SHAPE IS. The Swift app runs as the launch agent and
+   * spawns the node daemon itself, so launchd's argument vector is the app
+   * executable and one flag. The plist names no script: which daemon the
+   * app runs is the app's business, decided inside the signed bundle.
+   *
+   * WHY THE KEY IS HOST ONLY. `AssociatedBundleIdentifiers` is how System
+   * Settings attributes a background item to an app. A bundle or dev plist
+   * that carried it would claim an attribution its process cannot back, and
+   * those two plists are byte-identical to what they were before S2a.
+   */
+  const host = (over: Partial<LaunchAgentSpec> = {}): LaunchAgentSpec =>
+    spec({ programArguments: HOST_ARGS, ...over });
+
+  it('row 1: [exe, --daemon] is the host shape', () => {
+    expect(programArgumentsShape([...HOST_ARGS])).toBe('host');
+  });
+
+  it('row 2: the host plist carries AssociatedBundleIdentifiers, and only that one key more', () => {
+    const p = parseLaunchAgentPlist(renderLaunchAgentPlist(host()));
+    expect(p['AssociatedBundleIdentifiers']).toEqual(['sh.wemessage.gateway']);
+    expect(Object.keys(p).sort()).toEqual([...ELEVEN_KEYS]);
+    // The difference from a bundle plist of the same spec is that key and
+    // nothing else: the host is not a new kind of agent, it is the same
+    // agent with a different argument vector and an attribution.
+    const b = parseLaunchAgentPlist(renderLaunchAgentPlist(spec()));
+    const extra = Object.keys(p).filter((k) => !(k in b));
+    expect(extra).toEqual(['AssociatedBundleIdentifiers']);
+  });
+
+  it('row 3: bundle and dev plists do not carry it', () => {
+    for (const args of [BUNDLE_ARGS, DEV_ARGS]) {
+      const p = parseLaunchAgentPlist(
+        renderLaunchAgentPlist(spec({ programArguments: args })),
+      );
+      expect('AssociatedBundleIdentifiers' in p, args[1]).toBe(false);
+    }
+  });
+
+  it('row 3b: nor can extraKeys give it to them, or override any key this module owns', () => {
+    // The attribution is the shape's to grant. A caller that could add it
+    // through `extraKeys` could put it on a bundle or dev plist, which is
+    // exactly the claim row 3 says those plists never make.
+    for (const args of [BUNDLE_ARGS, DEV_ARGS]) {
+      const s = spec({
+        programArguments: args,
+        extraKeys: { AssociatedBundleIdentifiers: ['sh.wemessage.gateway'] },
+      });
+      expect(() => renderLaunchAgentPlist(s), args[1]).toThrow(
+        LaunchdPlistRefused,
+      );
+      expect(() => renderLaunchAgentPlist(s), args[1]).toThrow(
+        /AssociatedBundleIdentifiers/,
+      );
+    }
+    // NEAR-MISS, and the branch this guard extends: a key every shape
+    // carries is refused through `extraKeys` too, for all three shapes.
+    for (const args of [BUNDLE_ARGS, DEV_ARGS, HOST_ARGS]) {
+      expect(
+        () =>
+          renderLaunchAgentPlist(
+            spec({ programArguments: args, extraKeys: { KeepAlive: false } }),
+          ),
+        args[1],
+      ).toThrow(/KeepAlive/);
+    }
+  });
+
+  it('row 4: the host env is the supervisor and the label, and nothing else', () => {
+    // No ELECTRON_RUN_AS_NODE: there is no Electron binary in this vector.
+    // No WEMESSAGE_HOST: the app sets that on the child it spawns, so the
+    // plist cannot vouch for a host it does not start.
+    const p = parseLaunchAgentPlist(renderLaunchAgentPlist(host()));
+    const env = p['EnvironmentVariables'] as Record<string, string>;
+    expect(Object.keys(env).sort()).toEqual([
+      'WEMESSAGE_LAUNCHD_LABEL',
+      'WEMESSAGE_SUPERVISOR',
+    ]);
+    expect(env['WEMESSAGE_SUPERVISOR']).toBe('launchd');
+    expect(env['WEMESSAGE_LAUNCHD_LABEL']).toBe('sh.wemessage.gateway');
+  });
+
+  it('row 5: exactly three shapes, and every near miss of the host is refused', () => {
+    const shapes = [BUNDLE_ARGS, DEV_ARGS, HOST_ARGS].map((a) =>
+      programArgumentsShape([...a]),
+    );
+    expect([...new Set(shapes)].sort()).toEqual(['bundle', 'dev', 'host']);
+    expectTypeOf<ProgramArgumentsShape>().toEqualTypeOf<
+      'bundle' | 'dev' | 'host'
+    >();
+    const exe = HOST_ARGS[0];
+    const nearMisses: readonly (readonly string[])[] = [
+      [exe],
+      [exe, '--daemon', '--verbose'],
+      [exe, '--daemon=1'],
+      [exe, '--DAEMON'],
+      [process.execPath, '--daemon'],
+      ['/bin/sh', '--daemon'],
+      [`${APP}/Contents/MacOS/WeMessage Helper`, '--daemon'],
+      ['--daemon', exe],
+    ];
+    for (const args of nearMisses)
+      expect(() => programArgumentsShape(args), JSON.stringify(args)).toThrow(
+        LaunchdPlistRefused,
+      );
+  });
+
+  it('row 6a: the host plist round-trips through the parser', () => {
+    const s = host({ dir: '/tmp/wm', port: 47_123, throttleInterval: 1 });
+    expect(parseLaunchAgentPlist(renderLaunchAgentPlist(s))).toEqual(
+      launchAgentPlistObject(s),
+    );
+  });
+
+  it('row 6b: ten keys for bundle and dev, eleven for host, and the four bans hold for host', () => {
+    for (const args of [BUNDLE_ARGS, DEV_ARGS]) {
+      const p = parseLaunchAgentPlist(
+        renderLaunchAgentPlist(spec({ programArguments: args })),
+      );
+      expect(Object.keys(p).sort(), args[1]).toEqual([...TEN_KEYS]);
+    }
+    const h = parseLaunchAgentPlist(renderLaunchAgentPlist(host()));
+    expect(Object.keys(h).sort()).toEqual([...ELEVEN_KEYS]);
+    expect([...LAUNCH_AGENT_PLIST_KEYS]).toEqual([...ELEVEN_KEYS]);
+    // The closed-set teeth, on the shape that is new: each of the four
+    // convertibility keys is refused for the host by name. The PARSER does
+    // not consult the key set; this is the renderer's refusal. The four are
+    // spelled out here rather than read from the module, so a name dropped
+    // from the module's list is a red row, not a shorter loop.
+    const FOUR = ['LaunchOnlyOnce', 'SessionCreate', 'Sockets', 'UserName'];
+    for (const key of FOUR) {
+      expect(
+        () => renderLaunchAgentPlist(host({ extraKeys: { [key]: 'x' } })),
+        key,
+      ).toThrow(LaunchdPlistRefused);
+      expect(
+        () => renderLaunchAgentPlist(host({ extraKeys: { [key]: 'x' } })),
+        key,
+      ).toThrow(`${key} is not a key this project's agent may carry`);
+    }
+    expect([...FORBIDDEN_PLIST_KEYS]).toEqual(FOUR);
   });
 });
 

@@ -234,6 +234,8 @@ interface StatusJson {
   readonly label: string;
   readonly plistPath: string;
   readonly lastExitStatus: number | null;
+  /** S2a: read from the installed plist; absent when there is none. */
+  readonly shape?: string;
 }
 interface UninstallJson {
   readonly installed: boolean;
@@ -728,7 +730,7 @@ describe('s9 Sc7 row 6: service restart', () => {
 /* ── rows 11 and 12: status and uninstall ─────────────────────────────── */
 
 describe('s9 Sc3 rows 11 and 12: status, uninstall, and the second uninstall', () => {
-  it('status --json reports the six fields, from the state file', async () => {
+  it('status --json reports the seven fields, from the state file and the installed plist', async () => {
     const b = bed();
     const fake = fakeServiceManager();
     const env = { WEMESSAGE_LAUNCHD_LABEL: PINNED };
@@ -740,6 +742,9 @@ describe('s9 Sc3 rows 11 and 12: status, uninstall, and the second uninstall', (
     });
     expect(st.code).toBe(0);
     const s = st.json<StatusJson>();
+    // S2a: `shape` is the seventh, read back from the plist on disk. Under
+    // the test runner the derived vector is this node and the built entry,
+    // so the installed shape is `dev`.
     expect(Object.keys(s).sort()).toEqual([
       'installed',
       'label',
@@ -747,6 +752,7 @@ describe('s9 Sc3 rows 11 and 12: status, uninstall, and the second uninstall', (
       'pid',
       'plistPath',
       'running',
+      'shape',
     ]);
     expect(s).toEqual({
       installed: true,
@@ -755,6 +761,7 @@ describe('s9 Sc3 rows 11 and 12: status, uninstall, and the second uninstall', (
       label: PINNED,
       plistPath: join(b.la, `${PINNED}.plist`),
       lastExitStatus: 0,
+      shape: 'dev',
     });
     // ONE read-only call, and no `--launch-agents-dir` was passed: the
     // label came from the state file, not from a directory listing.
@@ -829,6 +836,174 @@ describe('s9 Sc3 rows 11 and 12: status, uninstall, and the second uninstall', (
       lastExitStatus: null,
     });
     expect(fake.rec.calls).toEqual([]);
+  });
+});
+
+/* ── S2a rows 10-12: the installed shape, and the bundle-to-host move ─── */
+
+describe('S2a rows 10-12: status reports the shape, and a host install replaces a bundle one', () => {
+  /*
+   * The daemon entry as it sits inside the app. Install derives its vector
+   * from this string and the environment, and never checks that either
+   * path exists, so nothing here reaches outside the temp beds.
+   */
+  const APP = '/Applications/WeMessage.app';
+  const BUNDLED_MAIN = `${APP}/Contents/Resources/daemon/main.mjs`;
+  const hostEnv = { WEMESSAGE_LAUNCHD_LABEL: PINNED, WEMESSAGE_HOST: 'swift' };
+  const bundleEnv = { WEMESSAGE_LAUNCHD_LABEL: PINNED };
+
+  async function statusJson(
+    b: { dir: string; la: string },
+    run: ReturnType<typeof laneRun>,
+  ): Promise<StatusJson> {
+    const st = await cli(['service', 'status', '--dir', b.dir, '--json'], {
+      run,
+    });
+    expect(st.code).toBe(0);
+    return st.json<StatusJson>();
+  }
+
+  it('row 10: shape is host after a host install, bundle after a bundle install, absent with nothing installed', async () => {
+    // One fake per bed: the fake is a single loaded flag, and two beds
+    // sharing it would be two installs of one label in one domain.
+    const h = bed();
+    const hostRun = laneRun(fakeServiceManager().rec.spawn);
+    await cli(installArgs(h), {
+      run: hostRun,
+      env: hostEnv,
+      daemonMain: BUNDLED_MAIN,
+    });
+    expect((await statusJson(h, hostRun)).shape).toBe('host');
+
+    const b = bed();
+    const bundleRun = laneRun(fakeServiceManager().rec.spawn);
+    await cli(installArgs(b), {
+      run: bundleRun,
+      env: bundleEnv,
+      daemonMain: BUNDLED_MAIN,
+    });
+    expect((await statusJson(b, bundleRun)).shape).toBe('bundle');
+
+    const none = await statusJson(
+      bed(),
+      laneRun(fakeServiceManager().rec.spawn),
+    );
+    expect('shape' in none).toBe(false);
+  });
+
+  it('row 10b: a plist on disk that is none of the three shapes reports no shape, and status still reports', async () => {
+    // Status is a report. A hand-edited plist, or one this project never
+    // wrote, is "shape unknown", never a crash of the one command an
+    // operator runs to find out what is wrong. One variant per way the
+    // read can come up empty.
+    const b = bed();
+    const run = laneRun(fakeServiceManager().rec.spawn);
+    const inst = await cli(installArgs(b), {
+      run,
+      env: hostEnv,
+      daemonMain: BUNDLED_MAIN,
+    });
+    const plistPath = inst.json<InstallJson>().plistPath;
+    const plist = (args: string): string =>
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<plist version="1.0">',
+        '<dict>',
+        '\t<key>Label</key>',
+        `\t<string>${PINNED}</string>`,
+        ...(args === '' ? [] : ['\t<key>ProgramArguments</key>', args]),
+        '</dict>',
+        '</plist>',
+        '',
+      ].join('\n');
+    const variants: Record<string, string> = {
+      'a vector that is none of the three': plist(
+        '\t<array><string>/bin/sh</string><string>--daemon</string></array>',
+      ),
+      'an entry that is not a string': plist(
+        `\t<array><string>${APP}/Contents/MacOS/WeMessage</string><integer>1</integer></array>`,
+      ),
+      'no ProgramArguments at all': plist(''),
+      'not a plist at all': 'not a plist at all\n',
+    };
+    for (const [name, bytes] of Object.entries(variants)) {
+      writeFileSync(plistPath, bytes);
+      const s = await statusJson(b, run);
+      expect(s.installed, name).toBe(true);
+      expect(s.label, name).toBe(PINNED);
+      expect('shape' in s, name).toBe(false);
+    }
+    // The line printer says so, rather than dropping the line.
+    const lines = await cli(['service', 'status', '--dir', b.dir], { run });
+    expect(lines.code).toBe(0);
+    expect(lines.out).toContain('\nshape     null\n');
+  });
+
+  it('row 11: a host install over an installed bundle plist rewrites it, booting out before bootstrapping', async () => {
+    const b = bed();
+    const fake = fakeServiceManager();
+    const run = laneRun(fake.rec.spawn);
+    await cli(installArgs(b), {
+      run,
+      env: bundleEnv,
+      daemonMain: BUNDLED_MAIN,
+    });
+    expect(fake.isLoaded()).toBe(true);
+    fake.rec.calls.length = 0;
+
+    const second = await cli(installArgs(b), {
+      run,
+      env: hostEnv,
+      daemonMain: BUNDLED_MAIN,
+    });
+    const out = second.json<InstallJson>();
+    expect(out.changed).toBe(true);
+    const p = parseLaunchAgentPlist(readFileSync(out.plistPath, 'utf8'));
+    expect(p['ProgramArguments']).toEqual([
+      `${APP}/Contents/MacOS/WeMessage`,
+      '--daemon',
+    ]);
+    expect(p['AssociatedBundleIdentifiers']).toEqual(['sh.wemessage.gateway']);
+    // The migration path for the new shape is the content-change path, in
+    // the same order: bootout, the poll that proves it is gone, bootstrap,
+    // and the read that reports it loaded.
+    expect(fake.rec.argvs()).toEqual([
+      ['bootout', `gui/${U}/${PINNED}`],
+      ['print', `gui/${U}/${PINNED}`],
+      ['bootstrap', `gui/${U}`, out.plistPath],
+      ['print', `gui/${U}/${PINNED}`],
+    ]);
+  });
+
+  it('row 12: status --json includes shape, and the line printer prints it', async () => {
+    const b = bed();
+    const fake = fakeServiceManager();
+    const run = laneRun(fake.rec.spawn);
+    await cli(installArgs(b), { run, env: hostEnv, daemonMain: BUNDLED_MAIN });
+
+    const json = await statusJson(b, run);
+    expect(json).toEqual({
+      installed: true,
+      running: true,
+      pid: 4242,
+      label: PINNED,
+      plistPath: join(b.la, `${PINNED}.plist`),
+      lastExitStatus: 0,
+      shape: 'host',
+    });
+
+    const lines = await cli(['service', 'status', '--dir', b.dir], { run });
+    expect(lines.code).toBe(0);
+    expect(lines.out).toBe(
+      [
+        'installed true',
+        'running   true',
+        `label     ${PINNED}`,
+        'pid       4242',
+        'shape     host',
+        '',
+      ].join('\n'),
+    );
   });
 });
 

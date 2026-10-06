@@ -1,0 +1,28 @@
+name: ci-swift
+
+# v2 S1: the Swift lane, its own workflow rather than a step in ci-macos.
+#
+# apps/mac is a SwiftPM package (WeMessageKit) with no package dependencies,
+# so the lane needs nothing but a checkout and the runner's own toolchain:
+# no Node, no pnpm, no credentials. The vitest projects never spawn Swift;
+# they only read the tree as text, so this job is the one place in CI where
+# the kit's tests execute.
+#
+# One runner label and no fallback: tools-version 6.2 and the macOS 26
+# platform floor are what this image ships, and a lane that quietly moved to
+# a different image would be verifying a different toolchain than the one
+# the package declares. `swift --version` is printed first so every run
+# records which compiler it actually used.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  kit:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: swift --version
+      - run: swift build --package-path apps/mac
+      - run: swift test --package-path apps/mac

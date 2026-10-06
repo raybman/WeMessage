@@ -1212,16 +1212,19 @@ describe('s9 Sc15 row 9: every manifest carries the same version', () => {
 
 /* ── row 10: the lanes CI actually runs ───────────────────────────────── */
 
-describe('s9 Sc15 row 10: the four workflows exist and the guard over them has teeth', () => {
+describe('s9 Sc15 row 10: the five workflows exist and the guard over them has teeth', () => {
   const WORKFLOWS = [
     '.github/workflows/ci-linux.yml',
     '.github/workflows/ci-macos.yml',
     '.github/workflows/ci-python.yml',
+    // v2 S1: the Swift kit's lane. workflows.spec.ts sweeps it (rows 5c,
+    // 8, 11, 12) and test/arch.spec.ts 'v2 S1: the Swift tree' pins it.
+    '.github/workflows/ci-swift.yml',
     '.github/workflows/release.yml',
   ] as const;
 
-  it('the workflow set is exactly these four', () => {
-    // Equality. A fifth workflow is a fifth thing that can push, publish or
+  it('the workflow set is exactly these five', () => {
+    // Equality. A sixth workflow is a sixth thing that can push, publish or
     // hold a secret, and `workflows.spec.ts` rows 5 and 5c enumerate
     // secrets per FILE: a file they have never seen is a file they do not
     // check.

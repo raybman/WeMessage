@@ -58,6 +58,7 @@ const RELEASE = '.github/workflows/release.yml';
 const CI_MACOS = '.github/workflows/ci-macos.yml';
 const CI_LINUX = '.github/workflows/ci-linux.yml';
 const CI_PYTHON = '.github/workflows/ci-python.yml';
+const CI_SWIFT = '.github/workflows/ci-swift.yml';
 const WORKFLOWS = [RELEASE, CI_MACOS, CI_LINUX] as const;
 
 /**
@@ -67,9 +68,10 @@ const WORKFLOWS = [RELEASE, CI_MACOS, CI_LINUX] as const;
  * supply-chain exposure with the same blast radius. It is deliberately NOT in
  * `WORKFLOWS`: the shape rows ask about a gate job and a release lane and
  * that file has neither, so widening `WORKFLOWS` would have meant loosening
- * those rows to tolerate it.
+ * those rows to tolerate it. `ci-swift.yml` (v2 S1) joins on the same terms:
+ * it checks out the repository with a third-party action on every push.
  */
-const SWEPT = [...WORKFLOWS, CI_PYTHON] as const;
+const SWEPT = [...WORKFLOWS, CI_PYTHON, CI_SWIFT] as const;
 
 interface Step {
   readonly id?: string;
@@ -421,7 +423,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
      * Read from the PARSED document, so a secret in a `with:` map, a job
      * `env:` or a step `env:` is the same fact as one on a `run:` line.
      */
-    for (const rel of [CI_MACOS, CI_LINUX, CI_PYTHON])
+    for (const rel of [CI_MACOS, CI_LINUX, CI_PYTHON, CI_SWIFT])
       expect(secretsNamedIn(JSON.stringify(load(rel))), rel).toEqual([]);
     // Non-vacuity, against the exact mutation and at the exact depth it
     // used. An empty expectation is only worth having if the reader that

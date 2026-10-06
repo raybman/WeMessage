@@ -43,3 +43,8 @@ __pycache__/
 dist-bundle/
 dist-pack/
 dist-pack-next/
+
+# v2 S1: SwiftPM build output and per-user package state for apps/mac. The
+# package has no dependencies, so there is no Package.resolved to keep either.
+/apps/mac/.build/
+/apps/mac/.swiftpm/

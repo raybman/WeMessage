@@ -1,0 +1,69 @@
+import Foundation
+import Testing
+import WeMessageKit
+
+/// R0 and R9: the toolchain proof, then the kit's import and logging hygiene.
+/// The test-framework name this file hunts for is assembled at runtime, so the
+/// file never spells the import it forbids.
+@Suite("KitHygiene")
+struct KitHygieneTests {
+  @Test("package compiles and swift test runs one trivial test")
+  func trivial() {
+    #expect(WireVersion.current == 1)
+  }
+
+  static let forbiddenFramework = "XC" + "Test"
+
+  /// Every module `text` imports, with attributes (@testable, @preconcurrency)
+  /// and import kinds (struct, func, ...) stripped.
+  static func imports(_ text: String) throws -> [String] {
+    let pattern =
+      #"^[ \t]*(?:@\w+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?([A-Za-z_]\w*)"#
+    let regex = try NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
+    let range = NSRange(text.startIndex..., in: text)
+    return regex.matches(in: text, range: range).compactMap { match in
+      Range(match.range(at: 1), in: text).map { String(text[$0]) }
+    }
+  }
+
+  static func swiftFiles(under rel: String) throws -> [String] {
+    try Repo.files(under: rel, skipping: [".build", ".swiftpm"]).filter { $0.hasSuffix(".swift") }
+  }
+
+  @Test("every file under Sources/WeMessageKit imports Foundation and nothing else")
+  func sourceImports() throws {
+    let files = try Self.swiftFiles(under: "apps/mac/Sources/WeMessageKit")
+    #expect(files.count >= 10, "kit sources found: \(files.count)")
+    for file in files {
+      let modules = try Self.imports(try Repo.text("apps/mac/Sources/WeMessageKit/" + file))
+      #expect(modules.allSatisfy { $0 == "Foundation" }, "\(file) imports \(modules)")
+    }
+  }
+
+  @Test("no print, NSLog or debugPrint in the kit's sources")
+  func noLogging() throws {
+    let regex = try NSRegularExpression(pattern: #"\b(?:print|NSLog|debugPrint)\("#)
+    for file in try Self.swiftFiles(under: "apps/mac/Sources/WeMessageKit") {
+      let text = try Repo.text("apps/mac/Sources/WeMessageKit/" + file)
+      let hits = regex.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+      #expect(hits == 0, "\(file) writes to stdout or the system log \(hits) time(s)")
+    }
+  }
+
+  @Test("tests import only Foundation, Testing and WeMessageKit, and no file under apps/mac imports the XCTest framework")
+  func testImports() throws {
+    let allowed: Set<String> = ["Foundation", "Testing", "WeMessageKit"]
+    let tests = try Self.swiftFiles(under: "apps/mac/Tests")
+    #expect(tests.count >= 8, "test files found: \(tests.count)")
+    for file in tests {
+      let modules = Set(try Self.imports(try Repo.text("apps/mac/Tests/" + file)))
+      #expect(modules.isSubset(of: allowed), "\(file) imports \(modules.subtracting(allowed).sorted())")
+    }
+    let everything = try Self.swiftFiles(under: "apps/mac")
+    #expect(everything.contains("Package.swift"))
+    for file in everything {
+      let modules = try Self.imports(try Repo.text("apps/mac/" + file))
+      #expect(!modules.contains(Self.forbiddenFramework), "\(file) imports \(Self.forbiddenFramework)")
+    }
+  }
+}

@@ -129,6 +129,39 @@ function topLevelTrackedDirs(): string[] {
 }
 
 /**
+ * The extensions the raw-control-byte sweep (s7 Sc1 (b)) reads as text.
+ *
+ * Moved to module scope by v2 S1, unchanged, so that the Swift tree's rows
+ * ('v2 S1: the Swift tree') can assert membership against the SAME set the
+ * sweep uses rather than a copy that could drift from it.
+ */
+const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.md',
+  '.yml',
+  '.yaml',
+  '.sql',
+  '.py',
+  '.sh',
+  '.toml',
+  '.txt',
+  // s8 Sc1: the token sheet is the app's only colour literal file and it
+  // is a stylesheet. Adding the extension here rather than leaving it out
+  // is the same decision Sc7 made for `.py` and `.yaml`: the sweep should
+  // read what the repo actually publishes, not what it published when the
+  // list was written.
+  '.css',
+  // v2 S1: apps/mac is Swift source in a public repository, so the sweeps
+  // read it for the same reason they read `.py` and `.css`.
+  '.swift',
+]);
+
+/**
  * Everything in anything git tracks that a PUBLIC repository must not carry.
  *
  * Hoisted to module scope by s7 Sc7 so that the row asserting it is clean
@@ -1921,28 +1954,11 @@ describe('arch invariants (dependency-cruiser)', () => {
     // tree has a reason to spell a vertical tab as a raw byte. Binary
     // fixtures (fixtures/typedstream/*.bin) are out of scope by extension:
     // the row says "text file", and a typedstream blob is not one.
-    const TEXT_EXTENSIONS = new Set([
-      '.ts',
-      '.tsx',
-      '.js',
-      '.mjs',
-      '.cjs',
-      '.json',
-      '.md',
-      '.yml',
-      '.yaml',
-      '.sql',
-      '.py',
-      '.sh',
-      '.toml',
-      '.txt',
-      // s8 Sc1: the token sheet is the app's only colour literal file and it
-      // is a stylesheet. Adding the extension here rather than leaving it out
-      // is the same decision Sc7 made for `.py` and `.yaml`: the sweep should
-      // read what the repo actually publishes, not what it published when the
-      // list was written.
-      '.css',
-    ]);
+    //
+    // TEXT_EXTENSIONS itself lives at module scope (next to
+    // trackedTextFiles) since v2 S1, so the Swift tree's rows can ask the
+    // same set this sweep reads instead of keeping a second copy of it.
+    //
     // Naming control characters is this guard's entire job; the class below
     // IS the denylist, and it is written with escapes precisely so that the
     // file enforcing the rule also obeys it.
@@ -13262,5 +13278,199 @@ describe('v2 S0: contract fixtures', () => {
       /import \{ NO_BODY_ROUTES, ROUTE_TABLE \} from '\.\/transport-surface\.snapshot\.js'/,
     );
     expect(archRead('.prettierignore')).toMatch(/^fixtures\/contract\/$/m);
+  });
+});
+
+describe('v2 S1: the Swift tree', () => {
+  /**
+   * v2 S1 adds apps/mac: a SwiftPM package whose one library, WeMessageKit,
+   * speaks the S0 contract in fixtures/contract. Its tests run under
+   * `swift test`, on the ci-swift lane and on a laptop, never under vitest.
+   * These rows own what is structural about it: what the kit may import,
+   * that it has no package dependencies, that the public-repo sweeps read
+   * it, and that its lane is a real one. Text only: nothing here spawns a
+   * Swift toolchain.
+   */
+  const MAC = 'apps/mac';
+  const SOURCES = `${MAC}/Sources/WeMessageKit`;
+  const TESTS = `${MAC}/Tests`;
+  const CI_SWIFT = '.github/workflows/ci-swift.yml';
+  const CI_MACOS = '.github/workflows/ci-macos.yml';
+  // Escaped so this file obeys the rule it enforces.
+  const EM_DASH = '\u2014';
+  // Assembled, so no tracked file spells the import it forbids.
+  const XCTEST = 'XC' + 'Test';
+
+  const trackedUnder = (root: string): string[] =>
+    execFileSync('git', ['ls-files', '--', root], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => f.length > 0);
+  const swiftUnder = (root: string): string[] =>
+    trackedUnder(root).filter((f) => f.endsWith('.swift'));
+  const trackedSwift = (): string[] =>
+    trackedTextFiles().filter((f) => f.endsWith('.swift'));
+
+  /**
+   * Every module a Swift file imports. Attributes (`@testable`,
+   * `@preconcurrency`) and import kinds (`import struct Foundation.URL`) are
+   * stripped, and the line may be indented, so an import tucked inside an
+   * `#if canImport(...)` block is still an import.
+   */
+  const swiftImports = (text: string): string[] =>
+    [
+      ...text.matchAll(
+        /^[ \t]*(?:@\w+\s+)*import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?([A-Za-z_]\w*)/gm,
+      ),
+    ].map((m) => m[1] ?? '');
+  const offendingImports = (
+    files: string[],
+    allowed: ReadonlySet<string>,
+  ): string[] =>
+    files.flatMap((f) =>
+      swiftImports(archRead(f))
+        .filter((m) => !allowed.has(m))
+        .map((m) => `${f}: ${m}`),
+    );
+
+  it('every Sources/WeMessageKit/*.swift imports Foundation only; tests add Testing and WeMessageKit', () => {
+    const sources = swiftUnder(SOURCES);
+    expect(sources.length).toBeGreaterThanOrEqual(10);
+    expect(offendingImports(sources, new Set(['Foundation']))).toEqual([]);
+    const tests = swiftUnder(TESTS);
+    expect(tests.length).toBeGreaterThanOrEqual(8);
+    expect(
+      offendingImports(
+        tests,
+        new Set(['Foundation', 'Testing', 'WeMessageKit']),
+      ),
+    ).toEqual([]);
+    // Non-vacuity: the reader sees every import form it is there to deny.
+    expect(
+      swiftImports(
+        [
+          'import AppKit',
+          '@testable import WeMessageKit',
+          `#if canImport(${XCTEST})`,
+          `  import ${XCTEST}`,
+          '#endif',
+          'import struct Foundation.URL',
+          '/// import SwiftUI is prose, not an import',
+        ].join('\n'),
+      ),
+    ).toEqual(['AppKit', 'WeMessageKit', XCTEST, 'Foundation']);
+  });
+
+  it('no file under apps/mac imports XCTest', () => {
+    const swift = swiftUnder(MAC);
+    expect(swift).toContain(`${MAC}/Package.swift`);
+    expect(
+      swift.filter((f) => swiftImports(archRead(f)).includes(XCTEST)),
+    ).toEqual([]);
+  });
+
+  it('Package.swift has no package dependencies, tools 6.2, macOS 26', () => {
+    const text = archRead(`${MAC}/Package.swift`);
+    // SwiftPM reads the tools version from the first line only.
+    expect(text.split('\n')[0]).toMatch(/^\/\/ swift-tools-version:\s*6\.2$/);
+    expect(text).toMatch(/\.macOS\(\.v26\)/);
+    expect(text).not.toMatch(/dependencies:\s*\[\s*\.package/);
+    expect(text).not.toMatch(/\.package\s*\(/);
+    // Advisor S1 item 1: the kit is a library, so it does not opt every
+    // type into the main actor; the app target chooses its own isolation.
+    expect(text).not.toContain('defaultIsolation');
+    expect(swiftImports(text)).toEqual(['PackageDescription']);
+  });
+
+  it('.swift is a text extension and at least one is tracked', () => {
+    expect(TEXT_EXTENSIONS.has('.swift')).toBe(true);
+    expect(trackedSwift().length).toBeGreaterThan(0);
+  });
+
+  it('no .swift or fixtures/contract file carries an em dash', () => {
+    const swift = trackedSwift();
+    expect(swift.length).toBeGreaterThan(0);
+    const files = [...swift, ...trackedUnder('fixtures/contract')];
+    expect(files.filter((f) => archRead(f).includes(EM_DASH))).toEqual([]);
+  });
+
+  it('no .swift spells the token prefix followed by hex', () => {
+    const TOKEN_HEX = /wm_[0-9a-f]{8,}/;
+    const swift = trackedSwift();
+    expect(swift.length).toBeGreaterThan(0);
+    expect(swift.filter((f) => TOKEN_HEX.test(archRead(f)))).toEqual([]);
+    // Non-vacuity: the token the Swift tests assemble at runtime would
+    // convict if it were ever written out.
+    expect(TOKEN_HEX.test(`wm_${'a'.repeat(64)}`)).toBe(true);
+  });
+
+  it('no .swift carries a 40-hex run or a literal ULID', () => {
+    // The kit's tests load every id from fixtures/contract at runtime, so a
+    // ULID or a digest written into a .swift file is a copy that can drift.
+    const HEX40 = /[0-9a-fA-F]{40}/;
+    const ULID = /\b[0-9A-HJKMNP-TV-Z]{26}\b/;
+    const swift = trackedSwift();
+    expect(swift.length).toBeGreaterThan(0);
+    expect(
+      swift.filter((f) => HEX40.test(archRead(f)) || ULID.test(archRead(f))),
+    ).toEqual([]);
+    expect(ULID.test(`01${'A'.repeat(24)}`)).toBe(true);
+    expect(HEX40.test('c'.repeat(40))).toBe(true);
+  });
+
+  it('ci-swift.yml is a real lane', () => {
+    const text = archRead(CI_SWIFT);
+    expect(text).toMatch(/^\s+runs-on: macos-26$/m);
+    // Advisor S1 item 9: no fallback runner.
+    expect(text).not.toContain('latest');
+    expect(text).toContain('swift --version');
+    expect(text).toContain('swift build --package-path apps/mac');
+    expect(text).toContain('swift test --package-path apps/mac');
+    expect(text).toMatch(/^ {2}pull_request:/m);
+    expect(text).not.toContain('workflow_dispatch');
+    // The word list of the Sc17 'neither signs' row, applied to this file.
+    for (const forbidden of [
+      'secrets.',
+      'codesign',
+      'notarytool',
+      'xcrun',
+      'APPLE_ID',
+      'CSC_LINK',
+      'p12',
+      'keychain',
+    ])
+      expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
+  });
+
+  it('the Swift lane is not a step in ci-macos.yml', () => {
+    expect(archRead(CI_MACOS)).not.toContain('swift ');
+  });
+
+  it('apps/mac has no vitest.config.ts', () => {
+    // pnpm test sweeps the Swift tree as text; it never spawns it. A vitest
+    // config here would join the `apps/*/vitest.config.ts` glob, and a
+    // package.json would join the pnpm workspace's `apps/*` glob.
+    expect(existsSync(join(repoRoot, MAC, 'Package.swift'))).toBe(true);
+    expect(existsSync(join(repoRoot, MAC, 'vitest.config.ts'))).toBe(false);
+    expect(existsSync(join(repoRoot, MAC, 'package.json'))).toBe(false);
+    expect(
+      trackedUnder(MAC).filter((f) => /(^|\/)vitest\.[\w.]*$/.test(f)),
+    ).toEqual([]);
+  });
+
+  it('/apps/mac/.build/ is ignored', () => {
+    for (const probe of [`${MAC}/.build/x`, `${MAC}/.swiftpm/x`]) {
+      const r = spawnSync('git', ['check-ignore', '-q', probe], {
+        cwd: repoRoot,
+      });
+      expect([probe, r.status]).toEqual([probe, 0]);
+    }
+    // Non-vacuity: the sources themselves are not ignored.
+    const src = spawnSync('git', ['check-ignore', '-q', `${SOURCES}/x.swift`], {
+      cwd: repoRoot,
+    });
+    expect(src.status).toBe(1);
   });
 });

@@ -1,5 +1,6 @@
 **/dist/**
 **/dist-bundle/**
+**/dist-bundle-node/**
 **/node_modules/**
 **/coverage/**
 **/*.tsbuildinfo

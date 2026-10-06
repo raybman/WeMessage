@@ -11749,8 +11749,13 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
    * a self-declaration requirement it did not have, and the implemented arms
    * gained proofs where they previously had none. Nothing was admitted by
    * being named.
+   *
+   * v2 S2d adds the ninth, `pack:swift`, which assembles WeMessage.app from
+   * the Swift host and the bundled Node. It joins the build drivers, so it
+   * owes the same two proofs `pack.mjs` does: it reaches a child process,
+   * and it still refuses with exit 2.
    */
-  describe('row 10: eight release scripts, each resolving to a real file', () => {
+  describe('row 10: nine release scripts, each resolving to a real file', () => {
     const RELEASE_SCRIPTS: readonly string[] = [
       'release:notarize',
       'release:cask',
@@ -11759,6 +11764,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       'release:cut-tag',
       'pack:adhoc',
       'pack:release',
+      'pack:swift',
       'smoke:automated',
     ];
     const scripts = (): Record<string, string> =>
@@ -11783,7 +11789,11 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
     const STUBS: readonly string[] = ['release:notarize', 'smoke:automated'];
 
     /** Drives a real build through a child process. */
-    const DRIVES_A_BUILD: readonly string[] = ['pack:adhoc', 'pack:release'];
+    const DRIVES_A_BUILD: readonly string[] = [
+      'pack:adhoc',
+      'pack:release',
+      'pack:swift',
+    ];
 
     /**
      * Thin bins over a compiled module in `tools/release/src`. Running these
@@ -11812,12 +11822,12 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       RUNS_IN_PROCESS,
     ];
 
-    it('all eight are declared', () => {
+    it('all nine are declared', () => {
       const have = scripts();
       expect(RELEASE_SCRIPTS.filter((s) => !(s in have))).toEqual([]);
     });
 
-    it('the root declares no ninth release script this row does not know about', () => {
+    it('the root declares no tenth release script this row does not know about', () => {
       // The other direction, and the one the old row was missing: a script
       // added to `package.json` and never added here would have been covered
       // by nothing at all. `release:notes` arrived exactly that way.
@@ -11842,10 +11852,10 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(missing).toEqual([]);
     });
 
-    it('the four buckets partition the eight, with nothing in two or in none', () => {
+    it('the four buckets partition the nine, with nothing in two or in none', () => {
       expect(BUCKETS.flat().sort()).toEqual([...RELEASE_SCRIPTS].sort());
       // Pairwise, so a failure names the two buckets that overlap instead of
-      // printing two eight-element arrays side by side.
+      // printing two nine-element arrays side by side.
       for (const [i, a] of BUCKETS.entries())
         for (const b of BUCKETS.slice(i + 1))
           expect(a.filter((n) => b.includes(n))).toEqual([]);

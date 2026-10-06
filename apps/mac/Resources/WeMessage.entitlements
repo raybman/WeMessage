@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Swift host's entitlements: one. The host runs no JIT and loads no
+  foreign library; it drives nothing itself. automation.apple-events is here
+  because TCC attributes the Messages automation grant to the responsible
+  process, which is the app. Signed onto Contents/MacOS/WeMessage and the app
+  by tools/swift/sign.sh (S2e).
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+  </dict>
+</plist>

@@ -48,3 +48,11 @@ dist-pack-next/
 # package has no dependencies, so there is no Package.resolved to keep either.
 /apps/mac/.build/
 /apps/mac/.swiftpm/
+
+# v2 S2d: the Swift packaging lane. dist-app holds the assembled, unsigned
+# WeMessage.app; dist-pack and dist-pack-2 are the zips of two packs the S2e
+# lane compares; dist-bundle-node is the daemon bundle for plain Node.
+/apps/mac/dist-app/
+/apps/mac/dist-pack/
+/apps/mac/dist-pack-2/
+dist-bundle-node/

@@ -1,0 +1,585 @@
+/**
+ * v2 S2d: WeMessage.app assembled from the Swift host and the bundled Node,
+ * without Xcode.
+ *
+ * STATIC, LIKE pack.spec. Every row here reads a script, a plist or a config
+ * file and asserts its shape. Nothing is executed: assembling the bundle
+ * needs a release Swift build and a fetched Node, and signing it (S2e) needs
+ * an identity, and neither belongs in a unit lane that also runs on Linux.
+ * The end-to-end proof is the S2e `pack-swift` job, which runs the lane this
+ * file pins, twice, on macos-26.
+ *
+ * WHAT THE ROWS ARE FOR. A bundle layout fails in two quiet ways. A file is
+ * missing and the app dies on a user's Mac at first launch, or a file is
+ * present that names the builder's machine (a home directory, a Homebrew
+ * prefix) and the app works on exactly one Mac. Row 9 makes the verifier
+ * check both against the real tree; rows 2 and 3 keep the scripts that build
+ * the tree from writing anywhere but their own output directories.
+ *
+ * Rows 10 and 11 of the plan's S2e section extend this file (sign.sh and the
+ * identity half of verify-bundle.sh). Each row here is its own describe so
+ * they can be added without touching these.
+ */
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+
+import {
+  ASSOCIATED_BUNDLE_IDENTIFIER,
+  BUNDLE_DAEMON_MAIN_SUFFIX,
+  BUNDLE_EXECUTABLE_SUFFIX,
+  parseLaunchAgentPlist,
+  type PlistDict,
+  type PlistValue,
+} from '../../packages/daemon/src/launchd/plist.js';
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+const read = (rel: string): string => readFileSync(join(repoRoot, rel), 'utf8');
+
+const LOCK = 'tools/swift/node.lock.json';
+const NODE_FETCH = 'tools/swift/node-fetch.sh';
+const BUNDLE = 'tools/swift/bundle.sh';
+const VERIFY = 'tools/swift/verify-bundle.sh';
+const PACK_SWIFT = 'tools/release/bin/pack-swift.mjs';
+const INFO_PLIST = 'apps/mac/Resources/Info.plist';
+const APP_ENTITLEMENTS = 'apps/mac/Resources/WeMessage.entitlements';
+const NODE_ENTITLEMENTS = 'apps/mac/Resources/node.entitlements';
+const ELECTRON_BUILDER = 'apps/desktop/electron-builder.yml';
+
+/**
+ * The bundle tree, relative to WeMessage.app (plan section 4.4 as redrawn by
+ * RESOLVED B3). `migrations/` sits BESIDE `daemon/`: the store's loader hops
+ * `../migrations` from the daemon module, so moving it inside breaks boot.
+ */
+const TREE: readonly string[] = [
+  'Contents/Info.plist',
+  'Contents/PkgInfo',
+  'Contents/MacOS/WeMessage',
+  'Contents/Resources/AppIcon.icns',
+  'Contents/Resources/daemon/node',
+  'Contents/Resources/daemon/main.mjs',
+  'Contents/Resources/daemon/wemessaged.mjs',
+  'Contents/Resources/daemon/ABI.json',
+  'Contents/Resources/daemon/node_modules/better-sqlite3/package.json',
+  'Contents/Resources/daemon/node_modules/better-sqlite3/lib/index.js',
+  'Contents/Resources/daemon/node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
+  'Contents/Resources/migrations/0001_init.sql',
+  'Contents/Resources/bin/wemessage',
+  'Contents/Resources/bin/wemessage.mjs',
+  'Contents/Resources/bin/wemessaged',
+  'Contents/Resources/licenses/LICENSE.node.txt',
+];
+
+/** `100755` when the index records the exec bit. */
+const indexMode = (rel: string): string => {
+  const out = execFileSync('git', ['ls-files', '-s', '--', rel], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  return out.split(/\s/)[0] ?? '';
+};
+
+// ---------------------------------------------------------------------------
+// The writes linter (rows 2 and 3).
+//
+// "Never writes outside --out" cannot be proved by running the script here,
+// so it is proved on the text: every command that can create, replace or
+// delete a path must name a destination that starts with one of the
+// script's own output variables. Deliberately simple shell: comments are
+// stripped, single-quoted strings are blanked (awk programs and printf
+// formats live there), continuations are joined, and the text is cut into
+// simple commands. A script that defeats this linter with clever shell is a
+// script that should be simpler, so the linter does not try harder.
+// ---------------------------------------------------------------------------
+
+interface Write {
+  readonly command: string;
+  readonly target: string;
+}
+
+const simpleCommands = (sh: string): string[] =>
+  sh
+    .split('\n')
+    .map((line) => line.replace(/(^|\s)#.*$/, ''))
+    .join('\n')
+    .replace(/'[^'\n]*'/g, "''")
+    .replace(/\\\n/g, ' ')
+    .split(/&&|\|\||;|\||\n/)
+    .map((s) =>
+      s
+        .trim()
+        .replace(/^(?:(?:if|then|else|elif|do|while|!|\{|\()\s+)+/, '')
+        .replace(/^\w+="?\$\(/, ''),
+    )
+    .filter((s) => s.length > 0);
+
+const ALL_OPERANDS = new Set(['mkdir', 'rm', 'touch', 'chmod']);
+const LAST_OPERAND = new Set(['ditto', 'cp', 'mv', 'install', 'ln']);
+const MODE_ARG = /^(?:[0-7]{3,4}|[ugoa]*[-+=][rwxX]+)$/;
+
+const writesOf = (sh: string): Write[] => {
+  const out: Write[] = [];
+  for (const cmd of simpleCommands(sh)) {
+    const tokens = (cmd.match(/"[^"]*"|\S+/g) ?? [])
+      .map((t) => t.replace(/\)+"?$/, ''))
+      .filter((t) => t.length > 0 && t !== '"');
+    const head = tokens[0] ?? '';
+    const operands = tokens.slice(1).filter((t) => !t.startsWith('-'));
+    const name = head.split('/').pop() ?? head;
+    if (ALL_OPERANDS.has(name))
+      for (const t of operands)
+        if (!(name === 'chmod' && MODE_ARG.test(t)))
+          out.push({ command: cmd, target: t });
+    if (LAST_OPERAND.has(name) || name === 'PlistBuddy' || name === 'mktemp') {
+      const last = operands[operands.length - 1];
+      if (last !== undefined) out.push({ command: cmd, target: last });
+    }
+    for (const [flag, cmdName] of [
+      ['-C', 'tar'],
+      ['-o', 'curl'],
+    ] as const)
+      if (name === cmdName) {
+        const i = tokens.indexOf(flag);
+        const t = i === -1 ? undefined : tokens[i + 1];
+        if (t !== undefined) out.push({ command: cmd, target: t });
+      }
+    for (const m of cmd.matchAll(/\d?>>?(?!&)\s*("[^"]*"|[^\s;|&)]+)/g)) {
+      const t = m[1] ?? '';
+      if (t !== '/dev/null') out.push({ command: cmd, target: t });
+    }
+  }
+  return out;
+};
+
+const escapes = (sh: string, allowed: readonly string[]): Write[] =>
+  writesOf(sh).filter((w) => !allowed.some((p) => w.target.startsWith(p)));
+
+// ---------------------------------------------------------------------------
+
+describe('row 1: node.lock.json pins Node 24.21.0 by sha256', () => {
+  const lock = JSON.parse(read(LOCK)) as {
+    version?: unknown;
+    major?: unknown;
+    source?: unknown;
+    'darwin-arm64'?: { sha256?: unknown };
+  };
+
+  it('version 24.21.0, major 24, and the two agree', () => {
+    expect(lock.version).toBe('24.21.0');
+    expect(lock.major).toBe(24);
+    expect(String(lock.version).startsWith(`${String(lock.major)}.`)).toBe(
+      true,
+    );
+  });
+
+  it('a 64-hex sha256 for darwin-arm64 and the nodejs.org source', () => {
+    expect(String(lock['darwin-arm64']?.sha256)).toMatch(/^[0-9a-f]{64}$/);
+    expect(lock.source).toBe(
+      `https://nodejs.org/dist/v${String(lock.version)}/`,
+    );
+  });
+});
+
+describe('row 2: node-fetch.sh verifies twice and writes only under .build/node', () => {
+  it('exists, is bash under set -euo pipefail, and is executable', () => {
+    expect(existsSync(join(repoRoot, NODE_FETCH))).toBe(true);
+    const text = read(NODE_FETCH);
+    expect(text.startsWith('#!/usr/bin/env bash\n')).toBe(true);
+    expect(text).toContain('set -euo pipefail');
+    expect(indexMode(NODE_FETCH)).toBe('100755');
+  });
+
+  it('checks the tarball against the lock AND SHASUMS256.txt, refusing with exit 2', () => {
+    const text = read(NODE_FETCH);
+    for (const needed of [
+      'shasum -a 256',
+      'node.lock.json',
+      'SHASUMS256.txt',
+      'exit 2',
+      'apps/mac/.build/node',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('every write lands under $cache or $stage', () => {
+    const text = read(NODE_FETCH);
+    expect(writesOf(text).length).toBeGreaterThanOrEqual(5);
+    expect(escapes(text, ['"$cache', '"$stage'])).toEqual([]);
+  });
+
+  it('PLANTED: a copy to /tmp is convicted', () => {
+    const planted = `${read(NODE_FETCH)}\ncp "$cache/x" "/tmp/y"\n`;
+    expect(
+      escapes(planted, ['"$cache', '"$stage']).map((w) => w.target),
+    ).toEqual(['"/tmp/y"']);
+  });
+});
+
+describe('row 3: bundle.sh lays out the tree and writes only under --out', () => {
+  it('exists, is bash under set -euo pipefail, and is executable', () => {
+    expect(existsSync(join(repoRoot, BUNDLE))).toBe(true);
+    const text = read(BUNDLE);
+    expect(text.startsWith('#!/usr/bin/env bash\n')).toBe(true);
+    expect(text).toContain('set -euo pipefail');
+    expect(indexMode(BUNDLE)).toBe('100755');
+  });
+
+  it('takes --exe --node --bundle --out and refuses with exit 2', () => {
+    const text = read(BUNDLE);
+    for (const arm of ['--exe)', '--node)', '--bundle)', '--out)'])
+      expect([arm, text.includes(arm)]).toEqual([arm, true]);
+    expect(text).toContain('exit 2');
+    expect(text).toContain('app="$out/WeMessage.app"');
+  });
+
+  it('copies with ditto, writes PkgInfo, patches both versions from package.json', () => {
+    const text = read(BUNDLE);
+    for (const needed of [
+      'ditto',
+      'APPL????',
+      'PkgInfo',
+      '/usr/libexec/PlistBuddy',
+      'Set :CFBundleShortVersionString',
+      'Set :CFBundleVersion',
+      'package.json',
+      'LICENSE.node.txt',
+      'apps/desktop/build/icon.icns',
+      'apps/mac/Resources/Info.plist',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('names every path of the tree it does not copy wholesale', () => {
+    // bin/, daemon/ and migrations/ arrive by ditto from dist-bundle-node;
+    // everything else is placed by name.
+    const text = read(BUNDLE);
+    for (const rel of [
+      'Contents/MacOS/WeMessage',
+      'Contents/PkgInfo',
+      'Contents/Info.plist',
+      'Contents/Resources/AppIcon.icns',
+      'Contents/Resources/daemon/node',
+      'Contents/Resources/licenses/LICENSE.node.txt',
+      'Contents/Resources/bin',
+      'Contents/Resources/daemon',
+      'Contents/Resources/migrations',
+    ])
+      expect([rel, text.includes(rel)]).toEqual([rel, true]);
+  });
+
+  it('every write lands under $app or is $out itself', () => {
+    const text = read(BUNDLE);
+    expect(writesOf(text).length).toBeGreaterThanOrEqual(6);
+    expect(escapes(text, ['"$app', '"$out"'])).toEqual([]);
+  });
+
+  it('PLANTED: a write beside --out is convicted', () => {
+    const planted = `${read(BUNDLE)}\nprintf x > "$out/../stray"\n`;
+    expect(escapes(planted, ['"$app', '"$out"']).map((w) => w.target)).toEqual([
+      '"$out/../stray"',
+    ]);
+  });
+});
+
+describe('row 4: Info.plist', () => {
+  const plist = (): PlistDict => parseLaunchAgentPlist(read(INFO_PLIST));
+  const yaml = (): {
+    copyright: string;
+    mac: { category: string; extendInfo: Record<string, unknown> };
+  } =>
+    parse(read(ELECTRON_BUILDER)) as {
+      copyright: string;
+      mac: { category: string; extendInfo: Record<string, unknown> };
+    };
+
+  const KEYS = [
+    'CFBundleDevelopmentRegion',
+    'CFBundleExecutable',
+    'CFBundleIconFile',
+    'CFBundleIdentifier',
+    'CFBundleInfoDictionaryVersion',
+    'CFBundleName',
+    'CFBundlePackageType',
+    'CFBundleShortVersionString',
+    'CFBundleVersion',
+    'LSApplicationCategoryType',
+    'LSMinimumSystemVersion',
+    'NSAppleEventsUsageDescription',
+    'NSHumanReadableCopyright',
+  ];
+
+  it('identifier and executable agree with the daemon constants', () => {
+    const p = plist();
+    expect(p['CFBundleIdentifier']).toBe('sh.wemessage.gateway');
+    expect(p['CFBundleIdentifier']).toBe(ASSOCIATED_BUNDLE_IDENTIFIER);
+    expect(p['CFBundleExecutable']).toBe('WeMessage');
+    expect(BUNDLE_EXECUTABLE_SUFFIX).toBe(
+      `/Contents/MacOS/${String(p['CFBundleExecutable'])}`,
+    );
+    expect(BUNDLE_DAEMON_MAIN_SUFFIX).toBe(
+      '/Contents/Resources/daemon/main.mjs',
+    );
+    expect(p['CFBundlePackageType']).toBe('APPL');
+    expect(p['LSMinimumSystemVersion']).toBe('26.0');
+    expect(p['CFBundleIconFile']).toBe('AppIcon');
+  });
+
+  it("the Automation prompt, copyright and category are electron-builder.yml's, not retyped", () => {
+    const p = plist();
+    const y = yaml();
+    expect(p['NSAppleEventsUsageDescription']).toBe(
+      y.mac.extendInfo['NSAppleEventsUsageDescription'],
+    );
+    expect(String(p['NSAppleEventsUsageDescription']).length).toBeGreaterThan(
+      0,
+    );
+    expect(p['NSHumanReadableCopyright']).toBe(y.copyright);
+    expect(p['LSApplicationCategoryType']).toBe(y.mac.category);
+  });
+
+  it('carries placeholder versions that bundle.sh patches, never a real one', () => {
+    // A real version here would be a twentieth place the version lives,
+    // and check-versions does not read plists.
+    const p = plist();
+    expect(p['CFBundleShortVersionString']).toBe('0.0.0');
+    expect(p['CFBundleVersion']).toBe('0.0.0');
+  });
+
+  it('no LSUIElement and no CFBundleURLTypes at any depth', () => {
+    const keys: string[] = [];
+    const walk = (v: PlistValue): void => {
+      if (Array.isArray(v)) for (const x of v as PlistValue[]) walk(x);
+      else if (typeof v === 'object')
+        for (const [k, x] of Object.entries(v as PlistDict)) {
+          keys.push(k);
+          walk(x);
+        }
+    };
+    walk(plist());
+    expect(keys).not.toContain('LSUIElement');
+    expect(keys).not.toContain('CFBundleURLTypes');
+  });
+
+  it('exactly the thirteen keys', () => {
+    expect(Object.keys(plist()).sort()).toEqual(KEYS);
+  });
+});
+
+describe('row 5: entitlements', () => {
+  const keysOf = (rel: string): string[] => {
+    const p = parseLaunchAgentPlist(read(rel));
+    for (const [k, v] of Object.entries(p)) expect([k, v]).toEqual([k, true]);
+    return Object.keys(p).sort();
+  };
+
+  it('the app has exactly automation.apple-events', () => {
+    expect(keysOf(APP_ENTITLEMENTS)).toEqual([
+      'com.apple.security.automation.apple-events',
+    ]);
+  });
+
+  it('node has exactly the four it needs', () => {
+    // JIT for V8; disable-library-validation because a self-signed leaf has
+    // no Team ID for validation to match against the addon.
+    expect(keysOf(NODE_ENTITLEMENTS)).toEqual([
+      'com.apple.security.automation.apple-events',
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.allow-unsigned-executable-memory',
+      'com.apple.security.cs.disable-library-validation',
+    ]);
+  });
+
+  it('neither carries get-task-allow or allow-dyld-environment-variables', () => {
+    for (const rel of [APP_ENTITLEMENTS, NODE_ENTITLEMENTS]) {
+      const text = read(rel);
+      for (const banned of [
+        'get-task-allow',
+        'allow-dyld-environment-variables',
+      ])
+        expect([rel, banned, text.includes(banned)]).toEqual([
+          rel,
+          banned,
+          false,
+        ]);
+    }
+  });
+});
+
+describe('row 6: pack-swift.mjs drives the lane in order', () => {
+  const body = (): string => read(PACK_SWIFT);
+  const code = (): string =>
+    body()
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+
+  it('exists and imports node builtins only', () => {
+    expect(existsSync(join(repoRoot, PACK_SWIFT))).toBe(true);
+    const specs = [...code().matchAll(/\bfrom\s+'([^']+)'/g)].map(
+      (m) => m[1] ?? '',
+    );
+    expect(specs.length).toBeGreaterThan(0);
+    for (const s of specs)
+      expect([
+        s,
+        ['node:child_process', 'node:fs', 'node:path'].includes(s),
+      ]).toEqual([s, true]);
+    expect(code()).not.toMatch(/\bimport\s*\(/);
+    for (const banned of ['../src/', '../dist/', '@wemessage/'])
+      expect([banned, body().includes(banned)]).toEqual([banned, false]);
+  });
+
+  it('spawns, and refuses with exit 2', () => {
+    expect(code()).toMatch(/\bspawnSync\s*\(/);
+    expect(code()).toContain('process.exit(2)');
+  });
+
+  it('requires --identity and refuses, naming S2e, while sign.sh is absent', () => {
+    for (const needed of ['--identity', 'tools/swift/sign.sh', 'S2e'])
+      expect([needed, body().includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('runs the ten steps in order', () => {
+    const src = code();
+    const calls: string[] = [];
+    for (
+      let i = src.indexOf('run(');
+      i !== -1;
+      i = src.indexOf('run(', i + 4)
+    ) {
+      const end = src.indexOf(');', i);
+      calls.push(src.slice(i, end === -1 ? undefined : end));
+    }
+    // Script names are matched quoted, so 'bundle.sh' cannot be found
+    // inside 'verify-bundle.sh' or 'bundle-daemon.mjs'.
+    const STEPS: readonly (readonly string[])[] = [
+      ["'node-fetch.sh'"],
+      ["'pnpm'", "'build'"],
+      ["'bundle-daemon.mjs'"],
+      ["'swift.sh'", "'release'"],
+      ["'bundle.sh'"],
+      ["'sign.sh'"],
+      ["'verify-bundle.sh'"],
+      ["'ditto'"],
+      ["'shasum'"],
+      ["'codesign'"],
+    ];
+    const at = STEPS.map((tokens) =>
+      calls.findIndex((c) => tokens.every((t) => c.includes(t))),
+    );
+    for (const [i, tokens] of STEPS.entries())
+      expect([tokens.join(' '), (at[i] ?? -1) >= 0]).toEqual([
+        tokens.join(' '),
+        true,
+      ]);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    expect(new Set(at).size).toBe(at.length);
+  });
+});
+
+describe('row 7: the root script', () => {
+  it("pack:swift is 'node tools/release/bin/pack-swift.mjs'", () => {
+    const pkg = JSON.parse(read('package.json')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts['pack:swift']).toBe(
+      'node tools/release/bin/pack-swift.mjs',
+    );
+  });
+});
+
+describe('row 8: build outputs are ignored', () => {
+  it('.gitignore carries the four lines', () => {
+    const lines = read('.gitignore').split('\n');
+    for (const line of [
+      '/apps/mac/dist-app/',
+      '/apps/mac/dist-pack/',
+      '/apps/mac/dist-pack-2/',
+      'dist-bundle-node/',
+    ])
+      expect([line, lines.includes(line)]).toEqual([line, true]);
+    expect(read('.prettierignore').split('\n')).toContain(
+      '**/dist-bundle-node/**',
+    );
+  });
+
+  it('git agrees, and the sources are not ignored', () => {
+    const ignored = (rel: string): number | null =>
+      spawnSync('git', ['check-ignore', '-q', rel], { cwd: repoRoot }).status;
+    for (const rel of [
+      'apps/mac/dist-app/WeMessage.app/Contents/Info.plist',
+      'apps/mac/dist-pack/SHA256SUMS',
+      'apps/mac/dist-pack-2/SHA256SUMS',
+      'apps/desktop/dist-bundle-node/daemon/main.mjs',
+    ])
+      expect([rel, ignored(rel)]).toEqual([rel, 0]);
+    for (const rel of [INFO_PLIST, BUNDLE, PACK_SWIFT])
+      expect([rel, ignored(rel)]).toEqual([rel, 1]);
+  });
+});
+
+describe('row 9: verify-bundle.sh, the structure half', () => {
+  it('exists, is bash under set -euo pipefail, and is executable', () => {
+    expect(existsSync(join(repoRoot, VERIFY))).toBe(true);
+    const text = read(VERIFY);
+    expect(text.startsWith('#!/usr/bin/env bash\n')).toBe(true);
+    expect(text).toContain('set -euo pipefail');
+    expect(indexMode(VERIFY)).toBe('100755');
+  });
+
+  it('requires every path of the tree', () => {
+    const text = read(VERIFY);
+    expect(text).toContain('required=(');
+    for (const rel of TREE)
+      expect([rel, text.includes(rel)]).toEqual([rel, true]);
+  });
+
+  it('checks ABI.json against the lock, the identifier, leftovers and machine paths', () => {
+    const text = read(VERIFY);
+    for (const needed of [
+      'ABI.json',
+      'runtime',
+      'node.lock.json',
+      'CFBundleIdentifier',
+      'sh.wemessage.gateway',
+      'dist-bundle',
+      '$HOME',
+      '/opt/',
+      '/usr/local',
+      '--app)',
+      '--expect-leaf',
+      'exit 2',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('compares ABI.json to the lock, and never types an ABI number', () => {
+    const text = read(VERIFY);
+    for (const comparison of [
+      '[ "$runtime" = "node" ]',
+      '[ "$abi_version" = "$pinned" ]',
+      "awk '!/^[1-9][0-9]*$/ {exit 1}'",
+    ])
+      expect([comparison, text.includes(comparison)]).toEqual([
+        comparison,
+        true,
+      ]);
+    // The ABI is read from the bundle; 137 and 141 are both real values today.
+    expect(text.match(/\b\d{3}\b/g) ?? []).toEqual([]);
+  });
+});
+
+describe('row 10: shell hygiene', () => {
+  it('no grep in any of the three scripts, and awk reads the text', () => {
+    for (const rel of [NODE_FETCH, BUNDLE, VERIFY]) {
+      expect([rel, read(rel).includes('grep')]).toEqual([rel, false]);
+    }
+    // bundle.sh only copies; the two scripts that read text do it with awk.
+    for (const rel of [NODE_FETCH, VERIFY]) {
+      expect([rel, /\bawk\b/.test(read(rel))]).toEqual([rel, true]);
+    }
+  });
+});

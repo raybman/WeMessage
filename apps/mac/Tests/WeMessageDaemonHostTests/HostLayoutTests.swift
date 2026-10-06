@@ -47,22 +47,25 @@ struct HostLayoutTests {
     }
   }
 
-  @Test("row 4: WEMESSAGE_HOST_NODE and WEMESSAGE_HOST_MAIN override the bundle-relative paths and still require existence")
+  @Test("row 4: inside a bundle the overrides are ignored and the paths are bundle-relative; a bare exe (debug build) still honours WEMESSAGE_HOST_NODE and WEMESSAGE_HOST_MAIN and requires them to exist")
   func overrides() throws {
     let env = ["WEMESSAGE_HOST_NODE": "/opt/stub/node", "WEMESSAGE_HOST_MAIN": "/opt/stub/main.mjs"]
     let stubs: Set<String> = ["/opt/stub/node", "/opt/stub/main.mjs"]
     let all = stubs.union([Self.node, Self.main])
+    let bundled = ["node " + Self.node, "main " + Self.main]
 
-    #expect(Self.outcome(Self.resolve(Self.exe, env, present: all)) == ["node /opt/stub/node", "main /opt/stub/main.mjs"])
-    // Both overrides make a bundle unnecessary: the CI smoke runs the bare exe.
+    // v2 S2c.1 (P0-2): a bundle exe never runs what its environment names.
+    #expect(Self.outcome(Self.resolve(Self.exe, env, present: all)) == bundled)
+    // Both overrides make a bundle unnecessary: a bare exe runs the stubs.
     let bare = Self.file("/usr/local/bin/WeMessage")
     #expect(Self.outcome(Self.resolve(bare, env, present: stubs)) == ["node /opt/stub/node", "main /opt/stub/main.mjs"])
-    // Still required to exist.
-    #expect(Self.outcome(Self.resolve(Self.exe, env, present: [Self.node, Self.main, "/opt/stub/main.mjs"])) == ["missing /opt/stub/node"])
+    // Inside a bundle a missing override is not consulted, so it cannot fail the resolve.
+    #expect(Self.outcome(Self.resolve(Self.exe, env, present: [Self.node, Self.main, "/opt/stub/main.mjs"])) == bundled)
+    // A bare exe's overrides are still required to exist.
     #expect(Self.outcome(Self.resolve(bare, env, present: ["/opt/stub/node"])) == ["missing /opt/stub/main.mjs"])
-    // One override: the other path stays bundle-relative, and a bare exe has no bundle to fall back on.
+    // One override: inside a bundle it is ignored too, and a bare exe has no bundle to fall back on.
     let nodeOnly = ["WEMESSAGE_HOST_NODE": "/opt/stub/node"]
-    #expect(Self.outcome(Self.resolve(Self.exe, nodeOnly, present: all)) == ["node /opt/stub/node", "main " + Self.main])
+    #expect(Self.outcome(Self.resolve(Self.exe, nodeOnly, present: all)) == bundled)
     #expect(Self.outcome(Self.resolve(bare, nodeOnly, present: all)) == ["notInsideBundle /usr/local/bin/WeMessage"])
   }
 

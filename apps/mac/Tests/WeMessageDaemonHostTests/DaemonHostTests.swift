@@ -58,7 +58,7 @@ struct DaemonHostTests {
     #expect(ExitStatus.decode(status) == .signaled(SIGTERM))
   }
 
-  @Test("row 11: run with a stub node that records its env and exits 0 returns 0, and the env has WEMESSAGE_HOST=swift and no ELECTRON_RUN_AS_NODE")
+  @Test("row 11: run with a stub node that records its env and exits 0 returns 0, and the env has WEMESSAGE_HOST=swift, no ELECTRON_RUN_AS_NODE, no NODE_OPTIONS, the pinned system PATH and WS_NO_BUFFER_UTIL=1")
   func environmentContract() throws {
     let scratch = try Scratch()
     defer { scratch.remove() }
@@ -67,26 +67,54 @@ struct DaemonHostTests {
     let env = scratch.path("env")
     let argv = scratch.path("argv")
     let exe = try Self.fakeBundle(scratch, node: #"""
-      printf '%s\n' "${WEMESSAGE_HOST-unset}" "${ELECTRON_RUN_AS_NODE-unset}" "${WEMESSAGE_HOST_PID-unset}" "${WEMESSAGE_HOST_VERSION-unset}" "${HOME-unset}" "${PATH-unset}" > '\#(env)'
+      printf '%s\n' "${WEMESSAGE_HOST-unset}" "${ELECTRON_RUN_AS_NODE-unset}" "${WEMESSAGE_HOST_PID-unset}" "${WEMESSAGE_HOST_VERSION-unset}" "${HOME-unset}" "${PATH-unset}" "${NODE_OPTIONS-unset}" "${WS_NO_BUFFER_UTIL-unset}" > '\#(env)'
       printf '%s\n' "$0" "$@" > '\#(argv)'
       exit 0
       """#)
+    // v2 S2c.1: a hostile PATH and NODE_OPTIONS in the host's environment
+    // never reach node.
     let parent = [
-      "PATH": Self.path,
+      "PATH": "/tmp/evil:" + Self.path,
       "HOME": "/nonexistent-home",
       "ELECTRON_RUN_AS_NODE": "1",
       "WEMESSAGE_HOST": "electron",
+      "NODE_OPTIONS": "--require /tmp/evil.js",
     ]
     let lines = Lines()
     let code = DaemonHost.run(argv: ["x", "--daemon"], environment: parent, executable: exe, options: Self.options(lines))
     #expect(code == 0)
     let version = HostVersion.current()
     #expect(!version.isEmpty)
-    let expected = ["swift", "unset", String(getpid()), version, "/nonexistent-home", Self.path]
+    let expected = [
+      "swift", "unset", String(getpid()), version, "/nonexistent-home", "/usr/bin:/bin:/usr/sbin:/sbin", "unset", "1",
+    ]
     #expect(scratch.read("env") == expected.map { $0 + "\n" }.joined())
     let node = scratch.path(Self.daemonDir + "node")
     let main = scratch.path(Self.daemonDir + "main.mjs")
     #expect(scratch.read("argv") == node + "\n" + main + "\n")
+    #expect(lines.all == [])
+  }
+
+  @Test("row 11b: a bundle exe with WEMESSAGE_HOST_NODE and WEMESSAGE_HOST_MAIN pointing at a second stub runs the bundled node, never the override")
+  func bundleIgnoresOverrides() throws {
+    let scratch = try Scratch()
+    defer { scratch.remove() }
+    let saved = Dispositions(Self.touched)
+    defer { saved.restore() }
+    let ran = scratch.path("ran")
+    let exe = try Self.fakeBundle(scratch, node: #"""
+      printf '%s\n' bundled "$1" > '\#(ran)'
+      exit 0
+      """#)
+    let override = try scratch.stub("override/node", #"""
+      printf '%s\n' override "$1" > '\#(ran)'
+      exit 5
+      """#)
+    let overrideMain = try scratch.write("override/main.mjs", "")
+    let env = ["PATH": Self.path, "WEMESSAGE_HOST_NODE": override.path, "WEMESSAGE_HOST_MAIN": overrideMain.path]
+    let lines = Lines()
+    #expect(DaemonHost.run(argv: ["x", "--daemon"], environment: env, executable: exe, options: Self.options(lines)) == 0)
+    #expect(scratch.read("ran") == "bundled\n" + scratch.path(Self.daemonDir + "main.mjs") + "\n")
     #expect(lines.all == [])
   }
 

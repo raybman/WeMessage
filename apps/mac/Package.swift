@@ -25,9 +25,13 @@ let package = Package(
       name: "WeMessageKit",
       path: "Sources/WeMessageKit"
     ),
+    // Debug only: lets a bare debug exe run a stub node named in its
+    // environment (HostLayout.override). A release build compiles no code
+    // that reads those keys, and ci-swift checks the release binary for them.
     .target(
       name: "WeMessageDaemonHost",
-      path: "Sources/WeMessageDaemonHost"
+      path: "Sources/WeMessageDaemonHost",
+      swiftSettings: [.define("WEMESSAGE_HOST_OVERRIDES", .when(configuration: .debug))]
     ),
     .executableTarget(
       name: "WeMessage",

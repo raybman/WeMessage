@@ -515,6 +515,14 @@ export async function bundleDaemon(argv = []) {
       // runtime supports natively and make the bundle harder to read in a crash.
       target: 'node24',
       external: EXTERNALS,
+      // ws reads these two keys before it tries its optional native requires,
+      // so defining them makes both requires dead code that esbuild drops.
+      // Every flavour gets it: a bundle that never names bufferutil or
+      // utf-8-validate cannot load one planted beside it (v2 S2c.1 P0-3).
+      define: {
+        'process.env.WS_NO_BUFFER_UTIL': '"1"',
+        'process.env.WS_NO_UTF_8_VALIDATE': '"1"',
+      },
       banner: { js: bannerFor(e.guard, guardText) },
       metafile: true,
       // Not 'silent'. A warning about the shipped artefact that nobody sees is

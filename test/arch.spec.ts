@@ -13631,3 +13631,154 @@ describe('v2 S1: the Swift tree', () => {
     }
   });
 });
+
+describe('v2 S2c.1: host hardening before a signed build gets Full Disk Access', () => {
+  /**
+   * The advisor's three P0s and the lead's PATH finding, as text. Each closes
+   * a way for a same-user process to choose what the host's child runs or
+   * loads, which becomes "run code with the app's Full Disk Access" the day
+   * a signed build is granted it. The Swift rows (HostEnvironmentTests row 5,
+   * HostLayoutTests row 4, DaemonHostTests rows 11 and 11b) prove the
+   * behaviour; these rows pin the structure a release build depends on.
+   */
+  const HOST = 'apps/mac/Sources/WeMessageDaemonHost';
+  const HOST_ENV = `${HOST}/HostEnvironment.swift`;
+  const HOST_LAYOUT = `${HOST}/HostLayout.swift`;
+  const PACKAGE = 'apps/mac/Package.swift';
+  const CI_SWIFT = '.github/workflows/ci-swift.yml';
+  const BUNDLER = 'apps/desktop/scripts/bundle-daemon.mjs';
+  const FLAG = 'WEMESSAGE_HOST_OVERRIDES';
+  const NODE_KEY = 'WEMESSAGE_HOST_NODE';
+  const MAIN_KEY = 'WEMESSAGE_HOST_MAIN';
+
+  /** The string literals of `name: Set<String> = [ ... ]`, or null. */
+  const setLiteral = (text: string, name: string): string[] | null => {
+    const body = new RegExp(
+      `\\b${name}:\\s*Set<String>\\s*=\\s*\\[([^\\]]*)\\]`,
+    ).exec(text)?.[1];
+    return body === undefined
+      ? null
+      : [...body.matchAll(/"([^"]*)"/g)].map((m) => m[1] ?? '').sort();
+  };
+
+  /**
+   * `text` split into what sits inside `#if WEMESSAGE_HOST_OVERRIDES` ...
+   * `#endif` blocks and what sits outside them.
+   */
+  const splitOnFlag = (text: string): { inside: string[]; outside: string } => {
+    const inside: string[] = [];
+    const outside = text.replace(
+      new RegExp(`^[ \\t]*#if ${FLAG}\\b([\\s\\S]*?)^[ \\t]*#endif\\b`, 'gm'),
+      (_, block: string) => {
+        inside.push(block);
+        return '';
+      },
+    );
+    return { inside, outside };
+  };
+
+  it('P0-1/P0-4: HostEnvironment is an allowlist of exactly ten keys, with no denylist, and pins PATH', () => {
+    const text = archRead(HOST_ENV);
+    expect(text).not.toContain('strippedKeys');
+    expect(setLiteral(text, 'forwardedKeys')).toEqual(
+      [
+        'WEMESSAGE_DIR',
+        'WEMESSAGE_PORT',
+        'WEMESSAGE_CHATDB',
+        'WEMESSAGE_SUPERVISOR',
+        'WEMESSAGE_LAUNCHD_LABEL',
+        'HOME',
+        'TMPDIR',
+        'TZ',
+        'USER',
+        'LOGNAME',
+      ].sort(),
+    );
+    expect(text).toContain(
+      'public static let childPath = "/usr/bin:/bin:/usr/sbin:/sbin"',
+    );
+    // Non-vacuity: the reader sees a set literal across lines.
+    expect(
+      setLiteral(
+        'static let forwardedKeys: Set<String> = [\n  "B", "A",\n]',
+        'forwardedKeys',
+      ),
+    ).toEqual(['A', 'B']);
+  });
+
+  it('P0-2: Package.swift defines WEMESSAGE_HOST_OVERRIDES for debug only, on the host target only', () => {
+    const text = archRead(PACKAGE);
+    expect(text.split(FLAG).length - 1).toBe(1);
+    const targets = text
+      .split(/(?=\.(?:target|executableTarget|testTarget)\()/)
+      .slice(1);
+    expect(targets.length).toBe(5);
+    const naming = targets
+      .filter((t) => t.includes(FLAG))
+      .map((t) => /name:\s*"(\w+)"/.exec(t)?.[1]);
+    expect(naming).toEqual(['WeMessageDaemonHost']);
+    expect(targets.find((t) => t.includes(FLAG))).toMatch(
+      /swiftSettings:\s*\[\s*\.define\("WEMESSAGE_HOST_OVERRIDES",\s*\.when\(configuration:\s*\.debug\)\)/,
+    );
+  });
+
+  it('P0-2: HostLayout reads the override keys only inside #if WEMESSAGE_HOST_OVERRIDES', () => {
+    const { inside, outside } = splitOnFlag(archRead(HOST_LAYOUT));
+    expect(inside.length).toBeGreaterThanOrEqual(1);
+    const block = inside.join('\n');
+    // The block is the whole of the override path: both keys and the read.
+    for (const needed of [NODE_KEY, MAIN_KEY, 'environment['])
+      expect([needed, block.includes(needed)]).toEqual([needed, true]);
+    // No #else arm can hide a second reading of them.
+    expect(block).not.toMatch(/^[ \t]*#(?:else|elseif)\b/m);
+    // Outside the block, a release build compiles nothing that names or
+    // reads them, comments included.
+    for (const banned of [NODE_KEY, MAIN_KEY, 'environment['])
+      expect([banned, outside.includes(banned)]).toEqual([banned, false]);
+    // Non-vacuity: the splitter separates a block from its surroundings.
+    const probe = splitOnFlag(
+      `a\n#if ${FLAG}\n  environment[x]\n#endif\nb environment[y]\n`,
+    );
+    expect(probe.inside).toEqual(['\n  environment[x]\n']);
+    expect(probe.outside).toContain('b environment[y]');
+    expect(probe.outside).not.toContain('environment[x]');
+  });
+
+  it('P0-2: ci-swift checks the release binary for the override keys, and the smoke runs a fake bundle with none', () => {
+    const text = archRead(CI_SWIFT);
+    const steps = text.split(/\n(?= {6}- )/);
+    const release = steps.findIndex((s) =>
+      s.includes('name: Build the host (release)'),
+    );
+    const strings = steps.findIndex((s) => s.includes('strings -a'));
+    const smoke = steps.findIndex((s) => s.includes('name: Host smoke'));
+    expect([release, strings, smoke].every((i) => i > 0)).toBe(true);
+    expect(strings).toBeGreaterThan(release);
+    const check = steps[strings] ?? '';
+    for (const needed of [NODE_KEY, MAIN_KEY, 'awk', 'WEMESSAGE_HOST_PID'])
+      expect([needed, check.includes(needed)]).toEqual([needed, true]);
+    expect(check).not.toContain('grep');
+    const run = steps[smoke] ?? '';
+    for (const banned of [NODE_KEY, MAIN_KEY])
+      expect([banned, run.includes(banned)]).toEqual([banned, false]);
+    for (const needed of [
+      'Fake.app/Contents/MacOS/WeMessage',
+      'Contents/Resources/daemon',
+      '--daemon',
+    ])
+      expect([needed, run.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('P0-3: bundle-daemon.mjs defines both WS_NO_* keys in its one esbuild call', () => {
+    const text = archRead(BUNDLER);
+    expect(text.split('await build({').length - 1).toBe(1);
+    const call = /await build\(\{([\s\S]*?)\n {4}\}\);/.exec(text)?.[1] ?? '';
+    expect(call).toContain('entryPoints');
+    for (const key of ['WS_NO_BUFFER_UTIL', 'WS_NO_UTF_8_VALIDATE'])
+      expect([key, call.includes(`'process.env.${key}': '"1"'`)]).toEqual([
+        key,
+        true,
+      ]);
+    expect(call).toMatch(/\bdefine:\s*\{/);
+  });
+});

@@ -917,6 +917,28 @@ describe('v2 S2b rows 2 to 7: the node flavour, built for the Swift host', () =>
     expect(cli.includes(REFUSAL_ELECTRON)).toBe(false);
   });
 
+  it("v2 S2c.1: neither daemon entry requires ws's optional natives at run time", () => {
+    /*
+     * P0-3. A bare `require("bufferutil")` the bundle does not ship falls
+     * through Node's resolution to `$HOME/.node_modules`, so a file dropped
+     * in the home directory would run inside the daemon. The esbuild
+     * `define` of WS_NO_BUFFER_UTIL and WS_NO_UTF_8_VALIDATE makes ws's two
+     * guarded requires dead code; this reads the built files to prove they
+     * are gone, not merely gated.
+     */
+    const RUNTIME_REQUIRE =
+      /\brequire\(\s*["'](?:bufferutil|utf-8-validate)["']\s*\)/;
+    // Non-vacuity: the reader convicts the exact shape esbuild emits.
+    expect(RUNTIME_REQUIRE.test('m = __require("bufferutil");')).toBe(true);
+    expect(RUNTIME_REQUIRE.test("require('utf-8-validate')")).toBe(true);
+    expect(RUNTIME_REQUIRE.test('"bufferutil" is prose')).toBe(false);
+    for (const entry of ['daemon/main.mjs', 'daemon/wemessaged.mjs']) {
+      const src = readFileSync(join(built.N, entry), 'utf8');
+      expect(src.includes(REFUSAL_NODE), entry).toBe(true);
+      expect(RUNTIME_REQUIRE.exec(src)?.[0], entry).toBeUndefined();
+    }
+  });
+
   it('row 5: ABI.json declares the Node it was read from, byte for byte', () => {
     expect(readFileSync(join(built.N, 'daemon/ABI.json'), 'utf8')).toBe(
       `${JSON.stringify(

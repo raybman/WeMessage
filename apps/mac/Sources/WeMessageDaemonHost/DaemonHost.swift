@@ -82,9 +82,7 @@ public enum DaemonHost {
       say("cannot start node: \(url.path) does not exist")
       return ExitStatus.config
     case .failure(.notInsideBundle(let url)):
-      say(
-        "cannot find node: \(url.path) is not in an app bundle's Contents/MacOS, and "
-          + "\(HostLayout.nodeKey) and \(HostLayout.mainKey) do not both name absolute paths")
+      say("cannot find node: \(url.path) is not in an app bundle's Contents/MacOS")
       return ExitStatus.config
     }
 

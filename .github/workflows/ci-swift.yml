@@ -17,13 +17,18 @@ name: ci-swift
 #
 # v2 S2c: this lane is the only place the built host ever runs. The otool step
 # proves the release executable links no UI framework at all, which is
-# stronger than "never starts one". The smoke runs `WeMessage --daemon` with a
-# stub node written to RUNNER_TEMP: the stub's exit code comes back as the
-# host's, a SIGTERM sent to the host reaches the stub (which exits 0 on it), a
-# missing node is 78, and the bare usage line is 0. GitHub runs each step
-# under bash -e without pipefail, so every command that may exit non-zero
-# runs between `set +e` and `set -e` and its code is tested on its own line,
-# and the one text match is done by awk.
+# stronger than "never starts one". The smoke copies the release executable
+# into a scratch Fake.app/Contents/MacOS under RUNNER_TEMP, with a stub node
+# and main.mjs at Contents/Resources/daemon, exactly where a shipped app keeps
+# them: the stub's exit code comes back as the host's, a SIGTERM sent to the
+# host reaches the stub (which exits 0 on it), a missing node is 78, and the
+# bare usage line is 0. GitHub runs each step under bash -e without pipefail,
+# so every command that may exit non-zero runs between `set +e` and `set -e`
+# and its code is tested on its own line, and every text match is done by awk.
+#
+# v2 S2c.1: a release build reads no environment key that names node or
+# main.mjs; those overrides exist in debug builds only. The strings step
+# proves it on the binary itself, and the smoke uses none of them.
 on:
   push:
     branches: ['**']
@@ -39,6 +44,15 @@ jobs:
       - run: swift test --package-path apps/mac
       - name: Build the host (release)
         run: swift build -c release --package-path apps/mac --product WeMessage
+      - name: Release host names no override key
+        run: |
+          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
+          # Non-vacuity: the same reader finds a key the host does carry.
+          strings -a "$exe" | awk '/WEMESSAGE_HOST_PID/ {found = 1} END {exit !found}'
+          if strings -a "$exe" | awk '/WEMESSAGE_HOST_NODE|WEMESSAGE_HOST_MAIN/ {found = 1} END {exit !found}'; then
+            echo "release host carries an override key" >&2
+            exit 1
+          fi
       - name: Host links no UI framework
         run: |
           exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
@@ -51,34 +65,51 @@ jobs:
           fi
       - name: Host smoke with a stub node
         run: |
-          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
-          stub="$RUNNER_TEMP/node"
-          main="$RUNNER_TEMP/main.mjs"
+          built="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
+          app="$RUNNER_TEMP/Fake.app"
+          exe="$RUNNER_TEMP/Fake.app/Contents/MacOS/WeMessage"
+          res="$RUNNER_TEMP/Fake.app/Contents/Resources/daemon"
+          stub="$res/node"
           ready="$RUNNER_TEMP/ready"
-          : > "$main"
+          mkdir -p "$app/Contents/MacOS" "$res"
+          cp "$built" "$exe"
+          cat > "$app/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>WeMessage</string>
+          </dict>
+          </plist>
+          EOF
+          : > "$res/main.mjs"
 
           # 1. The stub's exit code is the host's, and the stub sees the host's contract.
           cat > "$stub" <<'EOF'
           #!/bin/sh
           test "$WEMESSAGE_HOST" = swift || exit 9
-          case "$1" in *main.mjs) ;; *) exit 8 ;; esac
+          test "$PATH" = /usr/bin:/bin:/usr/sbin:/sbin || exit 10
+          case "$1" in */Contents/Resources/daemon/main.mjs) ;; *) exit 8 ;; esac
           exit 7
           EOF
           chmod 755 "$stub"
-          set +e; WEMESSAGE_HOST_NODE="$stub" WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon; code=$?; set -e
+          set +e; "$exe" --daemon; code=$?; set -e
           test "$code" -eq 7 || { echo "expected 7, got $code" >&2; exit 1; }
 
           # 2. A SIGTERM to the host is forwarded: the stub exits 0 on it, 6 if it never comes.
-          cat > "$stub" <<'EOF'
+          # The host forwards no key the smoke could name the ready file with, so
+          # the path is written into the stub itself (an unquoted heredoc).
+          cat > "$stub" <<EOF
           #!/bin/sh
-          trap 'kill "$s"; wait "$s"; exit 0' TERM
+          trap 'kill "\$s"; wait "\$s"; exit 0' TERM
           sleep 5 &
-          s=$!
-          : > "$SMOKE_READY"
-          wait "$s"
+          s=\$!
+          : > "$ready"
+          wait "\$s"
           exit 6
           EOF
-          SMOKE_READY="$ready" WEMESSAGE_HOST_NODE="$stub" WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon &
+          "$exe" --daemon &
           pid=$!
           tries=0
           while [ ! -e "$ready" ] && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
@@ -87,7 +118,8 @@ jobs:
           test "$code" -eq 0 || { echo "expected 0 after a forwarded TERM, got $code" >&2; exit 1; }
 
           # 3. A missing node is EX_CONFIG.
-          set +e; WEMESSAGE_HOST_NODE=/nonexistent WEMESSAGE_HOST_MAIN="$main" "$exe" --daemon; code=$?; set -e
+          rm "$stub"
+          set +e; "$exe" --daemon; code=$?; set -e
           test "$code" -eq 78 || { echo "expected 78 for a missing node, got $code" >&2; exit 1; }
 
           # 4. No arguments prints the usage line and exits 0.

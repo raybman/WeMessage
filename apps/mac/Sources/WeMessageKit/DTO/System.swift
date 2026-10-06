@@ -231,23 +231,55 @@ extension DoctorCheckPayload {
   }
 }
 
-/// Present only when the daemon that answered runs under Electron.
-public struct DoctorRuntimePayload: Codable, Equatable, Sendable {
-  public var electron: String
-  public var node: String
-  public var abi: Int
+/// Which runtime answered, and for which host: a union on `kind`, present
+/// only when the daemon can name one. `electron` is the Electron app
+/// re-entered as Node; `node` is this app's own Node, which the daemon knows
+/// from `WEMESSAGE_HOST=swift`. Each variant refuses the other's members, so
+/// a report can never be read as both.
+public enum DoctorRuntimePayload: Codable, Equatable, Sendable {
+  case electron(electron: String, node: String, abi: Int)
+  case node(host: String, node: String, abi: Int)
 
-  enum CodingKeys: String, CodingKey, CaseIterable {
-    case electron, node, abi
+  enum CodingKeys: String, CodingKey {
+    case kind, electron, host, node, abi
   }
-}
 
-extension DoctorRuntimePayload {
   public init(from decoder: any Decoder) throws {
-    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
-    electron = try c.decode(String.self, forKey: .electron)
-    node = try c.decode(String.self, forKey: .node)
-    abi = try c.decode(Int.self, forKey: .abi)
+    let probe = try decoder.container(keyedBy: CodingKeys.self)
+    let kind = try probe.decode(String.self, forKey: .kind)
+    switch kind {
+    case "electron":
+      let c = try decoder.strictContainer(keyedBy: CodingKeys.self, allowing: [.kind, .electron, .node, .abi])
+      self = .electron(
+        electron: try c.decode(String.self, forKey: .electron),
+        node: try c.decode(String.self, forKey: .node),
+        abi: try c.decode(Int.self, forKey: .abi))
+    case "node":
+      let c = try decoder.strictContainer(keyedBy: CodingKeys.self, allowing: [.kind, .host, .node, .abi])
+      self = .node(
+        host: try c.decode(String.self, forKey: .host),
+        node: try c.decode(String.self, forKey: .node),
+        abi: try c.decode(Int.self, forKey: .abi))
+    default:
+      throw DecodingError.dataCorruptedError(
+        forKey: .kind, in: probe, debugDescription: "unknown runtime kind \"\(kind)\"")
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .electron(let electron, let node, let abi):
+      try c.encode("electron", forKey: .kind)
+      try c.encode(electron, forKey: .electron)
+      try c.encode(node, forKey: .node)
+      try c.encode(abi, forKey: .abi)
+    case .node(let host, let node, let abi):
+      try c.encode("node", forKey: .kind)
+      try c.encode(host, forKey: .host)
+      try c.encode(node, forKey: .node)
+      try c.encode(abi, forKey: .abi)
+    }
   }
 }
 

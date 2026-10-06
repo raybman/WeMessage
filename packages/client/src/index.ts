@@ -467,26 +467,30 @@ export interface DoctorReportPayload {
    */
   supervisor: 'launchd' | 'app' | 'none';
   /**
-   * s9 Sc5: present iff the daemon that answered is running under Electron,
-   * which for a shipped install means it is `WeMessage.app` re-entered with
-   * ELECTRON_RUN_AS_NODE=1 (F-121).
+   * s9 Sc5: present iff the daemon that answered can name its host. v2 S2b
+   * made that a union on `kind`: `'electron'` is `WeMessage.app` re-entered
+   * with ELECTRON_RUN_AS_NODE=1 (F-121), and `'node'` is the Swift app
+   * running the daemon on the Node it ships, declared by WEMESSAGE_HOST=swift.
    *
    * OPTIONAL here, unlike `supervisor` above, because the two absences mean
    * different things. A missing `supervisor` would mean the daemon declined
-   * to say; a missing `runtime` means the daemon said "not Electron", which
-   * is exactly what a developer running from a checkout should see. That is
-   * the same distinction the FDA and Automation remediation copy already
-   * draws when it warns that unpackaged grants attach to your terminal.
+   * to say; a missing `runtime` means the daemon said "no host I can name",
+   * which is exactly what a developer running from a checkout should see.
+   * That is the same distinction the FDA and Automation remediation copy
+   * already draws when it warns that unpackaged grants attach to your
+   * terminal.
    */
   runtime?: DoctorRuntimePayload;
 }
 
-/** Mirrors the daemon's `DoctorRuntime`. */
-export interface DoctorRuntimePayload {
-  electron: string;
-  node: string;
-  abi: number;
-}
+/**
+ * Mirrors the daemon's `DoctorRuntime`, and WeMessageKit's enum of the same
+ * name. Narrow on `kind` first: `electron` exists on one variant and `host`
+ * on the other, so neither can be read until the caller has said which.
+ */
+export type DoctorRuntimePayload =
+  | { kind: 'electron'; electron: string; node: string; abi: number }
+  | { kind: 'node'; host: 'swift'; node: string; abi: number };
 
 export interface SendInput {
   /** Bare handle, e.g. "+15551234567" — the client builds the chatGuid. */

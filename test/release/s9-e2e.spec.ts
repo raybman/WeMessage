@@ -579,8 +579,8 @@ const DECLARED_SKIPS: readonly SkipSite[] = [
   {
     file: 'apps/desktop/test/bundle.spec.ts',
     guard: '!RUNS_THE_BUNDLE',
-    count: 4,
-    why: 'the bundle is Electron-as-Node and is built and run only on the macOS lane',
+    count: 5,
+    why: 'the bundle is Electron-as-Node and is built and run only on the macOS lane; the fifth site (v2 S2b) boots the node flavour as the Swift host, which opens its database through the darwin-arm64 prebuild',
   },
   {
     file: 'packages/daemon/test/launchd-plist.spec.ts',

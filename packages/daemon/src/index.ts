@@ -92,6 +92,7 @@ export {
   type DoctorRuntime,
   type DoctorSnapshot,
   type RunDoctorDeps,
+  type RuntimeEnv,
   type RuntimeVersions,
 } from './doctor.js';
 export {

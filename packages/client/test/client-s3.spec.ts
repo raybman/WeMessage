@@ -13,12 +13,23 @@
  * osascript regardless; test/arch.spec.ts gates (a)/(b) are moot for this
  * file, noted for completeness).
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from 'vitest';
 import {
   createClient,
   DaemonAuthError,
   DaemonGateDeniedError,
   DaemonRequestError,
+  type DoctorRuntimePayload,
 } from '../src/index.js';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -57,6 +68,72 @@ describe('doctor()', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://127.0.0.1:47100/v1/doctor');
     expect(init.method).toBe('GET');
+  });
+});
+
+/*
+ * v2 S2b row 13: `runtime` mirrors the daemon's tagged union. Both variants
+ * come from the same hand-written fixtures the daemon and WeMessageKit read,
+ * and the type half is the point: `runtime.electron` must not type-check
+ * until the caller has narrowed on `kind`, because under the Swift host
+ * there is no Electron to report.
+ */
+function runtimeFixture(name: 'electron' | 'node'): DoctorRuntimePayload {
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../../../fixtures/doctor-runtime/${name}.json`,
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  ) as DoctorRuntimePayload;
+}
+
+describe('v2 S2b row 13: doctor().runtime is a union narrowed on kind', () => {
+  it.each(['electron', 'node'] as const)(
+    'returns the %s variant verbatim',
+    async (name) => {
+      const runtime = runtimeFixture(name);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, {
+          state: 'fully-connected',
+          checks: [],
+          probedAt: '2026-09-02T00:00:00.000Z',
+          supervisor: 'none',
+          runtime,
+        }),
+      );
+
+      const result = await client().doctor();
+
+      expect(result.runtime).toStrictEqual(runtime);
+      expect(result.runtime?.kind).toBe(name);
+    },
+  );
+
+  it('exposes host only on the node variant and electron only on the other', () => {
+    const node = runtimeFixture('node');
+    const electron = runtimeFixture('electron');
+    if (node.kind !== 'node' || electron.kind !== 'electron')
+      throw new Error('the fixtures are swapped');
+    expectTypeOf(node.host).toEqualTypeOf<'swift'>();
+    expectTypeOf(electron.electron).toEqualTypeOf<string>();
+    expect(node.host).toBe('swift');
+    expect('electron' in node).toBe(false);
+    expect('host' in electron).toBe(false);
+  });
+
+  it('does not let an unnarrowed caller read runtime.electron', () => {
+    const unnarrowed = runtimeFixture('node');
+    // @ts-expect-error electron exists on one variant only; narrow on kind.
+    const read: unknown = unnarrowed.electron;
+    expect(read).toBeUndefined();
+    expectTypeOf<DoctorRuntimePayload['kind']>().toEqualTypeOf<
+      'electron' | 'node'
+    >();
   });
 });
 

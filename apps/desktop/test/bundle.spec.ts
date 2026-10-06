@@ -38,6 +38,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { createRequire, isBuiltin } from 'node:module';
 import { homedir } from 'node:os';
@@ -343,12 +344,20 @@ describe.skipIf(!RUNS_THE_BUNDLE)(
         });
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          runtime?: { electron?: string; node?: string; abi?: number };
+          runtime?: {
+            kind?: string;
+            electron?: string;
+            node?: string;
+            abi?: number;
+          };
         };
         expect(
           body.runtime,
           'the doctor report carries a runtime',
         ).toBeDefined();
+        // v2 S2b: the runtime is a union now, and this bundle is its
+        // electron variant.
+        expect(body.runtime?.kind).toBe('electron');
         expect(body.runtime?.electron).toMatch(/^\d+\.\d+\.\d+/);
         expect(body.runtime?.node).toMatch(/^\d+\.\d+\.\d+/);
         expect(typeof body.runtime?.abi).toBe('number');
@@ -427,9 +436,10 @@ describe.skipIf(!RUNS_THE_BUNDLE)(
      *
      * `resolveProgramArguments` recognises the packaged layout by the literal
      * `/Contents/Resources/` in the daemon entry's own path, and `plist.ts`
-     * refuses any argv that is neither the packaged shape nor the dev shape.
-     * A raw `dist-bundle/` is a third layout, and the right response to that is
-     * the refusal we get, not a third entry on the allowlist.
+     * refuses any argv that is not one of its three shapes: packaged, dev,
+     * and (v2 S2a) the Swift host's `[app, '--daemon']`. A raw `dist-bundle/`
+     * is none of them, and the right response to that is the refusal we get,
+     * not a fourth entry on the allowlist.
      *
      * So the row asserts the claim that actually matters for Sc 6: DROP THIS
      * BUNDLE INTO `Contents/Resources/` AND THE PLIST IS CORRECT WITH NOBODY
@@ -682,5 +692,339 @@ describe('s9 Sc5 row 9: a size budget, so an accidental import fails loudly', ()
       nodeBytes,
       `the prebuild is ${String(nodeBytes)} bytes`,
     ).toBeLessThan(4 * 1024 * 1024);
+  });
+});
+
+/* ── v2 S2b: the node flavour ─────────────────────────────────────────── */
+
+/*
+ * `--runtime node` builds the SAME bundle for a different host. The Swift app
+ * ships its own Node beside the daemon (`daemon/node`, added at pack time, not
+ * here) and runs it with WEMESSAGE_HOST=swift, so this flavour's guard asks
+ * three questions where the Electron one asks one: no Electron, the Swift
+ * host, and the Node major the app was locked to.
+ *
+ * WHY FOUR BUILDS, AND LOCKS WRITTEN BY THE TEST. The major comes from
+ * tools/swift/node.lock.json, and CI runs a different Node from the one the
+ * app ships. A bundle built against the real lock refuses the runner's own
+ * Node, which is correct, and is also the only thing it can be made to do
+ * here. So each build's lock isolates the one clause its row is about:
+ *
+ *   E  the major of Electron's own Node: under Electron-as-Node only the
+ *      Electron clause can refuse (row 2);
+ *   N  the runner's Node: the host variable is the only variable (rows 3, 5,
+ *      6, 7);
+ *   M  the runner's major plus one: only the major clause can refuse (row 4);
+ *   D  no --lock at all: the real lock, read for its pin and never executed.
+ *
+ * `--node` is the runner's Node in every build. ABI.json is read from it, and
+ * the bundle never needs a second Node to be built.
+ */
+const REFUSAL_NODE =
+  'this bundle runs under the WeMessage app host (wemessage --daemon)';
+const REFUSAL_ELECTRON =
+  'this bundle runs under Electron (ELECTRON_RUN_AS_NODE=1)';
+
+/**
+ * Run a bundled entry that is expected to refuse, and never leave it running
+ * if it does not. A guard that has stopped refusing boots a daemon that would
+ * outlive the row, so the wait ends on EITHER an exit or the listening line,
+ * and a daemon caught listening is stopped before the row convicts it.
+ */
+async function runToRefusal(
+  cmd: string,
+  entry: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  touched: string[];
+}> {
+  const { dir, chatDb } = bed();
+  const port = await freePort();
+  const d = launch(cmd, [entry], {
+    WEMESSAGE_DIR: dir,
+    WEMESSAGE_PORT: String(port),
+    WEMESSAGE_CHATDB: chatDb,
+    ...env,
+  });
+  let gone = false;
+  void d.exited.then(() => {
+    gone = true;
+  });
+  await waitFor(
+    () => gone || d.stdout().includes('listening on 127.0.0.1'),
+    'the bundle to refuse, or to listen',
+    BOOT_BUDGET_MS,
+  );
+  if (!gone) await d.stop();
+  const end = await d.exited;
+  return {
+    code: end.code,
+    stdout: d.stdout(),
+    stderr: d.stderr(),
+    touched: readdirSync(dir),
+  };
+}
+
+describe('v2 S2b rows 2 to 7: the node flavour, built for the Swift host', () => {
+  const runner = process.versions.node;
+  const runnerMajor = Number(runner.split('.')[0]);
+  const built = { E: '', N: '', M: '', D: '' };
+
+  /** A lock carrying only what the bundler reads from it. */
+  function lockFor(version: string): string {
+    const p = join(tempDir('wemessage-lock-'), 'node.lock.json');
+    const major = Number(version.split('.')[0]);
+    writeFileSync(p, `${JSON.stringify({ version, major }, null, 2)}\n`);
+    return p;
+  }
+
+  function buildNodeFlavour(lock: string | null): string {
+    const dir = tempDir('wemessage-node-bundle-');
+    execFileSync(
+      process.execPath,
+      [
+        BUNDLER,
+        '--runtime',
+        'node',
+        '--out',
+        dir,
+        '--node',
+        process.execPath,
+        ...(lock === null ? [] : ['--lock', lock]),
+      ],
+      { cwd: DESKTOP, stdio: 'pipe' },
+    );
+    return dir;
+  }
+
+  beforeAll(() => {
+    const electronNode = execFileSync(
+      ELECTRON_BIN,
+      ['-e', 'process.stdout.write(process.versions.node)'],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' },
+    ).trim();
+    built.E = buildNodeFlavour(lockFor(electronNode));
+    built.N = buildNodeFlavour(lockFor(runner));
+    built.M = buildNodeFlavour(lockFor(`${String(runnerMajor + 1)}.0.0`));
+    built.D = buildNodeFlavour(null);
+  }, 180_000);
+
+  it('row 2: refuses under Electron-as-Node, even with the Swift host set', async () => {
+    const r = await runToRefusal(
+      ELECTRON_BIN,
+      join(built.E, 'daemon/main.mjs'),
+      { ELECTRON_RUN_AS_NODE: '1', WEMESSAGE_HOST: 'swift' },
+    );
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(REFUSAL_NODE);
+    expect(r.stdout).toBe('');
+    // It refused before doing any work: no lock, no token, no store.
+    expect(r.touched).toEqual([]);
+  });
+
+  it.each<[string, string | undefined]>([
+    ['unset', undefined],
+    ['empty', ''],
+    ['in the wrong case', 'SWIFT'],
+  ])(
+    'row 3: refuses under plain Node when WEMESSAGE_HOST is %s',
+    async (_, host) => {
+      const r = await runToRefusal(
+        process.execPath,
+        join(built.N, 'daemon/main.mjs'),
+        { WEMESSAGE_HOST: host, ELECTRON_RUN_AS_NODE: undefined },
+      );
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain(REFUSAL_NODE);
+      expect(r.stdout).toBe('');
+      expect(r.touched).toEqual([]);
+    },
+  );
+
+  it.skipIf(!RUNS_THE_BUNDLE)(
+    'row 3: runs as the Swift host, and /v1/doctor says kind node, host swift',
+    async () => {
+      const { dir, chatDb } = bed();
+      const port = await freePort();
+      const d = launch(process.execPath, [join(built.N, 'daemon/main.mjs')], {
+        WEMESSAGE_HOST: 'swift',
+        ELECTRON_RUN_AS_NODE: undefined,
+        WEMESSAGE_DIR: dir,
+        WEMESSAGE_PORT: String(port),
+        WEMESSAGE_CHATDB: chatDb,
+      });
+      try {
+        await waitFor(
+          () => d.stdout().includes('listening on 127.0.0.1'),
+          'the node-flavour daemon to listen',
+          BOOT_BUDGET_MS,
+        );
+        const token = readFileSync(join(dir, 'daemon.token'), 'utf8').trim();
+        const res = await fetch(`http://127.0.0.1:${String(port)}/v1/doctor`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(res.status, d.stderr()).toBe(200);
+        const body = (await res.json()) as { runtime?: unknown };
+        expect(body.runtime).toStrictEqual({
+          kind: 'node',
+          host: 'swift',
+          node: runner,
+          abi: Number(process.versions.modules),
+        });
+      } finally {
+        await d.stop();
+        await d.exited;
+      }
+    },
+  );
+
+  it('row 4: refuses a Node whose major is not the locked one, Swift host or not', async () => {
+    const r = await runToRefusal(
+      process.execPath,
+      join(built.M, 'daemon/main.mjs'),
+      { WEMESSAGE_HOST: 'swift', ELECTRON_RUN_AS_NODE: undefined },
+    );
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(REFUSAL_NODE);
+    expect(r.stdout).toBe('');
+    expect(r.touched).toEqual([]);
+  });
+
+  it('row 4: with no --lock, the pinned major is the one in tools/swift/node.lock.json', () => {
+    const lock = JSON.parse(
+      readFileSync(join(REPO, 'tools/swift/node.lock.json'), 'utf8'),
+    ) as { version: string; major: number };
+    expect(Number.isInteger(lock.major)).toBe(true);
+    expect(lock.version.startsWith(`${String(lock.major)}.`)).toBe(true);
+    const pinned = /process\.versions\.node\.split\("\."\)\[0\]\) !== (\d+)\)/;
+    for (const entry of ['daemon/main.mjs', 'daemon/wemessaged.mjs']) {
+      const src = readFileSync(join(built.D, entry), 'utf8');
+      expect(pinned.exec(src)?.[1], entry).toBe(String(lock.major));
+    }
+  });
+
+  it('row 4: the guard heads both daemon entries, the CLI carries none, and none is the Electron one', () => {
+    for (const entry of ['daemon/main.mjs', 'daemon/wemessaged.mjs']) {
+      const src = readFileSync(join(built.N, entry), 'utf8');
+      expect(src.includes(REFUSAL_NODE), entry).toBe(true);
+      expect(src.includes(REFUSAL_ELECTRON), entry).toBe(false);
+    }
+    const cli = readFileSync(join(built.N, 'bin/wemessage.mjs'), 'utf8');
+    expect(cli.includes(REFUSAL_NODE)).toBe(false);
+    expect(cli.includes(REFUSAL_ELECTRON)).toBe(false);
+  });
+
+  it('row 5: ABI.json declares the Node it was read from, byte for byte', () => {
+    expect(readFileSync(join(built.N, 'daemon/ABI.json'), 'utf8')).toBe(
+      `${JSON.stringify(
+        {
+          runtime: 'node',
+          version: runner,
+          abi: Number(process.versions.modules),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  });
+
+  it("row 6: the shims run the app's own Node as the Swift host, and name no machine", () => {
+    for (const [shim, entry] of [
+      ['bin/wemessage', '"$here/wemessage.mjs"'],
+      ['bin/wemessaged', '"$here/../daemon/wemessaged.mjs"'],
+    ] as const) {
+      const src = readFileSync(join(built.N, shim), 'utf8');
+      expect(src, shim).toContain(
+        `WEMESSAGE_HOST=swift exec "$here/../daemon/node" ${entry} "$@"\n`,
+      );
+      expect(src, shim).toContain('readlink -f');
+      for (const banned of [
+        'ELECTRON_RUN_AS_NODE',
+        'node_modules/electron',
+        'MacOS/WeMessage',
+        '/Users',
+        '/opt',
+        '/usr/local',
+        homedir(),
+      ]) {
+        expect(src.includes(banned), `${shim} names ${banned}`).toBe(false);
+      }
+      expect(
+        (statSync(join(built.N, shim)).mode & 0o777).toString(8),
+        shim,
+      ).toBe('755');
+    }
+  });
+
+  it('row 7: every node-flavour listing is the Electron listing, path for path', () => {
+    const electron = listing(OUT);
+    expect(electron).toHaveLength(24);
+    for (const [name, dir] of Object.entries(built)) {
+      expect([name, listing(dir)]).toEqual([name, electron]);
+    }
+  });
+});
+
+/*
+ * Last in the file on purpose: one case aims the node flavour at `dist-bundle/`
+ * itself, and if the refusal ever broke, nothing after it reads that directory.
+ */
+describe('v2 S2b: the bundler refuses what it cannot honour, before writing anything', () => {
+  it('names the flag it objects to and exits 1', () => {
+    const foreign = tempDir('wemessage-foreign-');
+    writeFileSync(join(foreign, 'keep.txt'), 'not a bundle\n');
+    const cases: ReadonlyArray<readonly [string, readonly string[], string]> = [
+      ['an unknown runtime', ['--runtime', 'deno'], 'deno'],
+      [
+        'node with no --out',
+        ['--runtime', 'node', '--node', process.execPath],
+        '--out',
+      ],
+      [
+        'node with no --node',
+        ['--runtime', 'node', '--out', tempDir('wemessage-empty-')],
+        '--node',
+      ],
+      ['electron with --node', ['--node', process.execPath], '--node'],
+      ['electron with --lock', ['--lock', 'node.lock.json'], '--lock'],
+      [
+        "node into the Electron app's own bundle",
+        ['--runtime', 'node', '--out', OUT, '--node', process.execPath],
+        'dist-bundle',
+      ],
+      [
+        'node into a directory that is not a bundle',
+        ['--runtime', 'node', '--out', foreign, '--node', process.execPath],
+        'not empty',
+      ],
+    ];
+    for (const [what, args, says] of cases) {
+      let status: number | null = 0;
+      let stderr = '';
+      try {
+        execFileSync(process.execPath, [BUNDLER, ...args], {
+          cwd: DESKTOP,
+          stdio: 'pipe',
+        });
+      } catch (e) {
+        const err = e as { status?: number | null; stderr?: Buffer };
+        status = err.status ?? null;
+        stderr = String(err.stderr ?? '');
+      }
+      expect([what, status], stderr).toEqual([what, 1]);
+      expect(stderr, what).toContain(says);
+    }
+    expect(readdirSync(foreign)).toEqual(['keep.txt']);
+    expect(existsSync(join(OUT, 'daemon/ABI.json'))).toBe(true);
+    expect(
+      (
+        JSON.parse(readFileSync(join(OUT, 'daemon/ABI.json'), 'utf8')) as {
+          runtime: string;
+        }
+      ).runtime,
+    ).toBe('electron');
   });
 });

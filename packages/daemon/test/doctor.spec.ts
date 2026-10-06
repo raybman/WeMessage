@@ -23,10 +23,11 @@
  * gate (b)) proves `GET /v1/status` and the WS greeting both reflect the
  * probe-driven state end to end.
  */
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { AuditEvent, Clock, FsWatcher, Store } from '@wemessage/core';
 import {
   SETTING_AUTO_LAUNCH_MESSAGES,
@@ -37,8 +38,11 @@ import { createClient } from '@wemessage/client';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import type { GatewayEventPayload } from '@wemessage/protocol';
 import {
+  AUTOMATION_DENIED as EXPORTED_AUTOMATION_DENIED,
   buildServer,
+  describeRuntime,
   evaluateDoctor,
+  FDA_EPERM as EXPORTED_FDA_EPERM,
   macOsMajorFromRelease,
   readConnectionState,
   runDoctor,
@@ -46,6 +50,7 @@ import {
   type AuditSink,
   type DaemonServer,
   type DoctorProbes,
+  type DoctorRuntime,
   type DoctorSnapshot,
 } from '@wemessage/daemon';
 import {
@@ -293,6 +298,78 @@ describe('evaluateDoctor — pure derivation (§2.2.3 matrix, 7 rows / 8 cases)'
         },
       ],
     });
+  });
+});
+
+/*
+ * v2 S2b row 15. The Swift app hosts this daemon on plain Node, so a doctor
+ * that told the operator to do anything to Electron would be giving advice
+ * about a runtime that is not there. The sweep is over what the doctor can
+ * actually SAY: every detail and remediation `evaluateDoctor` produces across
+ * the whole snapshot matrix, plus the two exported constants other modules
+ * reuse verbatim. The module-private constants cannot be imported, so the
+ * matrix is how they are reached, and the coverage check below proves it
+ * reached every one of them.
+ */
+describe('v2 S2b row 15: the doctor copy never names Electron', () => {
+  const ELECTRON = /electron/i;
+  const offenders = (copy: readonly string[]): string[] =>
+    copy.filter((s) => ELECTRON.test(s));
+
+  function everyDoctorString(): string[] {
+    const out = new Set<string>([
+      EXPORTED_AUTOMATION_DENIED,
+      EXPORTED_FDA_EPERM,
+    ]);
+    for (const osMajor of [0, 12, 13, 15, 26]) {
+      for (const fda of ['ok', 'eperm', 'enoent', 'error'] as const) {
+        for (const automation of ['ok', 'denied', 'not-determined'] as const) {
+          for (const messagesRunning of [true, false]) {
+            for (const autoLaunch of [true, false]) {
+              const { checks } = evaluateDoctor({
+                osMajor,
+                fda,
+                automation,
+                messagesRunning,
+                autoLaunch,
+              });
+              for (const c of checks) {
+                if (c.detail !== undefined) out.add(c.detail);
+                if (c.remediation !== undefined) out.add(c.remediation);
+              }
+            }
+          }
+        }
+      }
+    }
+    return [...out];
+  }
+
+  it('no detail or remediation, in any state, says Electron', () => {
+    expect(offenders(everyDoctorString())).toEqual([]);
+  });
+
+  it('the sweep reached every copy constant, so it is not vacuous', () => {
+    const seen = everyDoctorString();
+    for (const s of [
+      UNSUPPORTED_OS,
+      CHATDB_SCHEMA_HONESTY,
+      FDA_EPERM,
+      FDA_ENOENT,
+      AUTOMATION_DENIED,
+      MESSAGES_WARN_3A,
+      MESSAGES_FAIL_3B,
+    ]) {
+      expect(seen, s).toContain(s);
+    }
+    // And the exported pair is the copy this file mirrors, not a lookalike.
+    expect(EXPORTED_AUTOMATION_DENIED).toBe(AUTOMATION_DENIED);
+    expect(EXPORTED_FDA_EPERM).toBe(FDA_EPERM);
+  });
+
+  it('convicts a planted string, so the filter is not a no-op', () => {
+    const planted = `${FDA_EPERM} Then relaunch Electron.`;
+    expect(offenders([...everyDoctorString(), planted])).toEqual([planted]);
   });
 });
 
@@ -551,6 +628,155 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
     expect(report.checks.find((c) => c.id === 'messages')).toMatchObject({
       status: 'fail',
     });
+  });
+});
+
+/*
+ * v2 S2b rows 8 and 9: the runtime is a tagged union, read from the two
+ * hand-written fixtures the client and WeMessageKit decode as well, so the
+ * three mirrors are held to one set of bytes. The fixtures are synthetic:
+ * the versions are the pinned Node and a plausible Electron, and the abi is
+ * the pinned Node's `process.versions.modules`, written down once.
+ */
+interface RuntimeFixture {
+  kind: string;
+  electron?: string;
+  host?: string;
+  node: string;
+  abi: number;
+}
+
+function runtimeFixture(name: 'electron' | 'node'): RuntimeFixture {
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../../../fixtures/doctor-runtime/${name}.json`,
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  ) as RuntimeFixture;
+}
+
+describe('v2 S2b row 8: describeRuntime says which host, by kind', () => {
+  const electron = runtimeFixture('electron');
+  const node = runtimeFixture('node');
+  const underElectron = {
+    electron: electron.electron,
+    node: electron.node,
+    modules: String(electron.abi),
+  };
+  const underNode = { node: node.node, modules: String(node.abi) };
+
+  it('the fixtures are the two variants, nothing more', () => {
+    expect(Object.keys(electron).sort()).toEqual([
+      'abi',
+      'electron',
+      'kind',
+      'node',
+    ]);
+    expect(Object.keys(node).sort()).toEqual(['abi', 'host', 'kind', 'node']);
+    expect([electron.kind, node.kind, node.host]).toEqual([
+      'electron',
+      'node',
+      'swift',
+    ]);
+  });
+
+  it("returns kind 'electron' with the Electron version when it is Electron", () => {
+    expect(describeRuntime(underElectron, {})).toStrictEqual(electron);
+  });
+
+  it('Electron is a measurement, so it wins over a host variable', () => {
+    expect(
+      describeRuntime(underElectron, { WEMESSAGE_HOST: 'swift' }),
+    ).toStrictEqual(electron);
+  });
+
+  it("returns kind 'node', host 'swift' under the Swift host, with no electron key", () => {
+    const got = describeRuntime(underNode, { WEMESSAGE_HOST: 'swift' });
+    expect(got).toStrictEqual(node);
+    expect(got !== undefined && 'electron' in got).toBe(false);
+  });
+
+  it('narrows on kind: host exists only on the node variant', () => {
+    const got = describeRuntime(underNode, { WEMESSAGE_HOST: 'swift' });
+    if (got?.kind !== 'node') throw new Error('expected the node variant');
+    expectTypeOf(got.host).toEqualTypeOf<'swift'>();
+    expectTypeOf<DoctorRuntime['kind']>().toEqualTypeOf<'electron' | 'node'>();
+  });
+
+  it.each([
+    ['no host variable', {}],
+    ['an empty host', { WEMESSAGE_HOST: '' }],
+    ['another host', { WEMESSAGE_HOST: 'electron' }],
+    ['the wrong case', { WEMESSAGE_HOST: 'SWIFT' }],
+    ['padding', { WEMESSAGE_HOST: ' swift' }],
+    ['an unset host', { WEMESSAGE_HOST: undefined }],
+    ['ELECTRON_RUN_AS_NODE without Electron', { ELECTRON_RUN_AS_NODE: '1' }],
+  ])('plain Node with %s is not a host it can name: undefined', (_, env) => {
+    expect(describeRuntime(underNode, env)).toBeUndefined();
+  });
+});
+
+describe('v2 S2b row 9: runDoctor reports the Swift host as kind node', () => {
+  const electron = runtimeFixture('electron');
+  const node = runtimeFixture('node');
+  const base = {
+    probes: fakeProbes(),
+    store: fakeStore(),
+    sink: fakeSink(),
+    clock: fixedClock,
+    supervisor: 'none',
+  } as const;
+
+  it("carries kind 'node' and no electron key, in process and on the wire", async () => {
+    const report = await runDoctor({
+      ...base,
+      versions: { node: node.node, modules: String(node.abi) },
+      env: { WEMESSAGE_HOST: 'swift' },
+    });
+    expect(report.runtime).toStrictEqual(node);
+    expect('electron' in (report.runtime ?? {})).toBe(false);
+    const wire = JSON.parse(JSON.stringify(report)) as { runtime?: unknown };
+    expect(wire.runtime).toStrictEqual(node);
+  });
+
+  it("carries kind 'electron' under Electron", async () => {
+    const report = await runDoctor({
+      ...base,
+      versions: {
+        electron: electron.electron,
+        node: electron.node,
+        modules: String(electron.abi),
+      },
+      env: {},
+    });
+    expect(report.runtime).toStrictEqual(electron);
+  });
+
+  it('omits the key when no host can be named', async () => {
+    const report = await runDoctor({
+      ...base,
+      versions: { node: node.node, modules: String(node.abi) },
+      env: {},
+    });
+    expect('runtime' in report).toBe(false);
+  });
+
+  it('defaults env to process.env, which is where the Swift host puts it', async () => {
+    vi.stubEnv('WEMESSAGE_HOST', 'swift');
+    try {
+      const report = await runDoctor({
+        ...base,
+        versions: { node: node.node, modules: String(node.abi) },
+      });
+      expect(report.runtime).toStrictEqual(node);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

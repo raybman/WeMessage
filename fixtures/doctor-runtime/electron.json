@@ -1,0 +1,6 @@
+{
+  "kind": "electron",
+  "electron": "44.2.0",
+  "node": "24.21.0",
+  "abi": 137
+}

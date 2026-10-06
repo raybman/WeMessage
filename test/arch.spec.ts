@@ -12003,10 +12003,14 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         re: /\b[0-9A-Z]{10}\b.*\b[Ii]ssuer(?![a-z])/,
       },
     ];
+    // v2 S2b argued the fourth carrier: tools/swift/node.lock.json pins the
+    // sha256 of the one Node tarball the Swift app ships. It is a real
+    // digest, not the placeholder, so it joins the strict list by name.
     const DIGEST_CARRIERS: readonly string[] = [
       'packages/adapters/hermes/plugin/requirements.txt',
       'packages/core/test/audit-chain-core.spec.ts',
       'packages/store/test/audit-chain.spec.ts',
+      'tools/swift/node.lock.json',
     ];
 
     function secretOffenders(): string[] {
@@ -12086,7 +12090,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         (m) => m[0] === NULL_DIGEST,
       );
 
-    it('a 64-hex digest lives in exactly three files, all of them earned', () => {
+    it('a 64-hex digest lives in exactly four files, all of them earned', () => {
       const carriers = trackedTextFiles()
         .filter((f) => HEX64.test(readFileSync(join(repoRoot, f), 'utf8')))
         .sort();

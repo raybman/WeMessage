@@ -1127,10 +1127,16 @@ async function recordNoToken(): Promise<Recorded> {
  * `contract.ts` (they need no daemon); everything else is asked of one.
  */
 export async function recordContract(): Promise<ContractBundle> {
-  // The doctor reports a `runtime` block only under Electron. Under Node the
-  // key is absent, which is what makes the doctor fixture host-independent.
+  // The doctor reports a `runtime` block only when it can name a host:
+  // under Electron, or (v2 S2b) under the Swift app's WEMESSAGE_HOST=swift.
+  // With neither the key is absent, which is what makes the doctor fixture
+  // host-independent, so a recording session refuses both.
   if (process.versions['electron'] !== undefined)
     throw new Error('contract-recorder: must run under Node, not Electron');
+  if (process.env['WEMESSAGE_HOST'] === 'swift')
+    throw new Error(
+      'contract-recorder: must not run with WEMESSAGE_HOST=swift',
+    );
   surprises = [];
 
   const { contractSlug, paramJsonSchemas, requestJsonSchemas } =

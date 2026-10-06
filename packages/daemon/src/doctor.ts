@@ -60,28 +60,47 @@ export interface DoctorCheck {
 }
 
 /**
- * s9 Sc5: which JavaScript runtime answered this report.
+ * s9 Sc5: which JavaScript runtime answered this report. v2 S2b: and which
+ * host it answered for.
  *
- * The shipped daemon is `WeMessage.app` re-entered with
+ * The Electron app is `WeMessage.app` re-entered with
  * `ELECTRON_RUN_AS_NODE=1` (F-121), so "am I Electron" is the difference
  * between a daemon whose TCC grants attach to the signed app and one whose
  * grants attach to whatever terminal launched it. That distinction is
  * already the subject of two remediation strings above ("Running unpackaged:
- * grants attach to your terminal/node binary"), and until now the report
+ * grants attach to your terminal/node binary"), and until Sc5 the report
  * asserted it nowhere.
+ *
+ * A TAGGED UNION ON `kind`, because the two hosts know different things. The
+ * Swift app (v2) runs the same daemon on a plain Node it ships beside it, and
+ * there is no Electron version to report there. A flat shape with an optional
+ * `electron` would leave every reader to infer the host from a missing key;
+ * this one makes the reader say which host it means before it can read
+ * anything only that host has.
  */
-export interface DoctorRuntime {
-  /** Electron's own version, e.g. "44.2.0". */
-  electron: string;
-  /** The Node bundled inside that Electron, which is NOT the host's Node. */
-  node: string;
-  /**
-   * `process.versions.modules`, the native ABI. This is the number a
-   * mismatched prebuild would disagree with, so it is reported as the number
-   * it is rather than as a boolean somebody would have to trust.
-   */
-  abi: number;
-}
+export type DoctorRuntime =
+  | {
+      kind: 'electron';
+      /** Electron's own version, e.g. "44.2.0". */
+      electron: string;
+      /** The Node bundled inside that Electron, which is NOT the host's Node. */
+      node: string;
+      /**
+       * `process.versions.modules`, the native ABI. This is the number a
+       * mismatched prebuild would disagree with, so it is reported as the
+       * number it is rather than as a boolean somebody would have to trust.
+       */
+      abi: number;
+    }
+  | {
+      kind: 'node';
+      /** Who launched this Node. One host today, so one literal. */
+      host: 'swift';
+      /** The Node the Swift app ships, pinned by tools/swift/node.lock.json. */
+      node: string;
+      /** `process.versions.modules` of that Node, for the same reason. */
+      abi: number;
+    };
 
 /** Exactly the three `process.versions` keys `describeRuntime` reads. */
 export interface RuntimeVersions {
@@ -91,18 +110,46 @@ export interface RuntimeVersions {
 }
 
 /**
- * UNLIKE `supervisor`, THIS ONE IS HONESTLY SELF-MEASURABLE.
+ * v2 S2b: the environment `describeRuntime` is handed, which it reads ONE
+ * variable of. `ELECTRON_RUN_AS_NODE` is declared so a caller can pass a real
+ * environment without a cast, and it is deliberately never read: it is an
+ * instruction to Electron, so on plain Node it proves nothing, and under
+ * Electron `process.versions.electron` has already answered.
+ */
+export interface RuntimeEnv {
+  WEMESSAGE_HOST?: string | undefined;
+  ELECTRON_RUN_AS_NODE?: string | undefined;
+}
+
+/**
+ * UNLIKE `supervisor`, THIS ONE IS HONESTLY SELF-MEASURABLE, FIRST.
  *
  * Sc4 refused to default `supervisor` because a process cannot see its own
  * supervisor: a ppid of 1 means launchd or an orphan, indistinguishably. The
  * runtime is the opposite case. `process.versions.electron` exists if and
- * only if this process is Electron, so absence here is a measurement and not
- * a shrug, and the field is genuinely omitted rather than set to a null that
- * a client would have to decide how to read.
+ * only if this process is Electron, so it is checked before anything else
+ * and it wins over any variable: a measurement beats a claim.
+ *
+ * v2 S2b adds the one claim it accepts. Plain Node cannot see who launched
+ * it, so the Swift host says so in the environment, `WEMESSAGE_HOST=swift`,
+ * the same variable the node-flavour bundle refuses to start without. It is
+ * matched exactly: an empty, padded or differently cased value is not the
+ * Swift host. With neither signal the field is genuinely omitted rather than
+ * set to a null, or to a guess, that a client would have to decide how to
+ * read.
  */
-export function describeRuntime(v: RuntimeVersions): DoctorRuntime | undefined {
-  if (!v.electron) return undefined;
-  return { electron: v.electron, node: v.node, abi: Number(v.modules) };
+export function describeRuntime(
+  v: RuntimeVersions,
+  env: RuntimeEnv,
+): DoctorRuntime | undefined {
+  const abi = Number(v.modules);
+  if (v.electron) {
+    return { kind: 'electron', electron: v.electron, node: v.node, abi };
+  }
+  if (env.WEMESSAGE_HOST === 'swift') {
+    return { kind: 'node', host: 'swift', node: v.node, abi };
+  }
+  return undefined;
 }
 
 export interface DoctorReport {
@@ -127,10 +174,11 @@ export interface DoctorReport {
    */
   supervisor: Supervisor;
   /**
-   * Present iff the daemon is running under Electron. The key is ABSENT, not
-   * null, when it is not: a client reading this over the wire and a caller
-   * reading it in process then see the same thing, and neither has to learn
-   * that one of them spells "plain Node" differently.
+   * Present iff a host can be named: Electron, measured, or the Swift app,
+   * declared (see `describeRuntime`). The key is ABSENT, not null, when
+   * neither holds: a client reading this over the wire and a caller reading
+   * it in process then see the same thing, and neither has to learn that one
+   * of them spells "no host I can name" differently.
    */
   runtime?: DoctorRuntime;
 }
@@ -291,9 +339,16 @@ export interface RunDoctorDeps {
    * the point: this one has a correct answer available in-process, so the
    * default is a measurement rather than an assumption. Same idiom as
    * `acquireInstanceLock`'s `opts.pid ?? process.pid`. Tests pass a literal
-   * to exercise both branches without needing a second runtime.
+   * to exercise every branch without needing a second runtime.
    */
   versions?: RuntimeVersions;
+  /**
+   * v2 S2b. Optional for the same reason as `versions`: the default is the
+   * real environment, which is exactly where the Swift host puts
+   * `WEMESSAGE_HOST`. Tests pass a literal, so the node variant needs no
+   * second process either.
+   */
+  env?: RuntimeEnv;
 }
 
 /**
@@ -311,7 +366,10 @@ export interface RunDoctorDeps {
  */
 export async function runDoctor(deps: RunDoctorDeps): Promise<DoctorReport> {
   const { probes, store, sink, clock } = deps;
-  const runtime = describeRuntime(deps.versions ?? process.versions);
+  const runtime = describeRuntime(
+    deps.versions ?? process.versions,
+    deps.env ?? process.env,
+  );
 
   const osMajor = probes.osMajor();
   let derived: { state: ConnectionState; checks: DoctorCheck[] };

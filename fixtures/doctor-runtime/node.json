@@ -1,0 +1,6 @@
+{
+  "kind": "node",
+  "host": "swift",
+  "node": "24.21.0",
+  "abi": 137
+}

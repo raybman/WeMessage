@@ -143,6 +143,9 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
+    // Measured (run 37599650529): launched alone, nothing in the app held
+    // the keyboard, so the app was not frontmost. Bring it forward.
+    app.activate()
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
     type(app, "first line")
@@ -172,6 +175,9 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
+    // Measured (run 37599650529): launched alone, nothing in the app held
+    // the keyboard, so the app was not frontmost. Bring it forward.
+    app.activate()
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
 
@@ -205,6 +211,9 @@ final class Board02Tests: XCTestCase {
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     _ = settledGeometry(app)
+    // Measured (run 37599650529): launched alone, nothing in the app held
+    // the keyboard, so the app was not frontmost. Bring it forward.
+    app.activate()
     for guid in [Self.priya, Self.hike] {
       open(app, guid)
       XCTAssertTrue(waitUntil { self.element(app, ID.draftApprove).exists }, "\(guid): no draft verbs")

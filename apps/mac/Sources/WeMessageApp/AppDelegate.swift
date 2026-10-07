@@ -15,6 +15,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if let appearance = TestHooks.appearance {
       NSApp.appearance = NSAppearance(named: appearance.nsAppearanceName)
     }
+    // The window's hosting view is the group above the shell; unnamed, the
+    // system accessibility audit reports it as an element with no
+    // description (S3c). It takes the window's title, in every mode.
+    observers.append(
+      NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) {
+        note in
+        let window = note.object as? NSWindow
+        MainActor.assumeIsolated { Self.describe(window) }
+      })
     guard TestHooks.isUITest else { return }
     // The CI runner's only display is smaller than the default size, so under
     // the UI-test flag the window is pinned to min(requested, visibleFrame)
@@ -32,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if self.pin() { return }
         try? await Task.sleep(for: .milliseconds(100))
       }
+    }
+  }
+
+  private static func describe(_ window: NSWindow?) {
+    guard let window, !window.title.isEmpty else { return }
+    if window.contentView?.accessibilityLabel() != window.title {
+      window.contentView?.setAccessibilityLabel(window.title)
     }
   }
 

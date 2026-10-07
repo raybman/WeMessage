@@ -2,25 +2,55 @@ import Foundation
 import XCTest
 
 /// U-X1/U-X2 (plan §4.5, §5.3): the shell passes the system accessibility
-/// audit with nothing ignored, and the keyboard reaches every part of it.
+/// audit with nothing of its own ignored, and the keyboard reaches every
+/// part of it.
 /// CI only.
 final class AccessibilityTests: XCTestCase {
   /// The rail tiles in rail order, which is cmd-1..5 order.
   static let railIDs = ID.railTiles
 
-  /// U-X1: the default audit types, and a handler that keeps every issue.
-  /// Each issue is also written to the log so a red run names it.
+  /// U-X1: the default audit types, and a handler that keeps every issue
+  /// the app's own views raise. Each issue is also written to the log so a
+  /// red run names it.
   @MainActor
   func testShellPassesAccessibilityAudit() throws {
     let app = UITestApp.make(appearance: "light")
     app.launch()
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     try app.performAccessibilityAudit() { issue in
-      let who = issue.element.map { "\($0.identifier) '\($0.label)'" } ?? "(no element)"
-      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)")
-      return false
+      let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)'" } ?? "(no element)"
+      let chrome = Self.isSystemChrome(issue, in: app)
+      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(chrome ? " (system chrome, ignored)" : "")")
+      return chrome
     }
     app.terminate()
+  }
+
+  /// The two issues the audit raises on elements the app does not draw,
+  /// observed on the ci-swift runner's Xcode 26.6 (17F113), run 37555284794:
+  /// "Element has no description" on the TouchBar element the test runner
+  /// exposes, and "Parent/Child mismatch" on the group directly under the
+  /// runner's `_XCUI:FullScreenWindow` button, whose child lives in another
+  /// process. Each match needs the audit type, the description and the
+  /// element; anything else, including any issue on the app's own views, is
+  /// kept. Re-check both on the next Xcode bump (17F113 is the build seen).
+  @MainActor
+  static func isSystemChrome(_ issue: XCUIAccessibilityAuditIssue, in app: XCUIApplication) -> Bool {
+    guard let element = issue.element, element.identifier.isEmpty else { return false }
+    if issue.auditType == .sufficientElementDescription,
+      issue.compactDescription == "Element has no description"
+    {
+      return element.elementType == .touchBar  // 17F113: the runner's TouchBar
+    }
+    if issue.auditType == .parentChild, issue.compactDescription == "Parent/Child mismatch",
+      element.elementType == .group
+    {
+      let fullScreen = app.descendants(matching: .any)["_XCUI:FullScreenWindow"]
+      guard fullScreen.exists else { return false }
+      let frame = element.frame
+      return fullScreen.children(matching: .group).allElementsBoundByIndex.contains { $0.frame == frame }  // 17F113
+    }
+    return false
   }
 
   /// The element that has keyboard focus now, by identifier ("" when it has none).

@@ -46,4 +46,23 @@ struct TokensTests {
     #expect(abs(Tokens.tint.hue - 210) < 1, "tint hue \(Tokens.tint.hue)")
     #expect(Tokens.RGB(0x80, 0x80, 0x80).saturation == 0)
   }
+
+  @Test("T5: ink and inkDim read at 7:1 or better on every layer of both appearances (the audit failed inkDim at 5.58:1)")
+  func contrast() {
+    for dark in [false, true] {
+      let p = Tokens.palette(dark: dark)
+      for layer in [p.layer0, p.layer1, p.layer2] {
+        #expect(Tokens.contrast(p.ink, layer) >= 7, "dark=\(dark) ink on \(layer)")
+        #expect(Tokens.contrast(p.inkDim, layer) >= 7, "dark=\(dark) inkDim on \(layer)")
+      }
+    }
+    // The maths: black on white is 21:1, symmetric, and the S3c audit's
+    // failing pair (run 37555284794) measures as it did.
+    let black = Tokens.RGB(0, 0, 0)
+    let white = Tokens.RGB(255, 255, 255)
+    #expect(abs(Tokens.contrast(black, white) - 21) < 0.01)
+    #expect(Tokens.contrast(white, black) == Tokens.contrast(black, white))
+    let failed = Tokens.contrast(Tokens.RGB(95, 95, 102), Tokens.RGB(240, 240, 245))
+    #expect(failed > 5.5 && failed < 5.7)
+  }
 }

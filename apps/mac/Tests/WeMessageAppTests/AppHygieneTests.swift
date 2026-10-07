@@ -159,6 +159,13 @@ struct AppHygieneTests {
     #expect(rail.contains(".keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)"))
     let sidebar = Self.block("SidebarView", in: shell)
     #expect(sidebar.contains(#".accessibilityLabel("Lens")"#), "the lens picker is unlabelled")
+    // A plain-style button is not a Tab stop on macOS (run 37555284794:
+    // the first Tab went straight to the lens).
+    #expect(Self.block("RailTile", in: shell).contains(".focusable()"), "the rail tiles are not Tab stops")
+    // The window's hosting group is described (the audit's "Element has no
+    // description" on the group above wemessage.shell).
+    let delegate = try Repo.text(Self.appDir + "/AppDelegate.swift")
+    #expect(delegate.contains("contentView?.setAccessibilityLabel(window.title)"))
   }
 
   @Test("H-A2+: every keyboard shortcut under Sources/WeMessageApp carries the command modifier (no bare letters in S3)")

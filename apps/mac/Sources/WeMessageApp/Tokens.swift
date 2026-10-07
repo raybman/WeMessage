@@ -14,7 +14,7 @@ public enum Tokens {
 
   public enum Dark {
     public static let ink = RGB(0xF5, 0xF5, 0xF7)
-    public static let inkDim = RGB(0x98, 0x98, 0x9E)
+    public static let inkDim = RGB(0xD1, 0xD1, 0xD6)
     public static let layer0 = RGB(0x1C, 0x1C, 0x1E)
     public static let layer1 = RGB(0x2C, 0x2C, 0x2E)
     public static let layer2 = RGB(0x3A, 0x3A, 0x3C)
@@ -22,7 +22,7 @@ public enum Tokens {
 
   public enum Light {
     public static let ink = RGB(0x1C, 0x1C, 0x1E)
-    public static let inkDim = RGB(0x5F, 0x5F, 0x66)
+    public static let inkDim = RGB(0x4E, 0x4E, 0x54)
     public static let layer0 = RGB(0xF5, 0xF5, 0xF7)
     public static let layer1 = RGB(0xFF, 0xFF, 0xFF)
     public static let layer2 = RGB(0xF0, 0xF0, 0xF5)
@@ -46,6 +46,16 @@ public enum Tokens {
     return [tint, danger]
       + [dark.ink, dark.inkDim, dark.layer0, dark.layer1, dark.layer2]
       + [light.ink, light.inkDim, light.layer0, light.layer1, light.layer2]
+  }
+
+  /// WCAG 2 contrast ratio between two opaque sRGB colours, 1...21, order
+  /// free. Pure. The shell holds every text colour at 7:1 or better on
+  /// every layer (TokensTests T5): the system accessibility audit failed
+  /// inkDim at 5.58:1 on layer 2 (S3c, ci-swift run 37555284794).
+  public static func contrast(_ a: RGB, _ b: RGB) -> Double {
+    let la = a.luminance
+    let lb = b.luminance
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
   }
 
   /// An sRGB triple with the HSB maths the green sweep needs. Pure.
@@ -83,6 +93,13 @@ public enum Tokens {
       let (r, g, b) = unit
       let hi = max(r, g, b)
       return hi == 0 ? 0 : (hi - min(r, g, b)) / hi
+    }
+
+    /// WCAG 2 relative luminance, 0...1.
+    public var luminance: Double {
+      func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+      let (r, g, b) = unit
+      return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 
     public var description: String { "RGB(\(r), \(g), \(b))" }

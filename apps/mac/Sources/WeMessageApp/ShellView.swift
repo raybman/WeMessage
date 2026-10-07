@@ -106,6 +106,8 @@ private struct RailTile: View {
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    // A plain-style button is not a Tab stop on macOS; this makes each tile one.
+    .focusable()
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }

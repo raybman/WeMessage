@@ -13938,6 +13938,37 @@ describe('v2 S1: the Swift tree', () => {
     });
   });
 
+  it('the audit ignores only the two pieces of runner chrome, each pinned to its element (R-A13b)', () => {
+    // v2 S3c fix: the ci-swift runner's Xcode 26.6 (17F113) raises two issues
+    // on elements the app does not draw (run 37555284794). The handler may
+    // hand them to isSystemChrome and nothing else; that helper matches the
+    // audit type, the description AND the element, and never says a bare
+    // `true`, so it cannot widen into an ignore-everything.
+    const a11y = archRead(`${UI_TESTS}/AccessibilityTests.swift`);
+    const handler =
+      /performAccessibilityAudit\(\)\s*\{([\s\S]*?)\n {4}\}/.exec(a11y)?.[1] ??
+      '';
+    expect(handler).not.toBe('');
+    const returns = handler.match(/\breturn\b[^\n]*/g) ?? [];
+    expect(returns).toEqual(['return chrome']);
+    expect(handler).toContain('Self.isSystemChrome(issue, in: app)');
+    const helper =
+      /static func isSystemChrome[\s\S]*?\n {2}\}/.exec(a11y)?.[0] ?? '';
+    for (const needed of [
+      '17F113',
+      '.sufficientElementDescription',
+      '"Element has no description"',
+      'element.elementType == .touchBar',
+      '.parentChild',
+      '"Parent/Child mismatch"',
+      'element.elementType == .group',
+      '"_XCUI:FullScreenWindow"',
+      'element.identifier.isEmpty',
+    ])
+      expect([needed, helper.includes(needed)]).toEqual([needed, true]);
+    expect(helper).not.toMatch(/return true/);
+  });
+
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {
     const lock = JSON.parse(
       archRead('tools/swift/xcodegen.lock.json'),

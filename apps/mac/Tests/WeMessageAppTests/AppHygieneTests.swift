@@ -168,8 +168,10 @@ struct AppHygieneTests {
     let delegate = try Repo.text(Self.appDir + "/AppDelegate.swift")
     let describe = Self.function("describe(_ window: " + Self.nsWindow + "?)", in: delegate)
     #expect(describe.contains("let root = window.contentView"))
+    #expect(describe.contains("root.setAccessibilityLabel(window.title)"))
     #expect(describe.contains("view.setAccessibilityLabel(window.title)"))
-    #expect(describe.contains("view.frame.size == root.bounds.size"))
+    #expect(describe.contains("(root.superview ?? root).subviews"))
+    #expect(describe.contains("sizes.contains(view.frame.size)"))
     #expect(describe.contains("level.flatMap(\\.subviews)"))
   }
 

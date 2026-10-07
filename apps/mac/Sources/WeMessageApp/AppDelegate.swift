@@ -49,18 +49,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  /// Names the window-sized views under the content view too: with the
-  /// frost as the window's container background (S4a) the hosting group sits
-  /// below the content view, and run 37571671881's audit reported a
-  /// window-sized group with no description. Unnamed views only, a few
-  /// levels down, each sized like the window's content.
+  /// Names the window's hosting group, and every other unnamed window-sized
+  /// view in the window: with the frost as the window's container
+  /// background (S4a) SwiftUI hosts that background in a view of its own
+  /// beside the content view, and run 37572419494's audit reported it as an
+  /// empty window-sized group with no description directly under the window.
+  /// Walks a few levels down from the content view's superview.
   private static func describe(_ window: NSWindow?) {
     guard let window, !window.title.isEmpty, let root = window.contentView else { return }
-    var level: [NSView] = [root]
+    if root.accessibilityLabel() != window.title { root.setAccessibilityLabel(window.title) }
+    let sizes = [root.bounds.size, window.frame.size]
+    var level: [NSView] = (root.superview ?? root).subviews
     for _ in 0..<4 {
-      for view in level where view === root || view.frame.size == root.bounds.size {
-        let label = view.accessibilityLabel() ?? ""
-        if view === root ? label != window.title : label.isEmpty { view.setAccessibilityLabel(window.title) }
+      for view in level where view !== root && sizes.contains(view.frame.size) {
+        if (view.accessibilityLabel() ?? "").isEmpty { view.setAccessibilityLabel(window.title) }
       }
       level = level.flatMap(\.subviews)
     }

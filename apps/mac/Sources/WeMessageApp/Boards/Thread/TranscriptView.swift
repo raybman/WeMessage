@@ -141,7 +141,8 @@ struct BubbleView: View {
     switch turn.kind {
     case .text: return turn.text ?? ""
     case .attachments(let count): return ProvisionalUI.attachmentsLine(count: count)
-    case .voice(let transcript): return transcript ?? ProvisionalUI.voiceLine
+    case .voice(let transcript, _): return transcript ?? ProvisionalUI.voiceLine
+    default: return turn.text ?? ""
     }
   }
 

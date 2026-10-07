@@ -60,9 +60,7 @@ final class Board02Tests: XCTestCase {
 
     // draft: Priya's SMS thread with sol-main's pending draft. Approve, Edit
     // and Hold are drawn; Hold until is not.
-    probe(app, "board launched")
     open(app, Self.priya)
-    probe(app, "board opened priya")
     XCTAssertTrue(waitUntil { self.label(app, ID.draft).hasPrefix("DRAFT") }, "draft: \(label(app, ID.draft))")
     XCTAssertTrue(label(app, ID.draft).contains("SOL-MAIN"), "draft: not sol-main's: \(label(app, ID.draft))")
     for id in [ID.draftApprove, ID.draftEdit, ID.draftHold, ID.threadBanner, ID.capabilityNote] {
@@ -145,10 +143,12 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
-    probe(app, "launched")
+    // v2 S4e: Daniel is the first thread opened after launch, and his field
+    // holds the keyboard with no click (KeyboardClaim; runs 37599650529 and
+    // 37601353605 measured it never did).
     open(app, Self.daniel)
-    probe(app, "opened")
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
+    XCTAssertTrue(holdsKeyboard(app), "the first thread opened after launch did not take the keyboard")
     type(app, "first line")
     dump(app, "before return")
     app.typeKey(.return, modifierFlags: [])
@@ -176,10 +176,12 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
-    probe(app, "launched")
+    // v2 S4e: Daniel is the first thread opened after launch, and his field
+    // holds the keyboard with no click (KeyboardClaim; runs 37599650529 and
+    // 37601353605 measured it never did).
     open(app, Self.daniel)
-    probe(app, "opened")
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
+    XCTAssertTrue(holdsKeyboard(app), "the first thread opened after launch did not take the keyboard")
 
     type(app, "take this back")
     app.typeKey(.return, modifierFlags: .command)
@@ -267,35 +269,38 @@ final class Board02Tests: XCTestCase {
     return inner.exists ? inner : tagged
   }
 
-  /// Clicks the field until it holds the keyboard, then types `text` and
-  /// checks it landed: a keystroke that went elsewhere fails here, not
-  /// three steps later as a missing countdown.
+  /// True once the composer's field holds the keyboard, within `seconds`
+  /// (KeyboardClaim gives up after about 2 s).
+  @MainActor
+  private func holdsKeyboard(_ app: XCUIApplication, within seconds: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    var held = (composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true
+    while !held && Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.25)
+      held = (composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true
+    }
+    return held
+  }
+
+  /// Types `text` into the field, clicking it once first if it does not
+  /// hold the keyboard, and checks it landed: a keystroke that went
+  /// elsewhere fails here, not three steps later as a missing countdown.
   @MainActor
   private func type(_ app: XCUIApplication, _ text: String) {
     let before = fieldText(app)
-    var focused = false
-    for attempt in 0..<3 where !focused {
-      probe(app, "before click \(attempt)")
+    var focused = holdsKeyboard(app, within: 1)
+    if !focused {
       composerField(app).click()
-      focused = waitUntil { (self.composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true }
-      probe(app, "after click \(attempt) focused=\(focused)")
+      focused = holdsKeyboard(app)
     }
     if !focused {
       let holder = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
       print("COMPOSER| no focus; keyboard is on: \(holder.exists ? holder.debugDescription : "nothing")")
     }
-    XCTAssertTrue(focused, "the field never took the keyboard; \((app.windows.firstMatch.value as? String) ?? "")")
+    XCTAssertTrue(focused, "the field never took the keyboard")
     app.typeText(text)
     XCTAssertTrue(
       waitUntil { self.fieldText(app).hasSuffix(text) }, "typed \(text.debugDescription), field has \(fieldText(app).debugDescription) (was \(before.debugDescription))")
-  }
-
-  /// The app's focus line (the window's value after the geometry): whether
-  /// it is active, which window is key and what is first responder.
-  @MainActor
-  private func probe(_ app: XCUIApplication, _ moment: String) {
-    let raw = (app.windows.firstMatch.value as? String) ?? ""
-    print("FOCUS| \(moment): \(raw)")
   }
 
   @MainActor

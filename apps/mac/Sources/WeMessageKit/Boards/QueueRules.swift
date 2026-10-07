@@ -103,4 +103,9 @@ public enum WireDate {
     if let date = try? Date(raw, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) { return date }
     return try? Date(raw, strategy: Date.ISO8601FormatStyle())
   }
+
+  /// The wire form of `date`: ISO 8601 in UTC with milliseconds.
+  public static func format(_ date: Date) -> String {
+    date.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+  }
 }

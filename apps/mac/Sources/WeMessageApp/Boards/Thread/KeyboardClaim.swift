@@ -5,7 +5,7 @@ import SwiftUI
 /// draft hint's promise ("just start typing") holds for the first thread
 /// after launch too.
 ///
-/// Measured (run 37606555171): with the app active, the shell window key
+/// Measured (runs 37606555171, 37608951010): with the app active, the shell window key
 /// and the window's first responder SwiftUI's KeyViewProxy, a FocusState
 /// written from `.task` on the composer's first mount never reached the
 /// text view, and neither did three clicks; a thread opened later (the
@@ -19,10 +19,6 @@ struct KeyboardClaim: NSViewRepresentable {
   func makeNSView(context: Context) -> ClaimView { ClaimView() }
 
   func updateNSView(_ view: ClaimView, context: Context) { view.want(token) }
-
-  /// Under the UI-test flag only, the last claim's outcome, which the
-  /// window's focus line carries: "found|missing", "ok|refused", attempts.
-  @MainActor static var outcome = "none"
 
   /// A zero-content view laid behind the text editor. It never takes a
   /// click or the keyboard itself.
@@ -58,15 +54,12 @@ struct KeyboardClaim: NSViewRepresentable {
     private func claim(attempt: Int) {
       guard let token = wanted, token != claimed else { return }
       guard let window, let field = textView(in: window) else {
-        KeyboardClaim.outcome = "missing:\(attempt)"
         schedule(attempt: attempt + 1)
         return
       }
       if window.firstResponder === field || window.makeFirstResponder(field) {
         claimed = token
-        KeyboardClaim.outcome = "found:ok:\(attempt)"
       } else {
-        KeyboardClaim.outcome = "found:refused:\(attempt)"
         schedule(attempt: attempt + 1)
       }
     }

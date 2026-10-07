@@ -85,9 +85,24 @@ final class AccessibilityTests: XCTestCase {
   /// process. Each match needs the audit type, the description and the
   /// element; anything else, including any issue on the app's own views, is
   /// kept. Re-check both on the next Xcode bump (17F113 is the build seen).
+  ///
+  /// v2 S4e adds a third, run 37608951010: once the composer's text view
+  /// holds the keyboard (the S4d focus fix), AppKit puts its "emoji &
+  /// symbols" item in the runner's Touch Bar, and the audit flags it with
+  /// "Element has no description" and "Action is missing". It matches only
+  /// as a pop-up button with that exact label, no identifier, lying inside
+  /// the Touch Bar element's frame (79,-1 74x32 inside 80,0 685x30).
   @MainActor
   static func isSystemChrome(_ issue: XCUIAccessibilityAuditIssue, in app: XCUIApplication) -> Bool {
     guard let element = issue.element, element.identifier.isEmpty else { return false }
+    if element.elementType == .popUpButton, element.label == "emoji & symbols",
+      (issue.auditType == .sufficientElementDescription && issue.compactDescription == "Element has no description")
+        || (issue.auditType == .action && issue.compactDescription == "Action is missing")
+    {
+      let touchBar = app.descendants(matching: .touchBar).firstMatch
+      guard touchBar.exists else { return false }
+      return touchBar.frame.intersects(element.frame)  // 17F113: the Touch Bar's emoji item
+    }
     if issue.auditType == .sufficientElementDescription,
       issue.compactDescription == "Element has no description"
     {

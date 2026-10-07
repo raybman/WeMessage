@@ -76,4 +76,92 @@ struct MessageTurnTests {
       #expect(turns.map(\.sentAt) == turns.map(\.sentAt).sorted(), "\(name) is not oldest first")
     }
   }
+
+  // v2 S4e, board 08: the richer kinds and per-message facts.
+
+  static let atlasPath = "fixtures/atlas/threads.messages.atlas.json"
+
+  static func atlas() throws -> AtlasGolden {
+    try JSONDecoder().decode(AtlasGolden.self, from: try Repo.data(atlasPath))
+  }
+
+  @Test("every kind round-trips through its wire form")
+  func kindsRoundTrip() throws {
+    let file = MessageTurn.Attachment(name: "a.pdf", mime: "application/pdf", bytes: 10)
+    let kinds: [MessageTurn.Kind] = [
+      .text, .emojiOnly, .attachments(count: 2), .media([file]), .voice(transcript: "hi", seconds: 3),
+      .voice(transcript: nil, seconds: nil), .file(file), .link(.init(title: "t", host: "example.com")),
+      .location("1 Main St"), .contactCard(.init(name: "A", handle: "+15550100001")),
+      .poll(.init(question: "q", options: [.init(title: "o", votes: 1)])), .system, .unsupported("View-once photo"),
+    ]
+    for kind in kinds {
+      let data = try JSONEncoder().encode(kind)
+      #expect(try JSONDecoder().decode(MessageTurn.Kind.self, from: data) == kind)
+    }
+    #expect(throws: DecodingError.self) {
+      try JSONDecoder().decode(MessageTurn.Kind.self, from: Data(#"{"type":"sticker"}"#.utf8))
+    }
+  }
+
+  @Test("a turn round-trips with its service, delivery, reactions, effect, quote and forward flag")
+  func turnRoundTrip() throws {
+    let turn = MessageTurn(
+      guid: "g", direction: .outbound, kind: .text, text: "hi", sentAt: DeliveryTests.at, service: .sms,
+      delivery: .read(at: DeliveryTests.at), reactions: [.init(glyph: "\u{2665}\u{FE0E}", count: 2)],
+      effect: "Fireworks", quote: "earlier", isForwarded: true)
+    let back = try JSONDecoder().decode(MessageTurn.self, from: try JSONEncoder().encode(turn))
+    #expect(back == turn)
+  }
+
+  @Test("delivery is an outbound fact: an inbound turn drops it, and a wire turn carrying it does not decode")
+  func inboundDelivery() throws {
+    let turn = MessageTurn(
+      guid: "g", direction: .inbound, kind: .text, text: "hi", sentAt: DeliveryTests.at, delivery: .delivered)
+    #expect(turn.delivery == nil)
+    let wire = #"{"guid":"g","direction":"inbound","kind":{"type":"text"},"text":"hi","#
+      + #""sentAt":"2026-09-01T09:53:00.000Z","delivery":{"state":"delivered"}}"#
+    #expect(throws: DecodingError.self) { try JSONDecoder().decode(MessageTurn.self, from: Data(wire.utf8)) }
+  }
+
+  @Test("the atlas golden decodes: ten sections, 08.A to 08.J, every kind and every delivery rung present")
+  func atlasDecodes() throws {
+    let golden = try Self.atlas()
+    #expect(
+      golden.sections.map(\.slug) == [
+        "anatomy", "text", "reactions", "media", "voice", "payloads", "delivery", "draft", "native", "coverage",
+      ])
+    let turns = golden.sections.flatMap(\.turns)
+    #expect(Set(turns.map(\.guid)).count == turns.count, "a guid repeats")
+    func has(_ match: (MessageTurn.Kind) -> Bool) -> Bool { turns.contains { match($0.kind) } }
+    #expect(has { if case .emojiOnly = $0 { true } else { false } })
+    #expect(has { if case .media = $0 { true } else { false } })
+    #expect(has { if case .voice(let t, _) = $0 { t != nil } else { false } })
+    #expect(has { if case .file = $0 { true } else { false } })
+    #expect(has { if case .link = $0 { true } else { false } })
+    #expect(has { if case .location = $0 { true } else { false } })
+    #expect(has { if case .contactCard = $0 { true } else { false } })
+    #expect(has { if case .poll = $0 { true } else { false } })
+    #expect(has { if case .system = $0 { true } else { false } })
+    #expect(has { if case .unsupported = $0 { true } else { false } })
+    let rungs = Set(turns.compactMap { $0.delivery.map { $0.rung ?? -1 } })
+    #expect(rungs == [-1, 0, 1, 2, 3])
+    #expect(turns.contains { $0.service == .sms })
+    #expect(turns.contains { $0.effect != nil })
+    #expect(turns.contains { !$0.reactions.isEmpty })
+    // Reactions are read where someone else left them: inbound only (08.C).
+    #expect(turns.filter { !$0.reactions.isEmpty }.allSatisfy { $0.direction == .inbound })
+  }
+
+  @Test("the atlas golden is synthetic: 555 numbers, example.com, no em dash")
+  func atlasSynthetic() throws {
+    let raw = try Repo.text(Self.atlasPath)
+    #expect(!raw.contains("\u{2014}"))
+    let turns = try Self.atlas().sections.flatMap(\.turns)
+    for handle in turns.compactMap(\.handle) { #expect(handle.hasPrefix("+1555"), "\(handle)") }
+    for turn in turns {
+      if case .contactCard(let card) = turn.kind { #expect(card.handle.hasPrefix("+1555")) }
+      if case .link(let link) = turn.kind { #expect(link.host == "example.com") }
+    }
+    #expect(raw.range(of: #"@[a-z0-9-]+\.(com|ai|net|org)"#, options: .regularExpression) == nil)
+  }
 }

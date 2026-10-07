@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 
 /// The token triples board 08's pixel probes compare against: Tokens.Light
 /// and Tokens.Dark's ink, layer1 and layer2, written here too because the

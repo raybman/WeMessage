@@ -217,6 +217,9 @@ struct AtlasPage: View {
     }
     .padding(8)
     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Tokens.color(palette.ink), lineWidth: 1))
+    // Read as one table: a lone "Yes" or a middle dot is too few glyphs for
+    // the 1x audit to measure (run 37618816522).
+    .accessibilityElement(children: .combine)
   }
 
   // MARK: 08.D

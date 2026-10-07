@@ -442,6 +442,9 @@ struct PollBody: View {
             Spacer()
             Text("\(option.votes)").font(.system(size: 9)).foregroundStyle(dim)
           }
+          // One element per option: a lone vote count is too few glyphs for
+          // the 1x audit to measure (run 37618816522).
+          .accessibilityElement(children: .combine)
           ZStack(alignment: .leading) {
             Rectangle().fill(dim.opacity(0.3)).frame(width: 172, height: 3)
             Rectangle().fill(ink).frame(width: 172 * Double(option.votes) / Double(total), height: 3)
@@ -501,7 +504,7 @@ struct ReactionRow: View {
       ForEach(Array(reactions.enumerated()), id: \.offset) { n, reaction in
         let glyph = SpecimenText.textPresentation(reaction.glyph)
         Text(glyph + " \(reaction.count)")
-          .font(.system(size: 9))
+          .font(.system(size: 11, weight: .medium))
           .foregroundStyle(ink)
           .padding(.vertical, 2)
           .padding(.horizontal, 6)

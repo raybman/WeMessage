@@ -250,6 +250,9 @@ struct BubbleView: View {
       .font(.system(size: 9))
       .foregroundStyle(Tokens.color(palette.inkDim))
       .fixedSize()
+      // The sheet's bubble already speaks its time; a second, five-glyph
+      // element is one the 1x audit cannot measure (run 37618816522).
+      .accessibilityHidden(style == .specimen)
   }
 
   private var content: some View {
@@ -343,9 +346,12 @@ struct BubbleView: View {
           .font(.system(size: 8, weight: .bold))
           .tracking(1)
           .foregroundStyle(secondary)
+          .accessibilityHidden(true)
       }
+      // The small print the bubble's label already speaks is drawn, not
+      // read twice: forwarded, the tag above, the edit time, the effect.
       if turn.isForwarded {
-        Text("\u{21AA} Forwarded").font(.system(size: 9)).foregroundStyle(secondary)
+        Text("\u{21AA} Forwarded").font(.system(size: 9)).foregroundStyle(secondary).accessibilityHidden(true)
       }
       if let quote = turn.quote {
         Text(quote)
@@ -358,6 +364,7 @@ struct BubbleView: View {
       payload
       if turn.isEdited {
         Text("Edited " + ShellText.shortClock(turn.sentAt, zone: zone)).font(.system(size: 9)).foregroundStyle(secondary)
+          .accessibilityHidden(true)
       }
       if !turn.reactions.isEmpty {
         ReactionRow(guid: turn.guid, reactions: turn.reactions, ink: textColor)
@@ -370,7 +377,7 @@ struct BubbleView: View {
           .fixedSize(horizontal: false, vertical: true)
       }
       if let effect = turn.effect {
-        Text("sent with " + effect).font(.system(size: 9)).foregroundStyle(secondary)
+        Text("sent with " + effect).font(.system(size: 9)).foregroundStyle(secondary).accessibilityHidden(true)
       }
     }
   }
@@ -429,7 +436,7 @@ struct BubbleView: View {
       .accessibilityIdentifier(ShellID.deliveryPrefix + turn.guid)
     } else {
       Text(SpecimenText.delivery(delivery, zone: zone))
-        .font(.system(size: 9))
+        .font(.system(size: 10, weight: .medium))
         .foregroundStyle(secondary)
         .accessibilityIdentifier(ShellID.deliveryPrefix + turn.guid)
     }

@@ -112,15 +112,16 @@ enum UITestApp {
   static func geometryText(_ app: XCUIApplication) -> (channel: String, raw: String)? {
     let shell = shellElement(app)
     let atlas = app.descendants(matching: .any)[ID.atlas]
-    var candidates: [(String, String?)] = [
-      ("shell.value", shell.value as? String),
-      ("shell.label", shell.label),
-      ("window.value", app.windows.firstMatch.value as? String),
-    ]
+    var candidates: [(String, String?)] = []
     // Board 08's sheet stands in for the shell and publishes the same way.
+    // A property read on an element that is not there fails the test, so
+    // each root is read only when it exists.
     if atlas.exists {
       candidates += [("atlas.value", atlas.value as? String), ("atlas.label", atlas.label)]
+    } else {
+      candidates += [("shell.value", shell.value as? String), ("shell.label", shell.label)]
     }
+    candidates.append(("window.value", app.windows.firstMatch.value as? String))
     for (channel, raw) in candidates {
       if let raw, raw.hasPrefix("frame=") { return (channel, raw) }
     }

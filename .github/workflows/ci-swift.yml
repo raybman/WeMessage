@@ -198,6 +198,18 @@ jobs:
       # P1-1 decided (S3a.0, four green legs): ad hoc signing from project.yml,
       # NO signing override on this line. The runner is then sandboxed (E19), so
       # no test writes a file.
+      # S4a.0 spike, push 2: run 37568366332 measured reduce transparency ON
+      # (app and runner both read 1), so every material rendered flat. Try to
+      # turn it off for the user session and read it back.
+      - name: spike, reduce transparency off for the session
+        run: |
+          set +e
+          echo "SPIKE|rtPref|before|$(defaults read com.apple.universalaccess reduceTransparency 2>&1 | tr '\n' ' ')"
+          defaults write com.apple.universalaccess reduceTransparency -bool false
+          echo "SPIKE|rtPref|write|exit=$?"
+          echo "SPIKE|rtPref|after|$(defaults read com.apple.universalaccess reduceTransparency 2>&1 | tr '\n' ' ')"
+          echo "SPIKE|rtPref|keys|$(defaults read com.apple.universalaccess 2>&1 | tr '\n' ' ' | tr -s ' ')"
+          exit 0
       - name: xcodebuild test (ad hoc signed, timeouts on)
         run: |
           set -eu

@@ -60,6 +60,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sh.wemessage.gateway.uitests
         TEST_TARGET_NAME: WeMessageMac
+        # The runner bundle has no plist of its own; Xcode writes one, else
+        # ad hoc signing refuses the target (run 37551542294).
+        GENERATE_INFOPLIST_FILE: 'YES'
 schemes:
   WeMessage:
     build:

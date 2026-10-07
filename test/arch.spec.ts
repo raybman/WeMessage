@@ -13785,6 +13785,12 @@ describe('v2 S1: the Swift tree', () => {
       1,
     );
     expect(text.match(/^\s+INFOPLIST_FILE:/gm)?.length).toBe(1);
+    // The UI test runner bundle gets a generated plist; without one ad hoc
+    // signing refuses it (run 37551542294). The app keeps S2d's.
+    const uiTarget =
+      /^ {2}WeMessageUITests:\n([\s\S]*?)(?=^\S)/m.exec(text)?.[1] ?? '';
+    expect(uiTarget).toMatch(/^\s+GENERATE_INFOPLIST_FILE: ['"]YES['"]$/m);
+    expect(text.match(/GENERATE_INFOPLIST_FILE: ['"]NO['"]/g)?.length).toBe(1);
     expect(text).not.toContain('NSPrincipalClass');
     expect(
       text.split('PRODUCT_BUNDLE_IDENTIFIER: sh.wemessage.gateway\n').length -

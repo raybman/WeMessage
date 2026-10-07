@@ -75,6 +75,20 @@ struct QueueRulesTests {
     #expect(QueueRules.queueCount(items: items, now: scan + 30 * Self.day) == 0)
   }
 
+  @Test("one item per drafted thread (06.G): the newest draft carries it, held or acted drafts are left out")
+  func oneItemPerThread() throws {
+    let drafts = try Self.rich("drafts.list.json", DraftsEnvelope.self).drafts
+    let threads = try Self.rich("threads.list.json", ThreadsPage.self).threads
+    var second = try #require(drafts.first { $0.id == "drf-0103" })
+    second.id = "drf-0199"
+    second.createdAt = "2026-09-01T12:00:40.000Z"
+    let items = QueueRules.items(drafts: drafts + [second], threads: threads)
+    #expect(items.map(\.draftId) == ["drf-0101", "drf-0102", "drf-0199", "drf-0104"])
+    #expect(Set(items.map(\.threadGuid)).count == items.count)
+    let excluded = QueueRules.items(drafts: drafts + [second], threads: threads, excluding: ["drf-0199", "drf-0101"])
+    #expect(excluded.map(\.draftId) == ["drf-0102", "drf-0103", "drf-0104"])
+  }
+
   @Test("wire dates parse with and without fractional seconds, and garbage does not")
   func wireDates() {
     #expect(WireDate.parse("2026-09-01T12:00:42.000Z") == Self.now)

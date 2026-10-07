@@ -81,19 +81,34 @@ public enum QueueRules {
     return total > 0 ? .digit(total) : .baseline
   }
 
-  /// The queue the daemon can vouch for today: one item per pending draft,
-  /// on its thread's channel, arrived when the draft was made. Drafts in any
-  /// other state, and drafts whose creation time does not parse, are not
-  /// waiting on anyone.
-  public static func items(drafts: [DraftPayload], threads: [ThreadSummary]) -> [QueueItem] {
+  /// The queue the daemon can vouch for today: one item per thread with a
+  /// pending draft (06.G: the rail, the counter and Triage say one number,
+  /// so a thread with two drafts is one thing waiting), on its thread's
+  /// channel, carrying the newest draft and arrived when it was made, in the
+  /// order the threads first appear. Drafts in any other state, drafts whose
+  /// creation time does not parse, and drafts `excluding` names (held, or
+  /// cleared by an act) are not waiting on anyone.
+  public static func items(
+    drafts: [DraftPayload], threads: [ThreadSummary], excluding: Set<String> = []
+  ) -> [QueueItem] {
     var channelOf: [String: String] = [:]
     for thread in threads { channelOf[thread.chatGuid] = thread.channel }
-    return drafts.compactMap { draft in
-      guard draft.state == .pending, let at = WireDate.parse(draft.createdAt) else { return nil }
-      return QueueItem(
+    var order: [String] = []
+    var newest: [String: QueueItem] = [:]
+    for draft in drafts {
+      guard draft.state == .pending, !excluding.contains(draft.id), let at = WireDate.parse(draft.createdAt)
+      else { continue }
+      let item = QueueItem(
         threadGuid: draft.chatGuid, channel: channelOf[draft.chatGuid] ?? "imessage", reason: .pendingDraft,
         arrivedAt: at, draftId: draft.id)
+      if let seen = newest[draft.chatGuid] {
+        if at >= seen.arrivedAt { newest[draft.chatGuid] = item }
+      } else {
+        order.append(draft.chatGuid)
+        newest[draft.chatGuid] = item
+      }
     }
+    return order.compactMap { newest[$0] }
   }
 }
 

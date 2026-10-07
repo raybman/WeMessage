@@ -163,9 +163,14 @@ struct AppHygieneTests {
     // the first Tab went straight to the lens).
     #expect(Self.block("RailTile", in: shell).contains(".focusable()"), "the rail tiles are not Tab stops")
     // The window's hosting group is described (the audit's "Element has no
-    // description" on the group above wemessage.shell).
+    // description" on the group above wemessage.shell), and so is every
+    // window-sized view under it (S4a: the frost container background).
     let delegate = try Repo.text(Self.appDir + "/AppDelegate.swift")
-    #expect(delegate.contains("contentView?.setAccessibilityLabel(window.title)"))
+    let describe = Self.function("describe(_ window: " + Self.nsWindow + "?)", in: delegate)
+    #expect(describe.contains("let root = window.contentView"))
+    #expect(describe.contains("view.setAccessibilityLabel(window.title)"))
+    #expect(describe.contains("view.frame.size == root.bounds.size"))
+    #expect(describe.contains("level.flatMap(\\.subviews)"))
   }
 
   @Test("H-A2+: every keyboard shortcut under Sources/WeMessageApp carries the command modifier (no bare letters in S3)")

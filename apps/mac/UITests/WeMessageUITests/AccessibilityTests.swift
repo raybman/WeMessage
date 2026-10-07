@@ -38,6 +38,10 @@ final class AccessibilityTests: XCTestCase {
       let note = chrome ? " (system chrome, ignored)" : measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
       print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(note)")
       print("audit detail: \(issue.detailedDescription)")
+      if !chrome && !cleared, let element = issue.element, element.exists {
+        // A kept issue names its element's subtree, so a red run says which view it was.
+        print("audit tree: \(element.debugDescription)")
+      }
       return chrome || cleared
     }
     app.terminate()

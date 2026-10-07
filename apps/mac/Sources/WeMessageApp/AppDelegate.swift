@@ -49,10 +49,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  /// Names the window-sized views under the content view too: with the
+  /// frost as the window's container background (S4a) the hosting group sits
+  /// below the content view, and run 37571671881's audit reported a
+  /// window-sized group with no description. Unnamed views only, a few
+  /// levels down, each sized like the window's content.
   private static func describe(_ window: NSWindow?) {
-    guard let window, !window.title.isEmpty else { return }
-    if window.contentView?.accessibilityLabel() != window.title {
-      window.contentView?.setAccessibilityLabel(window.title)
+    guard let window, !window.title.isEmpty, let root = window.contentView else { return }
+    var level: [NSView] = [root]
+    for _ in 0..<4 {
+      for view in level where view === root || view.frame.size == root.bounds.size {
+        let label = view.accessibilityLabel() ?? ""
+        if view === root ? label != window.title : label.isEmpty { view.setAccessibilityLabel(window.title) }
+      }
+      level = level.flatMap(\.subviews)
     }
   }
 
@@ -96,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if TestHooks.geometry.value != published { TestHooks.geometry.value = published }
     if window.accessibilityValue() as? String != published { window.setAccessibilityValue(published) }
     placeBackdrop(under: window, screen: screen)
+    Self.describe(window)
     return true
   }
 }

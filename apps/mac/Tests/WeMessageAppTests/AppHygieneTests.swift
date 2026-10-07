@@ -41,6 +41,10 @@ struct AppHygieneTests {
     "wemessage.thread.draft", "wemessage.thread.draft.approve", "wemessage.thread.draft.edit",
     "wemessage.thread.draft.hold", "wemessage.composer", "wemessage.composer.field", "wemessage.composer.send",
     "wemessage.composer.hold", "wemessage.composer.outbox",
+    // v2 S4e, board 08 (the per-specimen ids are prefixes: atlas.<slug>,
+    // bubble.reaction.<guid>.<n>, bubble.delivery.<guid>, bubble.draft.<id>,
+    // bubble.sms.<guid>, bubble.effect.<guid>, bubble.unsupported.<guid>).
+    "wemessage.atlas",
   ]
 
   static let nsApp = "NS" + "App"
@@ -311,9 +315,10 @@ struct AppHygieneTests {
 
   /// The D-UI questions ProvisionalUI.swift answers provisionally: S3's
   /// 1..6, S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21) and
-  /// S4c's 22..26 (choices the board 01 wireframe left open) and S4d's
-  /// 27..38 (choices board 02 left open, or the daemon cannot yet serve).
-  static let dUIKeys = (1...38).map { "D-UI-\($0)" }
+  /// S4c's 22..26 (choices the board 01 wireframe left open), S4d's
+  /// 27..38 (choices board 02 left open, or the daemon cannot yet serve)
+  /// and S4e's 39..42 (where board 08 and the plan disagree).
+  static let dUIKeys = (1...42).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -330,11 +335,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..38, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..42, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..38 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..42 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -342,7 +347,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...38), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...42), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -590,5 +595,84 @@ struct AppHygieneTests {
     #expect(placed.isEmpty, "Hold until is placed in \(placed.map(\.0))")
     let composer = try Repo.text(Self.appDir + "/Boards/Thread/ComposerView.swift")
     #expect(composer.contains(#".keyboardShortcut("z", modifiers: .command)"#))
+  }
+
+  // MARK: S4e
+
+  @Test("H-S4-4: no menu item and no key reach the specimen sheet; it opens only under the UI-test flag with board 08")
+  func specimenSheetUnreachable() throws {
+    let name = "Specimen" + "Sheet"
+    let atlas = Self.appDir + "/Boards/Atlas/"
+    let app = Self.appDir + "/ShellApp.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    var namedIn: [String] = []
+    for (path, text) in try Self.sources(Self.appDir) where try Self.count(#"\b"# + name + #"\b"#, in: text) > 0 {
+      namedIn.append(path)
+    }
+    #expect(namedIn.contains(app), "the window group never opens the sheet")
+    for path in namedIn {
+      #expect(path.hasPrefix(atlas) || path == app, "\(path) names the sheet")
+    }
+    // The sheet's own files hold no menu, command or key.
+    let menus = ["Command" + "Menu", ".com" + "mands", "Menu" + "Builder", ".keyboard" + "Shortcut", "Command" + "Group"]
+    let files = try Self.sources(Self.appDir + "/Boards/Atlas")
+    #expect(files.count >= 2)
+    for (path, text) in files {
+      for token in menus {
+        #expect(!text.contains(token), "\(path) contains \(token)")
+      }
+    }
+    // The app builds no menu that could name it, and the window group
+    // opens it only when the hooks built its content.
+    let appText = try Repo.text(app)
+    #expect(!appText.contains(".com" + "mands"), "the app declares commands")
+    #expect(appText.contains("if let specimens = TestHooks.specimens {"))
+    for (path, text) in try Self.sources(Self.appDir) where text.contains("Menu" + "Builder") {
+      #expect(!text.contains(name) && !text.contains("TestHooks.specimens"), "\(path) reaches the sheet")
+    }
+    // The content is built only under the flag, for board 08 only.
+    let hooksText = try Repo.text(hooks)
+    #expect(
+      hooksText.contains(#"specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08""#),
+      "the specimen content is not gated on the flag and board 08")
+    #expect(try Self.naming("TestHooks.specimens", under: Self.appDir) == [app])
+  }
+
+  @Test("H-S4-4b: no app source draws a typing indicator or a react affordance, which the UI tests require absent")
+  func noTypingNoReact() throws {
+    let typing = "wemessage." + "typing"
+    let react = "wemessage.bubble." + "react."
+    var swept = 0
+    for (path, text) in try Self.sources(Self.appDir) {
+      swept += 1
+      #expect(!text.contains(typing), "\(path) names the typing indicator")
+      #expect(!text.contains(react), "\(path) names a react affordance")
+    }
+    #expect(swept >= 20)
+    // The UI tests do name both, so their absence is asserted, not assumed.
+    let ui = try Self.sources(Self.uiTestsDir).map(\.1).joined(separator: "\n")
+    #expect(ui.contains(typing) && ui.contains(react))
+  }
+
+  @Test("H-S4-4c: AtlasPalette's triples equal Tokens' ink, layer1 and layer2, so the pixel probes compare against what the app paints")
+  func atlasPaletteMatchesTokens() throws {
+    let palette = try Repo.text(Self.uiTestsDir + "/Support/AtlasPalette.swift")
+    let tokens = try Repo.text(Self.appDir + "/Tokens.swift")
+    func triple(_ pattern: String, in text: String) throws -> [String] {
+      let regex = try NSRegularExpression(pattern: pattern)
+      let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+      guard matches.count == 1, let m = matches.first else { return ["matches: \(matches.count)"] }
+      return (1...3).compactMap { Range(m.range(at: $0), in: text).map { String(text[$0]) } }
+    }
+    let hex = #"(0x[0-9A-F]{2}), (0x[0-9A-F]{2}), (0x[0-9A-F]{2})"#
+    for side in ["Light", "Dark"] {
+      let after = tokens.components(separatedBy: "public enum " + side + " {").dropFirst().first ?? ""
+      let block = after.components(separatedBy: "public enum ").first ?? ""
+      for name in ["ink", "layer1", "layer2"] {
+        let fromTests = try triple(#"\b"# + name + side + #": RGB = \("# + hex + #"\)"#, in: palette)
+        let fromTokens = try triple(#"static let "# + name + #" = RGB\("# + hex + #"\)"#, in: block)
+        #expect(fromTests.count == 3 && fromTests == fromTokens, "\(name) \(side): \(fromTests) vs \(fromTokens)")
+      }
+    }
   }
 }

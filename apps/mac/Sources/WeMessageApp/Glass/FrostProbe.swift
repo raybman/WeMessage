@@ -50,13 +50,25 @@ public enum FrostProbe {
     /// the transcript is anchored to the bottom, so the space above a short
     /// thread is bare pane.
     case thread
+    /// Board 08's specimen sheet. Its two columns leave `atlasGutter` bare
+    /// from the title band down, so all three patches sit in the gutter,
+    /// one above the stripe patch and one below it.
+    case atlas
   }
+
+  /// Board 08: the bare gutter between the specimen sheet's two columns,
+  /// from the title band to the foot of the window. The sheet derives its
+  /// columns from it, so nothing it draws can cross a patch. It is centred
+  /// on the stripe patch.
+  public static let atlasGutter = Rect(
+    x: stripePatch.x - (68 - patchSide) / 2, y: 52, width: 68, height: .greatestFiniteMagnitude)
 
   /// Plain gradient near the top of the window, clear of every label.
   public static func gradientTop(windowWidth: Double, layout: Layout = .shell) -> Rect {
     switch layout {
     case .shell: Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
     case .thread: Rect(x: windowWidth - 140, y: 58, width: patchSide, height: patchSide)
+    case .atlas: Rect(x: stripePatch.x, y: 58, width: patchSide, height: patchSide)
     }
   }
 
@@ -65,6 +77,7 @@ public enum FrostProbe {
     switch layout {
     case .shell: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
     case .thread: Rect(x: 9, y: windowHeight - 120, width: patchSide, height: patchSide)
+    case .atlas: Rect(x: stripePatch.x, y: windowHeight - 120, width: patchSide, height: patchSide)
     }
   }
 }

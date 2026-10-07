@@ -146,6 +146,25 @@ equal):
   it while it counts
 - `wemessage.composer.hold`: reserved for Hold until; never placed while
   D-UI-17 is absent-with-reason
+- `wemessage.atlas`: board 08's specimen sheet, reachable only through
+  `WEMESSAGE_UI_BOARD=08` under the UI-test flag (no menu item, no key);
+  its label carries the pinned geometry, as the shell's does
+- `wemessage.atlas.<slug>`: one page of the sheet, 08.A..08.J (`anatomy`,
+  `text`, `reactions`, `media`, `voice`, `payloads`, `delivery`, `draft`,
+  `native`, `coverage`); the page dots in the title band (D-UI-42) are
+  buttons labelled `Specimen page 08.A` and so on
+- `wemessage.bubble.reaction.<guid>.<n>`: the n-th reaction chip someone
+  else left on a message (read only; nothing writes a reaction)
+- `wemessage.bubble.delivery.<guid>`: the delivery state inside an outbound
+  bubble; its label is the state and, for Not delivered, the cause
+- `wemessage.bubble.draft.<id>`: an agent draft specimen
+- `wemessage.bubble.sms.<guid>`: a message sent over SMS (D-UI-39: inset
+  rail and printed tag, never dashed, never green)
+- `wemessage.bubble.effect.<guid>`: a message sent with an effect
+- `wemessage.bubble.unsupported.<guid>`: the honest fallback for a type the
+  app cannot render
+- No typing indicator is ever drawn, so no identifier exists for one, and
+  no react affordance is placed on an iMessage bubble.
 
 ### Reading a run
 
@@ -154,7 +173,8 @@ artifact holds plain PNGs named by UUID; the export step's log prints
 `manifest.json`, which maps each file to its attachment name (`board-01-shell-light.png`,
 `board-01-shell-dark.png`, `board-01-shell-opaque-light.png`,
 `board-01-shell-opaque-dark.png`; since S4c `board-01-<state>-<appearance>.png`
-for the states `rich`, `empty`, `degraded` and `quiet`; and the accessibility
+for the states `rich`, `empty`, `degraded` and `quiet`; since S4e
+`board-08-<page>-<appearance>.png` for the ten specimen pages; and the accessibility
 audit's `audit-*` captures). The `frost evidence` step prints one `FROST|` line per snapshot
 with the measured stripe, gradient, pull and transmission.
 
@@ -178,4 +198,4 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..26 decisions.
+  provisional, pending the D-UI-1..42 decisions.

@@ -7,7 +7,11 @@ struct ShellApp: App {
 
   var body: some Scene {
     WindowGroup("WeMessage") {
-      ShellView()
+      if let specimens = TestHooks.specimens {
+        SpecimenSheet(content: specimens)
+      } else {
+        ShellView()
+      }
     }
     .defaultSize(width: ProvisionalUI.windowDefaultWidth, height: ProvisionalUI.windowDefaultHeight)
     .windowStyle(.hiddenTitleBar)

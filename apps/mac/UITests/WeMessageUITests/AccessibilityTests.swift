@@ -77,6 +77,27 @@ final class AccessibilityTests: XCTestCase {
     app.terminate()
   }
 
+  /// v2 S4e: the same audit over every page of board 08, the message
+  /// atlas, in one launch: each page is a click on its page dot.
+  @MainActor
+  func testBoard08PassesAccessibilityAudit() throws {
+    let app = UITestApp.make(appearance: "light", reduceTransparency: false, board: "08")
+    app.launch()
+    XCTAssertTrue(
+      app.descendants(matching: .any)[ID.atlas].waitForExistence(timeout: UITestApp.timeout), "the atlas never appeared")
+    for (index, slug) in Board08Tests.slugs.enumerated() {
+      let letter = String(UnicodeScalar(UInt8(65 + index)))
+      let dot = app.buttons.matching(NSPredicate(format: "label == %@", "Specimen page 08." + letter)).firstMatch
+      XCTAssertTrue(dot.waitForExistence(timeout: UITestApp.timeout), "08.\(letter): no page dot")
+      dot.click()
+      XCTAssertTrue(
+        app.descendants(matching: .any).matching(identifier: ID.atlasPagePrefix + slug).firstMatch
+          .waitForExistence(timeout: UITestApp.timeout), "08.\(letter): page \(slug) never drew")
+      try audit(app, window: "audit-board-08-\(slug)")
+    }
+    app.terminate()
+  }
+
   /// The two issues the audit raises on elements the app does not draw,
   /// observed on the ci-swift runner's Xcode 26.6 (17F113), run 37555284794:
   /// "Element has no description" on the TouchBar element the test runner

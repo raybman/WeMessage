@@ -50,6 +50,21 @@ enum ID {
   static let dayPrefix = "wemessage.thread.day."
   /// A held draft is this prefix and its draft id.
   static let heldPrefix = "wemessage.thread.held."
+  // v2 S4e, board 08: the specimen sheet and its specimens.
+  static let atlas = "wemessage.atlas"
+  /// A page of the sheet is this prefix and its section slug.
+  static let atlasPagePrefix = "wemessage.atlas."
+  static let reactionPrefix = "wemessage.bubble.reaction."
+  static let deliveryPrefix = "wemessage.bubble.delivery."
+  static let draftSpecimenPrefix = "wemessage.bubble.draft."
+  static let smsPrefix = "wemessage.bubble.sms."
+  static let effectPrefix = "wemessage.bubble.effect."
+  static let unsupportedPrefix = "wemessage.bubble.unsupported."
+  /// Never placed: no typing indicator is drawn either way (08.J). Tests
+  /// assert it is absent; the app never spells it.
+  static let typing = "wemessage.typing"
+  /// Never placed: no react affordance exists on any bubble (08.C).
+  static let reactAffordancePrefix = "wemessage.bubble.react."
 
   static let railTiles = [railAll, railIMessage, railWhatsApp, railLinkedIn, railEmail]
 }
@@ -66,12 +81,16 @@ enum UITestApp {
   ///
   /// `reduceTransparency` forces the app's copy of the Reduce Transparency
   /// display option ("1" on, "0" off); nil leaves the system's value.
-  static func make(appearance: String, reduceTransparency: Bool? = nil) -> XCUIApplication {
+  ///
+  /// `board` opens a board's specimen sheet (WEMESSAGE_UI_BOARD; "08" is
+  /// the message atlas) in place of the shell.
+  static func make(appearance: String, reduceTransparency: Bool? = nil, board: String? = nil) -> XCUIApplication {
     let env = ProcessInfo.processInfo.environment
     let app = XCUIApplication()
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     var launch: [String: String] = ["WEMESSAGE_UI_TEST": "1", "WEMESSAGE_UI_APPEARANCE": appearance]
     if let reduceTransparency { launch["WEMESSAGE_UI_REDUCE_TRANSPARENCY"] = reduceTransparency ? "1" : "0" }
+    if let board { launch["WEMESSAGE_UI_BOARD"] = board }
     for key in ["WEMESSAGE_DIR", "WEMESSAGE_PORT", "TZ"] {
       if let value = env[key], !value.isEmpty { launch[key] = value }
     }
@@ -92,11 +111,16 @@ enum UITestApp {
   /// value; the first that carries it wins.
   static func geometryText(_ app: XCUIApplication) -> (channel: String, raw: String)? {
     let shell = shellElement(app)
-    let candidates: [(String, String?)] = [
+    let atlas = app.descendants(matching: .any)[ID.atlas]
+    var candidates: [(String, String?)] = [
       ("shell.value", shell.value as? String),
       ("shell.label", shell.label),
       ("window.value", app.windows.firstMatch.value as? String),
     ]
+    // Board 08's sheet stands in for the shell and publishes the same way.
+    if atlas.exists {
+      candidates += [("atlas.value", atlas.value as? String), ("atlas.label", atlas.label)]
+    }
     for (channel, raw) in candidates {
       if let raw, raw.hasPrefix("frame=") { return (channel, raw) }
     }

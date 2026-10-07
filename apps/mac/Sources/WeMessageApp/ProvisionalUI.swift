@@ -1,10 +1,12 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..38 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..42 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
-// where board 02 left one open or the daemon cannot yet say what it draws). Every value below is the
+// where board 02 left one open or the daemon cannot yet say what it draws;
+// D-UI-39..42: the S4e build, where board 08 and the plan disagree or the
+// wireframe leaves a choice open). Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
 // live in this one file on purpose: when the decisions land, this file is
@@ -370,4 +372,43 @@ public enum ProvisionalUI {
     guard let ruleId else { return nil }
     return "Matched rule " + ruleId
   }
+
+  // D-UI-39: an SMS message in an iMessage chat (08.I). The plan says an
+  // inset rail plus a printed tag, never green and never dashed (dashed
+  // means not sent, and this message was sent); 08.I draws exactly that on
+  // a filled bubble. Board 02's SMS chat keeps D-UI-28; this is per message.
+  public enum SMSMessage: Sendable {
+    case insetRailAndTag
+  }
+  public static let smsMessage: SMSMessage = .insetRailAndTag
+  public static let smsMessageTag = "SMS · not iMessage · unencrypted"
+  public static let smsMessageNote = "History only. WeMessage did not send this and cannot."
+
+  // D-UI-40: emoji. An emoji-only message and every reaction chip draw the
+  // text presentation (U+FE0E appended), monochrome by construction: a
+  // colour glyph could carry the one colour the app never shows. The 2.6x
+  // scale is the plan's; whether colour emoji return in the theme pass is
+  // the open question.
+  public enum EmojiPresentation: Sendable {
+    case textMonochrome
+  }
+  public static let emojiPresentation: EmojiPresentation = .textMonochrome
+  public static let emojiOnlyScale: Double = 2.6
+
+  // D-UI-41: the inbound fill. Plan 1.4 says layer-2 solid; 08.A and board
+  // 02 draw paper with a 1 pt ink rule. Board 02 already ships the rule, so
+  // the atlas matches it until the decision lands.
+  public enum InboundFill: Sendable {
+    case layer1Outlined
+    case layer2Solid
+  }
+  public static let inboundFill: InboundFill = .layer1Outlined
+
+  // D-UI-42: the specimen sheet's page marker (08.A..08.J, one page each
+  // at the pinned window size). The wireframe is one long scroll and has no
+  // marker; the sheet pages, and marks the page it shows in the tint.
+  public enum AtlasPageMarker: Sendable {
+    case tintDots
+  }
+  public static let atlasPageMarker: AtlasPageMarker = .tintDots
 }

@@ -102,6 +102,27 @@ final class SnapshotTests: XCTestCase {
     XCTAssertLessThanOrEqual(bottom.x + bottom.width, 58, "the thread's bottom patch leaves the rail")
     XCTAssertLessThan(top.midY, FrostProbe.stripePatch.midY)
     XCTAssertLessThan(FrostProbe.stripePatch.midY, bottom.midY)
+
+    // v2 S4e: the atlas layout's patches read the same way, and all three
+    // sit in the specimen sheet's bare gutter, under the title band.
+    guard let atlasFlat = FrostEvidence.read(flat, window: window, layout: .atlas),
+      let atlasClear = FrostEvidence.read(clear, window: window, layout: .atlas),
+      let atlasFrost = FrostEvidence.read(blurred, window: window, layout: .atlas)
+    else { return XCTFail("the atlas layout's patches did not read") }
+    XCTAssertFalse(FrostEvidence.frostFailures(atlasFlat).isEmpty, "a flat fill passes as frost (atlas)")
+    XCTAssertTrue(
+      FrostEvidence.frostFailures(atlasClear).contains { $0.hasPrefix("stripe std") }, "unblurred stripes pass (atlas)")
+    XCTAssertEqual(FrostEvidence.frostFailures(atlasFrost), [], atlasFrost.line)
+    let gutter = FrostProbe.atlasGutter
+    let atlasTop = FrostProbe.gradientTop(windowWidth: window.width, layout: .atlas)
+    let atlasBottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height, layout: .atlas)
+    XCTAssertGreaterThanOrEqual(atlasTop.y, 52.5, "the atlas's top patch is under the title band")
+    for patch in [atlasTop, FrostProbe.stripePatch, atlasBottom] {
+      XCTAssertGreaterThanOrEqual(patch.x, gutter.x, "an atlas patch leaves the gutter: \(patch)")
+      XCTAssertLessThanOrEqual(patch.x + patch.width, gutter.x + gutter.width, "an atlas patch leaves the gutter: \(patch)")
+    }
+    XCTAssertLessThan(atlasTop.midY, FrostProbe.stripePatch.midY)
+    XCTAssertLessThan(FrostProbe.stripePatch.midY, atlasBottom.midY)
   }
 
   /// Non-vacuity of the sweep and of the tint count, on synthetic PNGs.

@@ -48,6 +48,23 @@ enum ShellID {
   static let dayPrefix = "wemessage.thread.day."
   /// A held agent draft is this prefix and the draft id.
   static let heldPrefix = "wemessage.thread.held."
+  // v2 S4e, board 08: the specimen sheet. Only WEMESSAGE_UI_BOARD=08 under
+  // the UI-test flag reaches it (H-S4-4).
+  static let atlas = "wemessage.atlas"
+  /// One page of the sheet is this prefix and its slug (08.A is "anatomy").
+  static let atlasPagePrefix = "wemessage.atlas."
+  /// A reaction chip is this prefix, the message guid, a dot and its index.
+  static let reactionPrefix = "wemessage.bubble.reaction."
+  /// The delivery state inside an outbound bubble: this prefix and its guid.
+  static let deliveryPrefix = "wemessage.bubble.delivery."
+  /// An agent draft specimen: this prefix and the draft id.
+  static let draftSpecimenPrefix = "wemessage.bubble.draft."
+  /// A message sent over SMS (D-UI-39): this prefix and its guid.
+  static let smsPrefix = "wemessage.bubble.sms."
+  /// A message sent with an effect: this prefix and its guid.
+  static let effectPrefix = "wemessage.bubble.effect."
+  /// The honest fallback for a type the app cannot render.
+  static let unsupportedPrefix = "wemessage.bubble.unsupported."
 
   static func rail(_ scope: ShellModel.Scope) -> String {
     switch scope {

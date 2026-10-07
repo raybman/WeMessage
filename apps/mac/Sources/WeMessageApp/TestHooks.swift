@@ -32,10 +32,16 @@ enum TestHooks {
   /// Transparency on without touching the runner's settings.
   static private(set) var accessibilityOverrides = AccessibilityMirror.Overrides()
 
+  /// Board 08's specimen sheet, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=08 only: the one way to reach it (H-S4-4). No menu
+  /// item and no key lead there.
+  static private(set) var specimens: SpecimenContent? = nil
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
     accessibilityOverrides = isUITest ? AccessibilityMirror.Overrides.parse(environment) : AccessibilityMirror.Overrides()
+    specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08" ? try? FixtureCatalogue.specimens() : nil
   }
 }
 

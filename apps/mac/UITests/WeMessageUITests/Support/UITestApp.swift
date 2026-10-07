@@ -49,11 +49,28 @@ enum UITestApp {
   // No snapshot directory: the ad hoc-signed runner is sandboxed and cannot
   // write under the job's temp dir. PNGs leave only as .keepAlways attachments.
 
+  /// Where the app's geometry string arrived, and the string. A SwiftUI
+  /// container's value is dropped on macOS (measured, run 37553425686), so
+  /// the app publishes on the shell's value and label and on the window's
+  /// value; the first that carries it wins.
+  static func geometryText(_ app: XCUIApplication) -> (channel: String, raw: String)? {
+    let shell = shellElement(app)
+    let candidates: [(String, String?)] = [
+      ("shell.value", shell.value as? String),
+      ("shell.label", shell.label),
+      ("window.value", app.windows.firstMatch.value as? String),
+    ]
+    for (channel, raw) in candidates {
+      if let raw, raw.hasPrefix("frame=") { return (channel, raw) }
+    }
+    return nil
+  }
+
   /// Parses "frame=WxH visible=WxH" from the shell root's accessibility
   /// value: the window size the APP computed and the visible frame the APP
   /// saw. Nil until the app has published it.
   static func shellGeometry(_ app: XCUIApplication) -> (frame: CGSize, visible: CGSize)? {
-    guard let raw = shellElement(app).value as? String else { return nil }
+    guard let raw = geometryText(app)?.raw else { return nil }
     var sizes: [String: CGSize] = [:]
     for field in raw.split(separator: " ") {
       let pair = field.split(separator: "=", maxSplits: 1)

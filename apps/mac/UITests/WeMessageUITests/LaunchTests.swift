@@ -44,6 +44,10 @@ final class LaunchTests: XCTestCase {
           + "window: \(window.frame)\n\(String(app.debugDescription.prefix(6000)))")
       return
     }
+    // Which channel delivered it, kept in the result bundle.
+    if let channel = UITestApp.geometryText(app)?.channel {
+      XCTContext.runActivity(named: "geometry published via \(channel)") { _ in }
+    }
     let f = window.frame.size
     XCTAssertEqual(f.width, g.frame.width, accuracy: 1, "window \(f) vs published \(g)")
     XCTAssertEqual(f.height, g.frame.height, accuracy: 1, "window \(f) vs published \(g)")

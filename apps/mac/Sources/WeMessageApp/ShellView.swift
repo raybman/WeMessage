@@ -27,7 +27,11 @@ struct ShellView: View {
     .ignoresSafeArea()
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("wemessage.shell")
+    // Under the UI-test flag only, the pinned geometry. Measured (run
+    // 37553425686): a SwiftUI container's value never reaches AX on macOS,
+    // so it rides the label too, and the delegate sets it on the window.
     .accessibilityValue(TestHooks.geometry.value ?? "")
+    .accessibilityLabel(Text(TestHooks.geometry.value ?? ""))
   }
 }
 

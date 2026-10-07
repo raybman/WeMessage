@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let published =
       "frame=\(Int(width.rounded()))x\(Int(height.rounded())) visible=\(Int(visible.width.rounded()))x\(Int(visible.height.rounded()))"
     if TestHooks.geometry.value != published { TestHooks.geometry.value = published }
+    if window.accessibilityValue() as? String != published { window.setAccessibilityValue(published) }
     return true
   }
 }

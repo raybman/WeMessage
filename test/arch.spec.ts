@@ -13717,8 +13717,28 @@ describe('v2 S1: the Swift tree', () => {
       'RESULTS=$RUNNER_TEMP/results.xcresult',
       'needs: [kit]',
       'if-no-files-found: warn',
+      // v2 S3b: the fake daemon starts before xcodebuild, in the background
+      // with its pipes redirected, and is stopped whatever happened.
+      'node tools/swift/fake-daemon.mjs --dir "$WEMESSAGE_DIR" --port "$WEMESSAGE_PORT"',
+      '--pid-file "$RUNNER_TEMP/fake-daemon.pid"',
+      '> "$RUNNER_TEMP/fake-daemon.ready" 2> "$RUNNER_TEMP/fake-daemon.err" &',
+      'http://127.0.0.1:$WEMESSAGE_PORT/v1/health',
+      'TEST_RUNNER_WEMESSAGE_DIR="$WEMESSAGE_DIR"',
+      'TEST_RUNNER_WEMESSAGE_PORT="$WEMESSAGE_PORT"',
+      'TEST_RUNNER_TZ=UTC',
+      'WEMESSAGE_DIR=$RUNNER_TEMP/wm',
+      'kill "$pid"',
     ])
       expect([needed, text.includes(needed)]).toEqual([needed, true]);
+    // The daemon is up before the tests and stopped after them.
+    const at = (s: string) => text.indexOf(s);
+    expect(at('node tools/swift/fake-daemon.mjs')).toBeLessThan(
+      at('xcodebuild test \\'),
+    );
+    expect(at('xcodebuild test \\')).toBeLessThan(at('kill "$pid"'));
+    expect(/- name: stop the fake daemon\n\s+if: always\(\)\n/.test(text)).toBe(
+      true,
+    );
     // P0-3: both jobs carry a limit, so a hung launch fails in minutes.
     expect(text.match(/^\s+timeout-minutes: \d+$/gm)?.length).toBe(2);
     expect(text.match(/^\s+runs-on: macos-26$/gm)?.length).toBe(2);
@@ -13800,7 +13820,7 @@ describe('v2 S1: the Swift tree', () => {
     expect(text).not.toMatch(/DEVELOPMENT_TEAM: "?[A-Z0-9]{10}"?/);
     for (const forbidden of ['codesign', 'keychain', 'secrets.'])
       expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
-    // The generated project lives under .build in CI and is never tracked.
+    // The project is generated beside this spec in CI and is never tracked.
     expect(trackedUnder(MAC).filter((f) => /\.xcodeproj\//.test(f))).toEqual(
       [],
     );
@@ -13828,6 +13848,65 @@ describe('v2 S1: the Swift tree', () => {
       'WEMESSAGE_SNAPSHOT_DIR',
     ])
       expect([banned, launch.includes(banned)]).toEqual([banned, false]);
+  });
+
+  it('the fake daemon imports node builtins only and serves the goldens from fixtures', () => {
+    // v2 S3b R-A12 (§4.10, P2-12): loopback is not an option, the bearer
+    // compare is constant-time, and every byte it answers is read from
+    // fixtures/contract at runtime, never written into the script.
+    const text = archRead('tools/swift/fake-daemon.mjs');
+    const specs = [
+      ...text.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm),
+    ].map((m) => m[1]);
+    expect(specs.length).toBeGreaterThanOrEqual(4);
+    expect(specs.filter((s) => !s?.startsWith('node:'))).toEqual([]);
+    expect(text).not.toMatch(/\bimport\s*\(/);
+    expect(text).not.toMatch(/\brequire\s*\(/);
+    for (const needed of [
+      "'wm_'",
+      'timingSafeEqual',
+      'fixtures/contract',
+      "'127.0.0.1'",
+      '0o600',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+    expect(text).not.toContain('--host');
+    expect(text).not.toContain("'localhost'");
+    expect(text).not.toContain("'0.0.0.0'");
+    for (const banned of [
+      '+1555',
+      '@example.com',
+      'process.env.WEMESSAGE_TOKEN',
+    ])
+      expect([banned, text.includes(banned)]).toEqual([banned, false]);
+    expect(text).not.toMatch(/wm_[0-9a-f]{64}/);
+    // No literal golden: every status other than the parse-time fallback
+    // comes from a fixture.
+    expect(text).not.toMatch(/"connectionState"|fully-connected/);
+    // The bearer is never compared with === or !==.
+    expect(text).not.toMatch(/(token|bearer|authorization)\w*\s*[!=]==/i);
+    expect(text).not.toMatch(/[!=]==\s*\w*(token|bearer)/i);
+  });
+
+  it('the UI tests copy the environment by name and never render the token', () => {
+    // v2 S3b (TN-env-forward): nothing reaches the app wholesale; the
+    // connection tests prove the line in words and look for any "wm_".
+    const support = archRead(`${UI_TESTS}/Support/UITestApp.swift`);
+    expect(support).not.toContain('launchEnvironment = ProcessInfo');
+    expect(support).toContain(
+      'for key in ["WEMESSAGE_DIR", "WEMESSAGE_PORT", "TZ"]',
+    );
+    const conn = archRead(`${UI_TESTS}/ConnectionTests.swift`);
+    for (const needed of [
+      'func testConnectsToFakeDaemon()',
+      'func testDaemonDownIsSaidPlainly()',
+      'ProvisionalUI.downLine',
+      'ProvisionalUI.connectedLine(state:',
+      'fully-connected',
+      '"47199"',
+      '"wm_"',
+    ])
+      expect([needed, conn.includes(needed)]).toEqual([needed, true]);
   });
 
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {

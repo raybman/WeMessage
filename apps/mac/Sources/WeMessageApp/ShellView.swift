@@ -1,4 +1,5 @@
 import SwiftUI
+import WeMessageKit
 
 /// The first window: channel rail, sidebar with the lens and the connection
 /// line, and the content pane. S3 keeps the whole view tree in this file on
@@ -7,7 +8,9 @@ import SwiftUI
 /// The accessibility identifiers below are the contract with the UI tests
 /// (AppHygieneTests H-A5 holds both sides to the same list).
 struct ShellView: View {
-  @State private var model = ShellModel()
+  /// The client reads WEMESSAGE_PORT and WEMESSAGE_DIR/daemon.token from the
+  /// environment, as the shipped app does (H10-H12).
+  @State private var model = ShellModel(client: GatewayClient())
   @Environment(\.colorScheme) private var scheme
 
   /// The title band the hidden title bar leaves to the traffic lights.
@@ -32,6 +35,7 @@ struct ShellView: View {
     // so it rides the label too, and the delegate sets it on the window.
     .accessibilityValue(TestHooks.geometry.value ?? "")
     .accessibilityLabel(Text(TestHooks.geometry.value ?? ""))
+    .task { model.start() }
   }
 }
 

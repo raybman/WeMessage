@@ -1,8 +1,10 @@
 import Foundation
 import Observation
+import WeMessageKit
 
-/// The shell's state. In S3a it is inert: the connection stays idle until
-/// S3b wires the kit's client to it.
+/// The shell's state. `start()` asks the daemon for its status once, then
+/// follows the kit's event stream; `apply` folds each status into the
+/// connection line. Nothing here sends anything.
 @MainActor
 @Observable
 public final class ShellModel {
@@ -45,11 +47,64 @@ public final class ShellModel {
     }
   }
 
-  public private(set) var connection: Connection = .idle
+  /// Settable inside the module so the reducer rows can start from any case.
+  public internal(set) var connection: Connection = .idle
   public var scope: Scope = .all
   public var lens: Lens = .recent
 
-  public init() {}
+  private let client: GatewayClient
+  private var task: Task<Void, Never>?
+
+  public init(client: GatewayClient) {
+    self.client = client
+  }
+
+  /// One task, however often it is called: read status, then follow the
+  /// event stream until `stop()` or the model goes away.
+  public func start() {
+    guard task == nil else { return }
+    let client = self.client
+    task = Task { [weak self] in
+      do {
+        let status = try await client.status()
+        self?.connection = .connected(state: status.connectionState)
+      } catch {
+        if Task.isCancelled { return }
+        self?.connection = .down(reason: "unreachable")
+      }
+      for await action in EventStream.live(client: client).run() {
+        guard let self else { return }
+        self.apply(action)
+      }
+    }
+  }
+
+  /// Cancels the task `start()` made; the stream ends with it.
+  public func stop() {
+    task?.cancel()
+    task = nil
+  }
+
+  /// The reducer (§4.3). "Reconnecting" is only ever said about a
+  /// connection the window actually had (P0-2): the kit's stream retries on
+  /// a refused connection, and from `.idle` or `.down` that retry is still
+  /// "not reachable", never "reconnecting".
+  public func apply(_ action: AppAction) {
+    guard case .status(let status) = action else { return }
+    switch status {
+    case .connected:
+      if case .connected = connection { return }
+      connection = .connected(state: "connected")
+    case .reconnecting(let attempt):
+      switch connection {
+      case .connected, .reconnecting: connection = .reconnecting(attempt: attempt)
+      case .idle: connection = .down(reason: "unreachable")
+      case .down: return
+      }
+    case .down(let reason):
+      connection = .down(reason: reason)
+    }
+  }
 
   /// The connection line, in words (D-UI-3, provisional).
   public var connectionLine: String {

@@ -21,6 +21,9 @@ struct AppHygieneTests {
     "Signal" + "Forwarder", "Daemon" + "Host", "Spa" + "wner", "posix" + "_spawn", "Pro" + "cess(", "NS" + "Task",
     "sig" + "nal(", "sig" + "action", "WEMESSAGE" + "_HOST", "POSIX_SPAWN" + "_SETPGROUP", "set" + "sid",
     "set" + "pgid", "dae" + "mon(", "responsibility" + "_spawnattrs", "Com" + "bine",
+    // v2 S3b (TN-env-forward): the UI tests copy WEMESSAGE_* keys by name;
+    // the runner's whole environment never reaches the app.
+    "launchEnvironment = " + "ProcessInfo",
   ]
 
   /// The accessibility identifiers that are the contract between the app and
@@ -104,6 +107,19 @@ struct AppHygieneTests {
     }
     // Non-vacuity: the regexes do find the palette where it is meant to be.
     #expect(inTokens >= 12, "colour literals found in Tokens.swift: \(inTokens)")
+  }
+
+  @Test("H-A3b: no system green, mint or teal anywhere under Sources/WeMessageApp, Tokens.swift included")
+  func noSystemGreen() throws {
+    let pattern = #"\.(green|mint|teal)\b"#
+    var swept = 0
+    for (path, text) in try Self.sources(Self.appDir) {
+      swept += 1
+      #expect(try Self.count(pattern, in: text) == 0, "\(path) names a system green")
+    }
+    #expect(swept >= 6)
+    // Non-vacuity: the pattern does see the spelling it bans.
+    #expect(try Self.count(pattern, in: "Circle().fill(." + "green)") == 1)
   }
 
   @Test("H-A4: no '@main' under apps/mac/Sources")

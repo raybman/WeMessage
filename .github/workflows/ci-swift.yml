@@ -131,7 +131,8 @@ jobs:
           echo "host smoke passed: 7, 0 after TERM, 78"
 
   # v2 S3: the CI UI lane. Generates an Xcode project from apps/mac/project.yml
-  # with a sha256-pinned XcodeGen, builds the app ad hoc signed and drives the
+  # with a sha256-pinned XcodeGen, builds the app ad hoc signed, starts the
+  # fake daemon from tools/swift against the S0 goldens, and drives the
   # window with XCUITest. Nothing here runs on a laptop; this job is the only
   # place the app is ever launched.
   ui:
@@ -177,6 +178,23 @@ jobs:
       # sits in apps/mac (measured, run 37550471920: generated one level down,
       # xcodebuild looked for Package.swift beside the project). Gitignored.
       - run: apps/mac/.build/xcodegen/bin/xcodegen generate --spec apps/mac/project.yml --project apps/mac --quiet
+      # v2 S3b: the S0 goldens over loopback. It mints a bearer into
+      # $WEMESSAGE_DIR/daemon.token, which is where the window's TokenSource
+      # looks; the bearer is never printed. Its output goes to files so the
+      # background process holds none of this step's pipes.
+      - name: start the fake daemon
+        run: |
+          set -eu
+          mkdir -p "$WEMESSAGE_DIR"
+          node tools/swift/fake-daemon.mjs --dir "$WEMESSAGE_DIR" --port "$WEMESSAGE_PORT" \
+            --pid-file "$RUNNER_TEMP/fake-daemon.pid" > "$RUNNER_TEMP/fake-daemon.ready" 2> "$RUNNER_TEMP/fake-daemon.err" &
+          for _ in $(seq 1 50); do
+            if curl -fsS "http://127.0.0.1:$WEMESSAGE_PORT/v1/health" > /dev/null 2>&1; then exit 0; fi
+            sleep 0.2
+          done
+          echo "fake daemon did not answer /v1/health" >&2
+          cat "$RUNNER_TEMP/fake-daemon.err" >&2 || true
+          exit 1
       # P1-1 decided (S3a.0, four green legs): ad hoc signing from project.yml,
       # NO signing override on this line. The runner is then sandboxed (E19), so
       # no test writes a file.
@@ -184,6 +202,9 @@ jobs:
         run: |
           set -eu
           set -o pipefail
+          TEST_RUNNER_WEMESSAGE_DIR="$WEMESSAGE_DIR" \
+          TEST_RUNNER_WEMESSAGE_PORT="$WEMESSAGE_PORT" \
+          TEST_RUNNER_TZ=UTC \
           xcodebuild test \
             -project apps/mac/WeMessage.xcodeproj \
             -scheme WeMessage \
@@ -194,6 +215,11 @@ jobs:
             -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 300 \
             | xcbeautify --renderer github-actions
+      - name: stop the fake daemon
+        if: always()
+        run: |
+          pid=$(cat "$RUNNER_TEMP/fake-daemon.pid" 2>/dev/null || true)
+          [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
       # P2-4: the result bundle uploads on every outcome, so a red run can be
       # read from its xcresult.
       - name: result bundle

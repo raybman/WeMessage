@@ -32,6 +32,12 @@ public final class ShellModel {
       case .email: "Email"
       }
     }
+
+    /// The digit cmd binds to this tile, in rail order: cmd-1 is ALL.
+    public var shortcutDigit: Character {
+      let index = Self.allCases.firstIndex(of: self) ?? 0
+      return Character(String(index + 1))
+    }
   }
 
   /// The sidebar's lens.

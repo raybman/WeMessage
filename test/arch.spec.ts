@@ -13909,6 +13909,35 @@ describe('v2 S1: the Swift tree', () => {
       expect([needed, conn.includes(needed)]).toEqual([needed, true]);
   });
 
+  it('the UI tests audit accessibility and ignore nothing', () => {
+    // v2 S3c R-A13 (§4.5, E12): the audit runs with a handler that keeps
+    // every issue. An ignore, if one is ever needed, names the Xcode build
+    // it was observed on (17F113) beside it.
+    const a11y = archRead(`${UI_TESTS}/AccessibilityTests.swift`);
+    for (const needed of [
+      'func testShellPassesAccessibilityAudit()',
+      'func testKeyboardPath()',
+      'performAccessibilityAudit',
+      'AppleKeyboardUIMode',
+      'XCTSkipUnless',
+      'modifierFlags: .command',
+    ])
+      expect([needed, a11y.includes(needed)]).toEqual([needed, true]);
+    const ui = trackedUnder(UI_TESTS)
+      .filter((f) => f.endsWith('.swift'))
+      .map((f) => archRead(f))
+      .join('\n');
+    expect(ui).not.toMatch(
+      /performAccessibilityAudit\([^)]*\)\s*\{[^}]*return true/,
+    );
+    const lines = ui.split('\n');
+    lines.forEach((line, i) => {
+      if (!/return true/.test(line)) return;
+      const near = lines.slice(Math.max(0, i - 3), i + 1).join('\n');
+      expect([line, near.includes('17F113')]).toEqual([line, true]);
+    });
+  });
+
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {
     const lock = JSON.parse(
       archRead('tools/swift/xcodegen.lock.json'),

@@ -59,6 +59,8 @@ private struct RailView: View {
       Color.clear.frame(height: ShellView.titleBand)
       ForEach(ShellModel.Scope.allCases, id: \.self) { scope in
         RailTile(scope: scope, selected: model.scope == scope, palette: palette) { model.scope = scope }
+          .accessibilityLabel(scope.fullLabel)
+          .keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)
           .accessibilityIdentifier(Self.identifier(scope))
       }
       Spacer(minLength: 0)
@@ -123,6 +125,7 @@ private struct SidebarView: View {
       }
       .pickerStyle(.segmented)
       .labelsHidden()
+      .accessibilityLabel("Lens")
       .accessibilityIdentifier("wemessage.lens")
       Spacer(minLength: 0)
       Text(ProvisionalUI.sidebarEmpty)

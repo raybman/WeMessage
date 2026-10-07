@@ -93,6 +93,12 @@ struct ShellModelTests {
     #expect(m.connection == .connected(state: "connected"))
   }
 
+  @Test("M12: the rail's scopes carry their full names and cmd-1..5 in rail order")
+  func scopeNamesAndDigits() {
+    #expect(ShellModel.Scope.allCases.map(\.fullLabel) == ["All channels", "iMessage", "WhatsApp", "LinkedIn", "Email"])
+    #expect(ShellModel.Scope.allCases.map(\.shortcutDigit) == ["1", "2", "3", "4", "5"])
+  }
+
   /// Polls the model until `done` or two seconds pass.
   static func settle(_ m: ShellModel, until done: (ShellModel.Connection) -> Bool) async {
     for _ in 0..<200 {

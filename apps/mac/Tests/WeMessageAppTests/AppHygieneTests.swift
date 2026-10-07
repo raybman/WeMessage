@@ -142,6 +142,43 @@ struct AppHygieneTests {
     }
   }
 
+  /// The text of `private struct <name>` up to the next top-level type.
+  static func block(_ name: String, in text: String) -> String {
+    guard let start = text.range(of: "private struct \(name)") else { return "" }
+    let rest = text[start.upperBound...]
+    let end = rest.range(of: "\nprivate struct ")?.lowerBound ?? rest.endIndex
+    return String(rest[..<end])
+  }
+
+  @Test("H-A5+: every rail tile is labelled with its full channel name and bound to cmd-<digit>; the lens is labelled")
+  func railAndLensLabels() throws {
+    let shell = try Repo.text(Self.appDir + "/ShellView.swift")
+    let rail = Self.block("RailView", in: shell)
+    #expect(rail.contains("ForEach(ShellModel.Scope.allCases"), "the rail is not one tile per scope")
+    #expect(rail.contains(".accessibilityLabel(scope.fullLabel)"), "a rail tile has no full-name label")
+    #expect(rail.contains(".keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)"))
+    let sidebar = Self.block("SidebarView", in: shell)
+    #expect(sidebar.contains(#".accessibilityLabel("Lens")"#), "the lens picker is unlabelled")
+  }
+
+  @Test("H-A2+: every keyboard shortcut under Sources/WeMessageApp carries the command modifier (no bare letters in S3)")
+  func shortcutsCarryCommand() throws {
+    // A call with one level of nested parentheses in its argument.
+    let call = try NSRegularExpression(pattern: #"keyboardShortcut\((?:[^()]|\([^()]*\))*\)"#)
+    var found = 0
+    for (path, text) in try Self.sources(Self.appDir) {
+      for match in call.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+        found += 1
+        let hit = Range(match.range, in: text).map { String(text[$0]) } ?? ""
+        #expect(hit.hasSuffix(", modifiers: .command)"), "\(path): \(hit)")
+      }
+    }
+    #expect(found >= 1, "no shortcut found: the rail binds cmd-1..5")
+    // Non-vacuity: the pattern sees a bare letter binding.
+    let planted = "Button {}.keyboardShortcut(\"r\")"
+    #expect(call.numberOfMatches(in: planted, range: NSRange(planted.startIndex..., in: planted)) == 1)
+  }
+
   @Test("H-A6: non-vacuity, the window target and the UI test bundle exist")
   func nonVacuity() throws {
     #expect(try Self.swiftFiles(under: Self.appDir).count >= 6)

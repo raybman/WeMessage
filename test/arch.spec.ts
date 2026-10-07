@@ -14523,7 +14523,7 @@ describe("v2 S2f: Eric's first-install runbook for the Swift build", () => {
     const text = archRead(RELEASING);
     const body = runbook();
     expect(body.length).toBeGreaterThan(0);
-    expect(text.includes('—')).toBe(false);
+    expect(text.includes(String.fromCharCode(0x2014))).toBe(false);
     for (const banned of [`kick${'start'}`, `launchctl ${'kill'}`])
       expect([banned, text.includes(banned)]).toEqual([banned, false]);
     // The CLI owns launchd; the runbook neither escalates nor drives Messages.

@@ -102,12 +102,8 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 
 ## Known seams
 
-- One executable, two faces. With `WeMessage --daemon` running from the
-  installed bundle, double-clicking the same `WeMessage.app` must open a
-  window, not activate the daemon process. LaunchServices treats a running
-  process with the same bundle identifier as already running in some paths.
-  CI cannot test this; it is a manual check on every release candidate until
-  the S2f runbook carries it.
+- One executable, two faces: the manual double-click check now lives in
+  `RELEASING.md`, "Double-click while the daemon runs".
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are

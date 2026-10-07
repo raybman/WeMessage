@@ -14357,3 +14357,180 @@ describe('v2 S2c.1: host hardening before a signed build gets Full Disk Access',
     expect(call).toMatch(/\bdefine:\s*\{/);
   });
 });
+
+describe("v2 S2f: Eric's first-install runbook for the Swift build", () => {
+  /**
+   * S2f has no production code. Its deliverable is a section of RELEASING.md
+   * that Eric runs by hand once a signed build exists, and these rows pin
+   * what that section must carry: the steps in order, the FDA experiment and
+   * what each outcome means for the doctor copy, the double-click check the
+   * S3 advisor review asked for (P2-11), the residual risks the S2 advisor
+   * review asked to be written down before any FDA grant, the post-run
+   * checklist, and an honest mark on everything that waits for S2e.
+   */
+  const RELEASING = 'RELEASING.md';
+  const MAC_README = 'apps/mac/README.md';
+  const DOCTOR = 'packages/daemon/src/doctor.ts';
+  const HEADING = '## First install on a Mac (the Swift build)';
+  const SUBS = [
+    '### Before you start',
+    '### The steps',
+    '### The FDA experiment',
+    '### Double-click while the daemon runs',
+    '### Residual risks to check before granting Full Disk Access',
+    '### Post-run checklist',
+    '### What S2 proves without this run',
+  ] as const;
+
+  /** The text from `heading` to the next heading of the same or higher level. */
+  const sectionOf = (text: string, heading: string): string => {
+    const at = text.indexOf(`${heading}\n`);
+    if (at < 0) return '';
+    const level = /^#+/.exec(heading)?.[0].length ?? 2;
+    const rest = text.slice(at + heading.length + 1);
+    const next = new RegExp(`^#{1,${String(level)}} `, 'm').exec(rest);
+    return rest.slice(0, next === null ? rest.length : next.index);
+  };
+  const runbook = (): string => sectionOf(archRead(RELEASING), HEADING);
+  const sub = (heading: string): string => sectionOf(runbook(), heading);
+  /** Top-level numbered items (`N. ` at column 0), in document order. */
+  const stepNumbers = (text: string): number[] =>
+    [...text.matchAll(/^(\d+)\. \S/gm)].map((m) => Number(m[1]));
+
+  it('RELEASING.md has the runbook section with its seven subsections, in order', () => {
+    const text = archRead(RELEASING);
+    expect(text.split(`${HEADING}\n`).length - 1).toBe(1);
+    const body = runbook();
+    const at = SUBS.map((h) => body.indexOf(`${h}\n`));
+    expect(SUBS.map((h, i) => [h, at[i]! >= 0])).toEqual(
+      SUBS.map((h) => [h, true]),
+    );
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(body).toMatch(/nothing in this section is automated/i);
+    // Non-vacuity: the section reader stops at the next same-level heading.
+    expect(sectionOf('## A\nx\n### B\ny\n## C\nz\n', '## A')).toBe(
+      'x\n### B\ny\n',
+    );
+  });
+
+  it('the steps are numbered from 1 without gaps and name each manual act', () => {
+    const steps = sub('### The steps');
+    const n = stepNumbers(steps);
+    expect(n.length).toBeGreaterThanOrEqual(10);
+    expect(n).toEqual(n.map((_, i) => i + 1));
+    for (const needed of [
+      'SHA256SUMS',
+      'DESIGNATED_REQUIREMENT.txt',
+      'Open Anyway',
+      'Full Disk Access',
+      'wemessaged service install',
+      'wemessaged service status --json',
+      'wemessage doctor',
+      'wemessage drafts create',
+      'wemessage drafts approve',
+      '+1555',
+      'Automation',
+      'restart the service',
+    ])
+      expect([needed, steps.includes(needed)]).toEqual([needed, true]);
+    // The first send is approved by hand, never the one-call send verb.
+    expect(steps).not.toMatch(/wemessage send\b/);
+  });
+
+  it('the runbook is honest that it waits for S2e while sign.sh does not exist', () => {
+    const body = runbook();
+    if (!existsSync(join(repoRoot, 'tools/swift/sign.sh'))) {
+      expect(sub('### Before you start')).toMatch(/Blocked on S2e/);
+      const tagged = sub('### The steps')
+        .split('\n')
+        .filter((l) => /^\d+\. /.test(l) && l.includes('[blocked on S2e]'));
+      expect(tagged.length).toBeGreaterThanOrEqual(1);
+    }
+    for (const needed of ['tools/swift/sign.sh', 'pack-swift', 'exit 2'])
+      expect([needed, body.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('the FDA experiment names its observation, both outcomes and the doctor copy it decides', () => {
+    const fda = sub('### The FDA experiment');
+    for (const needed of [
+      'Pass',
+      'Fail',
+      'FDA_EPERM',
+      DOCTOR,
+      'does not propagate to background items',
+      'L1',
+      'L2',
+      'tccutil reset SystemPolicyAllFiles sh.wemessage.gateway',
+    ])
+      expect([needed, fda.includes(needed)]).toEqual([needed, true]);
+    // The copy is revisited AFTER the result, not in S2f: the claim the
+    // experiment tests is still the shipped string.
+    expect(archRead(DOCTOR)).toContain(
+      'FDA does not propagate to background items',
+    );
+  });
+
+  it('the double-click row lives in the runbook, and apps/mac/README.md points at it (P2-11)', () => {
+    const dbl = sub('### Double-click while the daemon runs');
+    for (const needed of [
+      'WeMessage --daemon',
+      'double-click',
+      'window',
+      'LaunchServices',
+    ])
+      expect([needed, dbl.includes(needed)]).toEqual([needed, true]);
+    const seams = sectionOf(archRead(MAC_README), '## Known seams');
+    expect(seams).toContain('RELEASING.md');
+    expect(seams).toContain('Double-click while the daemon runs');
+    expect(seams).not.toContain('until the S2f runbook carries it');
+  });
+
+  it('the residual risks name the three escalation paths, PATH, and the two structural residues', () => {
+    const risks = sub(
+      '### Residual risks to check before granting Full Disk Access',
+    );
+    for (const needed of [
+      'NODE_OPTIONS',
+      'WEMESSAGE_HOST_NODE',
+      'bufferutil',
+      'PATH',
+      '1f32743',
+      'Contents/Resources/daemon/node',
+      'sh.wemessage.test.',
+      'EPERM',
+      'WEMESSAGE_DIR',
+      'openclaw',
+    ])
+      expect([needed, risks.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('the post-run checklist asks for what seeds the next slices', () => {
+    const post = sub('### Post-run checklist');
+    for (const needed of [
+      'macOS',
+      'L1',
+      'L2',
+      'service status --json',
+      'doctor --json',
+      'Automation',
+      'double-click',
+      'FDA_EPERM',
+    ])
+      expect([needed, post.includes(needed)]).toEqual([needed, true]);
+  });
+
+  it('RELEASING.md stays clean: no em dash, no killing verb, no bare table, no home path', () => {
+    const text = archRead(RELEASING);
+    const body = runbook();
+    expect(body.length).toBeGreaterThan(0);
+    expect(text.includes('—')).toBe(false);
+    for (const banned of [`kick${'start'}`, `launchctl ${'kill'}`])
+      expect([banned, text.includes(banned)]).toEqual([banned, false]);
+    // The CLI owns launchd; the runbook neither escalates nor drives Messages.
+    for (const banned of ['launchctl', 'sudo', 'osascript', 'chat.db'])
+      expect([banned, body.includes(banned)]).toEqual([banned, false]);
+    expect(/\/Users\//.test(text)).toBe(false);
+    // Every table is fenced: no markdown pipe table anywhere in the file.
+    expect(text.split('\n').filter((l) => /^\s*\|/.test(l))).toEqual([]);
+  });
+});

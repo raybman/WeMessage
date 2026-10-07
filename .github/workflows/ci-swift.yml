@@ -171,10 +171,12 @@ jobs:
       - name: Full Keyboard Access on, so Tab reaches buttons and the lens picker
         run: defaults write -g AppleKeyboardUIMode -int 2
       - run: sh tools/swift/xcodegen-fetch.sh --out apps/mac/.build/xcodegen
-      # E21 (measured, spike run 37545219027): xcodegen does not create the
-      # --project parent and fails at "Writing project" without it.
-      - run: mkdir -p apps/mac/.build/xcodeproj
-      - run: apps/mac/.build/xcodegen/bin/xcodegen generate --spec apps/mac/project.yml --project apps/mac/.build/xcodeproj --quiet
+      # The project is generated beside its spec, never under .build: XcodeGen
+      # 2.46.0 writes a local package's `path` verbatim as the .xcodeproj's
+      # relative path, so `path: .` only names apps/mac when the .xcodeproj
+      # sits in apps/mac (measured, run 37550471920: generated one level down,
+      # xcodebuild looked for Package.swift beside the project). Gitignored.
+      - run: apps/mac/.build/xcodegen/bin/xcodegen generate --spec apps/mac/project.yml --project apps/mac --quiet
       # P1-1 decided (S3a.0, four green legs): ad hoc signing from project.yml,
       # NO signing override on this line. The runner is then sandboxed (E19), so
       # no test writes a file.
@@ -183,7 +185,7 @@ jobs:
           set -eu
           set -o pipefail
           xcodebuild test \
-            -project apps/mac/.build/xcodeproj/WeMessage.xcodeproj \
+            -project apps/mac/WeMessage.xcodeproj \
             -scheme WeMessage \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$DERIVED" \

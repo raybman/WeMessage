@@ -48,6 +48,8 @@ dist-pack-next/
 # package has no dependencies, so there is no Package.resolved to keep either.
 /apps/mac/.build/
 /apps/mac/.swiftpm/
+# v2 S3: the CI UI lane generates this from apps/mac/project.yml; never tracked.
+/apps/mac/WeMessage.xcodeproj/
 
 # v2 S2d: the Swift packaging lane. dist-app holds the assembled, unsigned
 # WeMessage.app; dist-pack and dist-pack-2 are the zips of two packs the S2e

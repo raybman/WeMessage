@@ -13731,10 +13731,18 @@ describe('v2 S1: the Swift tree', () => {
       .filter((l) => l.includes('runner.temp') && !l.trim().startsWith('#'));
     expect(temps.length).toBeGreaterThanOrEqual(1);
     expect(temps.filter((l) => !/^\s+path:/.test(l))).toEqual([]);
-    // E21: xcodegen does not create its --project parent.
-    const mkdir = text.indexOf('mkdir -p apps/mac/.build/xcodeproj');
-    expect(mkdir).toBeGreaterThan(0);
-    expect(mkdir).toBeLessThan(text.indexOf('xcodegen generate'));
+    // XcodeGen writes a local package's path verbatim relative to the
+    // .xcodeproj, so the project is generated beside its spec (run
+    // 37550471920 measured the failure from .build/xcodeproj), and that
+    // generated project is ignored, never tracked.
+    expect(text).toContain(
+      'xcodegen generate --spec apps/mac/project.yml --project apps/mac --quiet',
+    );
+    expect(text).toContain('-project apps/mac/WeMessage.xcodeproj ');
+    expect(text).not.toContain('.build/xcodeproj');
+    expect(archRead('.gitignore').split('\n')).toContain(
+      '/apps/mac/WeMessage.xcodeproj/',
+    );
     // D3: bare launch opens a window now; the kit job never runs it. (The
     // stub's own "exits 0 on it" comments in checks 1-3 stay as S2c wrote them.)
     expect(text).not.toContain('usage line');

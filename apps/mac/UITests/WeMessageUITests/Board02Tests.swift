@@ -100,11 +100,11 @@ final class Board02Tests: XCTestCase {
     app.typeText("on my way")
     app.typeKey(.return, modifierFlags: .command)
     XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "sending: no countdown")
-    try await assertSends(0, "inside the 4 s window")
+    try await Self.assertSends(0, "inside the 4 s window")
     shoot("sending")
     XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox) == "parked" }, "parked: \(value(app, ID.composerOutbox))")
     shoot("parked")
-    try await assertSends(1, "after the window")
+    try await Self.assertSends(1, "after the window")
 
     // kill: back on Priya with text in the field, then the switch goes on.
     // Send, the draft's verbs and Hold until are all absent; the text stays.
@@ -123,7 +123,7 @@ final class Board02Tests: XCTestCase {
     shoot("kill")
 
     print("BOARD02| \(appearance) states=7 seconds=\(Int(Date().timeIntervalSince(started)))")
-    try await assertSends(1, "at the end of the board")
+    try await Self.assertSends(1, "at the end of the board")
   }
 
   // MARK: The composer's teeth
@@ -168,20 +168,20 @@ final class Board02Tests: XCTestCase {
     app.typeText("take this back")
     app.typeKey(.return, modifierFlags: .command)
     XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "no countdown after cmd-Return")
-    try await assertSends(0, "inside the window")
+    try await Self.assertSends(0, "inside the window")
     app.typeKey("z", modifierFlags: .command)
     XCTAssertTrue(waitUntil { !self.element(app, ID.composerOutbox).exists }, "cmd-Z left \(value(app, ID.composerOutbox))")
     XCTAssertTrue(fieldText(app).contains("take this back"), "cmd-Z did not return the text: \(fieldText(app))")
     try await Task.sleep(for: .seconds(6))
-    try await assertSends(0, "after cmd-Z took it back")
+    try await Self.assertSends(0, "after cmd-Z took it back")
 
     // The field holds the restored text; send it and leave it alone.
     composerField(app).click()
     app.typeKey(.return, modifierFlags: .command)
     XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "no second countdown")
-    try await assertSends(0, "inside the second window")
+    try await Self.assertSends(0, "inside the second window")
     XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox) == "parked" }, "not parked: \(value(app, ID.composerOutbox))")
-    try await assertSends(1, "after the second window")
+    try await Self.assertSends(1, "after the second window")
   }
 
   /// An agent draft never has Hold until beside it (02.J, D-UI-17): its
@@ -225,7 +225,7 @@ final class Board02Tests: XCTestCase {
   }
 
   /// The journal's POST /v1/send count is `count`, each one parked.
-  private func assertSends(_ count: Int, _ when: String, file: StaticString = #filePath, line: UInt = #line) async throws {
+  private static func assertSends(_ count: Int, _ when: String, file: StaticString = #filePath, line: UInt = #line) async throws {
     let sends = try await FakeDaemon.journal().requests.filter { $0.method == "POST" && $0.path == "/v1/send" }
     XCTAssertEqual(sends.count, count, "\(when): \(sends)", file: file, line: line)
     XCTAssertTrue(sends.allSatisfy { $0.status == 409 }, "\(when): a send was not parked: \(sends)", file: file, line: line)

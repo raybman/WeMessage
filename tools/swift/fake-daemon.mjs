@@ -20,6 +20,11 @@
 //   GET  /v1/_journal            every request the app made since the reset
 // They carry no bearer (the UI test runner is sandboxed and cannot read the
 // token file); they answer only a 127.0.0.1 peer, and are never journaled.
+//
+// v2 S4f: with --control, POST /v1/toggles/kill-switch {"on": bool} is served
+// (bearer and journal as any app route) and flips the kill switch in status
+// and settings until the next scenario switch or reset. Without --control it
+// stays parked (409), as S3 pinned it.
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -72,6 +77,8 @@ const CONTROL_PREFIX = '/v1/_';
 const CONTROL_SCENARIO = 'POST /v1/_scenario';
 const CONTROL_RESET = 'POST /v1/_reset';
 const CONTROL_JOURNAL = 'GET /v1/_journal';
+/** v2 S4f: served (only with --control) so the kill banner can disengage. */
+const KILL_TOGGLE = 'POST /v1/toggles/kill-switch';
 
 /** The draft state machine the queue routes walk: action -> [from, to]. */
 const TRANSITIONS = {
@@ -254,9 +261,21 @@ function answer(golden) {
   return { status: golden.status, headers: JSON_HEADERS, body: golden.body };
 }
 
-/** The state a fresh daemon holds; `control` is fixed for its life. */
+/**
+ * The state a fresh daemon holds; `control` is fixed for its life.
+ * `killSwitch` is null until the kill toggle flips it (v2 S4f).
+ * @returns {{ control: boolean, scenario: string, drafts: Record<string, any>,
+ *   journal: Array<{ method: string, path: string, query: string, status: number }>,
+ *   killSwitch: boolean | null }}
+ */
 export function initialState({ control = false } = {}) {
-  return { control, scenario: DEFAULT_SCENARIO, drafts: {}, journal: [] };
+  return {
+    control,
+    scenario: DEFAULT_SCENARIO,
+    drafts: {},
+    journal: [],
+    killSwitch: null,
+  };
 }
 
 /** [name, its parent, ...]; "default" is the empty chain. Throws on a loop or a missing parent. */
@@ -416,7 +435,59 @@ function control(goldens, state, key, rawBody) {
       scenario: name,
       summary: goldens.scenarios.get(name)?.summary ?? 'the S0 goldens alone',
     },
-    next: { ...state, scenario: name, drafts: {} },
+    next: { ...state, scenario: name, drafts: {}, killSwitch: null },
+  };
+}
+
+/** GET /v1/status and GET /v1/settings with a flipped kill switch laid over. */
+function withKill(goldens, state, key) {
+  const base = resolve(goldens, state, key);
+  const on = state.killSwitch;
+  if (on === null || on === undefined || base?.status !== 200) return base;
+  if (key === 'GET /v1/status') {
+    const s0 = goldens.responses.get(key)?.body?.armed;
+    const armed = on
+      ? { armed: false, until: null, reason: 'kill-switch' }
+      : base.body.armed?.reason === 'kill-switch'
+        ? s0
+        : base.body.armed;
+    return { ...base, body: { ...base.body, killSwitch: on, armed } };
+  }
+  const settings = base.body.settings ?? {};
+  const entry = settings['send.killSwitch'];
+  if (!entry) return base;
+  return {
+    ...base,
+    body: {
+      ...base.body,
+      settings: { ...settings, 'send.killSwitch': { ...entry, value: on } },
+    },
+  };
+}
+
+/** POST /v1/toggles/kill-switch {"on": bool}, only with --control. */
+function toggleKill(goldens, state, rawBody) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(rawBody ?? ''));
+  } catch {
+    parsed = null;
+  }
+  const on = parsed && typeof parsed === 'object' ? parsed.on : undefined;
+  if (typeof on !== 'boolean')
+    return controlError('invalid-body', 'want a JSON body {"on": boolean}');
+  const version = on ? 0 : 1;
+  return {
+    status: 200,
+    headers: JSON_HEADERS,
+    body: {
+      key: 'send.killSwitch',
+      on,
+      version,
+      cancelled: [],
+      circuitCleared: false,
+    },
+    next: { ...state, killSwitch: on },
   };
 }
 
@@ -470,6 +541,12 @@ function dispatch(req, token, goldens, state, key, query) {
       frames: replay(goldens, state, req.lastEventId),
     };
   }
+  if (
+    key === KILL_TOGGLE &&
+    state.control &&
+    LOOPBACK_PEERS.has(req.remote ?? '')
+  )
+    return toggleKill(goldens, state, req.body);
   if (PARKED.test(key)) return answer(goldens.errors.parked);
 
   const messages = MESSAGES.exec(key);
@@ -495,6 +572,8 @@ function dispatch(req, token, goldens, state, key, query) {
     return next ? { ...out, next } : out;
   }
   if (key === 'GET /v1/drafts') return listDrafts(goldens, state, query);
+  if (key === 'GET /v1/status' || key === 'GET /v1/settings')
+    return answer(withKill(goldens, state, key));
   return answer(resolve(goldens, state, key));
 }
 

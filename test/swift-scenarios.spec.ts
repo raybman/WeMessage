@@ -1133,3 +1133,78 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
     }
   });
 });
+
+describe('v2 S4f SC13: the kill switch toggle, only with --control', () => {
+  const toggle = (state: State, on: unknown, remote = LOOP) =>
+    step(state, {
+      method: 'POST',
+      path: '/v1/toggles/kill-switch',
+      body: JSON.stringify({ on }),
+      remote,
+    });
+  const killOf = (state: State) => ({
+    status: body(step(state, { method: 'GET', path: '/v1/status' }).out),
+    setting: (
+      body(step(state, { method: 'GET', path: '/v1/settings' }).out)
+        .settings as Record<string, { value: Json }>
+    )['send.killSwitch']?.value,
+  });
+
+  it('without --control it stays parked (409), and nothing flips', () => {
+    const state = initialState();
+    const { out, state: next } = toggle(state, false);
+    expect(out.status).toBe(409);
+    expect(out.body).toEqual(
+      readJson<Golden>(join(contract, 'errors/409.parked.json')).body,
+    );
+    expect(next.killSwitch).toBeNull();
+  });
+  it('a non-loopback peer is parked too', () => {
+    const out = toggle(switchTo('kill'), false, '10.0.0.9').out;
+    expect(out.status).toBe(409);
+  });
+  it('kill, then disengage: status, armed and settings follow; journaled', () => {
+    let state = switchTo('kill');
+    expect(killOf(state).status.killSwitch).toBe(true);
+    const off = toggle(state, false);
+    expect(off.out.status).toBe(200);
+    expect(off.out.body).toEqual(
+      readJson<Golden>(
+        join(contract, 'responses/toggles.killswitch.off.json'),
+      ).body,
+    );
+    state = off.state;
+    const k = killOf(state);
+    expect(k.status.killSwitch).toBe(false);
+    expect(k.status.armed).toEqual(
+      readJson<{ body: { armed: Json } }>(join(contract, 'responses/status.json'))
+        .body.armed,
+    );
+    expect(k.setting).toBe(false);
+    expect(
+      state.journal.map((r) => `${r.method} ${r.path} ${String(r.status)}`),
+    ).toContain('POST /v1/toggles/kill-switch 200');
+  });
+  it('engaging from rich mirrors the kill scenario status', () => {
+    const on = toggle(switchTo('rich'), true);
+    expect(on.out.body).toEqual(
+      readJson<Golden>(join(contract, 'responses/toggles.killswitch.json'))
+        .body,
+    );
+    const k = killOf(on.state);
+    const killStatus = readJson<{ body: Record<string, Json> }>(
+      join(scenariosDir, 'kill/responses/status.json'),
+    ).body;
+    expect(k.status).toEqual(killStatus);
+    expect(k.setting).toBe(true);
+  });
+  it('a scenario switch or reset drops the flip; a bad body is 400', () => {
+    const off = toggle(switchTo('kill'), false).state;
+    expect(killOf(switchTo('kill', off)).status.killSwitch).toBe(true);
+    const reset = step(off, { method: 'POST', path: '/v1/_reset' }).state;
+    expect(reset).toEqual(initialState({ control: true }));
+    const bad = toggle(switchTo('kill'), 'yes');
+    expect(bad.out.status).toBe(400);
+    expect(bad.state.killSwitch).toBeNull();
+  });
+});

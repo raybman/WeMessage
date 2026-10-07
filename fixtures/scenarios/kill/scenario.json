@@ -1,0 +1,4 @@
+{
+  "summary": "The kill switch is on: status says so, the arming state is off for that reason, the setting reads true, and the stream announces the toggle.",
+  "extends": "rich"
+}

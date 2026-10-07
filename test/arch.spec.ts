@@ -13721,6 +13721,9 @@ describe('v2 S1: the Swift tree', () => {
       // with its pipes redirected, and is stopped whatever happened.
       'node tools/swift/fake-daemon.mjs --dir "$WEMESSAGE_DIR" --port "$WEMESSAGE_PORT"',
       '--pid-file "$RUNNER_TEMP/fake-daemon.pid"',
+      // v2 S4b (advisor item 3): one port, the same start line, plus the
+      // loopback control routes the UI tests reset and read the journal on.
+      '--pid-file "$RUNNER_TEMP/fake-daemon.pid" --control >',
       '> "$RUNNER_TEMP/fake-daemon.ready" 2> "$RUNNER_TEMP/fake-daemon.err" &',
       'http://127.0.0.1:$WEMESSAGE_PORT/v1/health',
       'TEST_RUNNER_WEMESSAGE_DIR="$WEMESSAGE_DIR"',
@@ -13897,6 +13900,12 @@ describe('v2 S1: the Swift tree', () => {
       'fixtures/contract',
       "'127.0.0.1'",
       '0o600',
+      // v2 S4b: scenarios are read from fixtures too, and the control
+      // routes exist only behind --control and a loopback peer.
+      'fixtures/scenarios',
+      "'--control'",
+      'LOOPBACK_PEERS.has(',
+      '!state.control',
     ])
       expect([needed, text.includes(needed)]).toEqual([needed, true]);
     expect(text).not.toContain('--host');
@@ -13915,6 +13924,65 @@ describe('v2 S1: the Swift tree', () => {
     // The bearer is never compared with === or !==.
     expect(text).not.toMatch(/(token|bearer|authorization)\w*\s*[!=]==/i);
     expect(text).not.toMatch(/[!=]==\s*\w*(token|bearer)/i);
+  });
+
+  it('the fake daemon scenarios are synthetic data only', () => {
+    // v2 S4b: fixtures/scenarios overlays the S0 goldens. Phones are +1555,
+    // emails are example.com, and nothing in it is shaped like a bearer.
+    // test/swift-scenarios.spec.ts validates the shapes; this row guards
+    // the tracked bytes.
+    const files = trackedUnder('fixtures/scenarios');
+    expect(files.length).toBeGreaterThanOrEqual(30);
+    let phones = 0;
+    for (const file of files) {
+      const text = archRead(file);
+      expect([file, /\u2014/.test(text)]).toEqual([file, false]);
+      for (const n of text.match(/\+1\d{10}/g) ?? [])
+        expect([file, n.startsWith('+1555')]).toEqual([file, true]);
+      phones += (text.match(/\+1555\d{7}/g) ?? []).length;
+      for (const e of text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g) ?? [])
+        expect([file, e.endsWith('@example.com')]).toEqual([file, true]);
+      expect([file, /wm_[0-9a-f]{8}/.test(text)]).toEqual([file, false]);
+      expect([file, publicStringOffenders(text)]).toEqual([file, []]);
+    }
+    expect(phones).toBeGreaterThan(20);
+  });
+
+  it('every UI test class resets the fake daemon in setUp', () => {
+    // v2 S4b (advisor item 3): the control routes are one daemon shared by
+    // every class, so each starts from the S0 goldens and an empty journal.
+    const classes = trackedUnder(UI_TESTS).filter(
+      (f) =>
+        f.endsWith('.swift') &&
+        !f.includes('/Support/') &&
+        archRead(f).includes(': XCTestCase {'),
+    );
+    expect(classes.length).toBeGreaterThanOrEqual(5);
+    expect(classes).toContain(`${UI_TESTS}/FakeDaemonControlTests.swift`);
+    for (const f of classes) {
+      const text = archRead(f);
+      expect([f, text.includes('override func setUp() async throws')]).toEqual([
+        f,
+        true,
+      ]);
+      expect([f, text.includes('try await FakeDaemon.reset()')]).toEqual([
+        f,
+        true,
+      ]);
+    }
+    const helper = archRead(`${UI_TESTS}/Support/FakeDaemon.swift`);
+    for (const needed of [
+      '"/v1/_reset"',
+      '"/v1/_scenario"',
+      '"/v1/_journal"',
+      'http://127.0.0.1:',
+      'func assertNoSend(',
+      '"/v1/send"',
+    ])
+      expect([needed, helper.includes(needed)]).toEqual([needed, true]);
+    const proof = archRead(`${UI_TESTS}/FakeDaemonControlTests.swift`);
+    expect(proof).toContain('FakeDaemon.scenario(');
+    expect(proof).toContain('FakeDaemon.assertNoSend()');
   });
 
   it('the UI tests copy the environment by name and never render the token', () => {

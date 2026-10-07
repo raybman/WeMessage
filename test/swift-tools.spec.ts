@@ -48,16 +48,17 @@ describe('v2 S3b F1: parseArgs', () => {
         ['--dir', '/x/wm', '--port', '47191', '--pid-file', '/x/p'],
         {},
       ),
-    ).toEqual({ dir: '/x/wm', port: 47191, pidFile: '/x/p' });
+    ).toEqual({ dir: '/x/wm', port: 47191, pidFile: '/x/p', control: false });
   });
   it('falls back to WEMESSAGE_DIR and WEMESSAGE_PORT, then 47100', () => {
     expect(
       parseArgs([], { WEMESSAGE_DIR: '/e/wm', WEMESSAGE_PORT: '47192' }),
-    ).toEqual({ dir: '/e/wm', port: 47192, pidFile: null });
+    ).toEqual({ dir: '/e/wm', port: 47192, pidFile: null, control: false });
     expect(parseArgs([], { WEMESSAGE_DIR: '/e/wm' })).toEqual({
       dir: '/e/wm',
       port: 47100,
       pidFile: null,
+      control: false,
     });
   });
   it('allows port 0 (the OS picks)', () => {

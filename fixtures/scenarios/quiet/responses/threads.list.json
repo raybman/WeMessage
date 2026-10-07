@@ -1,0 +1,10 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [],
+    "nextCursor": null,
+    "total": 0,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

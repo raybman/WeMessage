@@ -1,0 +1,83 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "chatGuid": "iMessage;-;+15550100001",
+        "channel": "imessage",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "lastLine": "running ten late, save me a seat",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:58:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;+;chat5550100103",
+        "channel": "imessage",
+        "title": "Saturday hike",
+        "isGroup": true,
+        "lastLine": "I'll bring the trail mix",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:40:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;-;+15550100002",
+        "channel": "imessage",
+        "title": "Daniel Reyes",
+        "isGroup": false,
+        "lastLine": null,
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T10:15:00.000Z"
+      },
+      {
+        "chatGuid": "SMS;-;+15550100004",
+        "channel": "imessage",
+        "title": "Priya Natarajan",
+        "isGroup": false,
+        "lastLine": "can you call me back after 3?",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T09:05:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;-;sam.whitfield@example.com",
+        "channel": "imessage",
+        "title": "Sam Whitfield",
+        "isGroup": false,
+        "lastLine": "sent the slides",
+        "lastFromMe": true,
+        "lastAt": "2026-08-31T18:20:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;+;chat5550100104",
+        "channel": "imessage",
+        "title": "Flat 4B",
+        "isGroup": true,
+        "lastLine": "rent split is in the sheet",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T08:00:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;-;+15550100005",
+        "channel": "imessage",
+        "title": "Lena Brandt",
+        "isGroup": false,
+        "lastLine": null,
+        "lastFromMe": false,
+        "lastAt": "2026-08-30T09:12:00.000Z"
+      },
+      {
+        "chatGuid": "iMessage;-;+15550100007",
+        "channel": "imessage",
+        "title": "+15550100007",
+        "isGroup": false,
+        "lastLine": "hi, is this still the number for the bike?",
+        "lastFromMe": false,
+        "lastAt": "2026-08-29T16:45:00.000Z"
+      }
+    ],
+    "nextCursor": null,
+    "total": 8,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

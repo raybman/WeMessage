@@ -1,0 +1,4 @@
+id: 3
+event: message.received
+data: {"event":"message.received","message":{"guid":"msg-0901","chatGuid":"iMessage;-;+15550100002","handle":"+15550100002","displayName":"Daniel Reyes","isGroup":false,"service":"imessage","receivedAt":"2026-09-01T12:01:05.000Z","content":{"untrusted":true,"text":null,"attachments":[{"mimeType":"image/jpeg","bytes":2483120},{"mimeType":"image/heic","bytes":1874402}]}}}
+

@@ -1,0 +1,38 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "SMS;-;+15550100004",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0015",
+        "from": "them",
+        "kind": "text",
+        "text": "landed, grabbing my bag",
+        "at": "2026-09-01T08:30:00.000Z",
+        "handle": "+15550100004",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0016",
+        "from": "me",
+        "kind": "text",
+        "text": "outside door 4",
+        "at": "2026-09-01T08:32:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0017",
+        "from": "them",
+        "kind": "text",
+        "text": "can you call me back after 3?",
+        "at": "2026-09-01T09:05:00.000Z",
+        "handle": "+15550100004",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

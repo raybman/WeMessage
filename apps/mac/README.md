@@ -31,8 +31,9 @@ window is launched. It runs on a GitHub macOS runner on every push:
 3. Fetches the pinned XcodeGen (`tools/swift/xcodegen-fetch.sh`) and
    generates `apps/mac/WeMessage.xcodeproj` from `apps/mac/project.yml`
    (gitignored, never committed).
-4. Starts the fake daemon (`tools/swift/fake-daemon.mjs`), which serves the
-   S0 contract goldens over loopback and writes a bearer to the data dir.
+4. Starts the fake daemon (`tools/swift/fake-daemon.mjs --control`), which
+   serves the S0 contract goldens (or a scenario from `fixtures/scenarios`)
+   over loopback and writes a bearer to the data dir.
 5. Runs `xcodebuild test` with test timeouts on. The app is ad hoc signed
    from `project.yml`; the test runner is therefore sandboxed and no test
    writes a file.
@@ -56,7 +57,14 @@ SnapshotTests       light and dark snapshots, each with the frost on and with
                     traffic lights, with the tint present, and carrying the frost
                     evidence (a real blur, or plain layer0); plus the sweep's and
                     the evidence's own probes
+FakeDaemonControlTests
+                    a scenario served through the control routes reaches the
+                    window (its connection line), the journal sees the status
+                    read, the stream and the resync, and nothing was sent
 ```
+
+Every UI test class resets the fake daemon in `setUp` (S0 goldens, empty
+journal) through `Support/FakeDaemon.swift`.
 
 The app reads `WEMESSAGE_UI_TEST=1` and `WEMESSAGE_UI_APPEARANCE` only to pin
 the window geometry, force the appearance and turn animations off.

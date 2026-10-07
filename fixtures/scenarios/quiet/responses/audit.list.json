@@ -1,0 +1,5 @@
+{
+  "route": "GET /v1/audit",
+  "status": 200,
+  "body": []
+}

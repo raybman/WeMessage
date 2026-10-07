@@ -1,0 +1,38 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100008",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0511",
+        "from": "them",
+        "kind": "text",
+        "text": "the bakery on rue des lilas closed, sadly",
+        "at": "2024-03-08T15:20:00.000Z",
+        "handle": "+15550100008",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0512",
+        "from": "me",
+        "kind": "text",
+        "text": "no! the almond croissants",
+        "at": "2024-03-08T15:31:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0513",
+        "from": "them",
+        "kind": "text",
+        "text": "they opened a new one across town",
+        "at": "2024-11-02T10:10:00.000Z",
+        "handle": "+15550100008",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

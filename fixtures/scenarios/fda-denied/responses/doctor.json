@@ -1,0 +1,29 @@
+{
+  "route": "GET /v1/doctor",
+  "status": 200,
+  "body": {
+    "state": "disconnected",
+    "checks": [
+      {
+        "id": "os",
+        "status": "ok",
+        "detail": "chat.db schema verified stable through macOS 26; newer releases may change it without notice."
+      },
+      {
+        "id": "fda",
+        "status": "fail",
+        "remediation": "Full Disk Access is not reaching the daemon; on macOS 26, FDA does not propagate to background items, and after an update to an unsigned build the existing entry stays switched on while no longer matching this binary. Grant Full Disk Access to WeMessage in System Settings > Privacy & Security > Full Disk Access, removing the entry already listed first if there is one, then restart the agent. Running unpackaged: grants attach to your terminal/node binary, not sh.wemessage.gateway."
+      },
+      {
+        "id": "automation",
+        "status": "ok"
+      },
+      {
+        "id": "messages",
+        "status": "ok"
+      }
+    ],
+    "probedAt": "2026-09-01T12:00:00.000Z",
+    "supervisor": "none"
+  }
+}

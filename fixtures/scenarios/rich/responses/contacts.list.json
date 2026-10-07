@@ -1,0 +1,44 @@
+{
+  "route": "GET /v1/contacts",
+  "status": 200,
+  "body": {
+    "contacts": [
+      {
+        "handle": "+15550100001",
+        "displayName": "Maya Okafor",
+        "mode": "draft-only",
+        "updatedAt": "2026-08-20T10:00:00.000Z"
+      },
+      {
+        "handle": "+15550100002",
+        "displayName": "Daniel Reyes",
+        "mode": "draft-only",
+        "updatedAt": "2026-08-20T10:00:00.000Z"
+      },
+      {
+        "handle": "+15550100004",
+        "displayName": "Priya Natarajan",
+        "mode": "draft-only",
+        "updatedAt": "2026-08-21T09:30:00.000Z"
+      },
+      {
+        "handle": "sam.whitfield@example.com",
+        "displayName": "Sam Whitfield",
+        "mode": "auto",
+        "updatedAt": "2026-08-22T14:12:00.000Z"
+      },
+      {
+        "handle": "+15550100005",
+        "displayName": "Lena Brandt",
+        "mode": "draft-only",
+        "updatedAt": "2026-08-22T14:12:00.000Z"
+      },
+      {
+        "handle": "+15550100006",
+        "displayName": "Owen Castillo",
+        "mode": "deny",
+        "updatedAt": "2026-08-25T18:40:00.000Z"
+      }
+    ]
+  }
+}

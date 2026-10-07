@@ -198,7 +198,7 @@ jobs:
           set -eu
           mkdir -p "$WEMESSAGE_DIR"
           node tools/swift/fake-daemon.mjs --dir "$WEMESSAGE_DIR" --port "$WEMESSAGE_PORT" \
-            --pid-file "$RUNNER_TEMP/fake-daemon.pid" > "$RUNNER_TEMP/fake-daemon.ready" 2> "$RUNNER_TEMP/fake-daemon.err" &
+            --pid-file "$RUNNER_TEMP/fake-daemon.pid" --control > "$RUNNER_TEMP/fake-daemon.ready" 2> "$RUNNER_TEMP/fake-daemon.err" &
           for _ in $(seq 1 50); do
             if curl -fsS "http://127.0.0.1:$WEMESSAGE_PORT/v1/health" > /dev/null 2>&1; then exit 0; fi
             sleep 0.2

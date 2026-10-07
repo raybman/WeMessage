@@ -1,0 +1,4 @@
+id: 4
+event: message.received
+data: {"event":"message.received","message":{"guid":"msg-0902","chatGuid":"iMessage;+;chat5550100103","handle":"+15550100005","displayName":"Lena Brandt","isGroup":true,"service":"imessage","receivedAt":"2026-09-01T12:01:30.000Z","content":{"untrusted":true,"text":"here is the route map","attachments":[{"mimeType":"application/pdf","bytes":318776}]}}}
+

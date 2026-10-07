@@ -1,0 +1,152 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100001",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0501",
+        "from": "them",
+        "kind": "text",
+        "text": "happy new year! still on for the lake trip?",
+        "at": "2024-01-01T09:12:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0502",
+        "from": "me",
+        "kind": "text",
+        "text": "yes, booked the cabin for june",
+        "at": "2024-01-01T10:03:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0503",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2024-06-14T18:22:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 4
+      },
+      {
+        "guid": "msg-0504",
+        "from": "them",
+        "kind": "text",
+        "text": "the cabin had a canoe, we have to go back",
+        "at": "2024-06-16T20:05:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0505",
+        "from": "me",
+        "kind": "text",
+        "text": "same cabin next summer then",
+        "at": "2024-06-16T20:11:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0506",
+        "from": "them",
+        "kind": "audio",
+        "text": null,
+        "at": "2025-02-03T07:40:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 1
+      },
+      {
+        "guid": "msg-0507",
+        "from": "me",
+        "kind": "text",
+        "text": "congrats on the new job!",
+        "at": "2025-02-03T08:02:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0508",
+        "from": "them",
+        "kind": "text",
+        "text": "thank you! first day is monday",
+        "at": "2025-02-03T08:05:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0509",
+        "from": "them",
+        "kind": "text",
+        "text": "lake trip again in july?",
+        "at": "2025-05-20T12:30:00.000Z",
+        "handle": "+15550100001",
+        "editedAt": "2025-05-20T12:31:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0510",
+        "from": "me",
+        "kind": "text",
+        "text": "already looking at cabins",
+        "at": "2025-05-20T13:00:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0001",
+        "from": "them",
+        "kind": "text",
+        "text": "are we still doing dinner thursday?",
+        "at": "2026-08-31T19:02:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0002",
+        "from": "me",
+        "kind": "text",
+        "text": "yes, the place on 5th at 7",
+        "at": "2026-08-31T19:05:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0003",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-08-31T19:06:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 2
+      },
+      {
+        "guid": "msg-0004",
+        "from": "them",
+        "kind": "text",
+        "text": "menu, in case you want to look",
+        "at": "2026-08-31T19:06:30.000Z",
+        "handle": "+15550100001",
+        "editedAt": "2026-08-31T19:07:10.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0005",
+        "from": "me",
+        "kind": "text",
+        "text": "perfect",
+        "at": "2026-09-01T08:15:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0006",
+        "from": "them",
+        "kind": "text",
+        "text": "running ten late, save me a seat",
+        "at": "2026-09-01T11:58:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

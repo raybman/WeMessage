@@ -1,0 +1,37 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;theo.lindqvist@example.com",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0514",
+        "from": "me",
+        "kind": "text",
+        "text": "invoice for the bike repair attached",
+        "at": "2025-01-15T09:00:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0515",
+        "from": "me",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2025-01-15T09:00:30.000Z",
+        "attachments": 1
+      },
+      {
+        "guid": "msg-0516",
+        "from": "them",
+        "kind": "text",
+        "text": "paid, thanks",
+        "at": "2025-01-16T11:45:00.000Z",
+        "handle": "theo.lindqvist@example.com",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

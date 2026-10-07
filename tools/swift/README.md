@@ -34,7 +34,7 @@ unzips it under `--out`. Exit 0 leaves `<dir>/bin/xcodegen` executable; exit
 ## fake-daemon.mjs
 
 ```
-node tools/swift/fake-daemon.mjs --dir <path> [--port <n>] [--pid-file <path>]
+node tools/swift/fake-daemon.mjs --dir <path> [--port <n>] [--pid-file <path>] [--control]
 ```
 
 - `--dir`: the data dir (falls back to `WEMESSAGE_DIR`). A fresh bearer is
@@ -42,6 +42,8 @@ node tools/swift/fake-daemon.mjs --dir <path> [--port <n>] [--pid-file <path>]
 - `--port`: the loopback port (falls back to `WEMESSAGE_PORT`, then 47100).
   It binds the literal `127.0.0.1`.
 - `--pid-file`: where to write its pid, so a later step can stop it.
+- `--control`: adds the three loopback control routes below. Without it
+  they do not exist (404).
 
 On start it prints exactly one line,
 `{"ready":true,"port":<n>,"dir":"<path>"}`. It answers the routes the window
@@ -50,3 +52,52 @@ calls (`/v1/health` without a bearer, `/v1/status`, `/v1/drafts`,
 409 for send, schedules and toggles (parked), and 401 or 404 with the
 contract's error goldens otherwise. It exits on TERM or INT. Synthetic data
 only: everything it serves is already in the tree.
+
+### Scenarios (v2 S4b)
+
+A scenario is a directory under `fixtures/scenarios/<name>`:
+
+```
+scenario.json        {"summary": "...", "extends": "<parent>"}  (extends optional)
+responses/*.json     {route, status, body}, overlaying the S0 golden on that route
+sse/NN-<event>.txt   one frame each, replayed after the greeting, ids from 2
+```
+
+A route is answered by the scenario, then its `extends` chain, then the S0
+goldens; transcripts (`GET /v1/threads/:guid/messages`) are keyed by the
+`chatGuid` in each body. The stream sends the greeting (saying the
+scenario's own `connectionState`), then the first scenario in the chain
+that has frames, one per 250 ms, skipping ids at or below `Last-Event-ID`.
+`POST /v1/drafts/:id/{approve,reject,recall}` walks the draft state machine
+over the scenario's queue (409 illegal-transition otherwise), and
+`GET /v1/drafts` leaves terminal drafts out unless `?state=` names one.
+`default` (the S0 goldens alone) is reserved.
+
+```
+Scenario      What it serves
+------------  -----------------------------------------------------------
+rich          8 threads, a transcript each, 5 drafts, 6 people, 3 adapters
+pending       rich, plus 2 drafts arriving on the stream
+kill          rich, with the kill switch on (status and settings)
+degraded      rich, read-only, one adapter unhealthy
+empty-earned  rich, with the queue emptied
+quiet         nothing yet: no threads, drafts, people or adapters
+fda-denied    disconnected; threads 503 source-unavailable; doctor says FDA
+search        rich plus 2 threads and a transcript spanning 2024 to 2026
+```
+
+### Control routes (`--control` only)
+
+No bearer (the sandboxed UI test runner cannot read the token file); each
+answers only a `127.0.0.1` peer and none is journaled.
+
+```
+POST /v1/_scenario {"name"}  switch scenario; the journal is kept;
+                             400 unknown-scenario (with the known list)
+POST /v1/_reset              back to "default", draft moves and journal cleared
+GET  /v1/_journal            {scenario, requests: [{method, path, query, status}]}
+```
+
+The UI tests reach them through `UITests/WeMessageUITests/Support/FakeDaemon.swift`
+(`reset()`, `scenario(_:)`, `journal()`, `assertNoSend()`), and every UI
+test class resets in `setUp`.

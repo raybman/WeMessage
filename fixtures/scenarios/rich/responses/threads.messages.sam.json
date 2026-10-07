@@ -1,0 +1,46 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;sam.whitfield@example.com",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0018",
+        "from": "them",
+        "kind": "text",
+        "text": "do you have the deck from tuesday?",
+        "at": "2026-08-31T17:50:00.000Z",
+        "handle": "sam.whitfield@example.com",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0019",
+        "from": "me",
+        "kind": "text",
+        "text": "wrong file, ignore that",
+        "at": "2026-08-31T18:05:00.000Z",
+        "unsentAt": "2026-08-31T18:06:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0020",
+        "from": "me",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-08-31T18:19:00.000Z",
+        "attachments": 1
+      },
+      {
+        "guid": "msg-0021",
+        "from": "me",
+        "kind": "text",
+        "text": "sent the slides",
+        "at": "2026-08-31T18:20:00.000Z",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

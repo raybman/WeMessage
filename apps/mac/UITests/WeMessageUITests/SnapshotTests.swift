@@ -10,6 +10,11 @@ import XCTest
 /// must show the tint, and must carry the frost evidence for its leg: a real
 /// blur over the CI backdrop, or plain layer0. CI only.
 final class SnapshotTests: XCTestCase {
+  /// v2 S4b: every UI test starts from the S0 goldens and an empty journal.
+  override func setUp() async throws {
+    try await FakeDaemon.reset()
+  }
+
   @MainActor
   func testShellLightFrost() {
     shoot(appearance: "light", frost: true, name: "board-01-shell-light.png") { mean in

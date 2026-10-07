@@ -1,0 +1,29 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100005",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0026",
+        "from": "me",
+        "kind": "text",
+        "text": "how was the concert?",
+        "at": "2026-08-30T09:00:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0027",
+        "from": "them",
+        "kind": "audio",
+        "text": null,
+        "at": "2026-08-30T09:12:00.000Z",
+        "handle": "+15550100005",
+        "attachments": 1
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

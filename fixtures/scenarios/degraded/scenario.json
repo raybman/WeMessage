@@ -1,0 +1,4 @@
+{
+  "summary": "Read-only: the daemon can read but not send, and the Sol adapter has gone unhealthy with a stale last-seen time.",
+  "extends": "rich"
+}

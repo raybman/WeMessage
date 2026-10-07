@@ -1,0 +1,47 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;+;chat5550100104",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0022",
+        "from": "them",
+        "kind": "text",
+        "text": "boiler guy comes friday morning",
+        "at": "2026-08-30T20:10:00.000Z",
+        "handle": "+15550100006",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0023",
+        "from": "them",
+        "kind": "text",
+        "text": "I can be home",
+        "at": "2026-08-30T20:12:00.000Z",
+        "handle": "+15550100005",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0024",
+        "from": "me",
+        "kind": "text",
+        "text": "thanks Lena",
+        "at": "2026-08-30T20:30:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "msg-0025",
+        "from": "them",
+        "kind": "text",
+        "text": "rent split is in the sheet",
+        "at": "2026-08-31T08:00:00.000Z",
+        "handle": "+15550100006",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

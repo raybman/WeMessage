@@ -1,0 +1,4 @@
+id: 6
+event: draft.created
+data: {"event":"draft.created","draft":{"id":"drf-0107","chatGuid":"iMessage;+;chat5550100103","handle":"+15550100005","displayName":"Lena Brandt","ruleId":"rul-0202","adapterId":"sol-main","body":"map looks good to me","state":"pending","expiresAt":"2026-09-01T16:01:34.000Z","createdAt":"2026-09-01T12:01:34.000Z"}}
+

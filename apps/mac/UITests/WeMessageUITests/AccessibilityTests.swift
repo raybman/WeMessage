@@ -7,6 +7,11 @@ import XCTest
 /// part of it.
 /// CI only.
 final class AccessibilityTests: XCTestCase {
+  /// v2 S4b: every UI test starts from the S0 goldens and an empty journal.
+  override func setUp() async throws {
+    try await FakeDaemon.reset()
+  }
+
   /// The rail tiles in rail order, which is cmd-1..5 order.
   static let railIDs = ID.railTiles
 

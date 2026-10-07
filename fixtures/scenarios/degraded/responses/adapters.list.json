@@ -1,0 +1,39 @@
+{
+  "route": "GET /v1/adapters",
+  "status": 200,
+  "body": {
+    "adapters": [
+      {
+        "id": "echo",
+        "kind": "echo",
+        "displayName": "Echo",
+        "enabled": true,
+        "hasToken": false,
+        "health": "connected",
+        "lastSeenAt": "2026-09-01T12:00:40.000Z",
+        "config": {}
+      },
+      {
+        "id": "sol-main",
+        "kind": "sol",
+        "displayName": "Sol",
+        "enabled": true,
+        "hasToken": true,
+        "health": "unhealthy",
+        "lastSeenAt": "2026-09-01T09:14:00.000Z",
+        "config": {
+          "model": "house-default"
+        }
+      },
+      {
+        "id": "hermes-ops",
+        "kind": "hermes",
+        "displayName": "Hermes",
+        "enabled": false,
+        "hasToken": true,
+        "health": "unknown",
+        "config": {}
+      }
+    ]
+  }
+}

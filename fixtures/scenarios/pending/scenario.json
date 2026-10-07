@@ -1,0 +1,4 @@
+{
+  "summary": "The rich inbox with new drafts arriving on the stream: two draft.created frames after the inbound messages they answer, and the queue already holding them for a resync.",
+  "extends": "rich"
+}

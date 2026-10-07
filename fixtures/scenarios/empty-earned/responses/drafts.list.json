@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/drafts",
+  "status": 200,
+  "body": {
+    "drafts": []
+  }
+}

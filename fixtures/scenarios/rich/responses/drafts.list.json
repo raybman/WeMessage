@@ -1,0 +1,79 @@
+{
+  "route": "GET /v1/drafts",
+  "status": 200,
+  "body": {
+    "drafts": [
+      {
+        "id": "drf-0101",
+        "inboundGuid": "msg-0006",
+        "chatGuid": "iMessage;-;+15550100001",
+        "ruleId": "rul-0201",
+        "adapterId": "echo",
+        "idempotencyKey": "drf-0101-key",
+        "body": "no rush, I grabbed a table by the window",
+        "originalBody": "no rush, I grabbed a table by the window",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T11:58:20.000Z",
+        "expiresAt": "2026-09-01T15:58:20.000Z",
+        "createdAt": "2026-09-01T11:58:20.000Z"
+      },
+      {
+        "id": "drf-0102",
+        "inboundGuid": "msg-0017",
+        "chatGuid": "SMS;-;+15550100004",
+        "ruleId": "rul-0201",
+        "adapterId": "sol-main",
+        "idempotencyKey": "drf-0102-key",
+        "body": "sure, I will ring you at 3:15",
+        "originalBody": "sure, I will ring you at 3:15",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T09:05:30.000Z",
+        "expiresAt": "2026-09-01T13:05:30.000Z",
+        "createdAt": "2026-09-01T09:05:30.000Z"
+      },
+      {
+        "id": "drf-0103",
+        "inboundGuid": "msg-0011",
+        "chatGuid": "iMessage;+;chat5550100103",
+        "ruleId": "rul-0202",
+        "adapterId": "sol-main",
+        "idempotencyKey": "drf-0103-key",
+        "body": "great, I have space for two in the car",
+        "originalBody": "great, I have space for two in the car",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T11:40:40.000Z",
+        "expiresAt": "2026-09-01T15:40:40.000Z",
+        "createdAt": "2026-09-01T11:40:40.000Z"
+      },
+      {
+        "id": "drf-0104",
+        "inboundGuid": "msg-0028",
+        "chatGuid": "iMessage;-;+15550100007",
+        "ruleId": null,
+        "adapterId": "human",
+        "idempotencyKey": "drf-0104-key",
+        "body": "sorry, the bike has been sold",
+        "originalBody": "sorry, the bike has been sold",
+        "state": "pending",
+        "stateChangedAt": "2026-09-01T10:00:00.000Z",
+        "expiresAt": "2026-09-01T14:00:00.000Z",
+        "createdAt": "2026-09-01T10:00:00.000Z"
+      },
+      {
+        "id": "drf-0105",
+        "inboundGuid": null,
+        "chatGuid": "iMessage;-;sam.whitfield@example.com",
+        "ruleId": null,
+        "adapterId": "human",
+        "idempotencyKey": "drf-0105-key",
+        "body": "let me know if the link does not open",
+        "originalBody": "let me know if the link does not open",
+        "state": "approved",
+        "stateChangedAt": "2026-09-01T12:00:38.000Z",
+        "expiresAt": "2026-09-01T16:00:20.000Z",
+        "sendNotBefore": "2026-09-01T12:00:48.000Z",
+        "createdAt": "2026-09-01T12:00:20.000Z"
+      }
+    ]
+  }
+}

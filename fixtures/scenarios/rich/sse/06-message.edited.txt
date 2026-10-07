@@ -1,0 +1,4 @@
+id: 6
+event: message.edited
+data: {"event":"message.edited","guid":"msg-0006","newText":"running fifteen late, save me a seat"}
+

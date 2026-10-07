@@ -1,0 +1,4 @@
+id: 2
+event: toggle.changed
+data: {"event":"toggle.changed","key":"send.killSwitch","value":true,"actor":{"kind":"human","via":"api"}}
+

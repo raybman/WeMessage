@@ -1,0 +1,4 @@
+id: 7
+event: rule.matched
+data: {"event":"rule.matched","guid":"msg-0902","ruleId":"rul-0202","adapterId":"sol-main"}
+

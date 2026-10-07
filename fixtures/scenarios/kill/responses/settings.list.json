@@ -1,0 +1,137 @@
+{
+  "route": "GET /v1/settings",
+  "status": 200,
+  "body": {
+    "settings": {
+      "arming.pauseUntil": {
+        "value": null,
+        "default": null,
+        "version": -1,
+        "type": "iso",
+        "readOnly": true,
+        "use": "POST /v1/toggles/pause"
+      },
+      "send.autoGraceSeconds": {
+        "value": 10,
+        "default": 10,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 5,
+        "ceiling": 300
+      },
+      "send.capContactPer2Min": {
+        "value": 1,
+        "default": 1,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 60
+      },
+      "send.capContactPerHour": {
+        "value": 10,
+        "default": 10,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 600
+      },
+      "send.capGlobalPerHour": {
+        "value": 30,
+        "default": 30,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 10000
+      },
+      "send.circuitFailureThreshold": {
+        "value": 5,
+        "default": 5,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 1000
+      },
+      "send.circuitFailureWindowMin": {
+        "value": 10,
+        "default": 10,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 1440
+      },
+      "send.circuitOpenMinutes": {
+        "value": 15,
+        "default": 15,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 1440
+      },
+      "send.circuitOpenedAt": {
+        "value": null,
+        "default": null,
+        "version": -1,
+        "type": "iso",
+        "readOnly": true,
+        "use": "POST /v1/toggles/kill-switch {\"circuit\": true}"
+      },
+      "send.globalMode": {
+        "value": "draft-only",
+        "default": "draft-only",
+        "version": -1,
+        "type": "enum",
+        "readOnly": true,
+        "use": "POST /v1/toggles/global-mode"
+      },
+      "send.killSwitch": {
+        "value": true,
+        "default": false,
+        "version": 3,
+        "type": "bool",
+        "readOnly": true,
+        "use": "POST /v1/toggles/kill-switch"
+      },
+      "send.loopConsecutiveAutoMax": {
+        "value": 3,
+        "default": 3,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 100
+      },
+      "send.loopDuplicateLookback": {
+        "value": 5,
+        "default": 5,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 1,
+        "ceiling": 100
+      },
+      "send.retryAsSms": {
+        "value": false,
+        "default": false,
+        "version": -1,
+        "type": "bool",
+        "readOnly": false
+      },
+      "send.undoGraceSeconds": {
+        "value": 10,
+        "default": 10,
+        "version": -1,
+        "type": "int",
+        "readOnly": false,
+        "floor": 0,
+        "ceiling": 300
+      }
+    }
+  }
+}

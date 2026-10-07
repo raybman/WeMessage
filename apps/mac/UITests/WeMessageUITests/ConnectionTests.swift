@@ -6,6 +6,11 @@ import XCTest
 /// over the S0 goldens. CI only. The expected strings come from
 /// ProvisionalUI.swift (D-UI-3, pending Eric), never from literals here.
 final class ConnectionTests: XCTestCase {
+  /// v2 S4b: every UI test starts from the S0 goldens and an empty journal.
+  override func setUp() async throws {
+    try await FakeDaemon.reset()
+  }
+
   /// Polls the connection line until `done` holds or the timeout passes, and
   /// returns the last value read.
   @MainActor

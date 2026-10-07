@@ -6,6 +6,11 @@ import XCTest
 /// app on a laptop.
 /// XCUIApplication is main-actor isolated under Swift 6, so every test is.
 final class LaunchTests: XCTestCase {
+  /// v2 S4b: every UI test starts from the S0 goldens and an empty journal.
+  override func setUp() async throws {
+    try await FakeDaemon.reset()
+  }
+
   @MainActor
   func testBareLaunchShowsShell() {
     let app = UITestApp.make(appearance: "light")

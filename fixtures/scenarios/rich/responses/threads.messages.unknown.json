@@ -1,0 +1,21 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100007",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0028",
+        "from": "them",
+        "kind": "text",
+        "text": "hi, is this still the number for the bike?",
+        "at": "2026-08-29T16:45:00.000Z",
+        "handle": "+15550100007",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

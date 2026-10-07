@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/adapters",
+  "status": 200,
+  "body": {
+    "adapters": []
+  }
+}

@@ -17,10 +17,17 @@ final class AccessibilityTests: XCTestCase {
     let app = UITestApp.make(appearance: "light")
     app.launch()
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let window = app.windows.firstMatch.screenshot()
+    add(XCTAttachment(data: window.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-window"))
     try app.performAccessibilityAudit() { issue in
-      let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)'" } ?? "(no element)"
+      let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
       let chrome = Self.isSystemChrome(issue, in: app)
       print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(chrome ? " (system chrome, ignored)" : "")")
+      print("audit detail: \(issue.detailedDescription)")
+      if !chrome, let element = issue.element, element.exists {
+        let shot = element.screenshot().pngRepresentation
+        self.add(XCTAttachment(data: shot, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
+      }
       return chrome
     }
     app.terminate()
@@ -111,5 +118,15 @@ final class AccessibilityTests: XCTestCase {
     XCTAssertEqual(strays, [], "Tab stopped outside the rail before the lens; stops: \(path)")
     XCTAssertTrue(path.contains(where: { Self.railIDs.contains($0) }), "Tab skipped the rail; stops: \(path)")
     app.terminate()
+  }
+}
+
+extension XCTAttachment {
+  /// Named, and kept even when the test passes, so a red audit run carries
+  /// the pixels the audit judged (read from the xcresult artifact).
+  func kept(_ name: String) -> XCTAttachment {
+    self.name = name
+    lifetime = .keepAlways
+    return self
   }
 }

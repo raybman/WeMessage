@@ -22,7 +22,7 @@ public enum Tokens {
 
   public enum Light {
     public static let ink = RGB(0x1C, 0x1C, 0x1E)
-    public static let inkDim = RGB(0x4E, 0x4E, 0x54)
+    public static let inkDim = RGB(0x3C, 0x3C, 0x43)
     public static let layer0 = RGB(0xF5, 0xF5, 0xF7)
     public static let layer1 = RGB(0xFF, 0xFF, 0xFF)
     public static let layer2 = RGB(0xF0, 0xF0, 0xF5)

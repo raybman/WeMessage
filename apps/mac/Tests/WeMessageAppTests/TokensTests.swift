@@ -65,4 +65,17 @@ struct TokensTests {
     let failed = Tokens.contrast(Tokens.RGB(95, 95, 102), Tokens.RGB(240, 240, 245))
     #expect(failed > 5.5 && failed < 5.7)
   }
+
+  @Test("T5b: light inkDim clears 9.5:1 on every light layer (the audit samples antialiased pixels)")
+  func lightInkDimMargin() {
+    // The audit runs in light appearance and measures rendered pixels, so
+    // small text reads below its nominal ratio: ci-swift run 37556851103
+    // failed 4E4E54 at a nominal 7.27:1 on layer2 and called 7.59:1 on
+    // layer0 "nearly passed".
+    let p = Tokens.palette(dark: false)
+    for layer in [p.layer0, p.layer1, p.layer2] {
+      #expect(Tokens.contrast(p.inkDim, layer) >= 9.5, "light inkDim on \(layer)")
+    }
+    #expect(Tokens.contrast(Tokens.RGB(0x4E, 0x4E, 0x54), p.layer2) < 9.5)
+  }
 }

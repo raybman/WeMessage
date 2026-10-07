@@ -13998,6 +13998,108 @@ describe('v2 S1: the Swift tree', () => {
     expect(pc).not.toMatch(/return true/);
   });
 
+  it('snapshots are produced and swept in the test, not diffed (R-A13d)', () => {
+    // v2 S3d (§5.4, E19, D5, P2-4): the light and dark PNGs leave only as
+    // .keepAlways attachments that the job exports; the runner writes no
+    // file, nothing is compared with a stored golden, and the sweep and its
+    // traffic-light mask live in the test.
+    const files = trackedUnder(UI_TESTS).filter((f) => f.endsWith('.swift'));
+    expect(files).toContain(`${UI_TESTS}/SnapshotTests.swift`);
+    expect(files).toContain(`${UI_TESTS}/Support/NoGreen.swift`);
+    const ui = files.map((f) => archRead(f)).join('\n');
+    for (const needed of [
+      'pngRepresentation',
+      'keepAlways',
+      'NoGreen.offenders',
+      'NoGreen.tinted',
+      'NoGreen.isBlank',
+      'NoGreen.meanLuminance',
+      'trafficLightBand',
+      'shellGeometry',
+      'func testShellLight()',
+      'func testShellDark()',
+      'func testNoGreenSweepSeesGreen()',
+      '"shell-light"',
+      '"shell-dark"',
+    ])
+      expect([needed, ui.includes(needed)]).toEqual([needed, true]);
+    for (const banned of [
+      'write(to:',
+      'FileManager.default.createFile',
+      'WEMESSAGE_SNAPSHOT_DIR',
+      'snapshotDir',
+    ])
+      expect([banned, ui.includes(banned)]).toEqual([banned, false]);
+    // The geometry comes from the app, never a monitor assumption.
+    const snap = archRead(`${UI_TESTS}/SnapshotTests.swift`)
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n');
+    expect(snap.match(/\b(?:1180|760)\b/g) ?? []).toEqual([]);
+    // The shots themselves are swept, not only the probes.
+    for (const needed of [
+      'XCTAssertEqual(NoGreen.offenders(png, excluding: band), 0',
+      'NoGreen.tinted(png, hue: NoGreen.tintHue, tolerance: 15, minSaturation: 0.5), 0, "\\(name): no tint on screen")',
+      'XCTAssertFalse(NoGreen.isBlank(png)',
+      'band.width * band.height, 0.02 * area',
+    ])
+      expect([needed, snap.includes(needed)]).toEqual([needed, true]);
+    // No stored goldens in S3.
+    expect(
+      [...trackedUnder(MAC), ...trackedUnder('fixtures')].filter((f) =>
+        /\.png$/i.test(f),
+      ),
+    ).toEqual([]);
+    // The job: export with the selected Xcode's xcresulttool after a green
+    // test step, upload the PNGs with `error`, and keep the result bundle
+    // upload on every outcome with `warn`.
+    const ci = archRead(CI_SWIFT);
+    for (const needed of [
+      '"$(xcode-select -p)/usr/bin/xcresulttool" export attachments --path "$RESULTS" --output-path "$SNAPSHOTS_OUT"',
+      'snapshots/*.png',
+      'wemessage-ui-snapshots-${{ github.sha }}',
+    ])
+      expect([needed, ci.includes(needed)]).toEqual([needed, true]);
+    const step = (name: string) =>
+      new RegExp(
+        `- name: ${name}\\n(?:\\s+[^\\n]*\\n)*?\\s+if: ([^\\n]+)\\n`,
+      ).exec(ci)?.[1];
+    expect(step('export snapshot attachments from the result bundle')).toBe(
+      'success()',
+    );
+    expect(step('snapshots')).toBe('success()');
+    expect(step('result bundle')).toBe('always()');
+    const block = (name: string) =>
+      ci.slice(ci.indexOf(`- name: ${name}\n`)).split(/\n {6}- /)[0];
+    expect(block('snapshots')).toContain('if-no-files-found: error');
+    expect(block('result bundle')).toContain('if-no-files-found: warn');
+    const at = (s: string) => ci.indexOf(s);
+    expect(at('xcodebuild test \\')).toBeLessThan(at('xcresulttool'));
+    expect(at('xcresulttool')).toBeLessThan(at('- name: snapshots\n'));
+  });
+
+  it('the tint triple is written twice and equal (R-A14)', () => {
+    // v2 S3d (§4.10, P0-1): the positive tint assertion reads NoGreen.tintRGB,
+    // the one colour literal outside Tokens.swift; the two must move together.
+    const ui = trackedUnder(UI_TESTS)
+      .filter((f) => f.endsWith('.swift'))
+      .map((f) => archRead(f))
+      .join('\n');
+    const tests = [
+      ...ui.matchAll(
+        /tintRGB: \(UInt8, UInt8, UInt8\) = \((0x[0-9A-F]{2}), (0x[0-9A-F]{2}), (0x[0-9A-F]{2})\)/g,
+      ),
+    ];
+    expect(tests.length).toBe(1);
+    const tokens = [
+      ...archRead(`${MAC}/Sources/WeMessageApp/Tokens.swift`).matchAll(
+        /static let tint = RGB\((0x[0-9A-F]{2}), (0x[0-9A-F]{2}), (0x[0-9A-F]{2})\)/g,
+      ),
+    ];
+    expect(tokens.length).toBe(1);
+    expect(tests[0]!.slice(1)).toEqual(tokens[0]!.slice(1));
+  });
+
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {
     const lock = JSON.parse(
       archRead('tools/swift/xcodegen.lock.json'),

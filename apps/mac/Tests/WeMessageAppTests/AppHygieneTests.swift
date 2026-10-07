@@ -186,6 +186,16 @@ struct AppHygieneTests {
     #expect(call.numberOfMatches(in: planted, range: NSRange(planted.startIndex..., in: planted)) == 1)
   }
 
+  @Test("H-S1: under the UI-test flag the shell renders with animations off, so a snapshot is one settled frame")
+  func snapshotsSettle() throws {
+    let shell = try Repo.text(Self.appDir + "/ShellView.swift")
+    let body = String(shell[shell.range(of: "struct ShellView: View {")!.lowerBound...])
+      .components(separatedBy: "\nprivate struct ")[0]
+    #expect(
+      body.contains(".transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }"),
+      "ShellView does not disable animations under the UI-test flag")
+  }
+
   @Test("H-A6: non-vacuity, the window target and the UI test bundle exist")
   func nonVacuity() throws {
     #expect(try Self.swiftFiles(under: Self.appDir).count >= 6)

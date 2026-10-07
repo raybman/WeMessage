@@ -220,6 +220,25 @@ jobs:
         run: |
           pid=$(cat "$RUNNER_TEMP/fake-daemon.pid" 2>/dev/null || true)
           [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+      # v2 S3d (§5.4): the light and dark snapshots are .keepAlways attachments;
+      # the selected Xcode's xcresulttool exports them after a green test step
+      # (the runner writes no file, E19). manifest.json names each export.
+      - name: export snapshot attachments from the result bundle
+        if: success()
+        run: |
+          set -eu
+          mkdir -p "$SNAPSHOTS_OUT"
+          "$(xcode-select -p)/usr/bin/xcresulttool" export attachments --path "$RESULTS" --output-path "$SNAPSHOTS_OUT"
+          ls -l "$SNAPSHOTS_OUT"
+          cat "$SNAPSHOTS_OUT/manifest.json"
+      - name: snapshots
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wemessage-ui-snapshots-${{ github.sha }}
+          path: ${{ runner.temp }}/snapshots/*.png
+          retention-days: 7
+          if-no-files-found: error
       # P2-4: the result bundle uploads on every outcome, so a red run can be
       # read from its xcresult.
       - name: result bundle

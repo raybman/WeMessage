@@ -35,6 +35,9 @@ struct ShellView: View {
     // so it rides the label too, and the delegate sets it on the window.
     .accessibilityValue(TestHooks.geometry.value ?? "")
     .accessibilityLabel(Text(TestHooks.geometry.value ?? ""))
+    // Under the UI-test flag only, no animation: a snapshot is one settled
+    // frame, never a mid-transition one (H-S1).
+    .transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }
     .task { model.start() }
   }
 }

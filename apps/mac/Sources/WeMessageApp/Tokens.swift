@@ -28,6 +28,15 @@ public enum Tokens {
     public static let layer2 = RGB(0xF0, 0xF0, 0xF5)
   }
 
+  /// S4a.0 spike only (build/s4-spike, never merged): the backdrop window's
+  /// two-stop grey-blue gradient, top then bottom, per plan section 2.5.
+  public enum SpikeBackdrop {
+    public static let lightTop = RGB(0xD9, 0xDC, 0xE6)
+    public static let lightBottom = RGB(0xB9, 0xBE, 0xC9)
+    public static let darkTop = RGB(0x2A, 0x2C, 0x33)
+    public static let darkBottom = RGB(0x15, 0x16, 0x1B)
+  }
+
   /// One appearance's neutrals.
   public struct Palette: Equatable, Sendable {
     public let ink, inkDim, layer0, layer1, layer2: RGB

@@ -7,7 +7,12 @@ struct ShellApp: App {
 
   var body: some Scene {
     WindowGroup("WeMessage") {
-      ShellView()
+      // S4a.0 spike only: the frost variant over the test-only backdrop.
+      if let frost = TestHooks.spikeFrost {
+        SpikeView(frost: frost)
+      } else {
+        ShellView()
+      }
     }
     .defaultSize(width: ProvisionalUI.windowDefaultWidth, height: ProvisionalUI.windowDefaultHeight)
     .windowStyle(.hiddenTitleBar)

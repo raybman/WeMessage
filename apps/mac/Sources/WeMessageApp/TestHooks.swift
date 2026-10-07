@@ -27,10 +27,14 @@ enum TestHooks {
   /// The window geometry the delegate computed, published on the shell
   /// root's accessibility value under the UI-test flag only.
   static let geometry = PublishedGeometry()
+  /// S4a.0 spike only: WEMESSAGE_SPIKE_FROST, the frost variant the main
+  /// window draws over the test-only backdrop window. Nil outside the spike.
+  static private(set) var spikeFrost: SpikeFrost? = nil
 
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
+    spikeFrost = isUITest ? SpikeFrost(rawValue: environment["WEMESSAGE_SPIKE_FROST"] ?? "") : nil
   }
 }
 

@@ -214,7 +214,14 @@ jobs:
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 300 \
+            -only-testing:WeMessageUITests/SpikeTests \
+            | tee "$RUNNER_TEMP/xcodebuild-raw.log" \
             | xcbeautify --renderer github-actions
+      # S4a.0 spike (throwaway): every measurement line, greppable.
+      - name: spike measurements
+        if: always()
+        run: |
+          grep -o 'SPIKE|.*' "$RUNNER_TEMP/xcodebuild-raw.log" | sort -u || true
       - name: stop the fake daemon
         if: always()
         run: |
@@ -224,7 +231,7 @@ jobs:
       # the selected Xcode's xcresulttool exports them after a green test step
       # (the runner writes no file, E19). manifest.json names each export.
       - name: export snapshot attachments from the result bundle
-        if: success()
+        if: always()
         run: |
           set -eu
           mkdir -p "$SNAPSHOTS_OUT"
@@ -232,11 +239,11 @@ jobs:
           ls -l "$SNAPSHOTS_OUT"
           cat "$SNAPSHOTS_OUT/manifest.json"
       - name: snapshots
-        if: success()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wemessage-ui-snapshots-${{ github.sha }}
-          path: ${{ runner.temp }}/snapshots/*.png
+          path: ${{ runner.temp }}/snapshots/
           retention-days: 7
           if-no-files-found: error
       # P2-4: the result bundle uploads on every outcome, so a red run can be

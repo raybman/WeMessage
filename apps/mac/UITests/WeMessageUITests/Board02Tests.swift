@@ -100,9 +100,7 @@ final class Board02Tests: XCTestCase {
     // journal holds no send; after it, one POST /v1/send, parked (409).
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "sending: Daniel never opened")
-    let field = composerField(app)
-    field.click()
-    app.typeText("on my way")
+    type(app, "on my way")
     dump(app, "sending")
     app.typeKey(.return, modifierFlags: .command)
     XCTAssertTrue(waitUntil { self.counting(app) }, "sending: no countdown")
@@ -116,8 +114,7 @@ final class Board02Tests: XCTestCase {
     // Send, the draft's verbs and Hold until are all absent; the text stays.
     open(app, Self.priya)
     XCTAssertTrue(waitUntil { self.element(app, ID.draft).exists }, "kill: Priya never opened")
-    composerField(app).click()
-    app.typeText("ring me after 4")
+    type(app, "ring me after 4")
     try await FakeDaemon.scenario("kill")
     app.typeKey("r", modifierFlags: [.command, .option])
     XCTAssertTrue(waitUntil { self.value(app, ID.killChip) == "on" }, "kill chip: \(value(app, ID.killChip))")
@@ -145,8 +142,7 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
-    composerField(app).click()
-    app.typeText("first line")
+    type(app, "first line")
     dump(app, "before return")
     app.typeKey(.return, modifierFlags: [])
     dump(app, "after return")
@@ -173,8 +169,7 @@ final class Board02Tests: XCTestCase {
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
 
-    composerField(app).click()
-    app.typeText("take this back")
+    type(app, "take this back")
     app.typeKey(.return, modifierFlags: .command)
     XCTAssertTrue(waitUntil { self.counting(app) }, "no countdown after cmd-Return")
     try await Self.assertSends(0, "inside the window")
@@ -215,8 +210,7 @@ final class Board02Tests: XCTestCase {
     }
     open(app, Self.priya)
     XCTAssertTrue(waitUntil { self.element(app, ID.draft).exists }, "Priya never reopened")
-    composerField(app).click()
-    app.typeText("a")
+    type(app, "a")
     try await Task.sleep(for: .seconds(1))
     let approvals = try await FakeDaemon.journal().requests.filter { $0.method == "POST" && $0.path.hasPrefix("/v1/drafts/") }
     XCTAssertEqual(approvals, [], "a keycap is bound")
@@ -258,6 +252,23 @@ final class Board02Tests: XCTestCase {
     if tagged.elementType == .textView { return tagged }
     let inner = tagged.descendants(matching: .textView).firstMatch
     return inner.exists ? inner : tagged
+  }
+
+  /// Clicks the field until it holds the keyboard, then types `text` and
+  /// checks it landed: a keystroke that went elsewhere fails here, not
+  /// three steps later as a missing countdown.
+  @MainActor
+  private func type(_ app: XCUIApplication, _ text: String) {
+    let before = fieldText(app)
+    var focused = false
+    for _ in 0..<3 where !focused {
+      composerField(app).click()
+      focused = waitUntil { (self.composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true }
+    }
+    XCTAssertTrue(focused, "the field never took the keyboard")
+    app.typeText(text)
+    XCTAssertTrue(
+      waitUntil { self.fieldText(app).hasSuffix(text) }, "typed \(text.debugDescription), field has \(fieldText(app).debugDescription) (was \(before.debugDescription))")
   }
 
   @MainActor

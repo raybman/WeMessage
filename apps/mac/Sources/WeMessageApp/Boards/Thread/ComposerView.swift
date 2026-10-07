@@ -89,15 +89,6 @@ struct ComposerView: View {
     }
     .padding(.vertical, 10)
     .padding(.horizontal, 12)
-    .background {
-      // cmd-Return, the one keyboard send. Hidden and zero-sized: the
-      // visible control is Send. Bare Return is the editor's newline.
-      Button("") { send(gesture: .commandReturn) }
-        .keyboardShortcut(.return, modifiers: .command)
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
-    }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Composer")
     .accessibilityIdentifier(ShellID.composer)
@@ -170,6 +161,11 @@ struct ComposerView: View {
     }
     .buttonStyle(.plain)
     .focusable()
+    // cmd-Return, the one keyboard send, lives on Send itself. Measured
+    // (run 37596258225): a zero-sized shortcut button in the composer's
+    // background never fired. Where Send is absent, a send would be refused
+    // anyway (kill switch, group, or a draft with an empty field).
+    .keyboardShortcut(.return, modifiers: .command)
     .accessibilityLabel("Send")
     .accessibilityIdentifier(ShellID.composerSend)
   }

@@ -51,7 +51,8 @@ struct Inv5Strip: View {
       .padding(.vertical, 6)
       .padding(.horizontal, 12)
       .background(Tokens.color(palette.ink))
-      .accessibilityElement(children: .combine)
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel(Self.line)
       .accessibilityIdentifier(ShellID.inv5)
   }
 }
@@ -89,7 +90,8 @@ struct ChannelBanner: View {
     .overlay(alignment: .bottom) {
       Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 2)
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(ProvisionalUI.replyingBanner + ", " + cap)
     .accessibilityIdentifier(ShellID.threadBanner)
   }
 }

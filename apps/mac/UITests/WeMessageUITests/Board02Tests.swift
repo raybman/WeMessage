@@ -61,18 +61,21 @@ final class Board02Tests: XCTestCase {
     // draft: Priya's SMS thread with sol-main's pending draft. Approve, Edit
     // and Hold are drawn; Hold until is not.
     open(app, Self.priya)
-    XCTAssertTrue(waitUntil { self.value(app, ID.draft) == "drf-0102" }, "draft: \(value(app, ID.draft))")
+    XCTAssertTrue(waitUntil { self.label(app, ID.draft).hasPrefix("DRAFT") }, "draft: \(label(app, ID.draft))")
+    XCTAssertTrue(label(app, ID.draft).contains("SOL-MAIN"), "draft: not sol-main's: \(label(app, ID.draft))")
     for id in [ID.draftApprove, ID.draftEdit, ID.draftHold, ID.threadBanner, ID.capabilityNote] {
       XCTAssertTrue(element(app, id).exists, "draft: \(id) is missing")
     }
     assertNoHoldUntil(app, "draft")
-    XCTAssertEqual(value(app, ID.bubblePrefix + "msg-0016"), "outbound")
+    XCTAssertTrue(label(app, ID.bubblePrefix + "msg-0016").hasPrefix("Sent, "), "draft: msg-0016 reads \(label(app, ID.bubblePrefix + "msg-0016"))")
     shoot("draft")
 
     // resting: Daniel, no draft, an empty field and Send beside it.
     open(app, Self.daniel)
-    XCTAssertTrue(waitUntil { self.value(app, ID.bubblePrefix + "msg-0012") == "outbound" }, "resting: msg-0012")
-    XCTAssertEqual(value(app, ID.bubblePrefix + "msg-0013"), "inbound")
+    XCTAssertTrue(
+      waitUntil { self.label(app, ID.bubblePrefix + "msg-0012").hasPrefix("Sent, ") },
+      "resting: msg-0012 reads \(label(app, ID.bubblePrefix + "msg-0012"))")
+    XCTAssertTrue(label(app, ID.bubblePrefix + "msg-0013").hasPrefix("Received, "), "resting: msg-0013 reads \(label(app, ID.bubblePrefix + "msg-0013"))")
     XCTAssertFalse(element(app, ID.draft).exists, "resting: a draft in Daniel's thread")
     XCTAssertTrue(element(app, ID.composerSend).exists, "resting: no Send")
     assertNoHoldUntil(app, "resting")
@@ -80,7 +83,9 @@ final class Board02Tests: XCTestCase {
 
     // unsent: Sam's thread keeps the unsent message's slot as a placeholder.
     open(app, Self.sam)
-    XCTAssertTrue(waitUntil { self.value(app, ID.bubblePrefix + "msg-0019") == "unsent" }, "unsent: msg-0019")
+    XCTAssertTrue(
+      waitUntil { self.label(app, ID.bubblePrefix + "msg-0019").hasPrefix("Unsent, ") },
+      "unsent: msg-0019 reads \(label(app, ID.bubblePrefix + "msg-0019"))")
     shoot("unsent")
 
     // group: Flat 4B. INV-5 is a strip, Send is absent with its reason.
@@ -98,11 +103,12 @@ final class Board02Tests: XCTestCase {
     let field = composerField(app)
     field.click()
     app.typeText("on my way")
+    dump(app, "sending")
     app.typeKey(.return, modifierFlags: .command)
-    XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "sending: no countdown")
+    XCTAssertTrue(waitUntil { self.counting(app) }, "sending: no countdown")
     try await Self.assertSends(0, "inside the 4 s window")
     shoot("sending")
-    XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox) == "parked" }, "parked: \(value(app, ID.composerOutbox))")
+    XCTAssertTrue(waitUntil { self.parked(app) }, "parked: \(label(app, ID.composerOutbox))")
     shoot("parked")
     try await Self.assertSends(1, "after the window")
 
@@ -143,9 +149,10 @@ final class Board02Tests: XCTestCase {
     app.typeText("first line")
     app.typeKey(.return, modifierFlags: [])
     app.typeText("second line")
+    dump(app, "return")
     // Past the 4 s window and then some.
     try await Task.sleep(for: .seconds(6))
-    XCTAssertFalse(element(app, ID.composerOutbox).exists, "bare Return started a send: \(value(app, ID.composerOutbox))")
+    XCTAssertFalse(element(app, ID.composerOutbox).exists, "bare Return started a send: \(label(app, ID.composerOutbox))")
     let text = fieldText(app)
     XCTAssertTrue(text.contains("first line\nsecond line"), "the field has no newline: \(text.debugDescription)")
     try await FakeDaemon.assertNoSend()
@@ -167,10 +174,10 @@ final class Board02Tests: XCTestCase {
     composerField(app).click()
     app.typeText("take this back")
     app.typeKey(.return, modifierFlags: .command)
-    XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "no countdown after cmd-Return")
+    XCTAssertTrue(waitUntil { self.counting(app) }, "no countdown after cmd-Return")
     try await Self.assertSends(0, "inside the window")
     app.typeKey("z", modifierFlags: .command)
-    XCTAssertTrue(waitUntil { !self.element(app, ID.composerOutbox).exists }, "cmd-Z left \(value(app, ID.composerOutbox))")
+    XCTAssertTrue(waitUntil { !self.element(app, ID.composerOutbox).exists }, "cmd-Z left \(label(app, ID.composerOutbox))")
     XCTAssertTrue(fieldText(app).contains("take this back"), "cmd-Z did not return the text: \(fieldText(app))")
     try await Task.sleep(for: .seconds(6))
     try await Self.assertSends(0, "after cmd-Z took it back")
@@ -178,9 +185,9 @@ final class Board02Tests: XCTestCase {
     // The field holds the restored text; send it and leave it alone.
     composerField(app).click()
     app.typeKey(.return, modifierFlags: .command)
-    XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox).hasPrefix("counting") }, "no second countdown")
+    XCTAssertTrue(waitUntil { self.counting(app) }, "no second countdown")
     try await Self.assertSends(0, "inside the second window")
-    XCTAssertTrue(waitUntil { self.value(app, ID.composerOutbox) == "parked" }, "not parked: \(value(app, ID.composerOutbox))")
+    XCTAssertTrue(waitUntil { self.parked(app) }, "not parked: \(label(app, ID.composerOutbox))")
     try await Self.assertSends(1, "after the second window")
   }
 
@@ -259,6 +266,32 @@ final class Board02Tests: XCTestCase {
   @MainActor
   private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
     app.descendants(matching: .any).matching(identifier: id).firstMatch
+  }
+
+  @MainActor
+  private func label(_ app: XCUIApplication, _ id: String) -> String {
+    let e = element(app, id)
+    return e.exists ? e.label : "(missing)"
+  }
+
+  /// The outbox counts down: its label leads with the countdown.
+  @MainActor
+  private func counting(_ app: XCUIApplication) -> Bool {
+    label(app, ID.composerOutbox).hasPrefix("SENDING in ")
+  }
+
+  /// The outbox reads parked: the daemon answered 409.
+  @MainActor
+  private func parked(_ app: XCUIApplication) -> Bool {
+    label(app, ID.composerOutbox).hasPrefix(ProvisionalUI.parkedLine)
+  }
+
+  /// The composer's subtree, printed once per typed state, so a field that
+  /// never takes text can be read from the run's log.
+  @MainActor
+  private func dump(_ app: XCUIApplication, _ state: String) {
+    print("COMPOSER| \(state) field=\(fieldText(app).debugDescription)")
+    print(element(app, ID.composer).debugDescription)
   }
 
   @MainActor

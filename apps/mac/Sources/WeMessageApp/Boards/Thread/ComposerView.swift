@@ -129,6 +129,9 @@ struct ComposerView: View {
         .padding(.vertical, borderless ? 0 : 6)
         .padding(.horizontal, borderless ? 0 : 7)
         .focused($focused)
+        // The draft hint promises that plain typing lands here, so the field
+        // takes the keyboard when a thread opens.
+        .task(id: guid) { focused = true }
         .accessibilityLabel("Message")
         .accessibilityIdentifier(ShellID.composerField)
     }
@@ -299,8 +302,10 @@ struct OutboxBubble: View {
         }
       }
     }
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel([headline, body_].compactMap { $0 }.joined(separator: ", "))
+    // A group, so the label (which leads with the phase) reaches AX and the
+    // Undo button stays reachable inside it.
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel([headline ?? "Sent", body_].compactMap { $0 }.joined(separator: ", "))
     .accessibilityValue(phaseValue)
     .accessibilityIdentifier(ShellID.composerOutbox)
     .accessibilityAction(named: "Undo") { undo() }
@@ -329,7 +334,9 @@ struct CapabilityNote: View {
           .fixedSize(horizontal: false, vertical: true)
       }
     }
-    .accessibilityElement(children: .combine)
+    // A combined group's label arrives empty (run 37591391142); say it.
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(lines.joined(separator: " "))
     .accessibilityIdentifier(ShellID.capabilityNote)
   }
 }

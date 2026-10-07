@@ -51,7 +51,7 @@ struct DraftBubble: View {
           .strokeBorder(Tokens.color(Tokens.draftOutline), style: BubbleStroke.dashed)
       }
     }
-    .accessibilityElement(children: .ignore)
+    .accessibilityElement(children: .contain)
     .accessibilityLabel([label, draft.body, why].compactMap { $0 }.joined(separator: ", "))
     .accessibilityValue(draft.id)
   }
@@ -86,7 +86,7 @@ struct HeldBubble: View {
           .strokeBorder(Tokens.color(palette.inkDim, opacity: 0.5), style: BubbleStroke.dashed)
       }
     }
-    .accessibilityElement(children: .ignore)
+    .accessibilityElement(children: .contain)
     .accessibilityLabel(ProvisionalUI.heldLine + ", " + draft.body)
     .accessibilityValue("held")
   }

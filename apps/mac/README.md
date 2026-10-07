@@ -126,10 +126,11 @@ equal):
 - `wemessage.sidebar.row.<chatGuid>`: one list row
 - `wemessage.thread`: board 02's thread under the head; its label ends in the
   load state (`loading`, `loaded`, `unknown chat`, `failed`)
-- `wemessage.thread.bubble.<guid>`: one transcript bubble; value `inbound`,
-  `outbound` or `unsent`
+- `wemessage.thread.bubble.<guid>`: one transcript bubble; its label leads
+  with `Received`, `Sent` or `Unsent` (a group's value never reaches AX)
 - `wemessage.thread.day.<yyyy-MM-dd>`: a day separator
-- `wemessage.thread.draft`: the pending agent draft; its value is the draft id
+- `wemessage.thread.draft`: the pending agent draft; its label leads with
+  `DRAFT` and names the adapter
 - `wemessage.thread.held.<draftId>`: a draft held for later review
 - `wemessage.thread.draft.approve`: Approve (10 s undo, then the daemon)
 - `wemessage.thread.draft.edit`: Edit, which copies the draft into the field
@@ -140,9 +141,9 @@ equal):
 - `wemessage.composer`: the composer
 - `wemessage.composer.field`: the field; Return is a newline, never a send
 - `wemessage.composer.send`: Send (or cmd-Return), then the 4 s undo
-- `wemessage.composer.outbox`: the newest send; value `counting N`, `sending`,
-  `approved`, `parked`, `sent`, `refused <why>` or `failed`; cmd-Z undoes it
-  while it counts
+- `wemessage.composer.outbox`: the newest send; its label leads with the
+  phase (`SENDING in Ns`, the parked line, `Not sent`, `Sent`); cmd-Z undoes
+  it while it counts
 - `wemessage.composer.hold`: reserved for Hold until; never placed while
   D-UI-17 is absent-with-reason
 

@@ -157,9 +157,13 @@ struct BubbleView: View {
     return parts.joined(separator: " \u{00B7} ")
   }
 
+  /// What the bubble is, first, then who said what and when. The state
+  /// word leads because a group's value never reaches AX on macOS (run
+  /// 37591391142): the label is the one channel a reader can rely on.
   private var spoken: String {
     let who = outbound ? "You" : (bubble.senderName ?? title)
-    return who + ": " + words + ", " + ShellText.shortClock(turn.sentAt)
+    let state = turn.isUnsent ? "Unsent" : (outbound ? "Sent" : "Received")
+    return state + ", " + who + ": " + words + ", " + ShellText.shortClock(turn.sentAt)
   }
 
   var body: some View {
@@ -183,7 +187,9 @@ struct BubbleView: View {
       }
     }
     .padding(.top, bubble.gap)
-    .accessibilityElement(children: .ignore)
+    // A group, not an ignored element: an ignored one reads as an unknown
+    // role in the audit and its value arrives empty (run 37591391142).
+    .accessibilityElement(children: .contain)
     .accessibilityLabel(spoken)
     .accessibilityValue(turn.isUnsent ? "unsent" : turn.direction.rawValue)
   }

@@ -47,6 +47,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? await Task.sleep(for: .milliseconds(100))
       }
     }
+    // Under the UI-test flag only: who holds the keyboard, appended to the
+    // window's value after the geometry, so a UI test can read whether the
+    // app is active, which window is key and what is first responder.
+    Task { @MainActor in
+      while true {
+        self.publish()
+        try? await Task.sleep(for: .milliseconds(200))
+      }
+    }
+  }
+
+  /// The pinned geometry the window carries, kept for the focus line.
+  private var geometryLine = ""
+
+  /// "active=0|1 key=<window> main=<window> responder=<class> front=<bundle>".
+  private func focusLine(_ window: NSWindow) -> String {
+    func name(_ w: NSWindow?) -> String {
+      guard let w else { return "none" }
+      if w === window { return "shell" }
+      return String(describing: type(of: w))
+    }
+    let responder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+    let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
+    return "active=\(NSApp.isActive ? 1 : 0) key=\(name(NSApp.keyWindow)) main=\(name(NSApp.mainWindow))"
+      + " responder=\(responder.replacingOccurrences(of: " ", with: "")) front=\(front)"
+  }
+
+  private func publish() {
+    guard TestHooks.isUITest, !geometryLine.isEmpty,
+      let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain })
+    else { return }
+    let value = geometryLine + " " + focusLine(window)
+    if window.accessibilityValue() as? String != value { window.setAccessibilityValue(value) }
   }
 
   /// Names the window's hosting group, and every other unnamed window-sized
@@ -106,7 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let published =
       "frame=\(Int(width.rounded()))x\(Int(height.rounded())) visible=\(Int(visible.width.rounded()))x\(Int(visible.height.rounded()))"
     if TestHooks.geometry.value != published { TestHooks.geometry.value = published }
-    if window.accessibilityValue() as? String != published { window.setAccessibilityValue(published) }
+    geometryLine = published
+    if (window.accessibilityValue() as? String)?.hasPrefix(published) != true { window.setAccessibilityValue(published) }
     placeBackdrop(under: window, screen: screen)
     Self.describe(window)
     return true

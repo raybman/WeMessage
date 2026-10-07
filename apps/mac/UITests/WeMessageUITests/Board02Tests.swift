@@ -60,7 +60,9 @@ final class Board02Tests: XCTestCase {
 
     // draft: Priya's SMS thread with sol-main's pending draft. Approve, Edit
     // and Hold are drawn; Hold until is not.
+    probe(app, "board launched")
     open(app, Self.priya)
+    probe(app, "board opened priya")
     XCTAssertTrue(waitUntil { self.label(app, ID.draft).hasPrefix("DRAFT") }, "draft: \(label(app, ID.draft))")
     XCTAssertTrue(label(app, ID.draft).contains("SOL-MAIN"), "draft: not sol-main's: \(label(app, ID.draft))")
     for id in [ID.draftApprove, ID.draftEdit, ID.draftHold, ID.threadBanner, ID.capabilityNote] {
@@ -143,15 +145,9 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
-    // Measured (run 37599650529): launched alone, nothing in the app held
-    // the keyboard, so the app was not frontmost. Bring it forward.
-    app.activate()
-    // Measured (runs 37599650529, 37601353605): when the first thread opened
-    // after launch is the one typed into, its field never takes the keyboard,
-    // while every thread opened after another one does (board 02, Hold
-    // until). Open question for S4h; here, open another thread first.
-    open(app, Self.priya)
+    probe(app, "launched")
     open(app, Self.daniel)
+    probe(app, "opened")
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
     type(app, "first line")
     dump(app, "before return")
@@ -180,15 +176,9 @@ final class Board02Tests: XCTestCase {
     // The window resizes to the pinned geometry after launch; a click before
     // it settles can land on a field that is still moving.
     _ = settledGeometry(app)
-    // Measured (run 37599650529): launched alone, nothing in the app held
-    // the keyboard, so the app was not frontmost. Bring it forward.
-    app.activate()
-    // Measured (runs 37599650529, 37601353605): when the first thread opened
-    // after launch is the one typed into, its field never takes the keyboard,
-    // while every thread opened after another one does (board 02, Hold
-    // until). Open question for S4h; here, open another thread first.
-    open(app, Self.priya)
+    probe(app, "launched")
     open(app, Self.daniel)
+    probe(app, "opened")
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
 
     type(app, "take this back")
@@ -221,9 +211,6 @@ final class Board02Tests: XCTestCase {
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     _ = settledGeometry(app)
-    // Measured (run 37599650529): launched alone, nothing in the app held
-    // the keyboard, so the app was not frontmost. Bring it forward.
-    app.activate()
     for guid in [Self.priya, Self.hike] {
       open(app, guid)
       XCTAssertTrue(waitUntil { self.element(app, ID.draftApprove).exists }, "\(guid): no draft verbs")
@@ -287,18 +274,28 @@ final class Board02Tests: XCTestCase {
   private func type(_ app: XCUIApplication, _ text: String) {
     let before = fieldText(app)
     var focused = false
-    for _ in 0..<3 where !focused {
+    for attempt in 0..<3 where !focused {
+      probe(app, "before click \(attempt)")
       composerField(app).click()
       focused = waitUntil { (self.composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true }
+      probe(app, "after click \(attempt) focused=\(focused)")
     }
     if !focused {
       let holder = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
       print("COMPOSER| no focus; keyboard is on: \(holder.exists ? holder.debugDescription : "nothing")")
     }
-    XCTAssertTrue(focused, "the field never took the keyboard")
+    XCTAssertTrue(focused, "the field never took the keyboard; \((app.windows.firstMatch.value as? String) ?? "")")
     app.typeText(text)
     XCTAssertTrue(
       waitUntil { self.fieldText(app).hasSuffix(text) }, "typed \(text.debugDescription), field has \(fieldText(app).debugDescription) (was \(before.debugDescription))")
+  }
+
+  /// The app's focus line (the window's value after the geometry): whether
+  /// it is active, which window is key and what is first responder.
+  @MainActor
+  private func probe(_ app: XCUIApplication, _ moment: String) {
+    let raw = (app.windows.firstMatch.value as? String) ?? ""
+    print("FOCUS| \(moment): \(raw)")
   }
 
   @MainActor

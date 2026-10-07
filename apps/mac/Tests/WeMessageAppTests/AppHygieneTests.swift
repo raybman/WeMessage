@@ -36,6 +36,11 @@ struct AppHygieneTests {
     "wemessage.title", "wemessage.title.counter", "wemessage.lens.recent", "wemessage.lens.needsyou",
     "wemessage.lens.triage", "wemessage.kill.chip", "wemessage.content", "wemessage.inspector",
     "wemessage.inspector.toggle",
+    // v2 S4d, board 02.
+    "wemessage.thread", "wemessage.thread.banner", "wemessage.thread.capability.note", "wemessage.thread.inv5",
+    "wemessage.thread.draft", "wemessage.thread.draft.approve", "wemessage.thread.draft.edit",
+    "wemessage.thread.draft.hold", "wemessage.composer", "wemessage.composer.field", "wemessage.composer.send",
+    "wemessage.composer.hold", "wemessage.composer.outbox",
   ]
 
   static let nsApp = "NS" + "App"
@@ -243,7 +248,10 @@ struct AppHygieneTests {
     var swept = 0
     for (path, text) in try Self.sources(Self.appDir) {
       swept += 1
-      #expect(!text.contains(".send" + "(to:"), "\(path) calls the client's send")
+      // v2 S4d: the send funnel is the one caller (H-S4-2 holds it there).
+      if !path.hasSuffix("/Models/Outbound.swift") {
+        #expect(!text.contains(".send" + "(to:"), "\(path) calls the client's send")
+      }
       #expect(!text.contains("/v1/" + "send"), "\(path) names the send route")
     }
     #expect(swept >= 12)
@@ -303,8 +311,9 @@ struct AppHygieneTests {
 
   /// The D-UI questions ProvisionalUI.swift answers provisionally: S3's
   /// 1..6, S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21) and
-  /// S4c's 22..26 (choices the board 01 wireframe left open).
-  static let dUIKeys = (1...26).map { "D-UI-\($0)" }
+  /// S4c's 22..26 (choices the board 01 wireframe left open) and S4d's
+  /// 27..38 (choices board 02 left open, or the daemon cannot yet serve).
+  static let dUIKeys = (1...38).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -321,11 +330,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..26, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..38, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..26 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..38 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -333,7 +342,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...26), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...38), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -507,5 +516,67 @@ struct AppHygieneTests {
       let fromTokens = try triple(#"static let layer0 = RGB\("# + hex + #"\)"#, in: block)
       #expect(fromTests.count == 3 && fromTests == fromTokens, "\(token): \(fromTests) vs \(fromTokens)")
     }
+  }
+
+  // MARK: S4d
+
+  /// The files under `rel` whose text contains `needle`, by repo path.
+  static func naming(_ needle: String, under rel: String) throws -> [String] {
+    try sources(rel).filter { $0.1.contains(needle) }.map(\.0).sorted()
+  }
+
+  @Test("H-S4-2: the client's send and approve are called from Models/Outbound.swift only, once each, behind its gesture switch")
+  func sendOnlyFromOutbound() throws {
+    let outbound = Self.appDir + "/Models/Outbound.swift"
+    let send = ".send" + "(to:"
+    let approve = "approve" + "Draft("
+    #expect(try Self.naming(send, under: Self.appDir) == [outbound])
+    #expect(try Self.naming(approve, under: Self.appDir) == [outbound])
+    let text = try Repo.text(outbound)
+    #expect(text.components(separatedBy: send).count - 1 == 1)
+    #expect(text.components(separatedBy: approve).count - 1 == 1)
+    // No gesture is a bare key: the cases are exactly these three.
+    let gesture = (text.components(separatedBy: "public enum Gesture").dropFirst().first ?? "")
+      .components(separatedBy: "\n  }").first ?? ""
+    let cases = gesture.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { $0.hasPrefix("case ") }
+    #expect(cases == ["case commandReturn", "case sendButton", "case approveButton"], "gesture cases: \(cases)")
+    // The undo entry is written before the task that can reach the client.
+    let perform = Self.function("perform(", in: text)
+    let entry = perform.range(of: "entries.append(")
+    let task = perform.range(of: "Task {")
+    #expect(entry != nil && task != nil && entry!.lowerBound < task!.lowerBound, "the undo entry is not written first")
+    #expect(perform.contains("guard killSwitch() == false else { return .killSwitch }"))
+    // The kill switch is read again at the minute the request would go.
+    let run = Self.function("run(", in: text)
+    #expect(run.contains("guard killSwitch() == false else {"))
+  }
+
+  @Test("H-S4-2b: nothing under Sources/WeMessageApp submits on Return: no onSubmit, no default action, no Return binding without cmd")
+  func noReturnSubmit() throws {
+    let banned = [".on" + "Submit", ".default" + "Action", "keyboardShortcut(." + "return)"]
+    var swept = 0
+    for (path, text) in try Self.sources(Self.appDir) {
+      swept += 1
+      for token in banned {
+        #expect(!text.contains(token), "\(path) contains \(token)")
+      }
+    }
+    #expect(swept >= 15)
+    // The composer's one Return binding carries cmd, and Send calls the funnel.
+    let composer = try Repo.text(Self.appDir + "/Boards/Thread/ComposerView.swift")
+    #expect(composer.contains(".keyboardShortcut(.return, modifiers: .command)"))
+    #expect(composer.contains("perform(") && composer.contains("gesture: .commandReturn"))
+    #expect(!composer.contains("model.client"), "the composer reaches the client directly")
+  }
+
+  @Test("H-S4d: board 02 never places Hold until while D-UI-17 is absent-with-reason, and the cmd-Z undo lives under the composer")
+  func holdUntilAbsent() throws {
+    let files = try Self.sources(Self.appDir + "/Boards/Thread")
+    #expect(files.count >= 4)
+    let placed = try files.filter { try Self.count(#"accessibilityIdentifier\(ShellID\.composerHold\)"#, in: $0.1) > 0 }
+    #expect(placed.isEmpty, "Hold until is placed in \(placed.map(\.0))")
+    let composer = try Repo.text(Self.appDir + "/Boards/Thread/ComposerView.swift")
+    #expect(composer.contains(#".keyboardShortcut("z", modifiers: .command)"#))
   }
 }

@@ -69,14 +69,14 @@ enum FrostEvidence {
   }
 
   /// Samples the FrostProbe patches of a window snapshot whose window is
-  /// `window` points in size. Nil when the PNG does not decode or a patch
-  /// falls outside it.
-  static func read(_ png: Data, window: CGSize) -> Reading? {
+  /// `window` points in size, at the patches `layout` puts them. Nil when
+  /// the PNG does not decode or a patch falls outside it.
+  static func read(_ png: Data, window: CGSize, layout: FrostProbe.Layout = .shell) -> Reading? {
     guard let px = NoGreen.Pixels(png), window.width > 0 else { return nil }
     let k = Double(px.width) / window.width
     let stripe = FrostProbe.stripePatch
-    let top = FrostProbe.gradientTop(windowWidth: window.width)
-    let bottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height)
+    let top = FrostProbe.gradientTop(windowWidth: window.width, layout: layout)
+    let bottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height, layout: layout)
     guard let s = stats(px, stripe, scale: k), let t = stats(px, top, scale: k), let b = stats(px, bottom, scale: k)
     else { return nil }
     return Reading(

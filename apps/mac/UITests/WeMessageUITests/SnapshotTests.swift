@@ -84,6 +84,24 @@ final class SnapshotTests: XCTestCase {
     XCTAssertEqual(FrostEvidence.frostFailures(frostReading), [], frostReading.line)
     XCTAssertFalse(
       FrostEvidence.opaqueFailures(frostReading, layer0: FrostEvidence.layer0Light).isEmpty, "frost passes as layer0")
+
+    // v2 S4d: the thread layout's patches read the same synthetic images
+    // the same way, and sit where they say (head, rail, above the stripe).
+    guard let threadFlat = FrostEvidence.read(flat, window: window, layout: .thread),
+      let threadClear = FrostEvidence.read(clear, window: window, layout: .thread),
+      let threadFrost = FrostEvidence.read(blurred, window: window, layout: .thread)
+    else { return XCTFail("the thread layout's patches did not read") }
+    XCTAssertFalse(FrostEvidence.frostFailures(threadFlat).isEmpty, "a flat fill passes as frost (thread)")
+    XCTAssertTrue(
+      FrostEvidence.frostFailures(threadClear).contains { $0.hasPrefix("stripe std") }, "unblurred stripes pass (thread)")
+    XCTAssertEqual(FrostEvidence.frostFailures(threadFrost), [], threadFrost.line)
+    let top = FrostProbe.gradientTop(windowWidth: window.width, layout: .thread)
+    let bottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height, layout: .thread)
+    XCTAssertGreaterThanOrEqual(top.y, 52.5, "the thread's top patch is under the title band")
+    XCTAssertLessThanOrEqual(top.y + top.height, 105, "the thread's top patch crosses the head's hairline")
+    XCTAssertLessThanOrEqual(bottom.x + bottom.width, 58, "the thread's bottom patch leaves the rail")
+    XCTAssertLessThan(top.midY, FrostProbe.stripePatch.midY)
+    XCTAssertLessThan(FrostProbe.stripePatch.midY, bottom.midY)
   }
 
   /// Non-vacuity of the sweep and of the tint count, on synthetic PNGs.
@@ -147,7 +165,7 @@ extension XCTestCase {
   @MainActor
   func capture(
     _ app: XCUIApplication, geometry: (frame: CGSize, visible: CGSize)?, appearance: String, frost: Bool, name: String,
-    luminance: (Double) -> Void
+    layout: FrostProbe.Layout = .shell, luminance: (Double) -> Void
   ) {
     let window = app.windows.firstMatch
     let png = window.screenshot().pngRepresentation
@@ -177,13 +195,15 @@ extension XCTestCase {
     XCTAssertGreaterThanOrEqual(size.width + 1, g.frame.width * scale, "\(name): \(size) vs \(g.frame) at \(scale)x")
     XCTAssertGreaterThanOrEqual(size.height + 1, g.frame.height * scale, "\(name): \(size) vs \(g.frame) at \(scale)x")
     luminance(NoGreen.meanLuminance(png))
-    evidence(png, window: window.frame.size, appearance: appearance, frost: frost, name: name)
+    evidence(png, window: window.frame.size, appearance: appearance, frost: frost, name: name, layout: layout)
   }
 
   /// The frost evidence for one shot: printed as one FROST| line for the job
   /// log, attached as text, and asserted.
-  func evidence(_ png: Data, window: CGSize, appearance: String, frost: Bool, name: String) {
-    guard let reading = FrostEvidence.read(png, window: window) else {
+  func evidence(
+    _ png: Data, window: CGSize, appearance: String, frost: Bool, name: String, layout: FrostProbe.Layout = .shell
+  ) {
+    guard let reading = FrostEvidence.read(png, window: window, layout: layout) else {
       XCTFail("\(name): the frost probe patches fall outside the snapshot (\(window))")
       return
     }

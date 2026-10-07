@@ -13,6 +13,12 @@ public enum Tokens {
   public static let tint = RGB(0x0A, 0x84, 0xFF)
   public static let danger = RGB(0xFF, 0x45, 0x3A)
 
+  /// Board 02 (plan 3.2): the outbound bubble's fill when D-UI-27 picks
+  /// the tint, the draft outline, and the SMS rail D-UI-28 can pick.
+  public static let outbound = tint
+  public static let draftOutline = tint
+  public static func smsRail(dark: Bool) -> RGB { palette(dark: dark).inkDim }
+
   public enum Dark {
     public static let ink = RGB(0xF5, 0xF5, 0xF7)
     public static let inkDim = RGB(0xD1, 0xD1, 0xD6)
@@ -123,7 +129,7 @@ public enum Tokens {
   public static var all: [RGB] {
     let dark = palette(dark: true)
     let light = palette(dark: false)
-    return [tint, danger]
+    return [tint, danger, outbound, draftOutline, smsRail(dark: true), smsRail(dark: false)]
       + [dark.ink, dark.inkDim, dark.layer0, dark.layer1, dark.layer2]
       + [light.ink, light.inkDim, light.layer0, light.layer1, light.layer2]
       + [Frost.tintLight, Frost.tintDark]

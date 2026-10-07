@@ -29,6 +29,27 @@ enum ID {
   static let inspectorToggle = "wemessage.inspector.toggle"
   /// A list row is this prefix and its chatGuid.
   static let rowPrefix = "wemessage.sidebar.row."
+  // v2 S4d, board 02.
+  static let thread = "wemessage.thread"
+  static let threadBanner = "wemessage.thread.banner"
+  static let capabilityNote = "wemessage.thread.capability.note"
+  static let inv5 = "wemessage.thread.inv5"
+  static let draft = "wemessage.thread.draft"
+  static let draftApprove = "wemessage.thread.draft.approve"
+  static let draftEdit = "wemessage.thread.draft.edit"
+  static let draftHold = "wemessage.thread.draft.hold"
+  static let composer = "wemessage.composer"
+  static let composerField = "wemessage.composer.field"
+  static let composerSend = "wemessage.composer.send"
+  /// Never placed while D-UI-17 is absent-with-reason: tests assert it is not.
+  static let composerHold = "wemessage.composer.hold"
+  static let composerOutbox = "wemessage.composer.outbox"
+  /// A transcript bubble is this prefix and its message guid.
+  static let bubblePrefix = "wemessage.thread.bubble."
+  /// A day separator is this prefix and its day key (yyyy-MM-dd).
+  static let dayPrefix = "wemessage.thread.day."
+  /// A held draft is this prefix and its draft id.
+  static let heldPrefix = "wemessage.thread.held."
 
   static let railTiles = [railAll, railIMessage, railWhatsApp, railLinkedIn, railEmail]
 }

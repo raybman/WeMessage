@@ -1,9 +1,10 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..26 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..38 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
-// the board 01 wireframe left a choice open). Every value below is the
+// the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
+// where board 02 left one open or the daemon cannot yet say what it draws). Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
 // live in this one file on purpose: when the decisions land, this file is
@@ -154,7 +155,7 @@ public enum ProvisionalUI {
   }
   public static let reducedMotionUndo: ReducedMotionUndo = .tickingText
 
-  // D-UI-17: "Hold until" before the daemon has a hold route.
+  // D-UI-17: Hold until, before the daemon has a hold route.
   public enum HoldUntil: Sendable {
     /// No control; the composer's capability note gives the reason.
     case absentWithReason
@@ -248,4 +249,125 @@ public enum ProvisionalUI {
     case inkBarFill
   }
   public static let selectedRow: SelectedRowStyle = .tintBarWash
+
+  // D-UI-27: the outbound bubble's fill. Fill is the only direction cue
+  // (wireframe .row.out .bub). The wireframe fills with ink; plan 3.2 names
+  // outbound = tint. White 13 pt text on the tint is 3.65:1, under the
+  // audit's 4.5:1, so the default is ink, as drawn (the D-UI-25 precedent).
+  public enum OutboundFill: Sendable {
+    /// Ink fill, paper text, as drawn.
+    case ink
+    /// Tint fill, white text (plan 3.2; fails AA at 13 pt).
+    case tint
+  }
+  public static let outboundFill: OutboundFill = .ink
+
+  // D-UI-28: an outbound bubble in an SMS chat. Wireframe 02.D draws it 2 pt
+  // dashed and unfilled with the transport in words ("fill is reserved for
+  // sent as iMessage"); plan S4e draws an inkDim rail instead. The daemon
+  // serves no per-message service, so the chat guid's service stands in.
+  public enum SmsOutbound: Sendable {
+    /// 2 pt dashed, unfilled, as drawn in 02.D.
+    case dashedUnfilled
+    /// A plain bubble with the plan's inkDim rail on its edge.
+    case inkDimRail
+  }
+  public static let smsOutbound: SmsOutbound = .dashedUnfilled
+
+  // D-UI-29: the draft footer's keycaps (A, R, ⌫). Drawn as the wireframe
+  // draws them, but not bound: H-A2+ allows no bare-letter shortcut, and the
+  // verbs' keys are S4f's.
+  public enum DraftKeycaps: Sendable {
+    case shownUnbound
+    case hidden
+  }
+  public static let draftKeycaps: DraftKeycaps = .shownUnbound
+
+  // D-UI-30: the thread head's read line. 02.A draws "read here 9:41 · still
+  // unread in Messages.app"; the daemon serves no read state, so only the
+  // first half is something the app knows (it read the page at its as-of).
+  public enum ReadLine: Sendable {
+    /// read here, and the page's as-of clock.
+    case readHereOnly
+    /// Both halves, as drawn, the second unverified.
+    case asDrawn
+    case omitted
+  }
+  public static let readLine: ReadLine = .readHereOnly
+  /// The read line for a page read at `clock`; nil when omitted.
+  public static func readHere(clock: String) -> String? {
+    switch readLine {
+    case .readHereOnly: "read here " + clock
+    case .asDrawn: "read here " + clock + " · still unread in Messages.app"
+    case .omitted: nil
+    }
+  }
+
+  // D-UI-31: the day separators. Today and Yesterday are measured from
+  // the page's as-of, not the Mac's clock, so a fixture reads the same on
+  // any day; older days print weekday, month and day.
+  public enum DayLabels: Sendable {
+    case relativeToAsOf
+    case absolute
+  }
+  public static let dayLabels: DayLabels = .relativeToAsOf
+
+  // D-UI-32: what an attachment-only or audio bubble says. The daemon
+  // serves a count, never the files, and no transcript yet (02.G draws the
+  // transcript as the payload), so the bubble says exactly that.
+  public static func attachmentsLine(count: Int) -> String {
+    count == 1 ? "1 attachment, not shown here" : String(count) + " attachments, not shown here"
+  }
+  public static let voiceLine = "Audio message · no transcript from the daemon yet"
+
+  // D-UI-33: a send the daemon refused as parked (409). 14.F keeps dotted
+  // for failed and dashed for not sent; a parked send never left the Mac.
+  public enum ParkedBorder: Sendable {
+    case dotted
+    case dashed
+  }
+  public static let parkedBorder: ParkedBorder = .dotted
+  public static let parkedLine = "Sending is parked on this daemon"
+
+  // D-UI-34: Send in a group. GatewayClient.send addresses one handle, and
+  // the daemon answers group-send-disabled, so the composer prints why.
+  public static let groupSendReason = "No Send in a group from here: this build sends to one person at a time."
+
+  // D-UI-35: the sender name above an inbound group bubble (02.E). The
+  // daemon serves the handle; the name is the title of the one-to-one
+  // thread with that handle, when the list has one.
+  public enum GroupSenderNames: Sendable {
+    case fromOneToOneTitles
+    case handles
+  }
+  public static let groupSenderNames: GroupSenderNames = .fromOneToOneTitles
+
+  // D-UI-36: Hold (⌫) on an agent draft. The daemon has no hold route, so
+  // the hold is local to this window: the draft is drawn muted as held for
+  // later review and nothing is written. It never becomes a Hold until.
+  public enum DraftHold: Sendable {
+    case localPark
+    case absent
+  }
+  public static let draftHold: DraftHold = .localPark
+  public static let heldLine = "HELD for later review · not sent, still waiting in the daemon"
+
+  // D-UI-37: the draft-pending composer. 02.A draws the verb row and the
+  // line Or just start typing; the field the keystrokes go to sits under
+  // the verbs, with that line as its placeholder.
+  public enum DraftComposer: Sendable {
+    case verbsAboveField
+    case verbsOnly
+  }
+  public static let draftComposer: DraftComposer = .verbsAboveField
+
+  // D-UI-38: the line under an agent draft that says why it exists (02.A
+  // draws the rule's name and a sentence about past replies). The daemon
+  // serves the proactive reason or a rule id, never a name or a sentence,
+  // so the line says only what it serves.
+  public static func whyLine(proactiveReason: String?, ruleId: String?) -> String? {
+    if let proactiveReason, !proactiveReason.isEmpty { return proactiveReason }
+    guard let ruleId else { return nil }
+    return "Matched rule " + ruleId
+  }
 }

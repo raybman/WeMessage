@@ -38,13 +38,33 @@ public enum FrostProbe {
       width: patchSide, height: patchSide)
   }
 
-  /// Plain gradient near the top of the content pane, right of its text.
-  public static func gradientTop(windowWidth: Double) -> Rect {
-    Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
+  /// What the content pane shows, which moves the gradient patches.
+  public enum Layout: Sendable {
+    /// No thread open (board 01): the pane is empty but for its centred text.
+    case shell
+    /// A thread open (board 02). The head's hairline crosses the shell's top
+    /// patch and the composer covers its bottom one, so the top patch moves
+    /// into the head, between the title and the inspector button, and the
+    /// bottom one into the rail under its last tile. The backdrop gradient
+    /// is vertical, so only the heights matter to it. The stripe patch stays:
+    /// the transcript is anchored to the bottom, so the space above a short
+    /// thread is bare pane.
+    case thread
   }
 
-  /// Plain gradient near the bottom of the content pane.
-  public static func gradientBottom(windowWidth: Double, windowHeight: Double) -> Rect {
-    Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
+  /// Plain gradient near the top of the window, clear of every label.
+  public static func gradientTop(windowWidth: Double, layout: Layout = .shell) -> Rect {
+    switch layout {
+    case .shell: Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
+    case .thread: Rect(x: windowWidth - 140, y: 58, width: patchSide, height: patchSide)
+    }
+  }
+
+  /// Plain gradient near the bottom of the window, clear of every label.
+  public static func gradientBottom(windowWidth: Double, windowHeight: Double, layout: Layout = .shell) -> Rect {
+    switch layout {
+    case .shell: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
+    case .thread: Rect(x: 9, y: windowHeight - 120, width: patchSide, height: patchSide)
+    }
   }
 }

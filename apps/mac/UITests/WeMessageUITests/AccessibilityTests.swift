@@ -26,8 +26,16 @@ final class AccessibilityTests: XCTestCase {
     let app = UITestApp.make(appearance: "light")
     app.launch()
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
-    let window = app.windows.firstMatch.screenshot()
-    add(XCTAttachment(data: window.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-window"))
+    try audit(app, window: "audit-window")
+    app.terminate()
+  }
+
+  /// The U-X1 audit of whatever `app` shows now; the window is attached
+  /// as `window`.
+  @MainActor
+  private func audit(_ app: XCUIApplication, window: String) throws {
+    let shot = app.windows.firstMatch.screenshot()
+    add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept(window))
     try app.performAccessibilityAudit() { issue in
       let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
       let chrome = Self.isSystemChrome(issue, in: app)
@@ -49,6 +57,23 @@ final class AccessibilityTests: XCTestCase {
       }
       return chrome || cleared
     }
+  }
+
+  /// v2 S4d: the same audit with board 02 open on an agent draft (Priya,
+  /// SMS), so the transcript, the draft's verbs, the banner and the
+  /// composer are all in the tree the audit walks.
+  @MainActor
+  func testBoard02PassesAccessibilityAudit() async throws {
+    try await FakeDaemon.scenario("rich")
+    let app = UITestApp.make(appearance: "light")
+    app.launch()
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let row = app.descendants(matching: .any)[ID.rowPrefix + "SMS;-;+15550100004"]
+    XCTAssertTrue(row.waitForExistence(timeout: UITestApp.timeout), "no row for the SMS thread")
+    row.click()
+    XCTAssertTrue(
+      app.descendants(matching: .any)[ID.draft].waitForExistence(timeout: UITestApp.timeout), "the draft never drew")
+    try audit(app, window: "audit-board-02")
     app.terminate()
   }
 

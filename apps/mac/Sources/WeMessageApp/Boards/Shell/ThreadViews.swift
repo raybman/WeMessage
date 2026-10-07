@@ -121,8 +121,8 @@ struct ListRow: View {
 }
 
 /// The content pane: the D-UI-5 empty state, or the selected thread's head
-/// (wireframe .thread-head) with the inspector toggle. The thread itself is
-/// S4d's.
+/// (wireframe .thread-head) with the inspector toggle, over board 02's
+/// thread (S4d).
 struct ContentPane: View {
   @Bindable var model: ShellModel
   let palette: Tokens.Palette
@@ -130,10 +130,11 @@ struct ContentPane: View {
   var body: some View {
     if let thread = model.selected {
       VStack(spacing: 0) {
-        ThreadHeader(thread: thread, palette: palette) { model.inspectorShown.toggle() }
+        ThreadHeader(thread: thread, asOf: model.thread.asOf, palette: palette) { model.inspectorShown.toggle() }
         Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
-        Spacer(minLength: 0)
+        ThreadView(model: model, thread: thread, palette: palette)
       }
+      .task(id: model.selectedThread) { await model.thread.open(model.selectedThread) }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .accessibilityElement(children: .contain)
       .accessibilityLabel(thread.title)
@@ -159,6 +160,7 @@ func threadHandle(_ thread: ThreadSummary) -> String? {
 /// The thread head: avatar, name, channel and handle, and the ⓘ toggle.
 struct ThreadHeader: View {
   let thread: ThreadSummary
+  var asOf: Date? = nil
   let palette: Tokens.Palette
   let toggle: () -> Void
 
@@ -197,7 +199,10 @@ struct ThreadHeader: View {
 
   private var subline: String {
     let channel = ShellModel.Scope(rawValue: thread.channel)?.fullLabel ?? thread.channel
-    return [channel, threadHandle(thread)].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    // D-UI-30: what this app knows about reading, which is only that the
+    // transcript was fetched, and when.
+    let read = asOf.flatMap { ProvisionalUI.readHere(clock: ShellText.shortClock($0)) }
+    return [channel, threadHandle(thread), read].compactMap { $0 }.joined(separator: " \u{00B7} ")
   }
 }
 

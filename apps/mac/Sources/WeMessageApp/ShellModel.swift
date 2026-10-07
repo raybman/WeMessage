@@ -72,6 +72,17 @@ public final class ShellModel {
   /// The kit's state: the draft queue, folded by AppReducer.
   public internal(set) var state = AppState()
 
+  /// The selected thread's transcript (board 02).
+  public let thread: ThreadModel
+  /// The one send funnel: every send and approval goes through it.
+  public let outbound: Outbound
+  /// What the human has typed in each thread's composer, by chatGuid. Never
+  /// sent from here: only Outbound sends.
+  public var composerText: [String: String] = [:]
+  /// The draft whose body Edit copied into a thread's field, by chatGuid:
+  /// Approve then carries the field as the edited body.
+  public var editedFrom: [String: String] = [:]
+
   private let client: GatewayClient
   private var task: Task<Void, Never>?
 
@@ -107,6 +118,22 @@ public final class ShellModel {
 
   public init(client: GatewayClient) {
     self.client = client
+    self.thread = ThreadModel(client: client)
+    let shell = WeakShell()
+    self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
+    shell.model = self
+  }
+
+  /// The pending agent draft for `chatGuid`, newest last in the queue.
+  public func pendingDraft(for chatGuid: String) -> DraftPayload? {
+    state.queue.last { $0.chatGuid == chatGuid && $0.state == .pending }
+  }
+
+  /// D-UI-35: a group sender's name is the title of the one-to-one thread
+  /// with that handle, when the list has one.
+  public func senderName(handle: String) -> String? {
+    guard ProvisionalUI.groupSenderNames == .fromOneToOneTitles else { return nil }
+    return threads?.threads.first { threadHandle($0) == handle }?.title
   }
 
   /// One task, however often it is called: read status, then follow the
@@ -143,6 +170,7 @@ public final class ShellModel {
     }
     if case .ok(let page)? = try? await client.listThreads() { threads = page }
     if let envelope = try? await client.listDrafts() { fold(.response(.drafts(envelope.drafts))) }
+    await thread.reload()
   }
 
   /// Turns sending off (shift-cmd-K). Only ever this direction: turning it
@@ -204,4 +232,11 @@ public final class ShellModel {
     case .down: ProvisionalUI.downLine
     }
   }
+}
+
+/// Lets the send funnel read the shell's kill switch without the shell
+/// owning a cycle.
+@MainActor
+private final class WeakShell {
+  weak var model: ShellModel?
 }

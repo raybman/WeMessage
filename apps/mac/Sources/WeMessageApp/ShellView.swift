@@ -24,6 +24,30 @@ enum ShellID {
   static let inspectorToggle = "wemessage.inspector.toggle"
   /// A list row is this prefix and its chatGuid.
   static let rowPrefix = "wemessage.sidebar.row."
+  // v2 S4d, board 02.
+  static let thread = "wemessage.thread"
+  static let threadBanner = "wemessage.thread.banner"
+  static let capabilityNote = "wemessage.thread.capability.note"
+  static let inv5 = "wemessage.thread.inv5"
+  static let draft = "wemessage.thread.draft"
+  static let draftApprove = "wemessage.thread.draft.approve"
+  static let draftEdit = "wemessage.thread.draft.edit"
+  static let draftHold = "wemessage.thread.draft.hold"
+  static let composer = "wemessage.composer"
+  static let composerField = "wemessage.composer.field"
+  static let composerSend = "wemessage.composer.send"
+  /// Hold until (02.I). Never placed while D-UI-17 is absent-with-reason;
+  /// the UI tests assert it does not exist.
+  static let composerHold = "wemessage.composer.hold"
+  /// The send in its undo window, sending, parked or sent (14.F); its value
+  /// is the phase.
+  static let composerOutbox = "wemessage.composer.outbox"
+  /// A transcript bubble is this prefix and its message guid.
+  static let bubblePrefix = "wemessage.thread.bubble."
+  /// A day separator is this prefix and the day as yyyy-mm-dd.
+  static let dayPrefix = "wemessage.thread.day."
+  /// A held agent draft is this prefix and the draft id.
+  static let heldPrefix = "wemessage.thread.held."
 
   static func rail(_ scope: ShellModel.Scope) -> String {
     switch scope {

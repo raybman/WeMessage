@@ -51,8 +51,11 @@ public enum FrostProbe {
     /// thread is bare pane.
     case thread
     /// Board 08's specimen sheet. Its two columns leave `atlasGutter` bare
-    /// from the title band down, so all three patches sit in the gutter,
-    /// one above the stripe patch and one below it.
+    /// from the title band down, so the stripe and bottom patches sit in
+    /// the gutter. The top one cannot: the frost spreads the stripe band
+    /// across the 48 pt of gutter above it (measured, run 37621034024:
+    /// light 211.6, std 2.1, against 223 on bare pane), so it sits in the
+    /// title band, between the capped title and the page dots.
     case atlas
   }
 
@@ -63,12 +66,19 @@ public enum FrostProbe {
   public static let atlasGutter = Rect(
     x: stripePatch.x - (68 - patchSide) / 2, y: 52, width: 68, height: .greatestFiniteMagnitude)
 
+  /// Board 08: the top patch, in the title band, 70 pt clear of the stripe
+  /// band's right edge. The sheet caps its title at `atlasTitleMaxX` and
+  /// the page dots start right of `atlasBandPatch`'s right edge.
+  public static let atlasBandPatch = Rect(x: 600, y: 6, width: patchSide, height: patchSide)
+  /// Board 08: the title band's text ends left of this.
+  public static let atlasTitleMaxX: Double = 550
+
   /// Plain gradient near the top of the window, clear of every label.
   public static func gradientTop(windowWidth: Double, layout: Layout = .shell) -> Rect {
     switch layout {
     case .shell: Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
     case .thread: Rect(x: windowWidth - 140, y: 58, width: patchSide, height: patchSide)
-    case .atlas: Rect(x: stripePatch.x, y: 58, width: patchSide, height: patchSide)
+    case .atlas: atlasBandPatch
     }
   }
 

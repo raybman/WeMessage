@@ -189,7 +189,9 @@ final class Board08Tests: XCTestCase {
   @MainActor
   private func label(_ app: XCUIApplication, _ id: String) -> String {
     let e = element(app, id)
-    return e.exists ? e.label : "(missing)"
+    guard e.exists else { return "(missing)" }
+    // A macOS static text carries its words in its value, not its label.
+    return e.label.isEmpty ? (e.value as? String ?? "") : e.label
   }
 
   /// One more frame after the page draws, before the probes and the shot.

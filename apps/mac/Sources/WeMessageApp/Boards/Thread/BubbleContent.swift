@@ -438,12 +438,12 @@ struct PollBody: View {
       ForEach(Array(poll.options.enumerated()), id: \.offset) { _, option in
         VStack(alignment: .leading, spacing: 3) {
           HStack {
-            Text(option.title).font(.system(size: 9)).foregroundStyle(dim)
+            Text(option.title).font(.system(size: 11, weight: .medium)).foregroundStyle(dim)
             Spacer()
-            Text("\(option.votes)").font(.system(size: 9)).foregroundStyle(dim)
+            Text("\(option.votes)").font(.system(size: 11, weight: .medium)).foregroundStyle(dim)
           }
-          // One element per option: a lone vote count is too few glyphs for
-          // the 1x audit to measure (run 37618816522).
+          // One element per option, and 11 pt: at 9 pt the 1x audit found
+          // two ink pixels in "Italian, 4" (runs 37618816522, 37621034024).
           .accessibilityElement(children: .combine)
           ZStack(alignment: .leading) {
             Rectangle().fill(dim.opacity(0.3)).frame(width: 172, height: 3)

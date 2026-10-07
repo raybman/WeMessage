@@ -103,8 +103,10 @@ final class SnapshotTests: XCTestCase {
     XCTAssertLessThan(top.midY, FrostProbe.stripePatch.midY)
     XCTAssertLessThan(FrostProbe.stripePatch.midY, bottom.midY)
 
-    // v2 S4e: the atlas layout's patches read the same way, and all three
-    // sit in the specimen sheet's bare gutter, under the title band.
+    // v2 S4e: the atlas layout's patches read the same way. The stripe and
+    // bottom patches sit in the specimen sheet's bare gutter; the top one
+    // sits in the title band, right of the capped title and clear of the
+    // stripe band's blur.
     guard let atlasFlat = FrostEvidence.read(flat, window: window, layout: .atlas),
       let atlasClear = FrostEvidence.read(clear, window: window, layout: .atlas),
       let atlasFrost = FrostEvidence.read(blurred, window: window, layout: .atlas)
@@ -116,8 +118,11 @@ final class SnapshotTests: XCTestCase {
     let gutter = FrostProbe.atlasGutter
     let atlasTop = FrostProbe.gradientTop(windowWidth: window.width, layout: .atlas)
     let atlasBottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height, layout: .atlas)
-    XCTAssertGreaterThanOrEqual(atlasTop.y, 52.5, "the atlas's top patch is under the title band")
-    for patch in [atlasTop, FrostProbe.stripePatch, atlasBottom] {
+    XCTAssertLessThanOrEqual(atlasTop.y + atlasTop.height, 52, "the atlas's top patch leaves the title band")
+    XCTAssertGreaterThanOrEqual(atlasTop.x, FrostProbe.atlasTitleMaxX, "the atlas's top patch crosses the title")
+    XCTAssertGreaterThanOrEqual(
+      atlasTop.x, FrostProbe.stripeBand.x + FrostProbe.stripeBand.width + 60, "the atlas's top patch is in the stripe's blur")
+    for patch in [FrostProbe.stripePatch, atlasBottom] {
       XCTAssertGreaterThanOrEqual(patch.x, gutter.x, "an atlas patch leaves the gutter: \(patch)")
       XCTAssertLessThanOrEqual(patch.x + patch.width, gutter.x + gutter.width, "an atlas patch leaves the gutter: \(patch)")
     }

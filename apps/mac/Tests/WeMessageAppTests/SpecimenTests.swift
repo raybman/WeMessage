@@ -105,6 +105,17 @@ struct SpecimenTests {
     #expect(SpecimenText.delivery(.sent(at: nil), zone: SpecimenContent.zone) == "Sent")
   }
 
+  @Test("the title band leaves the frost evidence's top patch bare: the title is capped left of it")
+  func bandPatchBare() throws {
+    let patch = FrostProbe.atlasBandPatch
+    #expect(patch.x >= FrostProbe.atlasTitleMaxX)
+    #expect(patch.y >= 0 && patch.y + patch.height <= Double(ShellView.titleBand))
+    #expect(patch.x >= FrostProbe.stripeBand.x + FrostProbe.stripeBand.width + 60)
+    let sheet = try Repo.text("apps/mac/Sources/WeMessageApp/Boards/Atlas/SpecimenSheet.swift")
+    #expect(sheet.contains(".frame(maxWidth: FrostProbe.atlasTitleMaxX - (TitleBar.lightsReserve + 8), alignment: .leading)"))
+    #expect(sheet.contains(".padding(.leading, TitleBar.lightsReserve + 8)"))
+  }
+
   @Test("D-UI-40: emoji draw in text presentation, never colour")
   func monochromeEmoji() {
     let shown = SpecimenText.textPresentation("Landed \u{2708}\u{FE0F}")

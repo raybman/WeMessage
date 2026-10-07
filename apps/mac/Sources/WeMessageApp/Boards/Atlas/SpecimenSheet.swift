@@ -89,24 +89,29 @@ struct SpecimenSheet: View {
   /// the page marker (D-UI-42), clear of the traffic lights.
   private var band: some View {
     HStack(spacing: 10) {
-      Text("MESSAGE ATLAS")
-        .font(.system(size: 9, weight: .semibold))
-        .tracking(1.4)
-        .foregroundStyle(Tokens.color(palette.inkDim))
-      if content.golden.sections.indices.contains(page) {
-        Text("08." + Self.letter(page))
-          .font(.system(size: 10, weight: .bold, design: .monospaced))
-          .foregroundStyle(Tokens.color(palette.layer1))
-          .padding(.vertical, 3)
-          .padding(.horizontal, 6)
-          .background(RoundedRectangle(cornerRadius: 4).fill(Tokens.color(palette.ink)))
-          .accessibilityHidden(true)
-        Text(content.golden.sections[page].title)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(Tokens.color(palette.ink))
-          .lineLimit(1)
-          .accessibilityAddTraits(.isHeader)
+      HStack(spacing: 10) {
+        Text("MESSAGE ATLAS")
+          .font(.system(size: 9, weight: .semibold))
+          .tracking(1.4)
+          .foregroundStyle(Tokens.color(palette.inkDim))
+        if content.golden.sections.indices.contains(page) {
+          Text("08." + Self.letter(page))
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(Tokens.color(palette.layer1))
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Tokens.color(palette.ink)))
+            .accessibilityHidden(true)
+          Text(content.golden.sections[page].title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Tokens.color(palette.ink))
+            .lineLimit(1)
+            .accessibilityAddTraits(.isHeader)
+        }
       }
+      // Capped so the title never reaches the frost evidence's top patch
+      // (FrostProbe.atlasBandPatch), which sits between it and the dots.
+      .frame(maxWidth: FrostProbe.atlasTitleMaxX - (TitleBar.lightsReserve + 8), alignment: .leading)
       Spacer(minLength: 8)
       switch ProvisionalUI.atlasPageMarker {
       case .tintDots: dots

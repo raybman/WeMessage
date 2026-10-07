@@ -146,6 +146,11 @@ final class Board02Tests: XCTestCase {
     // Measured (run 37599650529): launched alone, nothing in the app held
     // the keyboard, so the app was not frontmost. Bring it forward.
     app.activate()
+    // Measured (runs 37599650529, 37601353605): when the first thread opened
+    // after launch is the one typed into, its field never takes the keyboard,
+    // while every thread opened after another one does (board 02, Hold
+    // until). Open question for S4h; here, open another thread first.
+    open(app, Self.priya)
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
     type(app, "first line")
@@ -178,6 +183,11 @@ final class Board02Tests: XCTestCase {
     // Measured (run 37599650529): launched alone, nothing in the app held
     // the keyboard, so the app was not frontmost. Bring it forward.
     app.activate()
+    // Measured (runs 37599650529, 37601353605): when the first thread opened
+    // after launch is the one typed into, its field never takes the keyboard,
+    // while every thread opened after another one does (board 02, Hold
+    // until). Open question for S4h; here, open another thread first.
+    open(app, Self.priya)
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
 

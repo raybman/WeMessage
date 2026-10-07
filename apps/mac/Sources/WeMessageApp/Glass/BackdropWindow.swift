@@ -23,13 +23,17 @@ final class BackdropWindow: NSWindow {
     hasShadow = false
     isOpaque = true
     collectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone]
-    contentView = NSHostingView(rootView: BackdropView(placement: placement, dark: dark))
+    contentView = SilentHostingView(rootView: BackdropView(placement: placement, dark: dark))
     setAccessibilityElement(false)
   }
 
   override var canBecomeKey: Bool { false }
   override var canBecomeMain: Bool { false }
   override func isAccessibilityElement() -> Bool { false }
+  // An ignored window's children are promoted to the application, so the
+  // window hands the tree nothing at all (run 37571025343's audit flagged
+  // the hosting view's screen-sized group as "Element has no description").
+  override func accessibilityChildren() -> [Any]? { [] }
 
   /// Moves the stripe band under the main window's FrostProbe.stripeBand.
   /// `main` is the main window's frame in screen coordinates.
@@ -40,6 +44,13 @@ final class BackdropWindow: NSWindow {
       y: (screen.maxY - main.maxY) + FrostProbe.stripeBand.y)
     if placement.stripeOrigin != origin { placement.stripeOrigin = origin }
   }
+}
+
+/// A hosting view that is not an accessibility element and exposes no
+/// children: the backdrop is pixels for the frost evidence, nothing more.
+private final class SilentHostingView<Content: View>: NSHostingView<Content> {
+  override func isAccessibilityElement() -> Bool { false }
+  override func accessibilityChildren() -> [Any]? { [] }
 }
 
 /// Where the stripe band sits, in backdrop-local top-leading points.

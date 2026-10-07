@@ -22,13 +22,19 @@ struct FrostBackground: ViewModifier {
   func body(content: Content) -> some View {
     let fill = Fill.decide(reduceTransparency: mirror.reduceTransparency)
     content
-      .background(ClearWindow())
+      // Neither the clearing view nor the fill is content: hidden from the
+      // accessibility tree (run 37571025343's audit flagged a window-sized
+      // group with no description).
+      .background(ClearWindow().accessibilityHidden(true))
       .containerBackground(for: .window) {
-        switch fill {
-        case .layer0: Rectangle().fill(Tokens.color(palette.layer0))
-        case .material(.regular): Rectangle().fill(.regularMaterial)
-        case .material(.hudWindow): BehindWindowEffect(material: .hudWindow)
+        Group {
+          switch fill {
+          case .layer0: Rectangle().fill(Tokens.color(palette.layer0))
+          case .material(.regular): Rectangle().fill(.regularMaterial)
+          case .material(.hudWindow): BehindWindowEffect(material: .hudWindow)
+          }
         }
+        .accessibilityHidden(true)
       }
   }
 }
@@ -63,6 +69,9 @@ private struct ClearWindow: NSViewRepresentable {
   func updateNSView(_ view: ClearingView, context: Context) { view.clear() }
 
   final class ClearingView: NSView {
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { [] }
+
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       clear()

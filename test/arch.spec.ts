@@ -13783,6 +13783,35 @@ describe('v2 S1: the Swift tree', () => {
       expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
   });
 
+  it('the ui job turns Reduce Transparency off before the tests (S4a)', () => {
+    // v2 S4a (S4.0 spike, run 37568873983): the macOS 26 image ships with
+    // Reduce Transparency on, which draws every material opaque; the frost
+    // legs would then measure a flat fill. The job writes it off, reads it
+    // back and fails unless it reads 0, all before xcodebuild; the FROST
+    // lines the snapshots print are kept from a raw log on every outcome.
+    const text = archRead(CI_SWIFT);
+    const write =
+      'defaults write com.apple.universalaccess reduceTransparency -bool false';
+    const read =
+      'value=$(defaults read com.apple.universalaccess reduceTransparency)';
+    const check = 'test "$value" = 0 || {';
+    for (const needed of [write, read, check])
+      expect([needed, text.split(needed).length - 1]).toEqual([needed, 1]);
+    const at = (s: string) => text.indexOf(s);
+    expect(at(write)).toBeLessThan(at(read));
+    expect(at(read)).toBeLessThan(at(check));
+    expect(at(check)).toBeLessThan(at('xcodebuild test \\'));
+    expect(text).toMatch(
+      /- name: Reduce Transparency off, so the window frost is real\n\s+run: \|\n\s+set -eu\n/,
+    );
+    // The raw log sits before xcbeautify, and its FROST lines print always.
+    expect(text).toContain(
+      '| tee "$RUNNER_TEMP/xcodebuild-raw.log" \\\n            | xcbeautify --renderer github-actions',
+    );
+    expect(/- name: frost evidence\n\s+if: always\(\)\n/.test(text)).toBe(true);
+    expect(text).toContain("awk '/FROST\\|/");
+  });
+
   it('project.yml is the CI-only spec', () => {
     const text = archRead(PROJECT_YML);
     expect(text.split('type: application').length - 1).toBe(1);
@@ -14016,11 +14045,21 @@ describe('v2 S1: the Swift tree', () => {
       'NoGreen.meanLuminance',
       'trafficLightBand',
       'shellGeometry',
-      'func testShellLight()',
-      'func testShellDark()',
+      // v2 S4a: each appearance twice, frost on and Reduce Transparency
+      // forced, named for board 01, each with its frost evidence.
+      'func testShellLightFrost()',
+      'func testShellDarkFrost()',
+      'func testShellLightOpaque()',
+      'func testShellDarkOpaque()',
       'func testNoGreenSweepSeesGreen()',
-      '"shell-light"',
-      '"shell-dark"',
+      'func testFrostEvidenceSeesFlatFill()',
+      '"board-01-shell-light.png"',
+      '"board-01-shell-dark.png"',
+      '"board-01-shell-opaque-light.png"',
+      '"board-01-shell-opaque-dark.png"',
+      'FrostEvidence.frostFailures(reading)',
+      'FrostEvidence.opaqueFailures(reading, layer0: FrostEvidence.layer0(dark: appearance == "dark"))',
+      'XCTAssertEqual(failures, [], ',
     ])
       expect([needed, ui.includes(needed)]).toEqual([needed, true]);
     for (const banned of [

@@ -27,10 +27,15 @@ enum TestHooks {
   /// The window geometry the delegate computed, published on the shell
   /// root's accessibility value under the UI-test flag only.
   static let geometry = PublishedGeometry()
+  /// WEMESSAGE_UI_REDUCE_TRANSPARENCY and its two siblings, parsed, under
+  /// the UI-test flag only: the opaque snapshot legs force Reduce
+  /// Transparency on without touching the runner's settings.
+  static private(set) var accessibilityOverrides = AccessibilityMirror.Overrides()
 
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
+    accessibilityOverrides = isUITest ? AccessibilityMirror.Overrides.parse(environment) : AccessibilityMirror.Overrides()
   }
 }
 

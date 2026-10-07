@@ -30,11 +30,15 @@ enum UITestApp {
   /// WEMESSAGE_* key the job exported with a TEST_RUNNER_ prefix arrives in
   /// ProcessInfo here and is copied to the app explicitly: nothing is
   /// forwarded wholesale.
-  static func make(appearance: String) -> XCUIApplication {
+  ///
+  /// `reduceTransparency` forces the app's copy of the Reduce Transparency
+  /// display option ("1" on, "0" off); nil leaves the system's value.
+  static func make(appearance: String, reduceTransparency: Bool? = nil) -> XCUIApplication {
     let env = ProcessInfo.processInfo.environment
     let app = XCUIApplication()
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     var launch: [String: String] = ["WEMESSAGE_UI_TEST": "1", "WEMESSAGE_UI_APPEARANCE": appearance]
+    if let reduceTransparency { launch["WEMESSAGE_UI_REDUCE_TRANSPARENCY"] = reduceTransparency ? "1" : "0" }
     for key in ["WEMESSAGE_DIR", "WEMESSAGE_PORT", "TZ"] {
       if let value = env[key], !value.isEmpty { launch[key] = value }
     }

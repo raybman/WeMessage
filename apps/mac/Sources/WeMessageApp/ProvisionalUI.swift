@@ -1,7 +1,8 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..6 decisions (docs/plans/v2-swift-S3.md
-// §7.2). Every value below is the plan's default, chosen only so the window
+// PROVISIONAL pending Eric's D-UI-1..21 decisions (D-UI-1..6:
+// docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
+// section 5 and the S4a.0 spike results). Every value below is the plan's default, chosen only so the window
 // can be built and tested before the design questions are answered. They
 // live in this one file on purpose: when the decisions land, this file is
 // the whole edit, and AppHygieneTests fails if any of these values is copied
@@ -57,4 +58,139 @@ public enum ProvisionalUI {
     case tintBar
   }
   public static let selectedTile: SelectedTileStyle = .filledTint
+
+  // D-UI-7: the frost tint strength. The mockup's numbers by default. The app
+  // draws the D-UI-21 material without this tint over it (a .58 tint over
+  // the material measured too flat for the frost evidence); Tokens.Frost uses
+  // it to model the frost for the luminance and contrast arithmetic.
+  public enum FrostTintStrength: Sendable {
+    /// .58 light, .62 dark.
+    case mockup
+    /// .45 light, .50 dark: the backdrop reads more.
+    case lighter
+    /// .70 light, .75 dark: nearer to opaque.
+    case heavier
+
+    public func alpha(dark: Bool) -> Double {
+      switch self {
+      case .mockup: dark ? 0.62 : 0.58
+      case .lighter: dark ? 0.50 : 0.45
+      case .heavier: dark ? 0.75 : 0.70
+      }
+    }
+  }
+  public static let frostTintStrength: FrostTintStrength = .mockup
+
+  // D-UI-8: the initials avatar palette. Green is excluded in every option.
+  public enum AvatarPalette: Sendable {
+    /// Blue family only: hues 200 to 240, three saturations, two lightnesses.
+    case blueFamily
+    /// Blue, violet, orange, red, slate and a cyan at hue 190.
+    case mixedNoGreen
+    /// Ink discs, no hue.
+    case monochrome
+  }
+  public static let avatarPalette: AvatarPalette = .blueFamily
+
+  // D-UI-9: the Contacts permission copy (NSContactsUsageDescription).
+  public static let contactsUsage =
+    "WeMessage shows the names and photos from your Contacts next to messages. Nothing is uploaded. You can say no; initials are shown instead."
+
+  // D-UI-10: the avatar when Contacts access is denied.
+  public enum DeniedAvatar: Sendable {
+    case initialsDisc
+    case silhouette
+    case lastFourDigits
+  }
+  public static let deniedAvatar: DeniedAvatar = .initialsDisc
+
+  // D-UI-11: the saturation boost the mockup's backdrop filter implies.
+  public enum SaturationBoost: Sendable {
+    /// The material's own saturation; no extra layer.
+    case materialDefault
+    /// A saturated overlay at 8 percent over the frost.
+    case overlay
+    /// A Core Image backdrop filter (costly, not public for behind-window).
+    case coreImage
+  }
+  public static let saturationBoost: SaturationBoost = .materialDefault
+
+  // D-UI-12: the backdrop the CI snapshots frost over.
+  public enum BackdropStyle: Sendable {
+    /// The grey-blue two-stop gradient in Tokens.Backdrop.
+    case greyBlueTwoStop
+    case flatMidGrey
+    case desertMultiStop
+  }
+  public static let backdropStyle: BackdropStyle = .greyBlueTwoStop
+
+  // D-UI-13: the Appearance pane's sentence about frost.
+  public static let appearanceSentence =
+    "Frost sits on the window behind the panes. Reduce Transparency turns it off; the opaque rendering is the one we designed first. Bubbles and text fields are always opaque."
+
+  // D-UI-14: perceptual-hash snapshot goldens (S4n).
+  public enum PerceptualGoldens: Sendable {
+    case now(toleranceBits: Int)
+    case never
+    case afterFirstPointRelease
+  }
+  public static let perceptualGoldens: PerceptualGoldens = .afterFirstPointRelease
+
+  // D-UI-15: the zero screen's numeral, in points, clamped to the pane at
+  // the window's minimum width.
+  public static let zeroNumeralSize: Double = 72
+  public static let zeroNumeralClampsToPane = true
+
+  // D-UI-16: the draft's undo countdown under Reduce Motion.
+  public enum ReducedMotionUndo: Sendable {
+    /// Monospace text that ticks from 10 s to 0 s.
+    case tickingText
+    /// A static line, no countdown.
+    case staticText
+    /// The ring is kept.
+    case ring
+  }
+  public static let reducedMotionUndo: ReducedMotionUndo = .tickingText
+
+  // D-UI-17: "Hold until" before the daemon has a hold route.
+  public enum HoldUntil: Sendable {
+    /// No control; the composer's capability note gives the reason.
+    case absentWithReason
+    case drawnWithSheet
+    case localTimer
+  }
+  public static let holdUntil: HoldUntil = .absentWithReason
+  public static let holdUntilReason = "Hold until arrives with the daemon's hold route"
+
+  // D-UI-18: the queue window, in days.
+  public static let queueWindowDays = 14
+
+  // D-UI-19: the menu bar popover in CI snapshots.
+  public enum PopoverSnapshot: Sendable {
+    /// The popover's content in a plain window.
+    case plainWindow
+    case skipped
+    case realStatusItem
+  }
+  public static let popoverSnapshot: PopoverSnapshot = .plainWindow
+
+  // D-UI-20: the reply banner before the daemon knows the account's number.
+  public enum ReplyingNumber: Sendable {
+    case omitted
+    case fromSettings
+    case placeholder
+  }
+  public static let replyingNumber: ReplyingNumber = .omitted
+  public static let replyingBanner = "Replying on iMessage"
+
+  // D-UI-21: the window frost material (the S4a.0 spike's default). Drawn as
+  // the window's container background, .containerBackground(for: .window),
+  // under transparent panes; Reduce Transparency swaps it for layer0.
+  public enum FrostMaterial: Sendable {
+    /// SwiftUI's regular material.
+    case regular
+    /// AppKit's HUD window material, behind-window: transmits more.
+    case hudWindow
+  }
+  public static let frostMaterial: FrostMaterial = .regular
 }

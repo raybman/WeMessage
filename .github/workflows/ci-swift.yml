@@ -171,6 +171,17 @@ jobs:
       # the lens picker.
       - name: Full Keyboard Access on, so Tab reaches buttons and the lens picker
         run: defaults write -g AppleKeyboardUIMode -int 2
+      # REQUIRED (S4a.0 spike, run 37568873983): the macOS 26 image has Reduce
+      # Transparency ON, and with it on every material is drawn opaque, so the
+      # frost legs of SnapshotTests would measure a flat fill. Written off here
+      # and read back; the opaque legs force it on in the app instead.
+      - name: Reduce Transparency off, so the window frost is real
+        run: |
+          set -eu
+          defaults write com.apple.universalaccess reduceTransparency -bool false
+          value=$(defaults read com.apple.universalaccess reduceTransparency)
+          echo "reduceTransparency reads $value"
+          test "$value" = 0 || { echo "reduceTransparency did not read back 0" >&2; exit 1; }
       - run: sh tools/swift/xcodegen-fetch.sh --out apps/mac/.build/xcodegen
       # The project is generated beside its spec, never under .build: XcodeGen
       # 2.46.0 writes a local package's `path` verbatim as the .xcodeproj's
@@ -214,7 +225,15 @@ jobs:
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 300 \
+            | tee "$RUNNER_TEMP/xcodebuild-raw.log" \
             | xcbeautify --renderer github-actions
+      # v2 S4a: the frost evidence each snapshot printed, kept out of
+      # xcbeautify's filter, on every outcome so a red leg shows its numbers.
+      - name: frost evidence
+        if: always()
+        run: |
+          awk '/FROST\|/ { print; n++ } END { if (n == 0) print "no FROST lines in the raw log" }' \
+            "$RUNNER_TEMP/xcodebuild-raw.log" || true
       - name: stop the fake daemon
         if: always()
         run: |

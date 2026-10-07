@@ -238,14 +238,46 @@ struct AppHygieneTests {
     #expect(swept >= 4)
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..6, and is never repeated as a literal")
+  /// The D-UI questions ProvisionalUI.swift answers provisionally: S3's
+  /// 1..6 and S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21).
+  static let dUIKeys = (1...21).map { "D-UI-\($0)" }
+
+  /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
+  static func dUISections(_ text: String) throws -> [Int: String] {
+    let regex = try NSRegularExpression(pattern: #"^[ \t]*// D-UI-(\d+):"#, options: [.anchorsMatchLines])
+    let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+    var out: [Int: String] = [:]
+    for (i, match) in matches.enumerated() {
+      guard let numberRange = Range(match.range(at: 1), in: text), let n = Int(text[numberRange]),
+        let start = Range(match.range, in: text)?.lowerBound
+      else { continue }
+      let end = i + 1 < matches.count ? Range(matches[i + 1].range, in: text)?.lowerBound ?? text.endIndex : text.endIndex
+      out[n] = String(text[start..<end])
+    }
+    return out
+  }
+
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..21, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..6 decisions"))
-    for key in ["D-UI-1", "D-UI-2", "D-UI-3", "D-UI-4", "D-UI-5", "D-UI-6"] {
-      #expect(provisional.contains(key), "ProvisionalUI.swift does not mark \(key)")
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..21 decisions"))
+    for key in Self.dUIKeys {
+      // D-UI-1 must not be satisfied by D-UI-10..19.
+      #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
     }
+    // One section per question, in order, each holding a constant the app
+    // can read.
+    let sections = try Self.dUISections(provisional)
+    #expect(sections.keys.sorted() == Array(1...21), "sections found: \(sections.keys.sorted())")
+    for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
+      #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
+    }
+    // D-UI-21 (the S4a.0 spike's material): regular material, as an enum
+    // case, never a string another file could copy.
+    let material = sections[21] ?? ""
+    #expect(material.contains("public static let frostMaterial: FrostMaterial = .regular"))
+    #expect(material.contains("containerBackground"), "D-UI-21 does not say where the material is applied")
     // Foundation only: the UI test bundle compiles this file too.
     #expect(try Self.imports(provisional) == ["Foundation"])
 
@@ -255,17 +287,161 @@ struct AppHygieneTests {
     let strings = literal.matches(in: provisional, range: NSRange(provisional.startIndex..., in: provisional))
       .compactMap { Range($0.range(at: 1), in: provisional).map { String(provisional[$0]) } }
       .filter { !$0.contains("D-UI") }
-    #expect(strings.count >= 3, "provisional copy strings found: \(strings)")
+    #expect(strings.count >= 7, "provisional copy strings found: \(strings)")
+    // No material or style name is copy: those are enum cases.
+    #expect(strings.filter { $0.contains("Material") }.isEmpty, "a material is spelled as a string: \(strings)")
     let numbers = #"\b(1180|760|870|560)\b"#
     #expect(try Self.count(numbers, in: provisional) >= 4)
 
     let others = try (Self.sources(Self.appDir) + Self.sources(Self.uiTestsDir)).filter { !$0.0.hasSuffix("/ProvisionalUI.swift") }
-    #expect(others.count >= 8)
+    #expect(others.count >= 14)
     for (path, text) in others {
       for s in strings {
         #expect(!text.contains(s), "\(path) repeats the provisional copy \"\(s)\"")
       }
       #expect(try Self.count(numbers, in: text) == 0, "\(path) repeats a provisional window size as a literal")
+    }
+  }
+
+  // MARK: S4a
+
+  @Test("H-S4-0: no file under apps/mac/Sources or UITests names the contacts store (a TCC prompt hangs the ui job)")
+  func noContactsStore() throws {
+    let store = "CN" + "Contact" + "Store"
+    let files = try Self.sources("apps/mac/Sources") + Self.sources(Self.uiTestsDir)
+    #expect(files.count >= 30)
+    for (path, text) in files {
+      #expect(!text.contains(store), "\(path) names the contacts store")
+    }
+  }
+
+  /// Types declared in a file under Fixtures/, and every name that looks like
+  /// a fixture type ("Fixture" then an upper-case letter).
+  static func fixtureNames(_ text: String) throws -> Set<String> {
+    let regex = try NSRegularExpression(pattern: #"\bFixture[A-Z]\w*"#)
+    return Set(
+      regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        .compactMap { Range($0.range, in: text).map { String(text[$0]) } })
+  }
+
+  static func declaredTypes(_ text: String) throws -> Set<String> {
+    let regex = try NSRegularExpression(
+      pattern: #"^[ \t]*(?:@\w+\s+)*(?:(?:public|internal|fileprivate|private|final|nonisolated)\s+)*(?:struct|class|enum|actor|protocol)\s+([A-Za-z_]\w*)"#,
+      options: [.anchorsMatchLines])
+    return Set(
+      regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        .compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } })
+  }
+
+  /// The H-S4-1 verdicts over (path, text) pairs: every offending
+  /// "<path>: <name>".
+  static func fixtureLeaks(_ files: [(String, String)]) throws -> [String] {
+    let inFixtures = files.filter { $0.0.contains("/Fixtures/") }
+    var fixtureTypes = Set<String>()
+    for (_, text) in inFixtures { fixtureTypes.formUnion(try declaredTypes(text)) }
+    var leaks: [String] = []
+    for (path, text) in files where !path.contains("/Fixtures/") {
+      if path.hasSuffix("/TestHooks.swift") { continue }
+      var names = try fixtureNames(text)
+      for type in fixtureTypes {
+        if try count(#"\b"# + type + #"\b"#, in: text) > 0 { names.insert(type) }
+      }
+      leaks += names.sorted().map { "\(path): \($0)" }
+    }
+    // A Fixture-named type declared outside Fixtures/ is a leak too.
+    for (path, text) in files where !path.contains("/Fixtures/") {
+      leaks += try declaredTypes(text).filter { $0.hasPrefix("Fixture") }.sorted().map { "\(path): declares \($0)" }
+    }
+    return leaks
+  }
+
+  @Test("H-S4-1: fixture types live in Sources/WeMessageApp/Fixtures and are named only there and in the TestHooks switch")
+  func fixturesStayFixtures() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(files.count >= 10)
+    #expect(try Self.fixtureLeaks(files) == [])
+    // Non-vacuity, on planted trees: a fixture type named by a view is a
+    // leak, by its prefix or by its declaration in Fixtures/; the switch is
+    // allowed.
+    let fixtures = ("app/Fixtures/Avatars.swift", "struct CannedAvatars {}\nenum FixtureCatalogue {}")
+    let hooks = ("app/TestHooks.swift", "let a = CannedAvatars(); let c = FixtureCatalogue.self")
+    #expect(try Self.fixtureLeaks([fixtures, hooks]) == [])
+    let view = ("app/Boards/Shell/ShellView.swift", "let a = CannedAvatars()")
+    #expect(try Self.fixtureLeaks([fixtures, hooks, view]) == ["app/Boards/Shell/ShellView.swift: CannedAvatars"])
+    let prefixed = ("app/Glass/Frost.swift", "let c = FixtureCatalogue.self")
+    #expect(try Self.fixtureLeaks([fixtures, prefixed]) == ["app/Glass/Frost.swift: FixtureCatalogue"])
+    let declared = ("app/Models/Thread.swift", "final class FixtureThreads {}")
+    #expect(
+      try Self.fixtureLeaks([declared]) == [
+        "app/Models/Thread.swift: FixtureThreads", "app/Models/Thread.swift: declares FixtureThreads",
+      ])
+  }
+
+  @Test("H-S4-3: the CI backdrop window is named only by its own file and the delegate, built only under the UI-test flag, and never pinned")
+  func backdropOnlyUnderTestFlag() throws {
+    let name = "Backdrop" + "Window"
+    let own = Self.appDir + "/Glass/" + name + ".swift"
+    let delegatePath = Self.appDir + "/AppDelegate.swift"
+    var namedIn: [String] = []
+    for (path, text) in try Self.sources(Self.appDir) + Self.sources(Self.uiTestsDir) where text.contains(name) {
+      namedIn.append(path)
+    }
+    #expect(namedIn.sorted() == [delegatePath, own].sorted(), "named in \(namedIn)")
+    // Its initialiser refuses to run outside the flag.
+    let ownText = try Repo.text(own)
+    #expect(ownText.contains("precondition(TestHooks.isUITest"))
+    #expect(ownText.contains("override var canBecomeKey: Bool { false }"))
+    #expect(ownText.contains("override var canBecomeMain: Bool { false }"))
+    #expect(ownText.contains("ignoresMouseEvents = true"))
+    #expect(ownText.contains("override func isAccessibilityElement() -> Bool { false }"))
+    // The delegate constructs it once, in a function whose first statement
+    // returns unless the flag is on, and pin() never picks it.
+    let delegate = try Repo.text(delegatePath)
+    #expect(delegate.components(separatedBy: name + "(").count - 1 == 1, "the delegate builds it more than once")
+    guard let construct = delegate.range(of: name + "(") else {
+      Issue.record("the delegate never builds the backdrop")
+      return
+    }
+    let before = delegate[..<construct.lowerBound]
+    guard let fn = before.range(of: "func ", options: .backwards) else {
+      Issue.record("the backdrop is built outside a function")
+      return
+    }
+    let body = delegate[fn.lowerBound..<construct.lowerBound]
+    let firstStatement = body.split(separator: "{", maxSplits: 1).dropFirst().first?
+      .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+      .first { !$0.isEmpty && !$0.hasPrefix("//") }
+    #expect(firstStatement == "guard TestHooks.isUITest else { return }", "first statement: \(String(describing: firstStatement))")
+    let pin = Self.function("pin()", in: delegate)
+    #expect(pin.contains("!($0 is " + name + ")"), "pin() can pick the backdrop")
+  }
+
+  /// The text of `func <signature>` up to the next `func ` (or the end).
+  static func function(_ signature: String, in text: String) -> String {
+    guard let start = text.range(of: "func " + signature) else { return "" }
+    let rest = text[start.upperBound...]
+    let end = rest.range(of: "func ")?.lowerBound ?? rest.endIndex
+    return String(rest[..<end])
+  }
+
+  @Test("H-S4-3b: FrostEvidence's layer0 triples equal Tokens' layer0, so the opaque legs compare against what the app paints")
+  func frostEvidenceLayer0() throws {
+    let evidence = try Repo.text(Self.uiTestsDir + "/Support/FrostEvidence.swift")
+    let tokens = try Repo.text(Self.appDir + "/Tokens.swift")
+    func triple(_ pattern: String, in text: String) throws -> [String] {
+      let regex = try NSRegularExpression(pattern: pattern)
+      let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+      guard matches.count == 1, let m = matches.first else { return ["matches: \(matches.count)"] }
+      return (1...3).compactMap { Range(m.range(at: $0), in: text).map { String(text[$0]) } }
+    }
+    let hex = #"(0x[0-9A-F]{2}), (0x[0-9A-F]{2}), (0x[0-9A-F]{2})"#
+    for (side, token) in [("Light", "light"), ("Dark", "dark")] {
+      let fromTests = try triple(#"layer0"# + side + #": \(UInt8, UInt8, UInt8\) = \("# + hex + #"\)"#, in: evidence)
+      // The enum's own block: from its opening to the next enum.
+      let after = tokens.components(separatedBy: "public enum " + side + " {").dropFirst().first ?? ""
+      let block = after.components(separatedBy: "public enum ").first ?? ""
+      let fromTokens = try triple(#"static let layer0 = RGB\("# + hex + #"\)"#, in: block)
+      #expect(fromTests.count == 3 && fromTests == fromTokens, "\(token): \(fromTests) vs \(fromTokens)")
     }
   }
 }

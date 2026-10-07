@@ -13,9 +13,24 @@ struct TokensTests {
     (75.0...165.0).contains(rgb.hue) && rgb.saturation > 0.10
   }
 
-  @Test("T1: no token is green (hue 75...165 with saturation over 0.10)")
+  /// Every value S4a adds: frost tints, hairlines, their opaque stand-ins,
+  /// the CI backdrop's gradient stops and its stripe pair.
+  static var s4aTokens: [Tokens.RGB] {
+    [
+      Tokens.Frost.tintLight, Tokens.Frost.tintDark,
+      Tokens.Hairline.light.rgb, Tokens.Hairline.dark.rgb,
+      Tokens.Hairline.opaqueLight, Tokens.Hairline.opaqueDark,
+      Tokens.Backdrop.lightTop, Tokens.Backdrop.lightBottom, Tokens.Backdrop.darkTop, Tokens.Backdrop.darkBottom,
+      Tokens.Backdrop.stripeDark, Tokens.Backdrop.stripeLight,
+    ]
+  }
+
+  @Test("T1: no token is green (hue 75...165 with saturation over 0.10), S4a's frost, hairline and backdrop values included")
   func noGreen() {
-    #expect(Tokens.all.count >= 12, "tokens swept: \(Tokens.all.count)")
+    #expect(Tokens.all.count >= 24, "tokens swept: \(Tokens.all.count)")
+    for rgb in Self.s4aTokens {
+      #expect(Tokens.all.contains(rgb), "\(rgb) is not in the sweep")
+    }
     for rgb in Tokens.all {
       #expect(!Self.isGreen(rgb), "green token \(rgb) hue \(rgb.hue) saturation \(rgb.saturation)")
     }
@@ -77,5 +92,67 @@ struct TokensTests {
       #expect(Tokens.contrast(p.inkDim, layer) >= 9.5, "light inkDim on \(layer)")
     }
     #expect(Tokens.contrast(Tokens.RGB(0x4E, 0x4E, 0x54), p.layer2) < 9.5)
+  }
+
+  @Test("T6 frostBandArithmetic: the D-UI-7 tint over the CI backdrop's mean lands inside the snapshot luminance bands with 0.05 to spare")
+  func frostBandArithmetic() {
+    // Plan 2.5: alpha times tint plus (1 minus alpha) times the backdrop's
+    // mean colour; a light window stays above 0.65 and a dark one below 0.35.
+    let light = Tokens.Frost.composite(dark: false, over: Tokens.Backdrop.mean(dark: false))
+    let dark = Tokens.Frost.composite(dark: true, over: Tokens.Backdrop.mean(dark: true))
+    #expect(light.luminance >= Tokens.Bands.lightFloor + Tokens.Bands.margin, "light frost \(light) L \(light.luminance)")
+    #expect(dark.luminance <= Tokens.Bands.darkCeiling - Tokens.Bands.margin, "dark frost \(dark) L \(dark.luminance)")
+    #expect(Tokens.Bands.lightFloor == 0.65)
+    #expect(Tokens.Bands.darkCeiling == 0.35)
+    #expect(Tokens.Bands.margin == 0.05)
+    // The alpha is D-UI-7's default, read, never restated.
+    #expect(Tokens.Frost.alpha(dark: false) == ProvisionalUI.frostTintStrength.alpha(dark: false))
+    #expect(Tokens.Frost.alpha(dark: true) == ProvisionalUI.frostTintStrength.alpha(dark: true))
+    // The backdrop runs light to dark top to bottom in both appearances, so
+    // FrostEvidence's transmission (top minus bottom) is positive.
+    for dark in [false, true] {
+      let (top, bottom) = Tokens.Backdrop.stops(dark: dark)
+      #expect(top.luminance > bottom.luminance, "dark=\(dark) backdrop does not darken downwards")
+    }
+    // The maths: compositing is per channel, rounded, and order matters.
+    let half = Tokens.composite(Tokens.RGB(0xFF, 0xFF, 0xFF), alpha: 0.5, over: Tokens.RGB(0x00, 0x00, 0x00))
+    #expect(half == Tokens.RGB(0x80, 0x80, 0x80))
+    #expect(Tokens.composite(Tokens.tint, alpha: 1, over: Tokens.danger) == Tokens.tint)
+    #expect(Tokens.composite(Tokens.tint, alpha: 0, over: Tokens.danger) == Tokens.danger)
+    // Non-vacuity: a much lighter tint strength would push the dark frost
+    // out of its band, so the row can fail.
+    let washed = Tokens.composite(Tokens.Frost.tintLight, alpha: 0.9, over: Tokens.Backdrop.mean(dark: true))
+    #expect(washed.luminance > Tokens.Bands.darkCeiling - Tokens.Bands.margin)
+  }
+
+  @Test("T7 frostContrast: inkDim reads at 7:1 or better over the composite frost, light and dark, at both backdrop stops and at the runner's measured frost")
+  func frostContrast() {
+    for dark in [false, true] {
+      let inkDim = Tokens.palette(dark: dark).inkDim
+      let (top, bottom) = Tokens.Backdrop.stops(dark: dark)
+      for under in [top, bottom, Tokens.Backdrop.mean(dark: dark)] {
+        let frost = Tokens.Frost.composite(dark: dark, over: under)
+        #expect(Tokens.contrast(inkDim, frost) >= 7, "dark=\(dark) inkDim on frost \(frost) over \(under)")
+      }
+    }
+    // What the runner really drew (.regularMaterial over this backdrop, S4a.0
+    // spike run 37568873983): flat greys whose means ran 216.32 to 223.06
+    // light and 33.98 to 39.30 dark. The worst of each still clears 7:1.
+    let measuredLight = Tokens.RGB(216, 216, 216)
+    let measuredDark = Tokens.RGB(40, 40, 40)
+    #expect(Tokens.contrast(Tokens.Light.inkDim, measuredLight) >= 7)
+    #expect(Tokens.contrast(Tokens.Dark.inkDim, measuredDark) >= 7)
+    // Hairlines: the opaque stand-in is the translucent hairline composited
+    // over layer0, within one step per channel.
+    for dark in [false, true] {
+      let hairline = dark ? Tokens.Hairline.dark : Tokens.Hairline.light
+      let opaque = dark ? Tokens.Hairline.opaqueDark : Tokens.Hairline.opaqueLight
+      let composed = Tokens.composite(hairline.rgb, alpha: hairline.alpha, over: Tokens.palette(dark: dark).layer0)
+      for (a, b) in [(opaque.r, composed.r), (opaque.g, composed.g), (opaque.b, composed.b)] {
+        #expect(abs(Int(a) - Int(b)) <= 1, "dark=\(dark) hairlineOpaque \(opaque) vs \(composed)")
+      }
+    }
+    #expect(Tokens.Hairline.light.alpha == 0.08)
+    #expect(Tokens.Hairline.dark.alpha == 0.09)
   }
 }

@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// Caps setFrame calls, so a window the system keeps constraining can
   /// never ping-pong with the resize observer.
   private var pins = 0
+  /// Under the UI-test flag only: the backdrop the frost blurs (plan 2.5).
+  private var backdrop: BackdropWindow?
 
   func applicationDidFinishLaunching(_ note: Notification) {
     if let appearance = TestHooks.appearance {
@@ -28,9 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // The CI runner's only display is smaller than the default size, so under
     // the UI-test flag the window is pinned to min(requested, visibleFrame)
     // and the result is published for the test to read. Re-pinned whenever
-    // the screen's visible frame settles or the window moves under it.
+    // the screen's visible frame settles or the window moves under it; a
+    // move also carries the backdrop's stripe band along.
     let center = NotificationCenter.default
-    for name in [NSApplication.didChangeScreenParametersNotification, NSWindow.didResizeNotification] {
+    for name in [
+      NSApplication.didChangeScreenParametersNotification, NSWindow.didResizeNotification, NSWindow.didMoveNotification,
+    ] {
       observers.append(
         center.addObserver(forName: name, object: nil, queue: .main) { _ in
           MainActor.assumeIsolated { _ = self.pin() }
@@ -51,6 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  /// Opens the backdrop behind the shell window once, then keeps its stripe
+  /// band under the window's FrostProbe.stripeBand.
+  private func placeBackdrop(under window: NSWindow, screen: NSScreen) {
+    guard TestHooks.isUITest else { return }
+    if backdrop == nil {
+      let made = BackdropWindow(screenFrame: screen.frame, dark: TestHooks.appearance == .dark)
+      made.orderFront(nil)
+      backdrop = made
+    }
+    backdrop?.place(under: window.frame)
+  }
+
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
   /// Pins the shell window and publishes "frame=WxH visible=WxH". Returns
@@ -59,7 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func pin() -> Bool {
     let candidate =
       NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) ?? NSApp.mainWindow ?? NSApp.keyWindow
-      ?? NSApp.windows.first(where: { $0.isVisible })
+      ?? NSApp.windows.first(where: { $0.isVisible && !($0 is BackdropWindow) })
     guard let window = candidate,
       let screen = window.screen ?? NSScreen.main
     else { return false }
@@ -78,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       "frame=\(Int(width.rounded()))x\(Int(height.rounded())) visible=\(Int(visible.width.rounded()))x\(Int(visible.height.rounded()))"
     if TestHooks.geometry.value != published { TestHooks.geometry.value = published }
     if window.accessibilityValue() as? String != published { window.setAccessibilityValue(published) }
+    placeBackdrop(under: window, screen: screen)
     return true
   }
 }

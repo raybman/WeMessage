@@ -3,7 +3,8 @@ import WeMessageKit
 
 /// The first window: channel rail, sidebar with the lens and the connection
 /// line, and the content pane. S3 keeps the whole view tree in this file on
-/// purpose; S4 splits it per board.
+/// purpose; S4 splits it per board. Since S4a the panes are transparent over
+/// one window frost (FrostBackground), divided by 0.5 pt hairlines.
 ///
 /// The accessibility identifiers below are the contract with the UI tests
 /// (AppHygieneTests H-A5 holds both sides to the same list).
@@ -11,6 +12,8 @@ struct ShellView: View {
   /// The client reads WEMESSAGE_PORT and WEMESSAGE_DIR/daemon.token from the
   /// environment, as the shipped app does (H10-H12).
   @State private var model = ShellModel(client: GatewayClient())
+  /// The system's display options, with a UI test's forced values on top.
+  @State private var mirror = AccessibilityMirror.live()
   @Environment(\.colorScheme) private var scheme
 
   /// The title band the hidden title bar leaves to the traffic lights.
@@ -22,12 +25,14 @@ struct ShellView: View {
   var body: some View {
     HStack(spacing: 0) {
       RailView(model: model, palette: palette)
+      Hairline(mirror: mirror, palette: palette, dark: scheme == .dark)
       SidebarView(model: model, palette: palette)
+      Hairline(mirror: mirror, palette: palette, dark: scheme == .dark)
       ContentPane(palette: palette)
     }
     .frame(minWidth: ProvisionalUI.windowMinWidth, minHeight: ProvisionalUI.windowMinHeight)
-    .background(Tokens.color(palette.layer0))
     .ignoresSafeArea()
+    .modifier(FrostBackground(mirror: mirror, palette: palette))
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("wemessage.shell")
     // Under the UI-test flag only, the pinned geometry. Measured (run
@@ -70,7 +75,6 @@ private struct RailView: View {
     }
     .frame(width: ProvisionalUI.railWidth)
     .frame(maxHeight: .infinity)
-    .background(Tokens.color(palette.layer1))
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("wemessage.rail")
   }
@@ -149,7 +153,6 @@ private struct SidebarView: View {
     .padding(.bottom, 12)
     .frame(width: ShellView.sidebarWidth)
     .frame(maxHeight: .infinity)
-    .background(Tokens.color(palette.layer2))
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("wemessage.sidebar")
   }

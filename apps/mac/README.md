@@ -51,12 +51,22 @@ LaunchTests         a bare launch shows the shell; the window is the requested
 ConnectionTests     the window connects to the fake daemon with the bearer, and
                     says plainly when the daemon is down
 AccessibilityTests  the accessibility audit passes; Tab walks the rail to the lens
-SnapshotTests       light and dark snapshots, swept for green outside the traffic
-                    lights, with the tint present; plus the sweep's own probes
+SnapshotTests       light and dark snapshots, each with the frost on and with
+                    Reduce Transparency forced, swept for green outside the
+                    traffic lights, with the tint present, and carrying the frost
+                    evidence (a real blur, or plain layer0); plus the sweep's and
+                    the evidence's own probes
 ```
 
 The app reads `WEMESSAGE_UI_TEST=1` and `WEMESSAGE_UI_APPEARANCE` only to pin
-the window geometry, force the appearance and turn animations off. The
+the window geometry, force the appearance and turn animations off.
+`WEMESSAGE_UI_REDUCE_TRANSPARENCY` (and `_INCREASE_CONTRAST`,
+`_REDUCE_MOTION`), `1` or `0`, force the app's copy of that display option
+under the same flag. Under it the app also opens a test-only backdrop
+window behind the shell (a grey-blue gradient with a 2 pt stripe band) that
+the frost evidence measures; it never takes focus or appears in the
+accessibility tree. The job writes the system's Reduce Transparency off
+first, because the image ships with it on. The
 geometry it computed is published on the shell's accessibility value as
 `frame=<w>x<h> visible=<w>x<h>`; tests compare against that, never against a
 monitor size or a literal.
@@ -84,8 +94,11 @@ equal):
 
 Download the artifacts with `gh run download <run id>`. The snapshots
 artifact holds plain PNGs named by UUID; the export step's log prints
-`manifest.json`, which maps each file to its attachment name (`shell-light`,
-`shell-dark`, and the accessibility audit's `audit-*` captures).
+`manifest.json`, which maps each file to its attachment name (`board-01-shell-light.png`,
+`board-01-shell-dark.png`, `board-01-shell-opaque-light.png`,
+`board-01-shell-opaque-dark.png`, and the accessibility audit's `audit-*`
+captures). The `frost evidence` step prints one `FROST|` line per snapshot
+with the measured stripe, gradient, pull and transmission.
 
 The result bundle opens in Xcode, or with
 `xcrun xcresulttool get test-results tests --path <bundle>`. Without Xcode,
@@ -107,4 +120,4 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..6 decisions.
+  provisional, pending the D-UI-1..21 decisions.

@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let responder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
     let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
     return "active=\(NSApp.isActive ? 1 : 0) key=\(name(NSApp.keyWindow)) main=\(name(NSApp.mainWindow))"
-      + " responder=\(responder.replacingOccurrences(of: " ", with: "")) front=\(front)"
+      + " responder=\(responder.replacingOccurrences(of: " ", with: "")) front=\(front) claim=\(KeyboardClaim.outcome)"
   }
 
   private func publish() {

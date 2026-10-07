@@ -121,8 +121,8 @@ struct ComposerView: View {
         .padding(.horizontal, borderless ? 0 : 7)
         .focused($focused)
         // The draft hint promises that plain typing lands here, so the field
-        // takes the keyboard when a thread opens.
-        .task(id: guid) { focused = true }
+        // takes the keyboard when a thread opens, the first one included.
+        .background(KeyboardClaim(token: guid))
         // Measured (run 37594298009): with the text view first responder the
         // hidden cmd-Return button never fires, so the field hears cmd-Return
         // itself. Anything without cmd falls through to the editor: a newline.

@@ -189,3 +189,111 @@ struct OutboundTests {
     #expect(Outbound.phase(for: .denied(reason: "kill-switch")) == .refused("kill-switch"))
   }
 }
+
+/// S4f: the bulk confirm's one batch (06.F, 09.D) and the agent window read
+/// from settings (09.C).
+@Suite("Outbound batch")
+@MainActor
+struct OutboundBatchTests {
+  static func approve(_ id: String, _ chat: String) -> Outbound.Intent {
+    .approve(draftId: id, chatGuid: chat, editedBody: nil)
+  }
+  static let three = [
+    approve("drf-0101", "iMessage;-;+15550100001"), approve("drf-0102", "SMS;-;+15550100004"),
+    approve("drf-0103", "iMessage;+;chat-hike"),
+  ]
+
+  static func approvals(_ transport: FakeTransport) -> [String] {
+    transport.requests.compactMap { $0.url?.path }.filter { $0.hasSuffix("/approve") }
+  }
+
+  @Test("09.D: every draft in a bulk must be rendered and an approval, or none starts")
+  func allOrNone() {
+    let (outbound, transport, _) = OutboundTests.make { _ in try Reply.golden("responses/drafts.approve.json") }
+    #expect(outbound.approveAll([]) == .empty)
+    outbound.markRendered("drf-0101")
+    outbound.markRendered("drf-0102")
+    #expect(outbound.approveAll(Self.three) == .notRendered)
+    outbound.markRendered("drf-0103")
+    #expect(outbound.approveAll(Self.three + [OutboundTests.daniel]) == .wrongGesture)
+    #expect(outbound.entries.isEmpty)
+    #expect(transport.requests.isEmpty)
+  }
+
+  @Test("09.F: a bulk under the kill switch, on or unknown, writes nothing")
+  func bulkKill() {
+    for state in [true, nil] as [Bool?] {
+      let kill = OutboundTests.Kill()
+      kill.on = state
+      let (outbound, transport, _) = OutboundTests.make(
+        { _ in try Reply.golden("responses/drafts.approve.json") }, kill: kill)
+      for intent in Self.three { outbound.markRendered(intent.draftId!) }
+      #expect(outbound.approveAll(Self.three) == .killSwitch)
+      #expect(outbound.entries.isEmpty && transport.requests.isEmpty)
+    }
+  }
+
+  @Test("06.F: one batch, one countdown; one cmd-Z takes all three back and nothing is requested")
+  func oneUndoPerBulk() async throws {
+    let (outbound, transport, clock) = OutboundTests.make { _ in try Reply.golden("responses/drafts.approve.json") }
+    for intent in Self.three { outbound.markRendered(intent.draftId!) }
+    #expect(outbound.approveAll(Self.three) == nil)
+    #expect(outbound.entries.count == 3)
+    #expect(Set(outbound.entries.map(\.batch)).count == 1 && outbound.entries[0].batch != nil)
+    #expect(outbound.countingBatch.count == 3)
+    await OutboundTests.second(clock)
+    #expect(await eventually { outbound.entries.allSatisfy { $0.phase == .counting(remaining: 9) } })
+    // One sleeper for the whole batch: one countdown.
+    #expect(clock.sleepers <= 1)
+    // Undo from any member's thread takes the batch.
+    #expect(outbound.undo(in: "SMS;-;+15550100004"))
+    #expect(outbound.entries.allSatisfy { $0.phase == .undone })
+    #expect(!outbound.undo())
+    #expect(outbound.countingBatch.isEmpty)
+    clock.tick()
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(transport.requests.isEmpty)
+  }
+
+  @Test("09.D: a bulk that runs out approves each draft once, and never posts a send")
+  func bulkApproves() async throws {
+    let (outbound, transport, clock) = OutboundTests.make { _ in try Reply.golden("responses/drafts.approve.json") }
+    outbound.approveSeconds = 5
+    for intent in Self.three { outbound.markRendered(intent.draftId!) }
+    outbound.approveAll(Self.three)
+    #expect(outbound.entries.allSatisfy { $0.phase == .counting(remaining: 5) && $0.window == 5 })
+    for _ in 0..<5 { await OutboundTests.second(clock) }
+    #expect(await eventually { outbound.entries.allSatisfy { $0.phase == .approved } })
+    #expect(
+      Self.approvals(transport) == [
+        "/v1/drafts/drf-0101/approve", "/v1/drafts/drf-0102/approve", "/v1/drafts/drf-0103/approve",
+      ])
+    #expect(OutboundTests.sends(transport).isEmpty)
+  }
+
+  @Test("09.F: the kill switch engaged inside a bulk's window refuses every member at the minute")
+  func bulkKillAtTheMinute() async throws {
+    let kill = OutboundTests.Kill()
+    let (outbound, transport, clock) = OutboundTests.make(
+      { _ in try Reply.golden("responses/drafts.approve.json") }, kill: kill)
+    for intent in Self.three { outbound.markRendered(intent.draftId!) }
+    outbound.approveAll(Self.three)
+    await OutboundTests.second(clock)
+    kill.on = true
+    for _ in 0..<9 { await OutboundTests.second(clock) }
+    #expect(await eventually { outbound.entries.allSatisfy { $0.phase == .refused("kill switch on") } })
+    #expect(transport.requests.isEmpty)
+  }
+
+  @Test("09.C: the agent window follows approveSeconds; a typed send stays 4 s")
+  func windows() {
+    let (outbound, _, _) = OutboundTests.make { _ in try Reply.golden("responses/drafts.approve.json") }
+    #expect(outbound.window(for: Self.three[0]) == 10)
+    outbound.approveSeconds = UndoWindow.agent(fromSetting: .number(25))
+    #expect(outbound.window(for: Self.three[0]) == 25)
+    #expect(outbound.window(for: OutboundTests.daniel) == 4)
+    #expect(!outbound.isRendered("drf-0101"))
+    outbound.markRendered("drf-0101")
+    #expect(outbound.isRendered("drf-0101"))
+  }
+}

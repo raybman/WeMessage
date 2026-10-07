@@ -34,12 +34,19 @@ public final class Outbound {
       }
     }
 
-    /// The undo window in seconds (14.F).
+    /// The default undo window in seconds (14.F). An approval's window
+    /// is read from `send.undoGraceSeconds` at run time (09.C): see
+    /// `Outbound.approveSeconds`.
     public var window: Int {
       switch self {
       case .send: Outbound.typedWindow
       case .approve: Outbound.approveWindow
       }
+    }
+
+    public var draftId: String? {
+      if case .approve(let id, _, _) = self { return id }
+      return nil
     }
   }
 
@@ -79,10 +86,21 @@ public final class Outbound {
     public let id: Int
     public let intent: Intent
     public internal(set) var phase: Phase
+    /// The window this entry counts down, in seconds.
+    public let window: Int
+    /// Entries approved together by one bulk confirm share a batch: one
+    /// countdown, one undo (06.F, 09.D).
+    public let batch: Int?
+    /// When the human acted: the "APPROVED by you" clock (09.B).
+    public let startedAt: Date
   }
 
   public nonisolated static let typedWindow = 4
-  public nonisolated static let approveWindow = 10
+  public nonisolated static let approveWindow = UndoWindow.agentDefault
+
+  /// The agent undo window in force: `send.undoGraceSeconds` clamped to
+  /// 5...30 (09.C), set by the shell from settings; 10 until it has read them.
+  public var approveSeconds = Outbound.approveWindow
 
   /// Every send and approval this window has made, oldest first.
   public private(set) var entries: [Entry] = []
@@ -108,6 +126,19 @@ public final class Outbound {
     rendered.insert(draftId)
   }
 
+  /// True once the draft's body has been drawn on screen this session.
+  public func isRendered(_ draftId: String) -> Bool {
+    rendered.contains(draftId)
+  }
+
+  /// The undo window `intent` would count down now.
+  public func window(for intent: Intent) -> Int {
+    switch intent {
+    case .send: Outbound.typedWindow
+    case .approve: approveSeconds
+    }
+  }
+
   /// Starts `intent`'s undo window, or says why not. Nothing reaches the
   /// client before the window closes.
   @discardableResult
@@ -124,8 +155,35 @@ public final class Outbound {
     let id = nextID
     nextID += 1
     // The undo entry first: the record exists before any request can.
-    entries.append(Entry(id: id, intent: intent, phase: .counting(remaining: intent.window)))
-    tasks[id] = Task { [weak self] in await self?.run(id) }
+    let window = window(for: intent)
+    entries.append(Entry(id: id, intent: intent, phase: .counting(remaining: window), window: window, batch: nil, startedAt: Date()))
+    tasks[id] = Task { [weak self] in await self?.run([id]) }
+    return nil
+  }
+
+  /// The bulk confirm's one gesture (06.F, 09.D): every intent must be an
+  /// approval of a draft drawn on screen, or none starts. One batch, one
+  /// countdown, one undo for all of them.
+  @discardableResult
+  public func approveAll(_ intents: [Intent]) -> Refusal? {
+    if intents.isEmpty { return .empty }
+    for intent in intents {
+      guard let draftId = intent.draftId else { return .wrongGesture }
+      if !rendered.contains(draftId) { return .notRendered }
+    }
+    guard killSwitch() == false else { return .killSwitch }
+    let batch = nextID
+    let window = approveSeconds
+    let now = Date()
+    var ids: [Int] = []
+    for intent in intents {
+      let id = nextID
+      nextID += 1
+      entries.append(Entry(id: id, intent: intent, phase: .counting(remaining: window), window: window, batch: batch, startedAt: now))
+      ids.append(id)
+    }
+    let task = Task { [weak self] () -> Void in await self?.run(ids) }
+    for id in ids { tasks[id] = task }
     return nil
   }
 
@@ -142,11 +200,25 @@ public final class Outbound {
     else {
       return false
     }
-    let id = entries[index].id
-    entries[index].phase = .undone
-    tasks[id]?.cancel()
-    tasks[id] = nil
+    let members = entries[index].batch.map { batch in entries.filter { $0.batch == batch } } ?? [entries[index]]
+    for member in members {
+      guard case .counting = member.phase else { continue }
+      set(member.id, .undone)
+      tasks[member.id]?.cancel()
+      tasks[member.id] = nil
+    }
     return true
+  }
+
+  /// The entries of the newest batch, while any of them still counts.
+  public var countingBatch: [Entry] {
+    guard
+      let batch = entries.last(where: {
+        guard $0.batch != nil, case .counting = $0.phase else { return false }
+        return true
+      })?.batch
+    else { return [] }
+    return entries.filter { $0.batch == batch }
   }
 
   /// The newest entry for `chatGuid`.
@@ -163,21 +235,35 @@ public final class Outbound {
     entries[index].phase = phase
   }
 
-  private func run(_ id: Int) async {
-    guard let entry = entries.first(where: { $0.id == id }) else { return }
-    var remaining = entry.intent.window
+  /// One countdown for `ids` (one entry, or one batch), then the kill
+  /// switch again, then each request in turn.
+  private func run(_ ids: [Int]) async {
+    guard let first = entries.first(where: { $0.id == ids.first }) else { return }
+    var remaining = first.window
     while remaining > 0 {
       do { try await sleep(.seconds(1)) } catch { return }
-      guard case .counting = phase(id) else { return }
       remaining -= 1
-      set(id, remaining > 0 ? .counting(remaining: remaining) : .sending)
+      var live = 0
+      for id in ids {
+        guard case .counting = phase(id) else { continue }
+        live += 1
+        set(id, remaining > 0 ? .counting(remaining: remaining) : .sending)
+      }
+      if live == 0 { return }
     }
-    defer { tasks[id] = nil }
+    defer { for id in ids { tasks[id] = nil } }
     // The kill switch is read again at the minute the request would go.
     guard killSwitch() == false else {
-      set(id, .refused("kill switch on"))
+      for id in ids where phase(id) == .sending { set(id, .refused("kill switch on")) }
       return
     }
+    for id in ids where phase(id) == .sending {
+      await deliver(id)
+    }
+  }
+
+  private func deliver(_ id: Int) async {
+    guard let entry = entries.first(where: { $0.id == id }) else { return }
     set(id, .sending)
     do {
       switch entry.intent {

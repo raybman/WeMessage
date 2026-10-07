@@ -147,7 +147,9 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
     composerField(app).click()
     app.typeText("first line")
+    dump(app, "before return")
     app.typeKey(.return, modifierFlags: [])
+    dump(app, "after return")
     app.typeText("second line")
     dump(app, "return")
     // Past the 4 s window and then some.

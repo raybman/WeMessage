@@ -568,6 +568,18 @@ struct AppHygieneTests {
     #expect(composer.contains(".keyboardShortcut(.return, modifiers: .command)"))
     #expect(composer.contains("perform(") && composer.contains("gesture: .commandReturn"))
     #expect(!composer.contains("model.client"), "the composer reaches the client directly")
+    // The field's own Return handler: only in the composer, and only with cmd.
+    let keyPress = ".onKeyPress(" + ".return"
+    for (path, text) in try Self.sources(Self.appDir) where text.contains(keyPress) {
+      #expect(path.hasSuffix("/Boards/Thread/ComposerView.swift"), "\(path) handles Return")
+    }
+    let handlers = composer.components(separatedBy: keyPress).dropFirst()
+    for handler in handlers {
+      let head = String(handler.prefix(160))
+      #expect(
+        head.contains("guard press.modifiers.contains(.command) else { return .ignored }"),
+        "a Return handler in the composer does not require cmd: \(head)")
+    }
   }
 
   @Test("H-S4d: board 02 never places Hold until while D-UI-17 is absent-with-reason, and the cmd-Z undo lives under the composer")

@@ -132,6 +132,14 @@ struct ComposerView: View {
         // The draft hint promises that plain typing lands here, so the field
         // takes the keyboard when a thread opens.
         .task(id: guid) { focused = true }
+        // Measured (run 37594298009): with the text view first responder the
+        // hidden cmd-Return button never fires, so the field hears cmd-Return
+        // itself. Anything without cmd falls through to the editor: a newline.
+        .onKeyPress(.return, phases: .down) { press in
+          guard press.modifiers.contains(.command) else { return .ignored }
+          send(gesture: .commandReturn)
+          return .handled
+        }
         .accessibilityLabel("Message")
         .accessibilityIdentifier(ShellID.composerField)
     }

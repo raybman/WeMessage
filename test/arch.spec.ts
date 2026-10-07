@@ -13950,7 +13950,9 @@ describe('v2 S1: the Swift tree', () => {
       '';
     expect(handler).not.toBe('');
     const returns = handler.match(/\breturn\b[^\n]*/g) ?? [];
-    expect(returns).toEqual(['return chrome']);
+    // R-A13c: the one other way out is a contrast issue whose own pixels
+    // clear WCAG AA (see the PixelContrast row below).
+    expect(returns).toEqual(['return chrome || cleared']);
     expect(handler).toContain('Self.isSystemChrome(issue, in: app)');
     const helper =
       /static func isSystemChrome[\s\S]*?\n {2}\}/.exec(a11y)?.[0] ?? '';
@@ -13967,6 +13969,33 @@ describe('v2 S1: the Swift tree', () => {
     ])
       expect([needed, helper.includes(needed)]).toEqual([needed, true]);
     expect(helper).not.toMatch(/return true/);
+  });
+
+  it('a contrast issue is set aside only when its own pixels clear WCAG AA (R-A13c)', () => {
+    // v2 S3c fix: on the 1x runner (17F113) the audit flags the three inkDim
+    // labels while their screenshots measure 9.6:1 to 10.1:1 (runs
+    // 37557960836, 37558534074). The handler may set aside a .contrast issue
+    // only on a measurement of that element's own screenshot, at the AA
+    // floor, with more than a stray pixel of ink; every other audit type and
+    // any measured failure still fails the run.
+    const a11y = archRead(`${UI_TESTS}/AccessibilityTests.swift`);
+    const handler =
+      /performAccessibilityAudit\(\)\s*\{([\s\S]*?)\n {4}\}/.exec(a11y)?.[1] ??
+      '';
+    for (const needed of [
+      'issue.auditType == .contrast',
+      'element.screenshot()',
+      'PixelContrast.measure(image)',
+      'let cleared = measured?.passes ?? false',
+    ])
+      expect([needed, handler.includes(needed)]).toEqual([needed, true]);
+    const pc = archRead(`${UI_TESTS}/Support/PixelContrast.swift`);
+    expect(pc).toMatch(/static let floor = 4\.5\b/);
+    expect(pc).toMatch(/static let minInkPixels = 4\b/);
+    expect(pc).toContain(
+      'ratio >= PixelContrast.floor && inkPixels >= PixelContrast.minInkPixels',
+    );
+    expect(pc).not.toMatch(/return true/);
   });
 
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {

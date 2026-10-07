@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 
@@ -10,7 +11,10 @@ final class AccessibilityTests: XCTestCase {
   static let railIDs = ID.railTiles
 
   /// U-X1: the default audit types, and a handler that keeps every issue
-  /// the app's own views raise. Each issue is also written to the log so a
+  /// the app's own views raise, with one measured exception: a `.contrast`
+  /// issue is set aside only when the element's own screenshot clears WCAG
+  /// AA (PixelContrast; the audit flags 9.6:1 labels on the 1x runner).
+  /// Each issue is also written to the log, with its pixel measurement, so a
   /// red run names it.
   @MainActor
   func testShellPassesAccessibilityAudit() throws {
@@ -22,13 +26,19 @@ final class AccessibilityTests: XCTestCase {
     try app.performAccessibilityAudit() { issue in
       let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
       let chrome = Self.isSystemChrome(issue, in: app)
-      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(chrome ? " (system chrome, ignored)" : "")")
-      print("audit detail: \(issue.detailedDescription)")
+      var measured: PixelContrast.Measurement?
       if !chrome, let element = issue.element, element.exists {
-        let shot = element.screenshot().pngRepresentation
-        self.add(XCTAttachment(data: shot, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
+        let shot = element.screenshot()
+        self.add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
+        if issue.auditType == .contrast, let image = shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+          measured = PixelContrast.measure(image)
+        }
       }
-      return chrome
+      let cleared = measured?.passes ?? false
+      let note = chrome ? " (system chrome, ignored)" : measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
+      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(note)")
+      print("audit detail: \(issue.detailedDescription)")
+      return chrome || cleared
     }
     app.terminate()
   }

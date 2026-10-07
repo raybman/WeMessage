@@ -36,6 +36,12 @@ Two consequences of the ad-hoc lane, both of which are documented for users in
    has to remove and re-add the app in Privacy and Security. `wemessage doctor`
    reports this case by name.
 
+The `ui` job in `ci-swift.yml` also builds the app, to launch it under
+XCUITest. That build is ad hoc signed from `apps/mac/project.yml` and has no
+icon, on purpose, and it is never what ships: it is not uploaded as an app,
+only its test results and snapshots are. The shipping bundle comes from the
+packaging lanes above.
+
 ## The gate
 
 Every release candidate must pass all five commands, from a clean tree, before

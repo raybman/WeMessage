@@ -14100,6 +14100,45 @@ describe('v2 S1: the Swift tree', () => {
     expect(tests[0]!.slice(1)).toEqual(tokens[0]!.slice(1));
   });
 
+  it('apps/mac/README.md names every accessibility identifier the shell publishes (R-A15)', () => {
+    // v2 S3e (§5.5): the identifier table is the contract a S4 builder reads;
+    // it cannot drift from ShellView.swift without this row going red.
+    const shell = archRead(`${MAC}/Sources/WeMessageApp/ShellView.swift`);
+    const ids = [
+      ...new Set(
+        [...shell.matchAll(/"(wemessage(?:\.[a-z]+)*)"/g)].map((m) => m[1]!),
+      ),
+    ];
+    expect(ids.length).toBeGreaterThanOrEqual(12);
+    const readme = archRead(`${MAC}/README.md`);
+    for (const id of ids)
+      expect([id, readme.includes(`\`${id}\``)]).toEqual([id, true]);
+    // ...and names none the shell does not publish.
+    const named = [
+      ...new Set(
+        [...readme.matchAll(/`(wemessage\.[a-z.]+)`/g)].map((m) => m[1]!),
+      ),
+    ];
+    expect(named.filter((id) => !ids.includes(id))).toEqual([]);
+    for (const heading of ['## The CI UI lane', '## Known seams'])
+      expect([heading, readme.includes(heading)]).toEqual([heading, true]);
+    for (const doc of [`${MAC}/README.md`, 'tools/swift/README.md']) {
+      const text = archRead(doc);
+      expect([doc, /\/Users\//.test(text), text.includes('\u2014')]).toEqual([
+        doc,
+        false,
+        false,
+      ]);
+    }
+    const tools = archRead('tools/swift/README.md');
+    for (const flag of ['--dir', '--port', '--pid-file', '--out'])
+      expect([flag, tools.includes(flag)]).toEqual([flag, true]);
+    const releasing = archRead('RELEASING.md');
+    expect(releasing).toMatch(
+      /`ui` job[\s\S]{0,200}ad hoc signed[\s\S]{0,200}never what ships/,
+    );
+  });
+
   it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {
     const lock = JSON.parse(
       archRead('tools/swift/xcodegen.lock.json'),

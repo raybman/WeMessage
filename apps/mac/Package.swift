@@ -4,6 +4,10 @@
 // WeMessageDaemonHost and the WeMessage executable: `WeMessage --daemon`, the
 // Foundation-only host that launchd runs and that posix_spawns the bundled
 // Node daemon as its child (v2 S2).
+// WeMessageApp: the window (v2 S3). The one executable links it, and
+// main.swift reaches it only after the `--daemon` branch has been decided.
+// It is also a library product so apps/mac/project.yml (the CI-only XcodeGen
+// spec) can name it as a package product.
 //
 // Zero package dependencies, by rule (test/arch.spec.ts, "v2 S1: the Swift
 // tree"). The kit speaks the S0 contract in fixtures/contract and nothing else.
@@ -18,6 +22,7 @@ let package = Package(
   products: [
     .library(name: "WeMessageKit", targets: ["WeMessageKit"]),
     .library(name: "WeMessageDaemonHost", targets: ["WeMessageDaemonHost"]),
+    .library(name: "WeMessageApp", targets: ["WeMessageApp"]),
     .executable(name: "WeMessage", targets: ["WeMessage"]),
   ],
   targets: [
@@ -33,9 +38,14 @@ let package = Package(
       path: "Sources/WeMessageDaemonHost",
       swiftSettings: [.define("WEMESSAGE_HOST_OVERRIDES", .when(configuration: .debug))]
     ),
+    .target(
+      name: "WeMessageApp",
+      dependencies: ["WeMessageKit"],
+      path: "Sources/WeMessageApp"
+    ),
     .executableTarget(
       name: "WeMessage",
-      dependencies: ["WeMessageDaemonHost"],
+      dependencies: ["WeMessageDaemonHost", "WeMessageApp"],
       path: "Sources/WeMessage"
     ),
     .testTarget(
@@ -47,6 +57,11 @@ let package = Package(
       name: "WeMessageDaemonHostTests",
       dependencies: ["WeMessageDaemonHost"],
       path: "Tests/WeMessageDaemonHostTests"
+    ),
+    .testTarget(
+      name: "WeMessageAppTests",
+      dependencies: ["WeMessageApp"],
+      path: "Tests/WeMessageAppTests"
     ),
   ],
   swiftLanguageModes: [.v6]

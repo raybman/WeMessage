@@ -12021,6 +12021,8 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       'packages/core/test/audit-chain-core.spec.ts',
       'packages/store/test/audit-chain.spec.ts',
       'tools/swift/node.lock.json',
+      // v2 S3: the XcodeGen release the CI UI lane fetches, same shape.
+      'tools/swift/xcodegen.lock.json',
     ];
 
     function secretOffenders(): string[] {
@@ -12100,7 +12102,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
         (m) => m[0] === NULL_DIGEST,
       );
 
-    it('a 64-hex digest lives in exactly four files, all of them earned', () => {
+    it('a 64-hex digest lives in exactly five files, all of them earned', () => {
       const carriers = trackedTextFiles()
         .filter((f) => HEX64.test(readFileSync(join(repoRoot, f), 'utf8')))
         .sort();
@@ -13366,15 +13368,22 @@ describe('v2 S1: the Swift tree', () => {
     `${MAC}/Sources/WeMessageKit`,
     `${MAC}/Sources/WeMessageDaemonHost`,
     `${MAC}/Sources/WeMessage`,
+    `${MAC}/Sources/WeMessageApp`,
   ];
   const HOST_SOURCES: readonly string[] = [
     `${MAC}/Sources/WeMessageDaemonHost`,
     `${MAC}/Sources/WeMessage`,
   ];
+  // v2 S3: the window's target, and the XCUITest bundle that only the ci-swift
+  // `ui` job ever builds (it is not a SwiftPM target).
+  const APP_SOURCES = `${MAC}/Sources/WeMessageApp`;
+  const UI_TESTS = `${MAC}/UITests/WeMessageUITests`;
+  const PROJECT_YML = `${MAC}/project.yml`;
   const MAIN_SWIFT = `${MAC}/Sources/WeMessage/main.swift`;
   const TESTS: readonly string[] = [
     `${MAC}/Tests/WeMessageKitTests`,
     `${MAC}/Tests/WeMessageDaemonHostTests`,
+    `${MAC}/Tests/WeMessageAppTests`,
   ];
   const CI_SWIFT = '.github/workflows/ci-swift.yml';
   const CI_MACOS = '.github/workflows/ci-macos.yml';
@@ -13417,20 +13426,36 @@ describe('v2 S1: the Swift tree', () => {
         .map((m) => `${f}: ${m}`),
     );
 
-  it('every Sources/**/*.swift imports Foundation only (plus WeMessageDaemonHost in main.swift); tests add Testing and the target under test', () => {
+  it('every Sources/**/*.swift imports Foundation only (main.swift adds the host and the app; WeMessageApp adds the UI frameworks and the kit); tests add Testing and the target under test', () => {
     const sources = SOURCES.flatMap(swiftUnder);
-    expect(sources.length).toBeGreaterThanOrEqual(19);
+    expect(sources.length).toBeGreaterThanOrEqual(25);
     expect(sources).toContain(MAIN_SWIFT);
+    const app = swiftUnder(APP_SOURCES);
+    expect(app.length).toBeGreaterThanOrEqual(6);
     expect(
       offendingImports(
-        sources.filter((f) => f !== MAIN_SWIFT),
+        sources.filter((f) => f !== MAIN_SWIFT && !app.includes(f)),
         new Set(['Foundation']),
       ),
     ).toEqual([]);
     expect(
       offendingImports(
         [MAIN_SWIFT],
-        new Set(['Foundation', 'WeMessageDaemonHost']),
+        new Set(['Foundation', 'WeMessageDaemonHost', 'WeMessageApp']),
+      ),
+    ).toEqual([]);
+    // v2 S3: the window target may name the UI frameworks and the kit, never
+    // the host (the GUI spawns nothing) and never Combine.
+    expect(
+      offendingImports(
+        app,
+        new Set([
+          'Foundation',
+          'SwiftUI',
+          'AppKit',
+          'Observation',
+          'WeMessageKit',
+        ]),
       ),
     ).toEqual([]);
     // Every tracked Swift file under Sources and Tests sits in a listed
@@ -13442,15 +13467,16 @@ describe('v2 S1: the Swift tree', () => {
       ),
     ).toEqual([]);
     const tests = TESTS.flatMap(swiftUnder);
-    expect(tests.length).toBeGreaterThanOrEqual(15);
+    expect(tests.length).toBeGreaterThanOrEqual(19);
     for (const dir of TESTS) {
       const files = swiftUnder(dir);
       expect([dir, files.length > 0]).toEqual([dir, true]);
-      // The target under test is the directory's name minus `Tests`.
+      // The target under test is the directory's name minus `Tests`; the
+      // app's tests may also name the kit, whose types the model speaks.
       const target = basename(dir).replace(/Tests$/, '');
-      expect(
-        offendingImports(files, new Set(['Foundation', 'Testing', target])),
-      ).toEqual([]);
+      const allowed = ['Foundation', 'Testing', target];
+      if (target === 'WeMessageApp') allowed.push('WeMessageKit');
+      expect(offendingImports(files, new Set(allowed))).toEqual([]);
     }
     // Non-vacuity: the reader sees every import form it is there to deny.
     expect(
@@ -13468,12 +13494,61 @@ describe('v2 S1: the Swift tree', () => {
     ).toEqual(['AppKit', 'WeMessageKit', XCTEST, 'Foundation']);
   });
 
-  it('no file under apps/mac imports XCTest', () => {
+  it('XCTest is imported under apps/mac/UITests and nowhere else', () => {
     const swift = swiftUnder(MAC);
     expect(swift).toContain(`${MAC}/Package.swift`);
+    // SwiftPM's tree (Sources, Tests, Package.swift) runs swift-testing only.
     expect(
-      swift.filter((f) => swiftImports(archRead(f)).includes(XCTEST)),
+      swift
+        .filter((f) => !f.startsWith(`${UI_TESTS}/`))
+        .filter((f) => swiftImports(archRead(f)).includes(XCTEST)),
     ).toEqual([]);
+    // v2 S3: the XCUITest bundle is the one XCTest home. Every file there
+    // imports it, and nothing there reaches a package target: the tests drive
+    // the app through the accessibility tree only.
+    const ui = swiftUnder(UI_TESTS);
+    expect(ui.length).toBeGreaterThanOrEqual(2);
+    expect(
+      ui.filter((f) => !swiftImports(archRead(f)).includes(XCTEST)),
+    ).toEqual([]);
+    expect(
+      offendingImports(ui, new Set([XCTEST, 'Foundation', 'AppKit'])),
+    ).toEqual([]);
+  });
+
+  it('main.swift leaves for the window only after the daemon branch', () => {
+    // v2 S3: the textual order beside the first-statement row. The daemon
+    // branch exits before the first app symbol in source order; with the
+    // first-statement row, before any app symbol in execution order.
+    const statements = archRead(MAIN_SWIFT)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l !== '' && !l.startsWith('//'))
+      .filter((l) => !/^(?:@\w+\s+)*import\s/.test(l));
+    const joined = statements.join('\n');
+    const isDaemon = joined.indexOf('HostArguments.isDaemon');
+    const daemonRun = joined
+      .replace(/exit\(\s*\n\s*/g, 'exit(')
+      .indexOf('exit(DaemonHost.run');
+    const entry = joined
+      .replace(/exit\(\s*\n\s*/g, 'exit(')
+      .indexOf('AppEntry.run');
+    expect(isDaemon).toBeGreaterThanOrEqual(0);
+    expect(daemonRun).toBeGreaterThan(isDaemon);
+    expect(entry).toBeGreaterThan(daemonRun);
+    expect(joined.split('AppEntry').length - 1).toBe(1);
+    expect(archRead(MAIN_SWIFT)).not.toContain('usage:');
+    // AppEntry.run returns Never: nothing follows it.
+    expect(statements[statements.length - 1] ?? '').toContain('AppEntry.run');
+  });
+
+  it('no @main under apps/mac', () => {
+    // main.swift is the one entry point; SwiftUI's App.main() is called from
+    // AppEntry, after the daemon branch, never by an attribute.
+    const files = [...SOURCES.flatMap(swiftUnder), ...swiftUnder(UI_TESTS)];
+    expect(files.length).toBeGreaterThanOrEqual(27);
+    expect(files.filter((f) => archRead(f).includes('@main'))).toEqual([]);
   });
 
   it('Package.swift has no package dependencies, tools 6.2, macOS 26', () => {
@@ -13492,9 +13567,23 @@ describe('v2 S1: the Swift tree', () => {
     expect(text.split('.executableTarget(').length - 1).toBe(1);
     const exe = /\.executableTarget\(([^)]*)\)/.exec(text)?.[1] ?? '';
     expect(exe).toMatch(/name:\s*"WeMessage"/);
+    // v2 S3: the one executable also links the window target; the kit still
+    // reaches the exe only through WeMessageApp, never directly.
     expect(/dependencies:\s*\[([^\]]*)\]/.exec(exe)?.[1]?.trim()).toBe(
-      '"WeMessageDaemonHost"',
+      '"WeMessageDaemonHost", "WeMessageApp"',
     );
+    const targets = text
+      .split(/(?=\.(?:target|executableTarget|testTarget)\()/)
+      .slice(1);
+    const app = targets.filter(
+      (t) => t.startsWith('.target(') && /name:\s*"WeMessageApp"/.test(t),
+    );
+    expect(app.length).toBe(1);
+    expect(/dependencies:\s*\[([^\]]*)\]/.exec(app[0] ?? '')?.[1]?.trim()).toBe(
+      '"WeMessageKit"',
+    );
+    expect(app[0]).not.toContain('swiftSettings');
+    expect(targets.filter((t) => t.startsWith('.testTarget(')).length).toBe(3);
   });
 
   it('the host never daemonises or disclaims', () => {
@@ -13511,11 +13600,31 @@ describe('v2 S1: the Swift tree', () => {
       'daemon(',
       'responsibility_spawnattrs',
     ];
-    const files = HOST_SOURCES.flatMap(swiftUnder);
-    expect(files.length).toBeGreaterThanOrEqual(9);
+    // v2 S3: the window and its UI tests join the sweep (advisor P1), and
+    // they spawn nothing at all, so they also never name a spawner.
+    const files = [...HOST_SOURCES, APP_SOURCES, UI_TESTS].flatMap(swiftUnder);
+    expect(files.length).toBeGreaterThanOrEqual(17);
     expect(
       files.flatMap((f) =>
         NEVER.filter((t) => archRead(f).includes(t)).map((t) => `${f}: ${t}`),
+      ),
+    ).toEqual([]);
+    const GUI_NEVER: readonly string[] = [
+      'posix_spawn',
+      'Process(',
+      'NSTask',
+      'SignalForwarder',
+      'DaemonHost',
+      'Spawner',
+      'WEMESSAGE_HOST',
+    ];
+    const gui = [APP_SOURCES, UI_TESTS].flatMap(swiftUnder);
+    expect(gui.length).toBeGreaterThanOrEqual(8);
+    expect(
+      gui.flatMap((f) =>
+        GUI_NEVER.filter((t) => archRead(f).includes(t)).map(
+          (t) => `${f}: ${t}`,
+        ),
       ),
     ).toEqual([]);
     // Non-vacuity: the spawner is in the sweep, and it sets what the host
@@ -13585,16 +13694,53 @@ describe('v2 S1: the Swift tree', () => {
     expect(text).toContain('swift test --package-path apps/mac');
     expect(text).toMatch(/^ {2}pull_request:/m);
     expect(text).not.toContain('workflow_dispatch');
-    // v2 S2c: the lane builds the release host, proves it links no UI
-    // framework, and smokes `--daemon` with a stub node.
+    // v2 S2c: the lane builds the release host and smokes `--daemon` with a
+    // stub node. v2 S3: the otool step now proves the one executable DOES
+    // link AppKit and SwiftUI (the window lives in it), and a second job,
+    // `ui`, is the only place the app is ever launched.
     for (const needed of [
       'swift build -c release --package-path apps/mac',
       '--daemon',
       'otool -L',
       'AppKit',
       'SwiftUI',
+      'xcodegen generate --spec apps/mac/project.yml',
+      'tools/swift/xcodegen-fetch.sh',
+      'xcodebuild test',
+      '-test-timeouts-enabled YES',
+      '-default-test-execution-time-allowance',
+      '-maximum-test-execution-time-allowance',
+      'automationmodetool',
+      'DOES NOT REQUIRE',
+      'AppleKeyboardUIMode -int 2',
+      '>> "$GITHUB_ENV"',
+      'RESULTS=$RUNNER_TEMP/results.xcresult',
+      'needs: [kit]',
+      'if-no-files-found: warn',
     ])
       expect([needed, text.includes(needed)]).toEqual([needed, true]);
+    // P0-3: both jobs carry a limit, so a hung launch fails in minutes.
+    expect(text.match(/^\s+timeout-minutes: \d+$/gm)?.length).toBe(2);
+    expect(text.match(/^\s+runs-on: macos-26$/gm)?.length).toBe(2);
+    // P1-1: ad hoc signing from project.yml is the only mode; no override.
+    expect(text).not.toContain('CODE_SIGNING_ALLOWED');
+    // E20: `${{ runner.temp }}` is illegal in job env; it may appear only as
+    // an upload `path:` inside a `with:` block.
+    const temps = text
+      .split('\n')
+      .filter((l) => l.includes('runner.temp') && !l.trim().startsWith('#'));
+    expect(temps.length).toBeGreaterThanOrEqual(1);
+    expect(temps.filter((l) => !/^\s+path:/.test(l))).toEqual([]);
+    // E21: xcodegen does not create its --project parent.
+    const mkdir = text.indexOf('mkdir -p apps/mac/.build/xcodeproj');
+    expect(mkdir).toBeGreaterThan(0);
+    expect(mkdir).toBeLessThan(text.indexOf('xcodegen generate'));
+    // D3: bare launch opens a window now; the kit job never runs it. (The
+    // stub's own "exits 0 on it" comments in checks 1-3 stay as S2c wrote them.)
+    expect(text).not.toContain('usage line');
+    expect(text).not.toMatch(/"\$exe";/);
+    expect(text).toContain('echo "host smoke passed: 7, 0 after TERM, 78"');
+    expect(text).not.toContain('WEMESSAGE_SNAPSHOT_DIR');
     // The word list of the Sc17 'neither signs' row, applied to this file.
     for (const forbidden of [
       'secrets.',
@@ -13607,6 +13753,101 @@ describe('v2 S1: the Swift tree', () => {
       'keychain',
     ])
       expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
+  });
+
+  it('project.yml is the CI-only spec', () => {
+    const text = archRead(PROJECT_YML);
+    expect(text.split('type: application').length - 1).toBe(1);
+    expect(text.split('type: bundle.ui-testing').length - 1).toBe(1);
+    // P2-3: the Xcode target cannot share the local package target's name;
+    // the product name does, so the bundle is WeMessage.app.
+    const targets = /^targets:\n([\s\S]*?)^\S/m.exec(text)?.[1] ?? '';
+    expect(targets).toMatch(/^ {2}WeMessageMac:$/m);
+    expect(targets).not.toMatch(/^ {2}WeMessage:$/m);
+    expect(targets.match(/^ {2}\w+:$/gm)).toEqual([
+      '  WeMessageMac:',
+      '  WeMessageUITests:',
+    ]);
+    expect(text).toContain('PRODUCT_NAME: WeMessage\n');
+    // Prettier writes the repo's YAML with single quotes; either is one string.
+    expect(text).toMatch(/macOS: ['"]26\.0['"]/);
+    expect(text).toMatch(/^packages:\n {2}WeMessage:\n {4}path: \.$/m);
+    // P1-5: S2d's plist, reused as is; S3 adds none.
+    expect(text.split('INFOPLIST_FILE: Resources/Info.plist').length - 1).toBe(
+      1,
+    );
+    expect(text.match(/^\s+INFOPLIST_FILE:/gm)?.length).toBe(1);
+    expect(text).not.toContain('NSPrincipalClass');
+    expect(
+      text.split('PRODUCT_BUNDLE_IDENTIFIER: sh.wemessage.gateway\n').length -
+        1,
+    ).toBe(1);
+    expect(text).toMatch(/CODE_SIGN_IDENTITY: ['"]-['"]/);
+    expect(text).not.toMatch(/DEVELOPMENT_TEAM: "?[A-Z0-9]{10}"?/);
+    for (const forbidden of ['codesign', 'keychain', 'secrets.'])
+      expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
+    // The generated project lives under .build in CI and is never tracked.
+    expect(trackedUnder(MAC).filter((f) => /\.xcodeproj\//.test(f))).toEqual(
+      [],
+    );
+    expect(trackedUnder(MAC).filter((f) => f.endsWith('Info.plist'))).toEqual([
+      `${MAC}/Resources/Info.plist`,
+    ]);
+  });
+
+  it('the UI tests read the window size from the app, never a literal', () => {
+    // v2 S3a ships the LaunchTests half of R-A13 early: the runner's display
+    // (1024 x 768, visible ~674) is smaller than the default, so a literal
+    // size would be red every run, and a monitor read in the runner differs
+    // from the app's by a few points.
+    const launch = archRead(`${UI_TESTS}/LaunchTests.swift`);
+    expect(launch).toContain('shellGeometry');
+    expect(launch).toContain('ProvisionalUI.windowDefaultWidth');
+    const code = launch
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n');
+    expect(code.match(/\b(?:1180|760|870|560)\b/g) ?? []).toEqual([]);
+    for (const banned of [
+      'write(to:',
+      'FileManager.default.createFile',
+      'WEMESSAGE_SNAPSHOT_DIR',
+    ])
+      expect([banned, launch.includes(banned)]).toEqual([banned, false]);
+  });
+
+  it('tools/swift/xcodegen.lock.json pins one XcodeGen release by sha256', () => {
+    const lock = JSON.parse(
+      archRead('tools/swift/xcodegen.lock.json'),
+    ) as Record<string, unknown>;
+    expect(Object.keys(lock).sort()).toEqual([
+      'asset',
+      'sha256',
+      'source',
+      'version',
+    ]);
+    expect(String(lock.sha256)).toMatch(/^[0-9a-f]{64}$/);
+    expect(String(lock.source).endsWith(`/${String(lock.version)}/`)).toBe(
+      true,
+    );
+    const fetch = archRead('tools/swift/xcodegen-fetch.sh');
+    for (const needed of [
+      'xcodegen.lock.json',
+      'curl -fsSL --retry 3',
+      'shasum -a 256',
+      'exit 2',
+      'unzip -q',
+      'share',
+    ])
+      expect([needed, fetch.includes(needed)]).toEqual([needed, true]);
+    // The digest lives in the lock only; the script reads it.
+    expect(fetch).not.toContain(String(lock.sha256));
+    // Commands, not prose: the header may say it never touches Homebrew.
+    for (const banned of [/\bgrep\b/, /\bjq\b/, /\bnode\b/, /(?<!Home)brew\b/])
+      expect([String(banned), banned.test(fetch)]).toEqual([
+        String(banned),
+        false,
+      ]);
   });
 
   it('the Swift lane is not a step in ci-macos.yml', () => {
@@ -13722,7 +13963,8 @@ describe('v2 S2c.1: host hardening before a signed build gets Full Disk Access',
     const targets = text
       .split(/(?=\.(?:target|executableTarget|testTarget)\()/)
       .slice(1);
-    expect(targets.length).toBe(5);
+    // v2 S3 adds WeMessageApp and WeMessageAppTests; neither carries the flag.
+    expect(targets.length).toBe(7);
     const naming = targets
       .filter((t) => t.includes(FLAG))
       .map((t) => /name:\s*"(\w+)"/.exec(t)?.[1]);

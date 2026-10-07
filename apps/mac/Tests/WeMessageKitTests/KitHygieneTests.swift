@@ -50,7 +50,7 @@ struct KitHygieneTests {
     }
   }
 
-  @Test("tests import only Foundation, Testing and the target under test, and no file under apps/mac imports the XCTest framework")
+  @Test("tests import only Foundation, Testing and the target under test, and no file under apps/mac/Sources or apps/mac/Tests imports the XCTest framework")
   func testImports() throws {
     let tests = try Self.swiftFiles(under: "apps/mac/Tests")
     #expect(tests.count >= 8, "test files found: \(tests.count)")
@@ -58,15 +58,23 @@ struct KitHygieneTests {
       // Tests/<Target>Tests/...: each test target may import its own target only.
       let suite = String(file.split(separator: "/")[0])
       #expect(suite.hasSuffix("Tests"), "\(file) sits outside a <Target>Tests directory")
-      let allowed: Set<String> = ["Foundation", "Testing", String(suite.dropLast("Tests".count))]
+      var allowed: Set<String> = ["Foundation", "Testing", String(suite.dropLast("Tests".count))]
+      // v2 S3: the app's model speaks the kit's types, so its tests may too.
+      if suite == "WeMessageAppTests" { allowed.insert("WeMessageKit") }
       let modules = Set(try Self.imports(try Repo.text("apps/mac/Tests/" + file)))
       #expect(modules.isSubset(of: allowed), "\(file) imports \(modules.subtracting(allowed).sorted())")
     }
-    let everything = try Self.swiftFiles(under: "apps/mac")
-    #expect(everything.contains("Package.swift"))
-    for file in everything {
-      let modules = try Self.imports(try Repo.text("apps/mac/" + file))
-      #expect(!modules.contains(Self.forbiddenFramework), "\(file) imports \(Self.forbiddenFramework)")
+    // v2 S3: the XCUITest bundle under apps/mac/UITests is the one place the
+    // framework is legal (test/arch.spec.ts holds that side); the SwiftPM
+    // tree, Sources and Tests, never imports it.
+    var swept = 0
+    for root in ["apps/mac/Sources", "apps/mac/Tests"] {
+      for file in try Self.swiftFiles(under: root) {
+        swept += 1
+        let modules = try Self.imports(try Repo.text(root + "/" + file))
+        #expect(!modules.contains(Self.forbiddenFramework), "\(root)/\(file) imports \(Self.forbiddenFramework)")
+      }
     }
+    #expect(swept >= 40, "SwiftPM files swept: \(swept)")
   }
 }

@@ -15,20 +15,25 @@ name: ci-swift
 # the package declares. `swift --version` is printed first so every run
 # records which compiler it actually used.
 #
-# v2 S2c: this lane is the only place the built host ever runs. The otool step
-# proves the release executable links no UI framework at all, which is
-# stronger than "never starts one". The smoke copies the release executable
-# into a scratch Fake.app/Contents/MacOS under RUNNER_TEMP, with a stub node
-# and main.mjs at Contents/Resources/daemon, exactly where a shipped app keeps
-# them: the stub's exit code comes back as the host's, a SIGTERM sent to the
-# host reaches the stub (which exits 0 on it), a missing node is 78, and the
-# bare usage line is 0. GitHub runs each step under bash -e without pipefail,
+# v2 S2c: this lane is the only place the built host ever runs. The smoke
+# copies the release executable into a scratch Fake.app/Contents/MacOS under
+# RUNNER_TEMP, with a stub node and main.mjs at Contents/Resources/daemon,
+# exactly where a shipped app keeps them: the stub's exit code comes back as
+# the host's, a SIGTERM sent to the host reaches the stub (which exits 0 on
+# it), and a missing node is 78. GitHub runs each step under bash -e without pipefail,
 # so every command that may exit non-zero runs between `set +e` and `set -e`
 # and its code is tested on its own line, and every text match is done by awk.
 #
 # v2 S2c.1: a release build reads no environment key that names node or
 # main.mjs; those overrides exist in debug builds only. The strings step
 # proves it on the binary itself, and the smoke uses none of them.
+#
+# v2 S3: the one executable also links the window (WeMessageApp), so the otool
+# step now asserts AppKit and SwiftUI ARE linked; `--daemon` headlessness is
+# proved by order (main.swift's first statement, the arch rows) and by the
+# smoke, which only ever runs `--daemon`. A bare launch opens a window and
+# never exits, so the smoke no longer runs one. The second job, `ui`, is the
+# only place the app is ever launched.
 on:
   push:
     branches: ['**']
@@ -37,6 +42,7 @@ on:
 jobs:
   kit:
     runs-on: macos-26
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: swift --version
@@ -53,16 +59,17 @@ jobs:
             echo "release host carries an override key" >&2
             exit 1
           fi
-      - name: Host links no UI framework
+      # v2 S3: the one executable links the window. `--daemon` headlessness is
+      # proved by order (arch rows) and by the smoke below, not by absence.
+      - name: release host links AppKit and SwiftUI (the window lives in the one exe)
         run: |
-          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
-          otool -L "$exe"
-          # Non-vacuity: the same reader finds the framework the host does link.
-          otool -L "$exe" | awk '/Foundation/ {found = 1} END {exit !found}'
-          if otool -L "$exe" | awk '/AppKit|SwiftUI/ {found = 1} END {exit !found}'; then
-            echo "host links a UI framework" >&2
-            exit 1
-          fi
+          set -eu
+          exe=apps/mac/.build/release/WeMessage
+          libs=$(otool -L "$exe")
+          printf '%s\n' "$libs" | awk '/AppKit.framework/ { found = 1 } END { exit found ? 0 : 1 }' \
+            || { echo "expected AppKit in otool -L" >&2; exit 1; }
+          printf '%s\n' "$libs" | awk '/SwiftUI.framework/ { found = 1 } END { exit found ? 0 : 1 }' \
+            || { echo "expected SwiftUI in otool -L" >&2; exit 1; }
       - name: Host smoke with a stub node
         run: |
           built="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
@@ -121,8 +128,77 @@ jobs:
           rm "$stub"
           set +e; "$exe" --daemon; code=$?; set -e
           test "$code" -eq 78 || { echo "expected 78 for a missing node, got $code" >&2; exit 1; }
+          echo "host smoke passed: 7, 0 after TERM, 78"
 
-          # 4. No arguments prints the usage line and exits 0.
-          set +e; "$exe"; code=$?; set -e
-          test "$code" -eq 0 || { echo "expected 0 for the usage line, got $code" >&2; exit 1; }
-          echo "host smoke passed: 7, 0 after TERM, 78, 0"
+  # v2 S3: the CI UI lane. Generates an Xcode project from apps/mac/project.yml
+  # with a sha256-pinned XcodeGen, builds the app ad hoc signed and drives the
+  # window with XCUITest. Nothing here runs on a laptop; this job is the only
+  # place the app is ever launched.
+  ui:
+    needs: [kit]
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      TZ: UTC
+      WEMESSAGE_PORT: '47191'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # E20 (measured, spike run 37545141709): `${{ runner.temp }}` is not a
+      # named value in jobs.<id>.env and the workflow is rejected at 0 s. The
+      # paths are written once here from the shell variable and become job env.
+      - name: job paths under RUNNER_TEMP
+        run: |
+          set -eu
+          {
+            echo "WEMESSAGE_DIR=$RUNNER_TEMP/wm"
+            echo "DERIVED=$RUNNER_TEMP/derived"
+            echo "RESULTS=$RUNNER_TEMP/results.xcresult"
+            echo "SNAPSHOTS_OUT=$RUNNER_TEMP/snapshots"
+          } >> "$GITHUB_ENV"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - run: xcodebuild -version
+      # Measured (S3a.0): prints "Automation Mode is disabled." and "This device
+      # DOES NOT REQUIRE user authentication to enable Automation Mode."; XCUITest
+      # attaches in that state, so nothing here asserts "enabled".
+      - name: automation mode needs no authentication (image premise, read-only)
+        run: automationmodetool | grep -q "DOES NOT REQUIRE"
+      # REQUIRED (P1-3, measured S3a.0): the AppleKeyboardUIMode key is absent on
+      # the image (defaults read exits 1) and with it absent Tab reaches no
+      # button at all. After this write it reads 2 and Tab cycles buttons and
+      # the lens picker.
+      - name: Full Keyboard Access on, so Tab reaches buttons and the lens picker
+        run: defaults write -g AppleKeyboardUIMode -int 2
+      - run: sh tools/swift/xcodegen-fetch.sh --out apps/mac/.build/xcodegen
+      # E21 (measured, spike run 37545219027): xcodegen does not create the
+      # --project parent and fails at "Writing project" without it.
+      - run: mkdir -p apps/mac/.build/xcodeproj
+      - run: apps/mac/.build/xcodegen/bin/xcodegen generate --spec apps/mac/project.yml --project apps/mac/.build/xcodeproj --quiet
+      # P1-1 decided (S3a.0, four green legs): ad hoc signing from project.yml,
+      # NO signing override on this line. The runner is then sandboxed (E19), so
+      # no test writes a file.
+      - name: xcodebuild test (ad hoc signed, timeouts on)
+        run: |
+          set -eu
+          set -o pipefail
+          xcodebuild test \
+            -project apps/mac/.build/xcodeproj/WeMessage.xcodeproj \
+            -scheme WeMessage \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$DERIVED" \
+            -resultBundlePath "$RESULTS" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 300 \
+            | xcbeautify --renderer github-actions
+      # P2-4: the result bundle uploads on every outcome, so a red run can be
+      # read from its xcresult.
+      - name: result bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wemessage-ui-xcresult-${{ github.sha }}
+          path: ${{ runner.temp }}/results.xcresult
+          retention-days: 7
+          if-no-files-found: warn

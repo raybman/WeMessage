@@ -1,0 +1,73 @@
+# XcodeGen spec for the CI UI lane ONLY. Never run xcodegen on a laptop; the
+# generated .xcodeproj lands under apps/mac/.build/ (gitignored) in CI.
+# `swift build` and `swift test` remain the local build. See
+# docs/plans/v2-swift-S3.md (private) for why this file exists.
+name: WeMessage
+options:
+  bundleIdPrefix: sh.wemessage
+  deploymentTarget:
+    macOS: '26.0'
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  xcodeVersion: '26.6'
+packages:
+  WeMessage:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    MACOSX_DEPLOYMENT_TARGET: '26.0'
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: 'YES'
+    CODE_SIGN_IDENTITY: '-'
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ''
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  # P2-3: the Xcode target is WeMessageMac so it cannot collide with the local
+  # package's executable product `WeMessage` in one derived-data tree; the
+  # bundle keeps PRODUCT_NAME WeMessage, so Info.plist's CFBundleExecutable holds.
+  WeMessageMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/WeMessage
+    dependencies:
+      - package: WeMessage
+        product: WeMessageDaemonHost
+      - package: WeMessage
+        product: WeMessageApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.wemessage.gateway
+        PRODUCT_NAME: WeMessage
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: 'NO'
+        ENABLE_HARDENED_RUNTIME: 'NO'
+  WeMessageUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests/WeMessageUITests
+      # The provisional D-UI values (pending Eric's decisions) are compiled
+      # into the UI tests too, so the tests read them instead of restating them.
+      - path: Sources/WeMessageApp/ProvisionalUI.swift
+    dependencies:
+      - target: WeMessageMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.wemessage.gateway.uitests
+        TEST_TARGET_NAME: WeMessageMac
+schemes:
+  WeMessage:
+    build:
+      targets:
+        WeMessageMac: all
+        WeMessageUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WeMessageUITests
+      gatherCoverageData: false

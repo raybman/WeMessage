@@ -70,11 +70,12 @@ final class Board01Tests: XCTestCase {
   @MainActor
   private func waitUntil(_ done: () -> Bool) -> Bool {
     let deadline = Date().addingTimeInterval(UITestApp.timeout)
-    repeat {
-      if done() { return true }
+    var held = done()
+    while !held && Date() < deadline {
       Thread.sleep(forTimeInterval: 0.25)
-    } while Date() < deadline
-    return done()
+      held = done()
+    }
+    return held
   }
 
   @MainActor

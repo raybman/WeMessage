@@ -41,7 +41,8 @@ enum ShellID {
 /// with the inspector beside the content when it is open. Since S4a the
 /// panes are transparent over one window frost (FrostBackground), divided
 /// by 0.5 pt hairlines. The panes come first in the view tree and the title
-/// bar is laid over them, so Tab walks the rail before the lens.
+/// bar is laid over them; SwiftUI's key loop follows reading order, so Tab
+/// reaches the lens and the kill chip in the title band, then the rail.
 struct ShellView: View {
   /// The client reads WEMESSAGE_PORT and WEMESSAGE_DIR/daemon.token from the
   /// environment, as the shipped app does (H10-H12).
@@ -265,6 +266,9 @@ private struct SidebarView: View {
       }
       .padding(.vertical, 6)
       .padding(.horizontal, 12)
+      // One element, "All, as of 16:42": the 9pt stamp (wireframe .tiny,
+      // --t-caption) stays the wireframe size and is read with its chip.
+      .accessibilityElement(children: .combine)
       Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
       let rows = model.rows
       if rows.isEmpty {
@@ -286,6 +290,8 @@ private struct SidebarView: View {
               .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
             }
           }
+          .accessibilityElement(children: .contain)
+          .accessibilityLabel("Threads")
         }
         .scrollIndicators(.never)
       }

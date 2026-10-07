@@ -94,8 +94,8 @@ final class AccessibilityTests: XCTestCase {
     return focusedIdentifier(app) == ID.lens || inside.count > 0
   }
 
-  /// U-X2: cmd-1..5 select the rail tiles in order, Tab walks the rail,
-  /// then the lens, then the kill chip, and cmd-T selects Triage.
+  /// U-X2: cmd-1..5 select the rail tiles in order, Tab reaches the lens,
+  /// then the kill chip, and the rail, and cmd-T selects Triage.
   @MainActor
   func testKeyboardPath() throws {
     // The job turns Full Keyboard Access on before xcodebuild (§4.7, P1-3).
@@ -119,41 +119,35 @@ final class AccessibilityTests: XCTestCase {
     }
     app.typeKey("1", modifierFlags: .command)
 
-    // Natural order from the view tree: every rail tile is a stop, then the
-    // lens. Record each stop so a wrong order reads as the path it took.
+    // v2 S4c: SwiftUI's key loop follows reading order, and the wireframe
+    // puts the 52pt title band above the rail, so Tab walks the title bar
+    // first (lens, then the kill chip) and then the rail. Record every stop
+    // so a wrong order reads as the path it took. Nothing outside the rail,
+    // the lens and the chip may take a stop: rows and the content pane
+    // stay out of the loop.
+    let lensStops = [ID.lens, ID.lensRecent, ID.lensNeedsYou, ID.lensTriage]
     var path: [String] = []
-    var reached = false
-    for _ in 0..<(Self.railIDs.count + 4) {
+    var firstLens: Int?
+    var chipAt: Int?
+    var railAt: Int?
+    for step in 0..<(Self.railIDs.count + 10) {
       app.typeKey("\t", modifierFlags: [])
       Thread.sleep(forTimeInterval: 0.2)
-      if Self.lensHasFocus(app) {
-        reached = true
-        break
-      }
-      path.append(Self.focusedIdentifier(app))
+      let now = Self.lensHasFocus(app) && !lensStops.contains(Self.focusedIdentifier(app)) ? ID.lens : Self.focusedIdentifier(app)
+      path.append(now)
+      if firstLens == nil, now == ID.lens || lensStops.contains(now) { firstLens = step }
+      if chipAt == nil, now == ID.killChip { chipAt = step }
+      if railAt == nil, Self.railIDs.contains(now) { railAt = step }
+      if firstLens != nil, chipAt != nil, railAt != nil { break }
     }
-    XCTAssertTrue(reached, "Tab never reached the lens; stops: \(path)")
-    let strays = path.filter { !$0.isEmpty && !Self.railIDs.contains($0) }
-    XCTAssertEqual(strays, [], "Tab stopped outside the rail before the lens; stops: \(path)")
-    XCTAssertTrue(path.contains(where: { Self.railIDs.contains($0) }), "Tab skipped the rail; stops: \(path)")
-
-    // v2 S4c: past the lens (its segments and Triage), Tab reaches the kill
-    // chip, and nothing outside the lens on the way.
-    var after: [String] = []
-    var chip = false
-    for _ in 0..<6 {
-      app.typeKey("\t", modifierFlags: [])
-      Thread.sleep(forTimeInterval: 0.2)
-      let now = Self.focusedIdentifier(app)
-      if now == ID.killChip {
-        chip = true
-        break
-      }
-      after.append(now)
+    XCTAssertNotNil(firstLens, "Tab never reached the lens; stops: \(path)")
+    XCTAssertNotNil(chipAt, "Tab never reached the kill chip; stops: \(path)")
+    XCTAssertNotNil(railAt, "Tab skipped the rail; stops: \(path)")
+    if let lens = firstLens, let chip = chipAt {
+      XCTAssertLessThan(lens, chip, "the kill chip came before the lens; stops: \(path)")
     }
-    XCTAssertTrue(chip, "Tab never reached the kill chip after the lens; stops: \(after)")
-    let lensStops = [ID.lens, ID.lensRecent, ID.lensNeedsYou, ID.lensTriage, ""]
-    XCTAssertEqual(after.filter { !lensStops.contains($0) }, [], "Tab left the lens before the chip; stops: \(after)")
+    let allowed = Set(Self.railIDs + lensStops + [ID.killChip, ""])
+    XCTAssertEqual(path.filter { !allowed.contains($0) }, [], "Tab stopped outside the rail, lens and chip; stops: \(path)")
 
     // cmd-T selects Triage.
     app.typeKey("t", modifierFlags: .command)

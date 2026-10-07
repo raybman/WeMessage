@@ -114,6 +114,9 @@ struct ListRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spoken)
     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    // Ignoring children drops the Button's press; give it back so
+    // VoiceOver and the audit see an action on the row.
+    .accessibilityAction { action() }
   }
 }
 

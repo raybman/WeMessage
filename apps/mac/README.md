@@ -51,8 +51,8 @@ LaunchTests         a bare launch shows the shell; the window is the requested
                     size clamped to the visible frame the app saw
 ConnectionTests     the window connects to the fake daemon with the bearer, and
                     says plainly when the daemon is down
-AccessibilityTests  the accessibility audit passes; Tab walks the rail, the lens
-                    and the kill chip; cmd-T selects Triage
+AccessibilityTests  the accessibility audit passes; Tab reaches the lens, the
+                    kill chip and the rail; cmd-T selects Triage
 SnapshotTests       light and dark snapshots, each with the frost on and with
                     Reduce Transparency forced, swept for green outside the
                     traffic lights, with the tint present, and carrying the frost

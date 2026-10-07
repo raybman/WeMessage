@@ -2,9 +2,12 @@ import Foundation
 import Observation
 import WeMessageKit
 
-/// The shell's state. `start()` asks the daemon for its status once, then
-/// follows the kit's event stream; `apply` folds each status into the
-/// connection line. Nothing here sends anything.
+/// The shell's state. `start()` reads status, the thread list and the draft
+/// queue once, then follows the kit's event stream; `apply` folds each
+/// status into the connection line and every frame into the kit's AppState.
+/// `board` is board 01's marks, counter and list, folded from all of it.
+/// Nothing here sends anything: the one write is the kill switch, and it
+/// only ever turns sending off.
 @MainActor
 @Observable
 public final class ShellModel {
@@ -57,9 +60,50 @@ public final class ShellModel {
   public internal(set) var connection: Connection = .idle
   public var scope: Scope = .all
   public var lens: Lens = .recent
+  /// The thread the list has selected, by chatGuid.
+  public var selectedThread: String?
+  /// The inspector column beside the thread (toggled by its button; no key).
+  public var inspectorShown = false
+
+  /// The last status read; nil until one succeeds.
+  public internal(set) var status: StatusPayload?
+  /// The last thread list read.
+  public internal(set) var threads: ThreadsPage?
+  /// The kit's state: the draft queue, folded by AppReducer.
+  public internal(set) var state = AppState()
 
   private let client: GatewayClient
   private var task: Task<Void, Never>?
+
+  /// Board 01, folded from status, threads and the queue (D-UI-18 window).
+  public var board: ShellBoard {
+    ShellBoard.fold(
+      status: status, threads: threads, drafts: state.queue,
+      window: QueueWindow(days: ProvisionalUI.queueWindowDays))
+  }
+
+  /// The channel the counter speaks for: the selected one, or under ALL the
+  /// first channel that is stale (the one that makes ALL unable to say).
+  public var counterChannel: String {
+    guard scope == .all else { return scope.fullLabel }
+    let stale = Scope.allCases.first { $0 != .all && board.mark($0) == .stale }
+    return (stale ?? .imessage).fullLabel
+  }
+
+  /// The title counter's sentence for the selected scope; nil when hidden.
+  public var counterSentence: String? { ShellText.counter(board.counter(scope), channel: counterChannel) }
+
+  /// The kill switch as status last said it: nil when status has not said.
+  public var killSwitch: Bool? { status?.killSwitch }
+
+  /// The threads the list shows for the current scope and lens.
+  public var rows: [ThreadSummary] { board.rows(threads?.threads ?? [], scope: scope, lens: lens) }
+
+  /// The selected thread's summary, when it is still listed.
+  public var selected: ThreadSummary? {
+    guard let selectedThread else { return nil }
+    return threads?.threads.first { $0.chatGuid == selectedThread }
+  }
 
   public init(client: GatewayClient) {
     self.client = client
@@ -71,18 +115,44 @@ public final class ShellModel {
     guard task == nil else { return }
     let client = self.client
     task = Task { [weak self] in
-      do {
-        let status = try await client.status()
-        self?.connection = .connected(state: status.connectionState)
-      } catch {
-        if Task.isCancelled { return }
-        self?.connection = .down(reason: "unreachable")
-      }
+      await self?.refresh()
+      if Task.isCancelled { return }
       for await action in EventStream.live(client: client).run() {
         guard let self else { return }
         self.apply(action)
       }
     }
+  }
+
+  /// Reads status, the thread list and the draft queue once. The first read
+  /// decides connected or down; a later one (the UI tests' reload key after
+  /// a scenario switch) updates what a connected window says and leaves a
+  /// lost connection to the stream.
+  public func refresh() async {
+    do {
+      let status = try await client.status()
+      self.status = status
+      switch connection {
+      case .idle, .connected: connection = .connected(state: status.connectionState)
+      case .reconnecting, .down: break
+      }
+    } catch {
+      if Task.isCancelled { return }
+      if case .idle = connection { connection = .down(reason: "unreachable") }
+      return
+    }
+    if case .ok(let page)? = try? await client.listThreads() { threads = page }
+    if let envelope = try? await client.listDrafts() { fold(.response(.drafts(envelope.drafts))) }
+  }
+
+  /// Turns sending off (shift-cmd-K). Only ever this direction: turning it
+  /// back on is S4f's disengage, behind its own confirmation. The status
+  /// read after it is what the chip shows; a refusal leaves the chip as it
+  /// was.
+  public func engageKillSwitch() async {
+    guard killSwitch != true else { return }
+    _ = try? await client.setKillSwitch(true)
+    if let status = try? await client.status() { self.status = status }
   }
 
   /// Cancels the task `start()` made; the stream ends with it.
@@ -96,6 +166,7 @@ public final class ShellModel {
   /// a refused connection, and from `.idle` or `.down` that retry is still
   /// "not reachable", never "reconnecting".
   public func apply(_ action: AppAction) {
+    fold(action)
     guard case .status(let status) = action else { return }
     switch status {
     case .connected:
@@ -109,6 +180,18 @@ public final class ShellModel {
       }
     case .down(let reason):
       connection = .down(reason: reason)
+    }
+  }
+
+  /// Folds `action` into the kit's state and runs the one effect the shell
+  /// acts on: a fresh read of the draft queue.
+  func fold(_ action: AppAction) {
+    let (next, effects) = AppReducer.reduce(state, action)
+    state = next
+    guard effects.contains(.listDrafts) else { return }
+    let client = self.client
+    Task { [weak self] in
+      if let envelope = try? await client.listDrafts() { self?.fold(.response(.drafts(envelope.drafts))) }
     }
   }
 

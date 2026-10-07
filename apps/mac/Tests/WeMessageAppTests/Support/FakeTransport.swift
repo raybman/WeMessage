@@ -33,6 +33,28 @@ struct Reply: Sendable {
       headers: ["Content-Type": "application/json"])
   }
 
+  /// fixtures/scenarios/<name>/responses/<file>, or the same file from the
+  /// scenario it extends (scenario.json "extends"), as the fake daemon
+  /// serves it.
+  static func scenario(_ name: String, _ file: String) throws -> Reply {
+    let dir = "fixtures/scenarios/" + name + "/"
+    if let url = try? Repo.url(dir + "responses/" + file), FileManager.default.fileExists(atPath: url.path) {
+      let data = try Data(contentsOf: url)
+      guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let status = object["status"] as? Int, let body = object["body"]
+      else { throw Repo.Missing(path: dir + file) }
+      return Reply(
+        status: status,
+        body: try JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed]),
+        headers: ["Content-Type": "application/json"])
+    }
+    let meta = try Data(contentsOf: try Repo.url(dir + "scenario.json"))
+    guard let parent = (try JSONSerialization.jsonObject(with: meta) as? [String: Any])?["extends"] as? String else {
+      return try golden("responses/" + file)
+    }
+    return try scenario(parent, file)
+  }
+
   /// A 200 event stream carrying fixtures/contract/sse/<name>, held open.
   static func sse(_ name: String) throws -> Reply {
     Reply(

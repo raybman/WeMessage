@@ -32,6 +32,10 @@ struct AppHygieneTests {
     "wemessage.shell", "wemessage.rail", "wemessage.rail.all", "wemessage.rail.imessage",
     "wemessage.rail.whatsapp", "wemessage.rail.linkedin", "wemessage.rail.email", "wemessage.sidebar",
     "wemessage.lens", "wemessage.sidebar.empty", "wemessage.connection", "wemessage.content.empty",
+    // v2 S4c, board 01.
+    "wemessage.title", "wemessage.title.counter", "wemessage.lens.recent", "wemessage.lens.needsyou",
+    "wemessage.lens.triage", "wemessage.kill.chip", "wemessage.content", "wemessage.inspector",
+    "wemessage.inspector.toggle",
   ]
 
   static let nsApp = "NS" + "App"
@@ -142,12 +146,13 @@ struct AppHygieneTests {
     }
   }
 
-  /// The text of `private struct <name>` up to the next top-level type.
+  /// The text of `struct <name>` (private or not) up to the next top-level
+  /// struct.
   static func block(_ name: String, in text: String) -> String {
-    guard let start = text.range(of: "private struct \(name)") else { return "" }
+    guard let start = text.range(of: "struct \(name): ") else { return "" }
     let rest = text[start.upperBound...]
-    let end = rest.range(of: "\nprivate struct ")?.lowerBound ?? rest.endIndex
-    return String(rest[..<end])
+    let ends = ["\nprivate struct ", "\nstruct "].compactMap { rest.range(of: $0)?.lowerBound }
+    return String(rest[..<(ends.min() ?? rest.endIndex)])
   }
 
   @Test("H-A5+: every rail tile is labelled with its full channel name and bound to cmd-<digit>; the lens is labelled")
@@ -157,11 +162,38 @@ struct AppHygieneTests {
     #expect(rail.contains("ForEach(ShellModel.Scope.allCases"), "the rail is not one tile per scope")
     #expect(rail.contains(".accessibilityLabel(scope.fullLabel)"), "a rail tile has no full-name label")
     #expect(rail.contains(".keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)"))
-    let sidebar = Self.block("SidebarView", in: shell)
-    #expect(sidebar.contains(#".accessibilityLabel("Lens")"#), "the lens picker is unlabelled")
+    // v2 S4c: the lens lives in the title bar, labelled, each segment a Tab
+    // stop; the kill chip is a Tab stop bound to shift-cmd-K.
+    let titleBar = try Repo.text(Self.appDir + "/Boards/Shell/TitleBar.swift")
+    let lens = Self.block("LensPicker", in: titleBar)
+    #expect(lens.contains(#".accessibilityLabel("Lens")"#), "the lens picker is unlabelled")
+    #expect(lens.contains(".accessibilityIdentifier(ShellID.lens)"))
+    #expect(lens.components(separatedBy: ".focusable()").count - 1 >= 2, "the lens segments are not Tab stops")
+    #expect(lens.contains(#".keyboardShortcut("t", modifiers: .command)"#), "Triage is not cmd-T")
+    let kill = Self.block("KillChip", in: titleBar)
+    #expect(kill.contains(".focusable()"), "the kill chip is not a Tab stop")
+    #expect(kill.contains(#".keyboardShortcut("k", modifiers: [.command, .shift])"#), "the kill chip is not shift-cmd-K")
+    #expect(kill.contains("engageKillSwitch()"))
+    #expect(kill.contains(".accessibilityIdentifier(ShellID.killChip)"), "the kill chip has no identifier")
+    // Always visible: the title bar places it unconditionally, outside any
+    // if, so no state can drop it.
+    let bar = Self.block("TitleBar", in: titleBar)
+    let placed = bar.components(separatedBy: "\n").filter { $0.contains("KillChip(model:") }
+    #expect(placed.count == 1, "the title bar does not place the kill chip once")
+    if let line = placed.first, let at = bar.range(of: line) {
+      let opened = bar[..<at.lowerBound].components(separatedBy: "if ").count - 1
+      let closed = bar[..<at.lowerBound].components(separatedBy: "\n      }").count - 1
+      #expect(opened == closed, "the kill chip sits inside a condition")
+    }
+    #expect(!kill.contains("setKillSwitch(false"), "the chip turns sending back on")
     // A plain-style button is not a Tab stop on macOS (run 37555284794:
     // the first Tab went straight to the lens).
     #expect(Self.block("RailTile", in: shell).contains(".focusable()"), "the rail tiles are not Tab stops")
+    // The rows are one element each and never a Tab stop.
+    let rows = try Repo.text(Self.appDir + "/Boards/Shell/ThreadViews.swift")
+    let row = Self.block("ListRow", in: rows)
+    #expect(row.contains(".focusable(false)"))
+    #expect(row.contains(".accessibilityElement(children: .ignore)"))
     // The window's hosting group is described (the audit's "Element has no
     // description" on the group above wemessage.shell), and so is every
     // window-sized view under it (S4a: the frost container background).
@@ -184,13 +216,37 @@ struct AppHygieneTests {
       for match in call.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
         found += 1
         let hit = Range(match.range, in: text).map { String(text[$0]) } ?? ""
-        #expect(hit.hasSuffix(", modifiers: .command)"), "\(path): \(hit)")
+        let listed = try Self.count(#", modifiers: \[[^\]]*\.command\b[^\]]*\]\)$"#, in: hit)
+        let command = hit.hasSuffix(", modifiers: .command)") || listed == 1
+        #expect(command, "\(path): \(hit)")
       }
     }
     #expect(found >= 1, "no shortcut found: the rail binds cmd-1..5")
     // Non-vacuity: the pattern sees a bare letter binding.
     let planted = "Button {}.keyboardShortcut(\"r\")"
     #expect(call.numberOfMatches(in: planted, range: NSRange(planted.startIndex..., in: planted)) == 1)
+  }
+
+  @Test("H-S4c: the reload key (cmd-opt-R) exists only under the UI-test flag, and the window names no send route")
+  func reloadOnlyUnderTestFlag() throws {
+    let shell = try Repo.text(Self.appDir + "/ShellView.swift")
+    let binding = #".keyboardShortcut("r", modifiers: [.command, .option])"#
+    #expect(shell.components(separatedBy: binding).count - 1 == 1)
+    guard let at = shell.range(of: binding) else { return }
+    let before = shell[..<at.lowerBound]
+    let guardLine = before.range(of: "if TestHooks.isUITest {", options: .backwards)
+    #expect(guardLine != nil, "the reload key is not under the UI-test flag")
+    if let guardLine {
+      let between = shell[guardLine.upperBound..<at.lowerBound]
+      #expect(!between.contains("\n    }"), "the reload key sits after the flag's block closed")
+    }
+    var swept = 0
+    for (path, text) in try Self.sources(Self.appDir) {
+      swept += 1
+      #expect(!text.contains(".send" + "(to:"), "\(path) calls the client's send")
+      #expect(!text.contains("/v1/" + "send"), "\(path) names the send route")
+    }
+    #expect(swept >= 12)
   }
 
   @Test("H-S1: under the UI-test flag the shell renders with animations off, so a snapshot is one settled frame")
@@ -246,8 +302,9 @@ struct AppHygieneTests {
   }
 
   /// The D-UI questions ProvisionalUI.swift answers provisionally: S3's
-  /// 1..6 and S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21).
-  static let dUIKeys = (1...21).map { "D-UI-\($0)" }
+  /// 1..6, S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21) and
+  /// S4c's 22..26 (choices the board 01 wireframe left open).
+  static let dUIKeys = (1...26).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -264,11 +321,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..21, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..26, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..21 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..26 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -276,7 +333,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...21), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...26), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }

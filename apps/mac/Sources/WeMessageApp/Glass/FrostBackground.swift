@@ -45,6 +45,8 @@ struct Hairline: View {
   let mirror: AccessibilityMirror
   let palette: Tokens.Palette
   let dark: Bool
+  /// Under the title bar the divider runs across, not down.
+  var horizontal = false
 
   private var color: Color {
     if mirror.increaseContrast { return Tokens.color(palette.ink) }
@@ -55,8 +57,8 @@ struct Hairline: View {
   var body: some View {
     Rectangle()
       .fill(color)
-      .frame(width: 0.5)
-      .frame(maxHeight: .infinity)
+      .frame(width: horizontal ? nil : 0.5, height: horizontal ? 0.5 : nil)
+      .frame(maxWidth: horizontal ? .infinity : nil, maxHeight: horizontal ? nil : .infinity)
       .accessibilityHidden(true)
   }
 }

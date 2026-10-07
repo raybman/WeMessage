@@ -51,12 +51,19 @@ LaunchTests         a bare launch shows the shell; the window is the requested
                     size clamped to the visible frame the app saw
 ConnectionTests     the window connects to the fake daemon with the bearer, and
                     says plainly when the daemon is down
-AccessibilityTests  the accessibility audit passes; Tab walks the rail to the lens
+AccessibilityTests  the accessibility audit passes; Tab walks the rail, the lens
+                    and the kill chip; cmd-T selects Triage
 SnapshotTests       light and dark snapshots, each with the frost on and with
                     Reduce Transparency forced, swept for green outside the
                     traffic lights, with the tint present, and carrying the frost
                     evidence (a real blur, or plain layer0); plus the sweep's and
                     the evidence's own probes
+Board01Tests        board 01 from the rich, empty, degraded and quiet scenarios
+                    in one launch per appearance (scenario switch plus the
+                    test-only cmd-opt-R reload): rail marks, the dated counter,
+                    no digit or total while stale, the kill chip in every
+                    state, a row opening its head and the inspector toggling,
+                    and no POST /v1/send in the journal
 FakeDaemonControlTests
                     a scenario served through the control routes reaches the
                     window (its connection line), the journal sees the status
@@ -68,7 +75,8 @@ journal) through `Support/FakeDaemon.swift`.
 
 The app reads `WEMESSAGE_UI_TEST=1` and `WEMESSAGE_UI_APPEARANCE` only to pin
 the window geometry, force the appearance and turn animations off.
-`WEMESSAGE_UI_REDUCE_TRANSPARENCY` (and `_INCREASE_CONTRAST`,
+Under the same flag cmd-opt-R reads status, threads and drafts again, so
+one launch can show several scenarios. `WEMESSAGE_UI_REDUCE_TRANSPARENCY` (and `_INCREASE_CONTRAST`,
 `_REDUCE_MOTION`), `1` or `0`, force the app's copy of that display option
 under the same flag. Under it the app also opens a test-only backdrop
 window behind the shell (a grey-blue gradient with a 2 pt stripe band) that
@@ -81,7 +89,8 @@ monitor size or a literal.
 
 ### Accessibility identifiers
 
-The contract between `Sources/WeMessageApp/ShellView.swift` and the UI tests
+The contract between `Sources/WeMessageApp/ShellView.swift` (its `ShellID`
+enum; the board views under `Boards/` name them through it) and the UI tests
 (AppHygieneTests H-A5 and arch R-A15 keep this list, the code and the tests
 equal):
 
@@ -92,11 +101,29 @@ equal):
 - `wemessage.rail.whatsapp`: rail tile, WhatsApp (cmd-3)
 - `wemessage.rail.linkedin`: rail tile, LinkedIn (cmd-4)
 - `wemessage.rail.email`: rail tile, Email (cmd-5)
+
+  Each rail tile's accessibility value is its mark: the waiting count, `clear`
+  (the baseline), `stale` (the "!"), or empty when the channel is not
+  connected.
+
 - `wemessage.sidebar`: the sidebar
-- `wemessage.lens`: the lens picker in the sidebar
+- `wemessage.title`: the title bar's scope title
+- `wemessage.title.counter`: the dated counter; its value is the sentence
+  ("N left as of hh:mm:ss", "Clear hh:mm:ss", or cannot say with the reason)
+- `wemessage.lens`: the lens group in the title bar
+- `wemessage.lens.recent`: the Recent segment
+- `wemessage.lens.needsyou`: the Needs You segment; its value is the count, or
+  empty when there is none to say
+- `wemessage.lens.triage`: the Triage button (cmd-T)
+- `wemessage.kill.chip`: the kill chip (shift-cmd-K); value `on`, `off` or
+  `unknown`
 - `wemessage.sidebar.empty`: the sidebar's empty state
 - `wemessage.connection`: the connection line at the foot of the sidebar
 - `wemessage.content.empty`: the content pane's empty state
+- `wemessage.content`: the content pane with a thread selected
+- `wemessage.inspector.toggle`: the thread head's inspector button
+- `wemessage.inspector`: the inspector column
+- `wemessage.sidebar.row.<chatGuid>`: one list row
 
 ### Reading a run
 
@@ -104,8 +131,9 @@ Download the artifacts with `gh run download <run id>`. The snapshots
 artifact holds plain PNGs named by UUID; the export step's log prints
 `manifest.json`, which maps each file to its attachment name (`board-01-shell-light.png`,
 `board-01-shell-dark.png`, `board-01-shell-opaque-light.png`,
-`board-01-shell-opaque-dark.png`, and the accessibility audit's `audit-*`
-captures). The `frost evidence` step prints one `FROST|` line per snapshot
+`board-01-shell-opaque-dark.png`; since S4c `board-01-<state>-<appearance>.png`
+for the states `rich`, `empty`, `degraded` and `quiet`; and the accessibility
+audit's `audit-*` captures). The `frost evidence` step prints one `FROST|` line per snapshot
 with the measured stripe, gradient, pull and transmission.
 
 The result bundle opens in Xcode, or with
@@ -128,4 +156,4 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..21 decisions.
+  provisional, pending the D-UI-1..26 decisions.

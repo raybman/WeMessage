@@ -17,6 +17,18 @@ enum ID {
   static let sidebarEmpty = "wemessage.sidebar.empty"
   static let connection = "wemessage.connection"
   static let contentEmpty = "wemessage.content.empty"
+  // v2 S4c, board 01.
+  static let title = "wemessage.title"
+  static let titleCounter = "wemessage.title.counter"
+  static let lensRecent = "wemessage.lens.recent"
+  static let lensNeedsYou = "wemessage.lens.needsyou"
+  static let lensTriage = "wemessage.lens.triage"
+  static let killChip = "wemessage.kill.chip"
+  static let content = "wemessage.content"
+  static let inspector = "wemessage.inspector"
+  static let inspectorToggle = "wemessage.inspector.toggle"
+  /// A list row is this prefix and its chatGuid.
+  static let rowPrefix = "wemessage.sidebar.row."
 
   static let railTiles = [railAll, railIMessage, railWhatsApp, railLinkedIn, railEmail]
 }

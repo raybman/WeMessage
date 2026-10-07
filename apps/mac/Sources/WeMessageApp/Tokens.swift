@@ -60,6 +60,15 @@ public enum Tokens {
     public static let opaqueDark = RGB(0x30, 0x30, 0x32)
   }
 
+  /// The selected list row's wash (plan 3.2: the tint at .16 light, .30
+  /// dark), under D-UI-26's tint bar.
+  public enum Selection {
+    public static let light = Wash(rgb: Tokens.tint, alpha: 0.16)
+    public static let dark = Wash(rgb: Tokens.tint, alpha: 0.30)
+
+    public static func wash(dark: Bool) -> Wash { dark ? Selection.dark : light }
+  }
+
   /// The CI-only backdrop window (plan 2.5, D-UI-12): a two-stop grey-blue
   /// gradient, top then bottom, and the black and white stripe band the
   /// frost evidence samples.

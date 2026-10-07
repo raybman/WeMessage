@@ -1,13 +1,47 @@
 import SwiftUI
 import WeMessageKit
 
-/// The first window: channel rail, sidebar with the lens and the connection
-/// line, and the content pane. S3 keeps the whole view tree in this file on
-/// purpose; S4 splits it per board. Since S4a the panes are transparent over
-/// one window frost (FrostBackground), divided by 0.5 pt hairlines.
-///
-/// The accessibility identifiers below are the contract with the UI tests
-/// (AppHygieneTests H-A5 holds both sides to the same list).
+/// The accessibility identifiers that are the contract with the UI tests
+/// (AppHygieneTests H-A5 and arch R-A15 hold this file, the UI tests and
+/// apps/mac/README.md to the same list). Every literal lives here, so the
+/// board views under Boards/ name them through this enum.
+enum ShellID {
+  static let shell = "wemessage.shell"
+  static let rail = "wemessage.rail"
+  static let sidebar = "wemessage.sidebar"
+  static let sidebarEmpty = "wemessage.sidebar.empty"
+  static let connection = "wemessage.connection"
+  static let title = "wemessage.title"
+  static let titleCounter = "wemessage.title.counter"
+  static let lens = "wemessage.lens"
+  static let lensRecent = "wemessage.lens.recent"
+  static let lensNeedsYou = "wemessage.lens.needsyou"
+  static let lensTriage = "wemessage.lens.triage"
+  static let killChip = "wemessage.kill.chip"
+  static let content = "wemessage.content"
+  static let contentEmpty = "wemessage.content.empty"
+  static let inspector = "wemessage.inspector"
+  static let inspectorToggle = "wemessage.inspector.toggle"
+  /// A list row is this prefix and its chatGuid.
+  static let rowPrefix = "wemessage.sidebar.row."
+
+  static func rail(_ scope: ShellModel.Scope) -> String {
+    switch scope {
+    case .all: "wemessage.rail.all"
+    case .imessage: "wemessage.rail.imessage"
+    case .whatsapp: "wemessage.rail.whatsapp"
+    case .linkedin: "wemessage.rail.linkedin"
+    case .email: "wemessage.rail.email"
+    }
+  }
+}
+
+/// The first window, board 01 (wireframe 01.B): the title bar across the
+/// top, then the channel rail, the conversation list and the content pane,
+/// with the inspector beside the content when it is open. Since S4a the
+/// panes are transparent over one window frost (FrostBackground), divided
+/// by 0.5 pt hairlines. The panes come first in the view tree and the title
+/// bar is laid over them, so Tab walks the rail before the lens.
 struct ShellView: View {
   /// The client reads WEMESSAGE_PORT and WEMESSAGE_DIR/daemon.token from the
   /// environment, as the shipped app does (H10-H12).
@@ -18,23 +52,46 @@ struct ShellView: View {
 
   /// The title band the hidden title bar leaves to the traffic lights.
   static let titleBand: CGFloat = 52
-  static let sidebarWidth: CGFloat = 248
+  /// The conversation list (wireframe .listcol).
+  static let sidebarWidth: CGFloat = 300
 
   private var palette: Tokens.Palette { Tokens.palette(dark: scheme == .dark) }
+  private var dark: Bool { scheme == .dark }
 
   var body: some View {
-    HStack(spacing: 0) {
-      RailView(model: model, palette: palette)
-      Hairline(mirror: mirror, palette: palette, dark: scheme == .dark)
-      SidebarView(model: model, palette: palette)
-      Hairline(mirror: mirror, palette: palette, dark: scheme == .dark)
-      ContentPane(palette: palette)
+    ZStack(alignment: .top) {
+      HStack(spacing: 0) {
+        RailView(model: model, palette: palette, mirror: mirror, dark: dark)
+        Hairline(mirror: mirror, palette: palette, dark: dark)
+        SidebarView(model: model, palette: palette, dark: dark)
+        Hairline(mirror: mirror, palette: palette, dark: dark)
+        ContentPane(model: model, palette: palette)
+        if model.inspectorShown, let thread = model.selected {
+          Hairline(mirror: mirror, palette: palette, dark: dark)
+          InspectorPane(thread: thread, palette: palette)
+        }
+      }
+      .padding(.top, Self.titleBand + 0.5)
+      VStack(spacing: 0) {
+        TitleBar(model: model, palette: palette)
+        Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
+      }
+      if TestHooks.isUITest {
+        // Under the UI-test flag only: cmd-opt-R reads status, threads and
+        // drafts again, so one launch can show several fake-daemon
+        // scenarios. Not a control: zero size and hidden.
+        Button("") { Task { await model.refresh() } }
+          .keyboardShortcut("r", modifiers: [.command, .option])
+          .frame(width: 0, height: 0)
+          .opacity(0)
+          .accessibilityHidden(true)
+      }
     }
     .frame(minWidth: ProvisionalUI.windowMinWidth, minHeight: ProvisionalUI.windowMinHeight)
     .ignoresSafeArea()
     .modifier(FrostBackground(mirror: mirror, palette: palette))
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("wemessage.shell")
+    .accessibilityIdentifier(ShellID.shell)
     // Under the UI-test flag only, the pinned geometry. Measured (run
     // 37553425686): a SwiftUI container's value never reaches AX on macOS,
     // so it rides the label too, and the delegate sets it on the window.
@@ -47,44 +104,50 @@ struct ShellView: View {
   }
 }
 
-/// The channel rail: one tile per scope.
+/// The channel rail (wireframe .rail): one tile per scope, a rule after
+/// ALL, and each tile's mark (digit, clear baseline, "!" or nothing).
 private struct RailView: View {
   let model: ShellModel
   let palette: Tokens.Palette
-
-  static func identifier(_ scope: ShellModel.Scope) -> String {
-    switch scope {
-    case .all: "wemessage.rail.all"
-    case .imessage: "wemessage.rail.imessage"
-    case .whatsapp: "wemessage.rail.whatsapp"
-    case .linkedin: "wemessage.rail.linkedin"
-    case .email: "wemessage.rail.email"
-    }
-  }
+  let mirror: AccessibilityMirror
+  let dark: Bool
 
   var body: some View {
-    VStack(spacing: 6) {
-      Color.clear.frame(height: ShellView.titleBand)
+    VStack(spacing: 8) {
       ForEach(ShellModel.Scope.allCases, id: \.self) { scope in
-        RailTile(scope: scope, selected: model.scope == scope, palette: palette) { model.scope = scope }
-          .accessibilityLabel(scope.fullLabel)
-          .keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)
-          .accessibilityIdentifier(Self.identifier(scope))
+        RailTile(scope: scope, selected: model.scope == scope, mark: model.board.mark(scope), palette: palette) {
+          model.scope = scope
+        }
+        .accessibilityLabel(scope.fullLabel)
+        .keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)
+        .accessibilityIdentifier(ShellID.rail(scope))
+        if scope == .all {
+          Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.35)).frame(width: 26, height: 1)
+            .padding(4)
+            .accessibilityHidden(true)
+        }
       }
       Spacer(minLength: 0)
     }
+    .padding(.vertical, 12)
     .frame(width: ProvisionalUI.railWidth)
     .frame(maxHeight: .infinity)
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("wemessage.rail")
+    .accessibilityIdentifier(ShellID.rail)
   }
 }
 
+/// One rail tile (wireframe .rail-btn: 38 pt, radius 9, a rule border; the
+/// selected tile per D-UI-6). The mark is drawn on the tile and published as
+/// its accessibility value: the digit, "clear", "stale", or nothing.
 private struct RailTile: View {
   let scope: ShellModel.Scope
   let selected: Bool
+  let mark: RailMark
   let palette: Tokens.Palette
   let action: () -> Void
+
+  static let side: CGFloat = 38
 
   private var labelColor: Color {
     guard selected else { return Tokens.color(palette.ink) }
@@ -94,20 +157,58 @@ private struct RailTile: View {
     }
   }
 
+  private var markValue: String {
+    switch mark {
+    case .digit(let n): String(n)
+    case .baseline: "clear"
+    case .stale: "stale"
+    case .none: ""
+    }
+  }
+
+  private var dot: String? {
+    switch mark {
+    case .digit(let n): String(n)
+    case .stale: "!"
+    case .baseline, .none: nil
+    }
+  }
+
   var body: some View {
     Button(action: action) {
       Text(scope.label)
-        .font(.system(size: 11, weight: .semibold))
+        .font(.system(size: 10, weight: .bold))
         .foregroundStyle(labelColor)
-        .frame(width: 42, height: 36)
+        .frame(width: Self.side, height: Self.side)
         .background {
-          if selected && ProvisionalUI.selectedTile == .filledTint {
-            RoundedRectangle(cornerRadius: 8).fill(Tokens.color(Tokens.tint))
+          RoundedRectangle(cornerRadius: 9)
+            .fill(selected && ProvisionalUI.selectedTile == .filledTint ? Tokens.color(Tokens.tint) : Tokens.color(palette.layer1))
+        }
+        .overlay(alignment: .bottom) {
+          if mark == .baseline {
+            Rectangle().fill(Tokens.color(palette.ink)).frame(height: 3)
           }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay {
+          RoundedRectangle(cornerRadius: 9)
+            .strokeBorder(Tokens.color(palette.inkDim, opacity: 0.35), lineWidth: 1)
         }
         .overlay(alignment: .leading) {
           if selected && ProvisionalUI.selectedTile == .tintBar {
             Rectangle().fill(Tokens.color(Tokens.tint)).frame(width: 3)
+          }
+        }
+        .overlay(alignment: .topTrailing) {
+          if let dot {
+            Text(dot)
+              .font(.system(size: 8, weight: .bold))
+              .foregroundStyle(Tokens.color(palette.layer1))
+              .fixedSize()
+              .padding(.horizontal, 3)
+              .frame(minWidth: 15, minHeight: 15)
+              .background(Capsule().fill(Tokens.color(palette.ink)))
+              .offset(x: 2, y: -2)
           }
         }
         .contentShape(Rectangle())
@@ -115,60 +216,89 @@ private struct RailTile: View {
     .buttonStyle(.plain)
     // A plain-style button is not a Tab stop on macOS; this makes each tile one.
     .focusable()
+    .accessibilityValue(markValue)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }
 }
 
-/// The sidebar: the lens, the (empty) list and the connection line.
+/// The conversation list (wireframe .listcol): the filter chip row with the
+/// list's "as of", the rows for the scope and lens, or the empty state, and
+/// the connection line at the foot.
 private struct SidebarView: View {
   @Bindable var model: ShellModel
   let palette: Tokens.Palette
+  let dark: Bool
+
+  private var asOf: Date? { model.threads.flatMap { WireDate.parse($0.asOf) } }
+
+  private var chipFill: Color {
+    switch ProvisionalUI.lensOn {
+    case .filledTint: Tokens.color(Tokens.tint)
+    case .filledInk: Tokens.color(palette.ink)
+    }
+  }
+
+  private var chipLabel: Color {
+    switch ProvisionalUI.lensOn {
+    case .filledTint: .white
+    case .filledInk: Tokens.color(palette.layer1)
+    }
+  }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Color.clear.frame(height: ShellView.titleBand)
-      Picker("Lens", selection: $model.lens) {
-        ForEach(ShellModel.Lens.allCases, id: \.self) { lens in
-          Text(lens.label).tag(lens)
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 5) {
+        Text("All")
+          .font(.system(size: 10, weight: .medium))
+          .foregroundStyle(chipLabel)
+          .fixedSize()
+          .padding(.vertical, 5)
+          .padding(.horizontal, 8)
+          .background(Capsule().fill(chipFill))
+        if let asOf {
+          Text("as of " + ShellText.shortClock(asOf))
+            .font(.system(size: 9))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+            .fixedSize()
         }
+        Spacer(minLength: 0)
       }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .accessibilityLabel("Lens")
-      .accessibilityIdentifier("wemessage.lens")
-      Spacer(minLength: 0)
-      Text(ProvisionalUI.sidebarEmpty)
-        .font(.system(size: 13))
-        .foregroundStyle(Tokens.color(palette.inkDim))
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("wemessage.sidebar.empty")
-      Spacer(minLength: 0)
+      .padding(.vertical, 6)
+      .padding(.horizontal, 12)
+      Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
+      let rows = model.rows
+      if rows.isEmpty {
+        Spacer(minLength: 0)
+        Text(ProvisionalUI.sidebarEmpty)
+          .font(.system(size: 13))
+          .foregroundStyle(Tokens.color(palette.inkDim))
+          .frame(maxWidth: .infinity)
+          .accessibilityIdentifier(ShellID.sidebarEmpty)
+        Spacer(minLength: 0)
+      } else {
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            ForEach(rows, id: \.chatGuid) { thread in
+              ListRow(
+                thread: thread, showsChannel: model.scope == .all, selected: model.selectedThread == thread.chatGuid,
+                asOf: asOf, palette: palette, dark: dark
+              ) { model.selectedThread = thread.chatGuid }
+              .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
+            }
+          }
+        }
+        .scrollIndicators(.never)
+      }
       Text(model.connectionLine)
         .font(.system(size: ProvisionalUI.connectionFontSize))
         .foregroundStyle(Tokens.color(palette.inkDim))
         .accessibilityValue(model.connectionLine)
-        .accessibilityIdentifier("wemessage.connection")
+        .accessibilityIdentifier(ShellID.connection)
+        .padding(12)
     }
-    .padding(.horizontal, 12)
-    .padding(.bottom, 12)
     .frame(width: ShellView.sidebarWidth)
     .frame(maxHeight: .infinity)
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("wemessage.sidebar")
-  }
-}
-
-/// The content pane with nothing selected (D-UI-5, provisional: text only).
-private struct ContentPane: View {
-  let palette: Tokens.Palette
-
-  var body: some View {
-    Text(ProvisionalUI.contentEmpty)
-      .font(.system(size: 13))
-      .foregroundStyle(Tokens.color(palette.inkDim))
-      .multilineTextAlignment(.center)
-      .frame(maxWidth: 360)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .accessibilityIdentifier("wemessage.content.empty")
+    .accessibilityIdentifier(ShellID.sidebar)
   }
 }

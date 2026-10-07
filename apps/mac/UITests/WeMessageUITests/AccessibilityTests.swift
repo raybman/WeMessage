@@ -94,8 +94,8 @@ final class AccessibilityTests: XCTestCase {
     return focusedIdentifier(app) == ID.lens || inside.count > 0
   }
 
-  /// U-X2: cmd-1..5 select the rail tiles in order, and Tab walks the rail
-  /// and then reaches the lens.
+  /// U-X2: cmd-1..5 select the rail tiles in order, Tab walks the rail,
+  /// then the lens, then the kill chip, and cmd-T selects Triage.
   @MainActor
   func testKeyboardPath() throws {
     // The job turns Full Keyboard Access on before xcodebuild (§4.7, P1-3).
@@ -136,6 +136,30 @@ final class AccessibilityTests: XCTestCase {
     let strays = path.filter { !$0.isEmpty && !Self.railIDs.contains($0) }
     XCTAssertEqual(strays, [], "Tab stopped outside the rail before the lens; stops: \(path)")
     XCTAssertTrue(path.contains(where: { Self.railIDs.contains($0) }), "Tab skipped the rail; stops: \(path)")
+
+    // v2 S4c: past the lens (its segments and Triage), Tab reaches the kill
+    // chip, and nothing outside the lens on the way.
+    var after: [String] = []
+    var chip = false
+    for _ in 0..<6 {
+      app.typeKey("\t", modifierFlags: [])
+      Thread.sleep(forTimeInterval: 0.2)
+      let now = Self.focusedIdentifier(app)
+      if now == ID.killChip {
+        chip = true
+        break
+      }
+      after.append(now)
+    }
+    XCTAssertTrue(chip, "Tab never reached the kill chip after the lens; stops: \(after)")
+    let lensStops = [ID.lens, ID.lensRecent, ID.lensNeedsYou, ID.lensTriage, ""]
+    XCTAssertEqual(after.filter { !lensStops.contains($0) }, [], "Tab left the lens before the chip; stops: \(after)")
+
+    // cmd-T selects Triage.
+    app.typeKey("t", modifierFlags: .command)
+    let triage = app.descendants(matching: .any)[ID.lensTriage]
+    wait(for: [expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: triage)], timeout: 5)
+    XCTAssertFalse(app.descendants(matching: .any)[ID.lensRecent].isSelected, "cmd-T left Recent selected")
     app.terminate()
   }
 }

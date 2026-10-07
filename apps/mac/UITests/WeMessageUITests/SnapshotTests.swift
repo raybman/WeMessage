@@ -115,9 +115,19 @@ final class SnapshotTests: XCTestCase {
     app.launch()
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let geometry = settledGeometry(app)
+    capture(app, geometry: geometry, appearance: appearance, frost: frost, name: name, luminance: luminance)
+  }
+}
+
+/// The shared half of every board snapshot (v2 S4c): wait for the app's
+/// pinned geometry, then capture, attach, sweep and measure one PNG.
+extension XCTestCase {
+  /// Waits for the app's pinned geometry and lets one frame settle
+  /// (animations are off under the test flag, H-S1).
+  @MainActor
+  func settledGeometry(_ app: XCUIApplication) -> (frame: CGSize, visible: CGSize)? {
     let window = app.windows.firstMatch
-    // Wait for the app's pinned geometry, then let one frame settle
-    // (animations are off under the test flag, H-S1).
     var geometry = UITestApp.shellGeometry(app)
     let deadline = Date().addingTimeInterval(UITestApp.timeout)
     while Date() < deadline {
@@ -128,7 +138,18 @@ final class SnapshotTests: XCTestCase {
       Thread.sleep(forTimeInterval: 0.25)
     }
     Thread.sleep(forTimeInterval: 0.5)
+    return geometry
+  }
 
+  /// One snapshot: attached as `name`, swept for green outside the traffic
+  /// lights, required to show the tint, measured for luminance, and held to
+  /// the frost evidence for its leg.
+  @MainActor
+  func capture(
+    _ app: XCUIApplication, geometry: (frame: CGSize, visible: CGSize)?, appearance: String, frost: Bool, name: String,
+    luminance: (Double) -> Void
+  ) {
+    let window = app.windows.firstMatch
     let png = window.screenshot().pngRepresentation
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
     attachment.name = name
@@ -161,7 +182,7 @@ final class SnapshotTests: XCTestCase {
 
   /// The frost evidence for one shot: printed as one FROST| line for the job
   /// log, attached as text, and asserted.
-  private func evidence(_ png: Data, window: CGSize, appearance: String, frost: Bool, name: String) {
+  func evidence(_ png: Data, window: CGSize, appearance: String, frost: Bool, name: String) {
     guard let reading = FrostEvidence.read(png, window: window) else {
       XCTFail("\(name): the frost probe patches fall outside the snapshot (\(window))")
       return

@@ -1,9 +1,11 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..21 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..26 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
-// section 5 and the S4a.0 spike results). Every value below is the plan's default, chosen only so the window
-// can be built and tested before the design questions are answered. They
+// section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
+// the board 01 wireframe left a choice open). Every value below is the
+// plan's default, chosen only so the window can be built and tested before
+// the design questions are answered. They
 // live in this one file on purpose: when the decisions land, this file is
 // the whole edit, and AppHygieneTests fails if any of these values is copied
 // as a literal into another app or UI test source.
@@ -193,4 +195,57 @@ public enum ProvisionalUI {
     case hudWindow
   }
   public static let frostMaterial: FrostMaterial = .regular
+
+  // D-UI-22: where the dated title counter shows. Board 01's frames draw no
+  // counter; 06.C says it "appears" in Triage; the S4 plan puts "title and
+  // dated counter" in board 01's toolbar. Default: always, for the selected
+  // scope, hidden only for a channel that is not connected.
+  public enum TitleCounterPlacement: Sendable {
+    /// In the title bar under every lens.
+    case always
+    /// Only while the Triage lens is on (06.C).
+    case triageOnly
+  }
+  public static let titleCounter: TitleCounterPlacement = .always
+
+  // D-UI-23: the reason the cannot-say counter gives (10.A's form is a
+  // channel, then stale since, then a time). With no scan at all there is no
+  // time to quote.
+  public static func cannotSayDetail(channel: String, staleSince: String?) -> String {
+    guard let staleSince else { return channel + " has not been read yet" }
+    return channel + " not fresh since " + staleSince
+  }
+
+  // D-UI-24: what the inspector shows before S4d and S4g give it more. The
+  // wireframe draws a 264 pt column and no content for board 01.
+  public enum InspectorContent: Sendable {
+    /// Avatar, name, channel and handle only.
+    case identityOnly
+    /// Nothing until there is real content.
+    case blank
+  }
+  public static let inspectorContent: InspectorContent = .identityOnly
+  public static let inspectorWidth: Double = 264
+
+  // D-UI-25: the selected lens segment and the "on" filter chip. Default:
+  // ink, as the wireframe draws them (white on the tint is 3.65:1 at 10 pt,
+  // under the audit's 4.5:1); the alternative is the accent, as D-UI-6 does
+  // for the rail.
+  public enum LensOnStyle: Sendable {
+    /// Filled tint, white label.
+    case filledTint
+    /// Filled ink, paper label, as drawn.
+    case filledInk
+  }
+  public static let lensOn: LensOnStyle = .filledInk
+
+  // D-UI-26: the selected list row. The wireframe draws a fill and a 3 pt
+  // ink bar on the leading edge; the app's accent is the tint.
+  public enum SelectedRowStyle: Sendable {
+    /// The selection wash and a 3 pt tint bar.
+    case tintBarWash
+    /// A neutral fill and a 3 pt ink bar, as drawn.
+    case inkBarFill
+  }
+  public static let selectedRow: SelectedRowStyle = .tintBarWash
 }

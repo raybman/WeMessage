@@ -41,7 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// false while no window is on screen yet.
   @discardableResult
   private func pin() -> Bool {
-    guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
+    let candidate =
+      NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) ?? NSApp.mainWindow ?? NSApp.keyWindow
+      ?? NSApp.windows.first(where: { $0.isVisible })
+    guard let window = candidate,
       let screen = window.screen ?? NSScreen.main
     else { return false }
     let visible = screen.visibleFrame

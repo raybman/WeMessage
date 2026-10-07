@@ -37,7 +37,11 @@ final class LaunchTests: XCTestCase {
       Thread.sleep(forTimeInterval: 0.25)
     }
     guard let g = geometry else {
-      XCTFail("the shell never published its geometry; value: \(String(describing: UITestApp.shellElement(app).value))")
+      // The element tree says whether the app never pinned or the value
+      // never reached the accessibility layer.
+      XCTFail(
+        "the shell never published its geometry; value: \(String(describing: UITestApp.shellElement(app).value)); "
+          + "window: \(window.frame)\n\(String(app.debugDescription.prefix(6000)))")
       return
     }
     let f = window.frame.size

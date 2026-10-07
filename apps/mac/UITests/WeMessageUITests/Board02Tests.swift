@@ -140,6 +140,9 @@ final class Board02Tests: XCTestCase {
     app.launch()
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    // The window resizes to the pinned geometry after launch; a click before
+    // it settles can land on a field that is still moving.
+    _ = settledGeometry(app)
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
     type(app, "first line")
@@ -166,6 +169,9 @@ final class Board02Tests: XCTestCase {
     app.launch()
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    // The window resizes to the pinned geometry after launch; a click before
+    // it settles can land on a field that is still moving.
+    _ = settledGeometry(app)
     open(app, Self.daniel)
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0012").exists }, "Daniel never opened")
 
@@ -198,6 +204,7 @@ final class Board02Tests: XCTestCase {
     app.launch()
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    _ = settledGeometry(app)
     for guid in [Self.priya, Self.hike] {
       open(app, guid)
       XCTAssertTrue(waitUntil { self.element(app, ID.draftApprove).exists }, "\(guid): no draft verbs")
@@ -264,6 +271,10 @@ final class Board02Tests: XCTestCase {
     for _ in 0..<3 where !focused {
       composerField(app).click()
       focused = waitUntil { (self.composerField(app).value(forKey: "hasKeyboardFocus") as? Bool) == true }
+    }
+    if !focused {
+      let holder = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+      print("COMPOSER| no focus; keyboard is on: \(holder.exists ? holder.debugDescription : "nothing")")
     }
     XCTAssertTrue(focused, "the field never took the keyboard")
     app.typeText(text)

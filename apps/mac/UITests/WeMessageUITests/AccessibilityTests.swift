@@ -30,6 +30,35 @@ final class AccessibilityTests: XCTestCase {
     app.terminate()
   }
 
+  /// The U-X1 audit of whatever `app` shows now; the window is attached
+  /// as `window`.
+  @MainActor
+  static func audit(_ app: XCUIApplication, window: String, test: XCTestCase) throws {
+    let shot = app.windows.firstMatch.screenshot()
+    test.add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept(window))
+    try app.performAccessibilityAudit() { issue in
+      let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
+      let chrome = Self.isSystemChrome(issue, in: app)
+      var measured: PixelContrast.Measurement?
+      if !chrome, let element = issue.element, element.exists {
+        let shot = element.screenshot()
+        test.add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
+        if issue.auditType == .contrast, let image = shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+          measured = PixelContrast.measure(image)
+        }
+      }
+      let cleared = measured?.passes ?? false
+      let note = chrome ? " (system chrome, ignored)" : measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
+      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(note)")
+      print("audit detail: \(issue.detailedDescription)")
+      if !chrome && !cleared, let element = issue.element, element.exists {
+        // A kept issue names its element's subtree, so a red run says which view it was.
+        print("audit tree: \(element.debugDescription)")
+      }
+      return chrome || cleared
+    }
+  }
+
   /// v2 S4d: the same audit with board 02 open on an agent draft (Priya,
   /// SMS), so the transcript, the draft's verbs, the banner and the
   /// composer are all in the tree the audit walks.
@@ -203,32 +232,8 @@ extension XCTAttachment {
 /// The U-X1 audit, shared so a board's own launch can run it (v2 S4f: no
 /// extra launch for an audit).
 extension XCTestCase {
-  /// The U-X1 audit of whatever `app` shows now; the window is attached
-  /// as `window`.
   @MainActor
   func audit(_ app: XCUIApplication, window: String) throws {
-    let shot = app.windows.firstMatch.screenshot()
-    add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept(window))
-    try app.performAccessibilityAudit() { issue in
-      let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
-      let chrome = AccessibilityTests.isSystemChrome(issue, in: app)
-      var measured: PixelContrast.Measurement?
-      if !chrome, let element = issue.element, element.exists {
-        let shot = element.screenshot()
-        self.add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
-        if issue.auditType == .contrast, let image = shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-          measured = PixelContrast.measure(image)
-        }
-      }
-      let cleared = measured?.passes ?? false
-      let note = chrome ? " (system chrome, ignored)" : measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
-      print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(note)")
-      print("audit detail: \(issue.detailedDescription)")
-      if !chrome && !cleared, let element = issue.element, element.exists {
-        // A kept issue names its element's subtree, so a red run says which view it was.
-        print("audit tree: \(element.debugDescription)")
-      }
-      return chrome || cleared
-    }
+    try AccessibilityTests.audit(app, window: window, test: self)
   }
 }

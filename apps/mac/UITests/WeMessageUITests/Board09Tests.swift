@@ -124,7 +124,12 @@ final class Board09Tests: XCTestCase {
     // audit: the chain, oldest first.
     QueueUI.element(app, ID.auditOpen).click()
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, ID.audit).exists }, "audit: no audit view")
-    XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, ID.auditRowPrefix + "1").exists }, "audit: no first row")
+    // The rich audit golden holds seq 102 to 108: rows are keyed by seq.
+    let oldest = QueueUI.element(app, ID.auditRowPrefix + "102")
+    let newest = QueueUI.element(app, ID.auditRowPrefix + "108")
+    XCTAssertTrue(QueueUI.waitUntil { oldest.exists && newest.exists }, "audit: rows 102 and 108 are not both drawn")
+    XCTAssertEqual(QueueUI.count(app, containing: ID.auditRowPrefix), 7, "audit: not the golden's seven rows")
+    XCTAssertLessThan(oldest.frame.minY, newest.frame.minY, "audit: the chain is not oldest first")
     glance(app, name: "board-09-audit-\(appearance).png")
     QueueUI.element(app, ID.auditClose).click()
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.audit).exists }, "audit: Close left it open")

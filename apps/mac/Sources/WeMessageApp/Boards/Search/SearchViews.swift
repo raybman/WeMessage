@@ -212,8 +212,10 @@ struct TokenChipView: View {
           .font(.system(size: 10, weight: .bold))
           .foregroundStyle(Tokens.color(palette.ink))
       }
+      // The op carries its own colon ("from:"); the CI shots of run
+      // 37764667738 drew "from:: me".
       if let op = chip.op {
-        Text(op + ":")
+        Text(op)
           .font(.system(size: 11, weight: .semibold, design: .monospaced))
           .foregroundStyle(Tokens.color(palette.ink))
       }

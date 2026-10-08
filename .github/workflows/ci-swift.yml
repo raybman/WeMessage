@@ -135,13 +135,31 @@ jobs:
   # fake daemon from tools/swift against the S0 goldens, and drives the
   # window with XCUITest. Nothing here runs on a laptop; this job is the only
   # place the app is ever launched.
+  #
+  # v2 S4j: two shards, each a disjoint explicit list of XCUITest classes,
+  # balanced on the per-class seconds of run 37768611744 (9c3f4be, one job,
+  # 854 s of tests): a = 425 s, b = 429 s. Every class under
+  # apps/mac/UITests is in exactly one list; test/arch.spec.ts 'the ui
+  # shards cover every XCUITest class once' goes red otherwise, so a new
+  # board test cannot silently go unrun. Each shard keeps its own 30 minutes.
   ui:
+    name: ui (${{ matrix.shard }})
     needs: [kit]
     runs-on: macos-26
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            classes: AccessibilityTests Board02Tests Board08Tests ConnectionTests LaunchTests
+          - shard: b
+            classes: Board01Tests Board06Tests Board09Tests Board10Tests Board11Tests Board12Tests FakeDaemonControlTests SnapshotTests
     env:
       TZ: UTC
       WEMESSAGE_PORT: '47191'
+      UI_SHARD: ${{ matrix.shard }}
+      UI_SHARD_CLASSES: ${{ matrix.classes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # E20 (measured, spike run 37545141709): `${{ runner.temp }}` is not a
@@ -213,6 +231,12 @@ jobs:
         run: |
           set -eu
           set -o pipefail
+          only=""
+          for class in $UI_SHARD_CLASSES; do only="$only -only-testing:WeMessageUITests/$class"; done
+          test -n "$only" || { echo "shard $UI_SHARD names no class" >&2; exit 1; }
+          echo "shard ${UI_SHARD}:$only"
+          # $only is split on purpose: one -only-testing flag per class.
+          # shellcheck disable=SC2086
           TEST_RUNNER_WEMESSAGE_DIR="$WEMESSAGE_DIR" \
           TEST_RUNNER_WEMESSAGE_PORT="$WEMESSAGE_PORT" \
           TEST_RUNNER_TZ=UTC \
@@ -225,6 +249,7 @@ jobs:
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 300 \
+            $only \
             | tee "$RUNNER_TEMP/xcodebuild-raw.log" \
             | xcbeautify --renderer github-actions
       # v2 S4a: the frost evidence each snapshot printed, kept out of
@@ -250,12 +275,22 @@ jobs:
           "$(xcode-select -p)/usr/bin/xcresulttool" export attachments --path "$RESULTS" --output-path "$SNAPSHOTS_OUT"
           ls -l "$SNAPSHOTS_OUT"
           cat "$SNAPSHOTS_OUT/manifest.json"
+          # v2 S4j: each shard's manifest travels with its PNGs under a shard
+          # name, and a shard that exported no PNG is red here, not hidden
+          # behind the manifest satisfying if-no-files-found.
+          cp "$SNAPSHOTS_OUT/manifest.json" "$SNAPSHOTS_OUT/manifest-$UI_SHARD.json"
+          pngs=$(find "$SNAPSHOTS_OUT" -maxdepth 1 -name '*.png' | wc -l)
+          test "$pngs" -gt 0 || { echo "shard $UI_SHARD exported no PNG" >&2; exit 1; }
       - name: snapshots
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: wemessage-ui-snapshots-${{ github.sha }}
-          path: ${{ runner.temp }}/snapshots/*.png
+          name: wemessage-ui-snapshots-${{ github.sha }}-${{ matrix.shard }}
+          # E20: a multi-line path names the directory through env, so
+          # runner.temp stays on single `path:` lines only.
+          path: |
+            ${{ env.SNAPSHOTS_OUT }}/*.png
+            ${{ env.SNAPSHOTS_OUT }}/manifest-${{ matrix.shard }}.json
           retention-days: 7
           if-no-files-found: error
       # P2-4: the result bundle uploads on every outcome, so a red run can be
@@ -264,7 +299,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: wemessage-ui-xcresult-${{ github.sha }}
+          name: wemessage-ui-xcresult-${{ github.sha }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/results.xcresult
           retention-days: 7
           if-no-files-found: warn

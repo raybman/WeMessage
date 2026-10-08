@@ -22,7 +22,11 @@ appears only under `UITests/`.
 ## The CI UI lane
 
 The `ui` job in `.github/workflows/ci-swift.yml` is the only place the
-window is launched. It runs on a GitHub macOS runner on every push:
+window is launched. It runs on a GitHub macOS runner on every push, as two
+shards (`ui (a)` and `ui (b)`), each running a disjoint explicit list of
+XCUITest classes through `-only-testing`. A new UI test class goes into
+exactly one shard's `classes:` list in `ci-swift.yml`; `test/arch.spec.ts`
+is red until it does. Each shard:
 
 1. Writes its paths under `RUNNER_TEMP` (the app's data dir, derived data,
    the result bundle, the snapshot export dir).
@@ -38,9 +42,10 @@ window is launched. It runs on a GitHub macOS runner on every push:
    from `project.yml`; the test runner is therefore sandboxed and no test
    writes a file.
 6. On a green test step, exports the `.keepAlways` attachments with the
-   selected Xcode's `xcresulttool` and uploads the PNGs as
-   `wemessage-ui-snapshots-<sha>`. The result bundle uploads on every
-   outcome as `wemessage-ui-xcresult-<sha>`.
+   selected Xcode's `xcresulttool` and uploads the PNGs, with the export
+   manifest as `manifest-<shard>.json`, as
+   `wemessage-ui-snapshots-<sha>-<shard>`. The result bundle uploads on
+   every outcome as `wemessage-ui-xcresult-<sha>-<shard>`.
 
 The UI tests:
 

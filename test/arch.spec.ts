@@ -13798,6 +13798,49 @@ describe('v2 S1: the Swift tree', () => {
       expect([forbidden, text.includes(forbidden)]).toEqual([forbidden, false]);
   });
 
+  it('the ui shards cover every XCUITest class once (S4j)', () => {
+    // v2 S4j: the `ui` job is a two-way matrix and each shard names its
+    // XCUITest classes explicitly through -only-testing. A class in neither
+    // list would compile, launch nothing and stay green, so a new board test
+    // must land in exactly one shard or this row goes red.
+    const text = archRead(CI_SWIFT);
+    const shards = [
+      ...text.matchAll(/^ {10}- shard: (\w+)\n {12}classes: ([^\n]+)$/gm),
+    ].map((m) => ({ shard: m[1]!, classes: m[2]!.trim().split(/\s+/) }));
+    expect(shards.map((s) => s.shard)).toEqual(['a', 'b']);
+    const classes = trackedUnder(UI_TESTS)
+      .filter((f) => f.endsWith('.swift'))
+      .flatMap((f) => [
+        ...archRead(f).matchAll(
+          /^\s*(?:final\s+)?class\s+(\w+)\s*:\s*XCTestCase\b/gm,
+        ),
+      ])
+      .map((m) => m[1]!)
+      .sort();
+    // Non-vacuity: the reader sees the thirteen classes S4i shipped.
+    expect(classes.length).toBeGreaterThanOrEqual(13);
+    expect(classes).toContain('Board12Tests');
+    const named = shards.flatMap((s) => s.classes);
+    expect(classes.filter((c) => !named.includes(c))).toEqual([]);
+    expect(named.filter((c) => !classes.includes(c))).toEqual([]);
+    expect(named.filter((c, k) => named.indexOf(c) !== k)).toEqual([]);
+    // The list reaches xcodebuild, once per class, inside the one test step.
+    for (const needed of [
+      'UI_SHARD_CLASSES: ${{ matrix.classes }}',
+      'for class in $UI_SHARD_CLASSES; do only="$only -only-testing:WeMessageUITests/$class"; done',
+      '            $only \\\n',
+      'fail-fast: false',
+      'wemessage-ui-snapshots-${{ github.sha }}-${{ matrix.shard }}',
+      'wemessage-ui-xcresult-${{ github.sha }}-${{ matrix.shard }}',
+      '${{ env.SNAPSHOTS_OUT }}/manifest-${{ matrix.shard }}.json',
+    ])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+    // Each shard keeps the job's 30 minutes; the cap is not the lever.
+    expect(text).toMatch(
+      /^ {2}ui:\n(?: {4}[^\n]*\n)*? {4}timeout-minutes: 30$/m,
+    );
+  });
+
   it('the ui job turns Reduce Transparency off before the tests (S4a)', () => {
     // v2 S4a (S4.0 spike, run 37568873983): the macOS 26 image ships with
     // Reduce Transparency on, which draws every material opaque; the frost
@@ -14207,7 +14250,7 @@ describe('v2 S1: the Swift tree', () => {
     const ci = archRead(CI_SWIFT);
     for (const needed of [
       '"$(xcode-select -p)/usr/bin/xcresulttool" export attachments --path "$RESULTS" --output-path "$SNAPSHOTS_OUT"',
-      'snapshots/*.png',
+      '${{ env.SNAPSHOTS_OUT }}/*.png',
       'wemessage-ui-snapshots-${{ github.sha }}',
     ])
       expect([needed, ci.includes(needed)]).toEqual([needed, true]);

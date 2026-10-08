@@ -11,6 +11,8 @@ struct ShellApp: App {
         SpecimenSheet(content: specimens)
       } else if let states = TestHooks.statesSheet {
         StatesSheet(content: states)
+      } else if let onboarding = TestHooks.onboarding {
+        OnboardingRoot(model: onboarding)
       } else {
         ShellView()
       }

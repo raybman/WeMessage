@@ -168,14 +168,19 @@ struct RevokedBanner: View {
 /// Full Disk Access required (10.C): the step, the title, the four
 /// headings and what each says, Open System Settings and Skip. Open asks
 /// the seam and nothing else: under the UI-test flag that is a count.
+/// Onboarding's 2a (12.B) draws this same screen with its own step line.
 struct FDAScreen: View {
-  @Bindable var model: ShellModel
+  /// How many times Open asked the seam.
+  let asked: Int
   let palette: Tokens.Palette
+  var stepLine: String = FDACopy.step
+  let open: () -> Void
+  let skip: () -> Void
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 14) {
-        Text(FDACopy.step.uppercased())
+        Text(stepLine.uppercased())
           .font(.system(size: 9, weight: .semibold))
           .tracking(1.2)
           .foregroundStyle(Tokens.color(palette.inkDim))
@@ -200,7 +205,7 @@ struct FDAScreen: View {
         }
         HStack(spacing: 10) {
           Button {
-            model.openFullDiskAccess()
+            open()
           } label: {
             Text(FDACopy.open)
               .font(.system(size: 12, weight: .semibold))
@@ -213,11 +218,10 @@ struct FDAScreen: View {
           .buttonStyle(.plain)
           .focusable()
           .accessibilityLabel(FDACopy.open)
-          .accessibilityValue("asked \(model.fdaAsked)")
+          .accessibilityValue("asked \(asked)")
           .accessibilityIdentifier(ShellID.fdaOpen)
           Button {
-            model.fdaSkipped = true
-            model.fdaScreenShown = false
+            skip()
           } label: {
             Text(FDACopy.skip)
               .font(.system(size: 12, weight: .semibold))

@@ -159,15 +159,16 @@ struct OnboardingModelTests {
 
   @Test("any key dismisses the coach row, Escape or not, once; a tile click collapses the rail, once")
   func coachDismissedByAnyKey() {
-    for keyCode: UInt16 in [7, 15, 14, 4, 46, 49, 36, 53] {
+    // x, r, e, h, m, space, Return, Escape, a function key, and no text.
+    for key: String? in ["x", "r", "e", "h", "m", " ", "\r", "\u{1B}", "\u{F704}", nil] {
       var saved = OnboardingProgress()
       saved.step = .firstThread
       let store = MemoryOnboardingStore(saved)
       let model = OnboardingModel(store: store, seam: FixtureFullDiskAccess())
       #expect(model.coachShown)
       #expect(model.railExpanded)
-      model.coachKeyDown(keyCode: keyCode)
-      #expect(!model.coachShown, "key \(keyCode) left the coach row up")
+      model.coachKeyDown(key)
+      #expect(!model.coachShown, "key \(String(describing: key)) left the coach row up")
       #expect(model.railExpanded, "a key collapsed the rail")
       let relaunched = OnboardingModel(store: store, seam: FixtureFullDiskAccess())
       #expect(!relaunched.coachShown, "the coach row came back")
@@ -179,7 +180,7 @@ struct OnboardingModelTests {
     model.railTileClicked()
     #expect(!model.railExpanded)
     #expect(model.coachShown, "a click dismissed the coach row")
-    model.coachKeyDown(keyCode: 7)
+    model.coachKeyDown("x")
     #expect(store.saved?.finished == true)
   }
 

@@ -58,6 +58,13 @@ struct AppHygieneTests {
     "wemessage.trust.banner", "wemessage.trust.action", "wemessage.freshness", "wemessage.freshness.footer",
     "wemessage.revoked.banner", "wemessage.revoked.fix", "wemessage.fda", "wemessage.fda.open", "wemessage.fda.skip",
     "wemessage.states", "wemessage.pacing", "wemessage.collision",
+    // v2 S4h2, board 12 (prefixes: onboarding.page.<slug>,
+    // onboarding.card.<channel>, onboarding.connect.<channel>,
+    // onboarding.skip.<channel>, onboarding.agent.channel.<channel>).
+    "wemessage.onboarding", "wemessage.onboarding.step", "wemessage.onboarding.next", "wemessage.onboarding.again",
+    "wemessage.onboarding.sizing", "wemessage.onboarding.progress", "wemessage.onboarding.notbuilt",
+    "wemessage.onboarding.agent.off", "wemessage.onboarding.agent.draft", "wemessage.onboarding.kill",
+    "wemessage.onboarding.done", "wemessage.coach", "wemessage.voice.dock",
   ]
 
   static let nsApp = "NS" + "App"
@@ -341,8 +348,9 @@ struct AppHygieneTests {
   /// S4e's 39..42 (where board 08 and the plan disagree) and S4f's 43..53
   /// (where boards 06 and 09 leave a choice open), and S4g's 54..57 (the
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
-  /// leaves a choice open or the daemon cannot serve what it draws).
-  static let dUIKeys = (1...68).map { "D-UI-\($0)" }
+  /// leaves a choice open or the daemon cannot serve what it draws), and
+  /// S4h2's 69..77 (the same for board 12).
+  static let dUIKeys = (1...77).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -359,11 +367,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..68, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..77, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..68 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..77 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -371,7 +379,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...68), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...77), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -820,6 +828,99 @@ struct AppHygieneTests {
       for token in opens + menus + colours {
         #expect(!text.contains(token), "\(path) contains \(token)")
       }
+    }
+  }
+
+  // MARK: S4h2
+
+  /// The H-S4-7 verdicts over (path, text) pairs of the app sources: every
+  /// way onboarding could reach the daemon, open a pane under the flag,
+  /// write the runner's defaults, or paint a system colour.
+  static func onboardingLeaks(_ files: [(String, String)]) -> [String] {
+    let onboardingDir = appDir + "/Boards/Onboarding/"
+    let pane = onboardingDir + "SystemSettingsPane.swift"
+    let model = appDir + "/Models/OnboardingModel.swift"
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let reach = ["Gateway" + "Client", ".client", ".send" + "(", "setKill" + "Switch", "engageKill" + "Switch", "approve" + "Draft(", "/v1/"]
+    let opens = ["x-apple." + "systempreferences", "NSWork" + "space", "openURL", "open" + "Application", "URL(string"]
+    let menus = ["Command" + "Menu", ".com" + "mands", "Menu" + "Builder", ".keyboard" + "Shortcut", "Command" + "Group"]
+    let colours = [
+      "." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent", "Tokens." + "danger",
+    ]
+    var leaks: [String] = []
+    for (path, text) in files {
+      let onboarding = path.hasPrefix(onboardingDir) || path == model
+      // The pane is named in one file, and only that file opens anything.
+      if path != pane && text.contains(opens[0]) { leaks.append("\(path): names the pane") }
+      if onboarding && path != pane {
+        for token in opens where text.contains(token) { leaks.append("\(path): \(token)") }
+      }
+      if onboarding {
+        for token in reach + menus + colours where text.contains(token) { leaks.append("\(path): \(token)") }
+        // A client's call, not the word in copy ("a normal mail client.").
+        if (try? count(#"\bclient\.[a-z]"#, in: text)) != 0 { leaks.append("\(path): calls a client") }
+      }
+      // The shipped store is built in the hooks only; the model reaches
+      // the window group only.
+      if path != hooks && path != model && text.contains("DefaultsOnboarding" + "Store()") {
+        leaks.append("\(path): builds the defaults store")
+      }
+      if path != app && text.contains("TestHooks." + "onboarding") { leaks.append("\(path): opens onboarding") }
+    }
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    let paneText = text(pane)
+    let open = paneText.components(separatedBy: "func openFullDiskAccess()").dropFirst().first ?? ""
+    let first = open.split(separator: "{", maxSplits: 1).dropFirst().first?
+      .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+      .first { !$0.isEmpty && !$0.hasPrefix("//") } ?? ""
+    if !first.hasPrefix("precondition(!TestHooks.isUITest") { leaks.append("\(pane): opens before refusing the flag") }
+    let modelText = text(model)
+    if !modelText.contains("public var drafting = false") { leaks.append("\(model): drafting is not off by default") }
+    let store = modelText.components(separatedBy: "class DefaultsOnboardingStore").dropFirst().first ?? ""
+    if !String(store.prefix(260)).contains("precondition(!TestHooks.isUITest") {
+      leaks.append("\(model): the defaults store runs under the flag")
+    }
+    let hooksText = text(hooks)
+    let flagFirst =
+      "if isUITest { return board == \"12\" ? OnboardingModel(store: MemoryOnboardingStore(), seam: fullDiskAccess()) : nil }"
+    let built = hooksText.components(separatedBy: "func onboardingModel(").dropFirst().first ?? ""
+    let firstLine = built.split(separator: "\n").dropFirst().first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    if firstLine != flagFirst { leaks.append("\(hooks): the flag does not return first: \(firstLine)") }
+    if !text(app).contains("} else if let onboarding = TestHooks.onboarding {") { leaks.append("\(app): never opens onboarding") }
+    return leaks
+  }
+
+  @Test("H-S4-7: onboarding never reaches the daemon, opens the Full Disk Access pane only outside the UI-test flag, keeps the runner's defaults untouched, and paints no system colour")
+  func onboardingSealed() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Onboarding").count >= 2)
+    let leaks = Self.onboardingLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let views = Self.appDir + "/Boards/Onboarding/OnboardingViews.swift"
+    let model = Self.appDir + "/Models/OnboardingModel.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let plants: [(String, String)] = [
+      (views, "Circle().fill(." + "green)"),
+      (views, "await client." + "setKill" + "Switch(true)"),
+      (views, "NSWork" + "space.shared.open(url)"),
+      (model, "public var drafting = true"),
+      (hooks, "func onboardingModel(board: String?) -> OnboardingModel? {\n    let store = DefaultsOnboarding" + "Store()"),
+    ]
+    for (path, planted) in plants {
+      let mutated = files.map { $0.0 == path ? ($0.0, $0.1 + "\n" + planted) : $0 }
+      var swapped = mutated
+      if planted.hasPrefix("public var drafting") || planted.hasPrefix("func onboardingModel") {
+        swapped = files.map {
+          guard $0.0 == path else { return $0 }
+          if planted.hasPrefix("public var drafting") {
+            return ($0.0, $0.1.replacingOccurrences(of: "public var drafting = false", with: planted))
+          }
+          return ($0.0, $0.1.replacingOccurrences(of: "func onboardingModel(board: String?) -> OnboardingModel? {", with: planted))
+        }
+      }
+      #expect(!Self.onboardingLeaks(swapped).isEmpty, "a planted \(planted) in \(path) went unseen")
     }
   }
 }

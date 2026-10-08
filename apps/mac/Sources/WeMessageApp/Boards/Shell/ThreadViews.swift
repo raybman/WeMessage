@@ -147,7 +147,12 @@ struct ContentPane: View {
         TrustBannerView(model: model, line: line, palette: palette)
       }
       if model.fdaScreenUp {
-        FDAScreen(model: model, palette: palette)
+        FDAScreen(asked: model.fdaAsked, palette: palette) {
+          model.openFullDiskAccess()
+        } skip: {
+          model.fdaSkipped = true
+          model.fdaScreenShown = false
+        }
       } else {
         pane
       }

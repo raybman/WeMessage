@@ -300,9 +300,9 @@ public protocol FullDiskAccessSeam: AnyObject {
   func probe() async -> Bool
   /// How many times probe was asked.
   var probes: Int { get }
-  /// 2c's count query, once readable; nil when it is not served.
+  /// 2c's count query, once readable; nil while the daemon has none.
   func sizing() async -> CopySizing?
-  /// CopyProgress, once the copy was asked for; nil when it is not served.
+  /// CopyProgress, once the copy was asked for; nil while the daemon has none.
   func copyProgress() async -> CopyProgressFacts?
 }
 

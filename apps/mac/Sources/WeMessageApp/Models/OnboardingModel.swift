@@ -352,8 +352,10 @@ public final class OnboardingModel {
   /// The rail has words: 12.I, until its one tile click.
   public var railExpanded: Bool { progress.step == .firstThread && !progress.railCollapsed }
 
-  /// Any key dismisses the coach row (12.I legend 1), whatever key it is.
-  public func coachKeyDown(keyCode: UInt16) {
+  /// Any key dismisses the coach row (12.I legend 1), whatever key it is:
+  /// `characters` is what the key typed, Escape and Return included, and is
+  /// read by nothing (D-UI-74; raw key codes stay in TriageKeys, H-S4-2b).
+  public func coachKeyDown(_ characters: String?) {
     guard coachShown else { return }
     update { $0.coachDismissed = true }
   }

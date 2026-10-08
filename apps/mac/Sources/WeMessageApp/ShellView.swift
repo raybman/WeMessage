@@ -134,6 +134,37 @@ enum ShellID {
   /// The pacing table (10.D) and the collision notice (10.E).
   static let pacing = "wemessage.pacing"
   static let collision = "wemessage.collision"
+  // v2 S4h, board 12: onboarding. The window, its step counter, and a page
+  // per step (this prefix and the step's slug: 1, 2a, 2b, 2c, 2c-copy, 3,
+  // 4, 5, 6, done).
+  static let onboarding = "wemessage.onboarding"
+  static let onboardingStep = "wemessage.onboarding.step"
+  static let onboardingPagePrefix = "wemessage.onboarding.page."
+  /// Step 1's cards and their two buttons: these prefixes and the channel.
+  static let onboardingCardPrefix = "wemessage.onboarding.card."
+  static let onboardingConnectPrefix = "wemessage.onboarding.connect."
+  static let onboardingSkipPrefix = "wemessage.onboarding.skip."
+  /// Each page's one forward control.
+  static let onboardingNext = "wemessage.onboarding.next"
+  /// 2b's Open System Settings again; its value is the asks, the probes and
+  /// whether the poll runs.
+  static let onboardingOpenAgain = "wemessage.onboarding.again"
+  /// 2c's count and CopyProgress.
+  static let onboardingSizing = "wemessage.onboarding.sizing"
+  static let onboardingProgress = "wemessage.onboarding.progress"
+  /// Steps 3 to 5: the channel is not built in this version (D-UI-71).
+  static let onboardingNotBuilt = "wemessage.onboarding.notbuilt"
+  /// AgentStep's two choices and its per-channel boxes (this prefix and the
+  /// channel).
+  static let onboardingAgentOff = "wemessage.onboarding.agent.off"
+  static let onboardingAgentDraft = "wemessage.onboarding.agent.draft"
+  static let onboardingAgentChannelPrefix = "wemessage.onboarding.agent.channel."
+  /// KillIntro and setup complete.
+  static let onboardingKill = "wemessage.onboarding.kill"
+  static let onboardingDone = "wemessage.onboarding.done"
+  /// 12.I: the coach row and the voice dock's idle line.
+  static let coach = "wemessage.coach"
+  static let voiceDock = "wemessage.voice.dock"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
@@ -162,6 +193,12 @@ struct ShellView: View {
   /// The system's display options, with a UI test's forced values on top.
   @State private var mirror = AccessibilityMirror.live()
   @Environment(\.colorScheme) private var scheme
+  /// 12.I: the first thread after onboarding. The rail has words until its
+  /// first tile click, and the coach row sits under the panes until its
+  /// first keypress (D-UI-70, D-UI-74).
+  let handover: OnboardingModel?
+
+  init(handover: OnboardingModel? = nil) { self.handover = handover }
 
   /// The title band the hidden title bar leaves to the traffic lights.
   static let titleBand: CGFloat = 52
@@ -173,15 +210,23 @@ struct ShellView: View {
 
   var body: some View {
     ZStack(alignment: .top) {
-      HStack(spacing: 0) {
-        RailView(model: model, palette: palette, mirror: mirror, dark: dark)
-        Hairline(mirror: mirror, palette: palette, dark: dark)
-        SidebarView(model: model, palette: palette, dark: dark)
-        Hairline(mirror: mirror, palette: palette, dark: dark)
-        ContentPane(model: model, palette: palette)
-        if model.inspectorShown, let thread = model.selected {
+      VStack(spacing: 0) {
+        HStack(spacing: 0) {
+          RailView(model: model, palette: palette, mirror: mirror, dark: dark, handover: handover)
           Hairline(mirror: mirror, palette: palette, dark: dark)
-          InspectorPane(thread: thread, image: model.avatars.image(for: thread), palette: palette)
+          SidebarView(model: model, palette: palette, dark: dark)
+          Hairline(mirror: mirror, palette: palette, dark: dark)
+          ContentPane(model: model, palette: palette)
+          if model.inspectorShown, let thread = model.selected {
+            Hairline(mirror: mirror, palette: palette, dark: dark)
+            InspectorPane(thread: thread, image: model.avatars.image(for: thread), palette: palette)
+          }
+        }
+        if let handover, handover.coachShown {
+          // 12.I: its own row under the panes, never over them.
+          Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
+          CoachRow(palette: palette)
+            .background(CoachKeyMonitor(model: handover))
         }
       }
       .padding(.top, Self.titleBand + 0.5)
@@ -233,26 +278,45 @@ private struct RailView: View {
   let palette: Tokens.Palette
   let mirror: AccessibilityMirror
   let dark: Bool
+  /// 12.I: the rail has words beside its tiles until the first tile click.
+  var handover: OnboardingModel? = nil
+
+  private var expanded: Bool { handover?.railExpanded ?? false }
 
   var body: some View {
-    VStack(spacing: 8) {
+    VStack(alignment: expanded ? .leading : .center, spacing: 8) {
       ForEach(ShellModel.Scope.allCases, id: \.self) { scope in
-        RailTile(scope: scope, selected: model.scope == scope, mark: model.board.mark(scope), palette: palette) {
-          model.scope = scope
+        HStack(spacing: 10) {
+          RailTile(scope: scope, selected: model.scope == scope, mark: model.board.mark(scope), palette: palette) {
+            handover?.railTileClicked()
+            model.scope = scope
+          }
+          .accessibilityLabel(scope.fullLabel)
+          .keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)
+          .accessibilityIdentifier(ShellID.rail(scope))
+          if expanded {
+            // The tile's own label already says it: drawn, not read twice.
+            Text(scope.fullLabel)
+              .font(.system(size: 12, weight: .semibold))
+              .foregroundStyle(Tokens.color(palette.ink))
+              .lineLimit(1)
+              .accessibilityHidden(true)
+          }
         }
-        .accessibilityLabel(scope.fullLabel)
-        .keyboardShortcut(KeyEquivalent(scope.shortcutDigit), modifiers: .command)
-        .accessibilityIdentifier(ShellID.rail(scope))
         if scope == .all {
-          Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.35)).frame(width: 26, height: 1)
+          Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.35)).frame(width: expanded ? 170 : 26, height: 1)
             .padding(4)
             .accessibilityHidden(true)
         }
       }
       Spacer(minLength: 0)
+      if expanded {
+        VoiceDockIdle(palette: palette)
+      }
     }
     .padding(.vertical, 12)
-    .frame(width: ProvisionalUI.railWidth)
+    .padding(.horizontal, expanded ? 10 : 0)
+    .frame(width: expanded ? ProvisionalUI.handoverRailWidth : ProvisionalUI.railWidth)
     .frame(maxHeight: .infinity)
     .contentShape(Rectangle())
     // Hover shows the ages (D-UI-68); never under the UI-test flag, where a

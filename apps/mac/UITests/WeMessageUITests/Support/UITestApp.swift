@@ -107,6 +107,27 @@ enum ID {
   static let emptyPrefix = "wemessage.empty."
   static let pacing = "wemessage.pacing"
   static let collision = "wemessage.collision"
+  // v2 S4h, board 12: onboarding.
+  static let onboarding = "wemessage.onboarding"
+  static let onboardingStep = "wemessage.onboarding.step"
+  /// A page: the prefix and the step's slug (1, 2a, 2b, 2c, 2c-copy, 3, 4,
+  /// 5, 6, done).
+  static let onboardingPagePrefix = "wemessage.onboarding.page."
+  static let onboardingCardPrefix = "wemessage.onboarding.card."
+  static let onboardingConnectPrefix = "wemessage.onboarding.connect."
+  static let onboardingSkipPrefix = "wemessage.onboarding.skip."
+  static let onboardingNext = "wemessage.onboarding.next"
+  static let onboardingOpenAgain = "wemessage.onboarding.again"
+  static let onboardingSizing = "wemessage.onboarding.sizing"
+  static let onboardingProgress = "wemessage.onboarding.progress"
+  static let onboardingNotBuilt = "wemessage.onboarding.notbuilt"
+  static let onboardingAgentOff = "wemessage.onboarding.agent.off"
+  static let onboardingAgentDraft = "wemessage.onboarding.agent.draft"
+  static let onboardingAgentChannelPrefix = "wemessage.onboarding.agent.channel."
+  static let onboardingKill = "wemessage.onboarding.kill"
+  static let onboardingDone = "wemessage.onboarding.done"
+  static let coach = "wemessage.coach"
+  static let voiceDock = "wemessage.voice.dock"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..68 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..77 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -10,7 +10,8 @@ import Foundation
 // 06 and 09 leave a choice open or the daemon cannot serve what they draw;
 // D-UI-54..57: the S4g build, where the avatar plan leaves a choice open;
 // D-UI-58..68: the S4h build, where board 10 leaves a choice open or the
-// daemon cannot serve what it draws).
+// daemon cannot serve what it draws; D-UI-69..77: the S4h2 build, where
+// board 12 leaves a choice open or the daemon cannot serve what it draws).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -646,4 +647,84 @@ public enum ProvisionalUI {
     case inWindowOverlay
   }
   public static let freshnessPopover: FreshnessPopover = .inWindowOverlay
+
+  // v2 S4h, board 12: onboarding.
+
+  // D-UI-69: the wireframe's 12.I is the first-thread handover, so board
+  // 12's "I" shot is that screen. The interrupted case (quit at 2c by the
+  // grant, relaunched) is not a screen of its own: the relaunch resumes on
+  // the step it left, which the model tests prove and the shots show as 2c.
+  public enum InterruptedState: Sendable {
+    case resumeOnTheSameStep
+  }
+  public static let interruptedState: InterruptedState = .resumeOnTheSameStep
+
+  // D-UI-70: the handover rail (12.I legend 6) is 200 pt wide, each tile
+  // with its full channel name beside it, and the voice dock's idle line at
+  // its foot. Only the five scope tiles are drawn: the wireframe's Add a
+  // channel, Voice and Settings tiles are not part of this rail yet. The
+  // first tile click collapses it to the 58 pt rail, once.
+  public static let handoverRailWidth: Double = 200
+
+  // D-UI-71: steps 3 to 5 (WhatsApp, LinkedIn, Email) draw their
+  // disclosure in full, say the channel is not in this version, and offer
+  // Skip <channel> as the only forward control. No QR, no sign-in window,
+  // no provider list. A card's Connect on step 1 goes to that channel's
+  // step; its Skip marks the channel declined and passes over its step.
+  public enum ChannelSteps: Sendable {
+    case disclosureAndSkipOnly
+  }
+  public static let channelSteps: ChannelSteps = .disclosureAndSkipOnly
+
+  // D-UI-72: the daemon serves no message count, chat count, size or copy
+  // progress today, so the shipped seam answers nothing and 2c and
+  // CopyProgress print not served (auditResultUnserved). Make the copy
+  // records the choice; the copy itself is the daemon's ingest. The UI-test
+  // fixture serves the wireframe's figures.
+  public enum CopyFacts: Sendable {
+    case notServedUntilTheDaemonCounts
+  }
+  public static let copyFacts: CopyFacts = .notServedUntilTheDaemonCounts
+
+  // D-UI-73: 2b draws the in-app half only (Waiting, the 2 s line, Open
+  // System Settings again). The System Settings half of the wireframe is
+  // the system's own window and is never drawn by the app.
+  public enum WaitingHalf: Sendable {
+    case inAppOnly
+  }
+  public static let waitingHalf: WaitingHalf = .inAppOnly
+
+  // D-UI-74: the coach row's dismissing keystroke is consumed (it is the
+  // answer to "press any key", not a triage verb), by a local key-down
+  // monitor that lives only while the row is up. Any key counts, Escape or
+  // not; the monitor reads no key code.
+  public enum CoachKey: Sendable {
+    case anyKeyConsumed
+  }
+  public static let coachKey: CoachKey = .anyKeyConsumed
+
+  // D-UI-75: onboarding takes the window on a shipped launch until its
+  // handover is spent, kept in the app's defaults. Under the UI-test flag
+  // only board 12 reaches it, with an in-memory store, so no other board's
+  // launch ever sees it.
+  public enum OnboardingGate: Sendable {
+    case untilHandoverSpent
+  }
+  public static let onboardingGate: OnboardingGate = .untilHandoverSpent
+
+  // D-UI-76: KillIntro's engaged specimen is drawn in ink, not red, and
+  // its Disengage is drawn, not a control: it is a picture of the banner,
+  // and nothing on this board touches the kill switch.
+  public enum KillSpecimen: Sendable {
+    case inkAndInert
+  }
+  public static let killSpecimen: KillSpecimen = .inkAndInert
+
+  // D-UI-77: setup complete (12.G) prints the choices made, a line per
+  // channel, with no ages: nothing has synced yet when it is drawn. 12.H
+  // (disconnect and delete) is Settings' and is not built on this board.
+  public enum SetupComplete: Sendable {
+    case choicesOnly
+  }
+  public static let setupComplete: SetupComplete = .choicesOnly
 }

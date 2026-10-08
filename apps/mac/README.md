@@ -223,6 +223,32 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.empty.<case>.action` its one action
 - `wemessage.pacing`: the pacing table (10.D), iMessage's rows (D-UI-66)
 - `wemessage.collision`: the collision notice (10.E)
+- `wemessage.onboarding`: board 12's onboarding window, on a shipped launch
+  until its handover is spent, and under the UI-test flag only with
+  `WEMESSAGE_UI_BOARD=12` (D-UI-75, H-S4-7)
+- `wemessage.onboarding.step`: the step counter (`Step 1 of 6`, fixed)
+- `wemessage.onboarding.page.<slug>`: one step's page, slugs `1`, `2a`,
+  `2b`, `2c`, `2c-copy`, `3`, `4`, `5`, `6` and `done`
+- `wemessage.onboarding.card.<channel>`, `wemessage.onboarding.connect.<channel>`,
+  `wemessage.onboarding.skip.<channel>`: step 1's cards and their Connect
+  and Skip; a skip's value is `skipped` once pressed
+- `wemessage.onboarding.next`: the page's one forward control (Continue,
+  Make the copy, Skip <channel>, Finish setup, Open inbox)
+- `wemessage.onboarding.again`: 2b's Open System Settings again; its value
+  is `asked n, probes m, polling on|off`
+- `wemessage.onboarding.sizing`: 2c's count, or not served (D-UI-72)
+- `wemessage.onboarding.progress`: CopyProgress, dated
+- `wemessage.onboarding.notbuilt`: steps 3 to 5 say the channel is not in
+  this version (D-UI-71)
+- `wemessage.onboarding.agent.off`, `wemessage.onboarding.agent.draft`:
+  AgentStep's two choices; No drafting is selected by default
+- `wemessage.onboarding.agent.channel.<channel>`: a per-channel drafting
+  box, unchecked, and inert while No drafting is selected
+- `wemessage.onboarding.kill`: KillIntro, with an inert specimen (D-UI-76)
+- `wemessage.onboarding.done`: setup complete, a line per channel
+- `wemessage.coach`: the first thread's coach row (12.I), until any key
+- `wemessage.voice.dock`: the voice dock's idle line at the foot of the
+  handover rail (D-UI-70)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

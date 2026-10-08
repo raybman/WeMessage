@@ -246,10 +246,16 @@ struct TokenChipView: View {
       }
     }
     // One element: a container's value never reaches AX on macOS (run
-    // 37756434645 read "" on every chip), and its x stays a named action.
+    // 37756434645 read "" on every chip). Ignored alone it is role Other,
+    // which still drops the value and fails the audit as "Unknown role"
+    // (run 37761444224); as a button, like a result row, the value
+    // reaches AX. Its press removes it, as its x does.
     .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(.isButton)
     .accessibilityLabel(spoken)
     .accessibilityValue(chip.parsed ? "parsed" : "unparsed")
+    .accessibilityHint("Removes the token")
+    .accessibilityAction { remove() }
     .accessibilityAction(named: "Remove") { remove() }
     .accessibilityIdentifier(ShellID.searchTokenPrefix + String(chip.id))
   }

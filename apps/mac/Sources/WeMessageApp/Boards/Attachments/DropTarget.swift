@@ -38,12 +38,11 @@ struct DropTargetView: View {
         }
       }
     }
+    // No group element here: on macOS a group drops its value and, with
+    // one visible child, hands its identifier to the thread's scroll view.
+    // The drop state rides on the header's line instead (MediaHeader).
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .clipped()
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel("Drop target")
-    .accessibilityValue(model.drop.state.name)
-    .accessibilityIdentifier(ShellID.mediaDrop)
   }
 }
 
@@ -172,9 +171,9 @@ struct MediaBubble: View {
           .strokeBorder(outlined ? Tokens.color(Tokens.tint) : Color.clear, lineWidth: ProvisionalUI.viewerOutlineWidth))
       if !message.fromMe { Spacer(minLength: 120) }
     }
+    // A group drops its value on macOS, so the outline rides on the label.
     .accessibilityElement(children: .contain)
-    .accessibilityLabel("Message")
-    .accessibilityValue(outlined ? "outlined" : "")
+    .accessibilityLabel(outlined ? "Message, outlined" : "Message")
     .accessibilityIdentifier(ShellID.mediaMessagePrefix + message.id)
   }
 }
@@ -219,6 +218,7 @@ struct MediaThumb: View {
         .padding(3)
     )
     .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(.isImage)
     .accessibilityLabel(item.name + ", " + item.chip)
   }
 }

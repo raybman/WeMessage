@@ -47,8 +47,8 @@ final class Board15Tests: XCTestCase {
       "the thread did not target: \(QueueUI.value(app, ID.mediaDrop))")
     Self.door(app, "3")
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaTray) == "Staged \u{00B7} 3 items" },
-      "the drop did not stage: \(QueueUI.value(app, ID.mediaTray))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaTray) == "Staged \u{00B7} 3 items" },
+      "the drop did not stage: \(QueueUI.label(app, ID.mediaTray))")
     XCTAssertEqual(QueueUI.value(app, ID.mediaDrop), "resting", "the field stayed up after the release")
     XCTAssertFalse(QueueUI.element(app, ID.mediaNote).exists, "the release printed \(QueueUI.label(app, ID.mediaNote))")
     var requests = try await FakeDaemon.journal().requests
@@ -88,36 +88,38 @@ final class Board15Tests: XCTestCase {
     let thread = QueueUI.element(app, ID.mediaThread)
     let origin = QueueUI.element(app, ID.mediaItemPrefix + "t3")
     XCTAssertTrue(origin.waitForExistence(timeout: UITestApp.timeout), "no IMG_4417 in the thread")
-    var y = 0
-    for delta in [-120.0, -120.0, 120.0, 120.0, 120.0] where y == 0 {
+    // Scroll until the thread is off its top and IMG_4417 is still in reach.
+    // The wheel's sign differs between hosts, so try one way, then the other.
+    var y = Self.offset(app)
+    for delta in [-60.0, -60.0, -60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0] where y <= 0 || !origin.isHittable {
       thread.scroll(byDeltaX: 0, deltaY: delta)
       QueueUI.settle()
-      y = Self.offset(thread)
+      y = Self.offset(app)
     }
-    XCTAssertGreaterThan(y, 0, "the thread never scrolled: \(thread.value as? String ?? "")")
+    XCTAssertGreaterThan(y, 0, "the thread never scrolled: \(QueueUI.value(app, ID.mediaHeader))")
     XCTAssertTrue(origin.isHittable, "IMG_4417 scrolled out of reach at y=\(y)")
     origin.click()
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaViewer) == "3 / 7" },
-      "the viewer opened at \(QueueUI.value(app, ID.mediaViewer))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerPosition) == "3 / 7" },
+      "the viewer opened at \(QueueUI.label(app, ID.mediaViewerPosition))")
     XCTAssertTrue(
       QueueUI.label(app, ID.mediaViewerOrigin).contains("y=\(y)"),
       "the pinned offset is not y=\(y): \(QueueUI.label(app, ID.mediaViewerOrigin))")
     for _ in 0..<3 { app.typeKey(.rightArrow, modifierFlags: []) }
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaViewer) == "6 / 7" },
-      "the arrows reached \(QueueUI.value(app, ID.mediaViewer))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerPosition) == "6 / 7" },
+      "the arrows reached \(QueueUI.label(app, ID.mediaViewerPosition))")
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(
       QueueUI.waitUntil { !QueueUI.element(app, ID.mediaViewer).exists }, "Esc did not close the viewer")
     XCTAssertTrue(
-      QueueUI.waitUntil { abs(Self.offset(thread) - y) <= 1 },
-      "Esc restored \(thread.value as? String ?? "") and not y=\(y)")
-    XCTAssertEqual(QueueUI.value(app, ID.mediaMessagePrefix + "m6"), "outlined", "the origin is not outlined")
-    XCTAssertNotEqual(QueueUI.value(app, ID.mediaMessagePrefix + "m11"), "outlined", "the arrows' end is outlined")
+      QueueUI.waitUntil { abs(Self.offset(app) - y) <= 1 },
+      "Esc restored \(QueueUI.value(app, ID.mediaHeader)) and not y=\(y)")
+    XCTAssertTrue(QueueUI.label(app, ID.mediaMessagePrefix + "m6").hasSuffix("outlined"), "the origin is not outlined")
+    XCTAssertFalse(QueueUI.label(app, ID.mediaMessagePrefix + "m11").hasSuffix("outlined"), "the arrows' end is outlined")
     XCTAssertTrue(
       QueueUI.waitUntil(Double(ProvisionalUI.viewerOutlineSeconds) + 4) {
-        QueueUI.value(app, ID.mediaMessagePrefix + "m6") != "outlined"
+        !QueueUI.label(app, ID.mediaMessagePrefix + "m6").hasSuffix("outlined")
       }, "the outline never faded")
     print("BOARD15| esc restored y=\(y)")
   }
@@ -140,9 +142,11 @@ final class Board15Tests: XCTestCase {
     app.typeKey(key, modifierFlags: [.command, .option])
   }
 
-  /// The thread's reported offset, from its value "y=N".
-  private static func offset(_ thread: XCUIElement) -> Int {
-    let value = thread.value as? String ?? ""
+  /// The thread's reported offset, from the header name's value "y=N".
+  /// The scroll view's own value is not reliably exposed, so the model's
+  /// offset rides on a Text, which keeps it.
+  private static func offset(_ app: XCUIApplication) -> Int {
+    let value = QueueUI.value(app, ID.mediaHeader)
     return Int(value.replacingOccurrences(of: "y=", with: "")) ?? -1
   }
 
@@ -181,15 +185,15 @@ final class Board15Tests: XCTestCase {
     let card = QueueUI.label(app, ID.mediaDropCard)
     XCTAssertTrue(card.contains("onto Maya Lee"), "the card names nobody: \(card)")
     XCTAssertTrue(card.contains("over iMessage's"), "the card hides the wall: \(card)")
-    XCTAssertNotEqual(QueueUI.value(app, ID.mediaRail), "refused")
+    XCTAssertFalse(QueueUI.label(app, ID.mediaRail).contains("refused"), "the rail refused a thread drop")
     shot("drop")
 
     // Over the rail: refused, hatched, and the reason printed.
     Self.door(app, "0")
     Self.door(app, "2")
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaRail) == "refused" },
-      "the rail did not refuse: \(QueueUI.value(app, ID.mediaRail))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaRail).contains("refused") },
+      "the rail did not refuse: \(QueueUI.label(app, ID.mediaRail))")
     XCTAssertEqual(QueueUI.value(app, ID.mediaDrop), "refused")
     XCTAssertTrue(QueueUI.label(app, ID.mediaDropReason).contains("recipient"), "the refusal is silent")
     shot("refused")
@@ -203,11 +207,13 @@ final class Board15Tests: XCTestCase {
       "the dwell never opened the thread: \(QueueUI.value(app, ID.mediaDrop))")
     Self.door(app, "3")
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaTray) == "Staged \u{00B7} 3 items" },
-      "the drop did not stage: \(QueueUI.value(app, ID.mediaTray))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaTray) == "Staged \u{00B7} 3 items" },
+      "the drop did not stage: \(QueueUI.label(app, ID.mediaTray))")
     XCTAssertTrue(QueueUI.label(app, ID.mediaCounter).contains("over iMessage's wall"), "the wall is not printed")
     XCTAssertEqual(QueueUI.value(app, ID.mediaSend), "inert", "Send is live over the wall")
-    XCTAssertEqual(QueueUI.value(app, ID.mediaTrayItemPrefix + "d3"), "\u{25B6} 4:12", "the video has no duration")
+    XCTAssertTrue(
+      QueueUI.label(app, ID.mediaTrayItemPrefix + "d3").hasSuffix("\u{25B6} 4:12"),
+      "the video has no duration: \(QueueUI.label(app, ID.mediaTrayItemPrefix + "d3"))")
     XCTAssertTrue(QueueUI.element(app, ID.mediaCompression).exists, "no compression table under the video")
     XCTAssertTrue(
       QueueUI.label(app, ID.mediaCompressionRowPrefix + "original").contains("4:12"), "a target has no duration")
@@ -219,8 +225,8 @@ final class Board15Tests: XCTestCase {
     QueueUI.element(app, ID.mediaTrayRemovePrefix + "d3").click()
     Self.door(app, "4")
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaTray) == "Staged \u{00B7} 6 images" },
-      "the pick did not stage: \(QueueUI.value(app, ID.mediaTray))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaTray) == "Staged \u{00B7} 6 images" },
+      "the pick did not stage: \(QueueUI.label(app, ID.mediaTray))")
     XCTAssertTrue(QueueUI.label(app, ID.mediaConversion).contains("JPEG"), "the HEIC conversion is silent")
     XCTAssertTrue(QueueUI.label(app, ID.mediaLocation).contains("removed"), "the location strip is silent")
     XCTAssertTrue(QueueUI.label(app, ID.mediaCounter).contains("left under"), "the wall is not counted down")
@@ -232,23 +238,24 @@ final class Board15Tests: XCTestCase {
     // 15.C: a paste is one more numbered cell, never a send.
     Self.door(app, "5")
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaTray) == "Staged \u{00B7} 7 images" },
-      "the paste did not stage: \(QueueUI.value(app, ID.mediaTray))")
-    XCTAssertTrue(QueueUI.value(app, ID.mediaGrid).hasSuffix("5 shown, +2"), "the grid reads \(QueueUI.value(app, ID.mediaGrid))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaTray) == "Staged \u{00B7} 7 images" },
+      "the paste did not stage: \(QueueUI.label(app, ID.mediaTray))")
+    XCTAssertTrue(QueueUI.label(app, ID.mediaGrid).hasSuffix("5 shown, +2"), "the grid reads \(QueueUI.label(app, ID.mediaGrid))")
     shot("paste")
     QueueUI.printTime("BOARD15", appearance, "paste", since: started)
     Self.door(app, "9")
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.mediaTray).exists }, "the tray did not clear")
 
-    // 15.F: the viewer, from message 6, three arrows on.
-    QueueUI.element(app, ID.mediaItemPrefix + "t3").click()
+    // 15.F: the viewer, from the thread's first photo, three arrows on. The
+    // first photo is in reach without scrolling; the Esc test scrolls.
+    QueueUI.element(app, ID.mediaItemPrefix + "t1").click()
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaViewer) == "3 / 7" },
-      "the viewer opened at \(QueueUI.value(app, ID.mediaViewer))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerPosition) == "1 / 7" },
+      "the viewer opened at \(QueueUI.label(app, ID.mediaViewerPosition))")
     for _ in 0..<3 { app.typeKey(.rightArrow, modifierFlags: []) }
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.mediaViewer) == "6 / 7" },
-      "the arrows reached \(QueueUI.value(app, ID.mediaViewer))")
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerPosition) == "4 / 7" },
+      "the arrows reached \(QueueUI.label(app, ID.mediaViewerPosition))")
     XCTAssertTrue(QueueUI.label(app, ID.mediaViewerKinds).contains("PDF"), "the strip hides the PDF")
     XCTAssertTrue(QueueUI.element(app, ID.mediaViewerSave).exists)
     XCTAssertTrue(QueueUI.element(app, ID.mediaViewerReveal).exists)
@@ -257,12 +264,12 @@ final class Board15Tests: XCTestCase {
     if light { try audit(app, window: "audit-board-15-viewer") }
     app.typeKey("s", modifierFlags: .command)
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerLine).contains("Downloads as trail-02") },
+      QueueUI.waitUntil { QueueUI.label(app, ID.mediaViewerLine).contains("Downloads as trail-01") },
       "cmd-S saved nothing: \(QueueUI.label(app, ID.mediaViewerLine))")
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(
       QueueUI.waitUntil { !QueueUI.element(app, ID.mediaViewer).exists }, "Esc did not close the viewer")
-    XCTAssertEqual(QueueUI.value(app, ID.mediaMessagePrefix + "m6"), "outlined", "the origin is not outlined")
+    XCTAssertTrue(QueueUI.label(app, ID.mediaMessagePrefix + "m3").hasSuffix("outlined"), "the origin is not outlined")
 
     // 15.B: the walls, each dated.
     QueueUI.element(app, ID.mediaTabPrefix + "walls").click()

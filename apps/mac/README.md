@@ -333,18 +333,20 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   drags over the thread, 2 over the rail, 6 over the list row, 3 releases,
   4 attaches, 5 pastes, 0 leaves and 9 clears the tray
 - `wemessage.media.tab.<page>`, `wemessage.media.page.<page>`: `thread`,
-  `walls` and `refusal`; `wemessage.media.header`, the thread's name, channel and handle
-- `wemessage.media.drop`: the content pane, valued `resting`, `dwelling`,
-  `targeted` or `refused`; `wemessage.media.drop.card` while targeted;
-  `wemessage.media.rail` (valued `refused` when hatched) and
+  `walls` and `refusal`; `wemessage.media.header`, the thread's name,
+  valued `y=<offset>` (a container drops its value, a Text keeps it)
+- `wemessage.media.drop`: the header's channel and handle line, valued
+  `resting`, `dwelling`, `targeted` or `refused`;
+  `wemessage.media.drop.card` while targeted; `wemessage.media.rail`
+  (labelled `Rail, refused` when hatched) and
   `wemessage.media.drop.reason`, the printed refusal (15.A)
-- `wemessage.media.thread` (valued `y=<offset>`),
-  `wemessage.media.message.<id>` (valued `outlined` after the viewer
-  closes, for D-UI-109's seconds) and `wemessage.media.item.<id>`, the
-  attachment that opens the viewer
-- `wemessage.media.tray` (valued by its header),
-  `wemessage.media.tray.item.<id>` (valued by its chip, a video always with
-  its duration), `wemessage.media.tray.remove.<id>`,
+- `wemessage.media.thread`, the scroll view,
+  `wemessage.media.message.<id>` (labelled `Message, outlined` after the
+  viewer closes, for D-UI-109's seconds) and `wemessage.media.item.<id>`,
+  the attachment that opens the viewer
+- `wemessage.media.tray` (labelled by its header),
+  `wemessage.media.tray.item.<id>` (labelled by its name and chip, a video
+  always with its duration), `wemessage.media.tray.remove.<id>`,
   `wemessage.media.conversion`, `wemessage.media.location`,
   `wemessage.media.counter`, `wemessage.media.grid` and
   `wemessage.media.compression` with `.row.<target>` (15.C, 15.D)
@@ -352,7 +354,7 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `enabled` or `inert`; the only call to the sink, which this version
   parks, D-UI-104), `wemessage.media.note`, and `wemessage.media.record`:
   the record slot, a printed reason and no control on iMessage (15.E)
-- `wemessage.media.viewer` (valued `<n> / <count>`) with
+- `wemessage.media.viewer` (labelled with `<n> / <count>`) with
   `wemessage.media.viewer.position`, `wemessage.media.viewer.meta`,
   `wemessage.media.viewer.line`, `wemessage.media.viewer.origin`,
   `wemessage.media.viewer.close`, `wemessage.media.viewer.previous`,

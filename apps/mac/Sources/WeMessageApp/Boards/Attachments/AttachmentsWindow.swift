@@ -213,8 +213,7 @@ struct MediaRail: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .overlay { if refused { Hatching(palette: palette) } }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel("Rail")
-    .accessibilityValue(refused ? "refused" : "")
+    .accessibilityLabel(refused ? "Rail, refused" : "Rail")
     .accessibilityIdentifier(ShellID.mediaRail)
   }
 }
@@ -275,7 +274,9 @@ struct MediaList: View {
   }
 }
 
-/// The thread's header: who, where, and how many attachments.
+/// The thread's header: who, where, and how many attachments. Two values
+/// ride on its two lines, because a group drops its value on macOS: the
+/// thread's offset on the name, and the drop state on the line.
 struct MediaHeader: View {
   let model: AttachmentsModel
   let palette: Tokens.Palette
@@ -285,14 +286,16 @@ struct MediaHeader: View {
       Text(model.content.recipient)
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(Tokens.color(palette.ink))
+        .accessibilityIdentifier(ShellID.mediaHeader)
+        .accessibilityValue("y=\(Int(model.scrollY))")
       Text("iMessage \u{00B7} \(ComposeModel.printed(model.content.handle)) \u{00B7} \(model.content.attachments.count) attachments")
         .font(.system(size: 11))
         .foregroundStyle(Tokens.color(palette.inkDim))
+        .accessibilityIdentifier(ShellID.mediaDrop)
+        .accessibilityValue(model.drop.state.name)
       Spacer()
     }
     .padding(.horizontal, AttachmentsWindow.margin)
     .frame(height: 40)
-    .accessibilityElement(children: .combine)
-    .accessibilityIdentifier(ShellID.mediaHeader)
   }
 }

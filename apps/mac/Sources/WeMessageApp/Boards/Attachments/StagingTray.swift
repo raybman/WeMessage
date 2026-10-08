@@ -31,8 +31,7 @@ struct StagingTrayView: View {
         }
         .frame(maxHeight: 300)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Tray")
-        .accessibilityValue(model.tray.header)
+        .accessibilityLabel(model.tray.header)
         .accessibilityIdentifier(ShellID.mediaTray)
       }
       composer
@@ -89,8 +88,7 @@ struct StagingTrayView: View {
               .frame(width: 96, alignment: .leading)
           }
           .accessibilityElement(children: .contain)
-          .accessibilityLabel(item.wireName)
-          .accessibilityValue(item.chip)
+          .accessibilityLabel(item.wireName + ", " + item.chip)
           .accessibilityIdentifier(ShellID.mediaTrayItemPrefix + item.id)
         }
       }
@@ -195,8 +193,8 @@ struct RecipientGridView: View {
       }
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Recipient grid")
-    .accessibilityValue("\(grid.columns)-up \(grid.cell), \(grid.shown) shown, +\(grid.overflow)")
+    .accessibilityAddTraits(.isImage)
+    .accessibilityLabel("Recipient grid, \(grid.columns)-up \(grid.cell), \(grid.shown) shown, +\(grid.overflow)")
     .accessibilityIdentifier(ShellID.mediaGrid)
   }
 }
@@ -224,6 +222,7 @@ struct CompressionTableView: View {
         .font(.system(size: 11).monospacedDigit())
         .foregroundStyle(Tokens.color(palette.ink))
         .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel(row.line)
         .accessibilityIdentifier(ShellID.mediaCompressionRowPrefix + String(row.target.prefix(while: { $0 != " " })).lowercased())
       }

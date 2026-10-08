@@ -110,7 +110,7 @@ struct AppearancePane: View {
       .overlay(Capsule().strokeBorder(Tokens.color(palette.inkDim), lineWidth: 1))
     }
     .padding(.vertical, 6)
-    .accessibilityElement(children: .ignore)
+    .accessibilityElement(children: .combine)
     .accessibilityLabel("Theme, follows macOS")
     .accessibilityValue("system")
     .accessibilityIdentifier(ShellID.settingsTheme)
@@ -324,10 +324,15 @@ struct ConfirmCard: View {
       Tokens.color(palette.layer0, opacity: 0.6)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 10) {
+        // The card's identity and what it asks rides on its title: a
+        // containing group drops its value on macOS.
         Text(title)
           .font(.system(size: 15, weight: .semibold))
           .foregroundStyle(Tokens.color(palette.ink))
+          .accessibilityElement(children: .combine)
           .accessibilityAddTraits(.isHeader)
+          .accessibilityIdentifier(ShellID.settingsConfirmSheet)
+          .accessibilityValue(what.rawValue)
         ForEach(lines, id: \.self) { line in
           Text(line)
             .font(.system(size: 12))
@@ -358,8 +363,6 @@ struct ConfirmCard: View {
       .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Tokens.color(palette.ink), lineWidth: 3))
       .accessibilityElement(children: .contain)
       .accessibilityLabel(title)
-      .accessibilityIdentifier(ShellID.settingsConfirmSheet)
-      .accessibilityValue(what.rawValue)
     }
   }
 }

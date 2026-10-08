@@ -198,6 +198,8 @@ struct ResolutionRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityAddTraits(.isButton)
     .accessibilityLabel(person.title + ", " + person.evidence)
+    // Ignoring children drops the Button's press; give it back.
+    .accessibilityAction { action() }
     .accessibilityIdentifier(ShellID.composeResultPrefix + person.id)
   }
 }
@@ -260,6 +262,7 @@ struct CapabilityStrip: View {
               .font(.system(size: 11, weight: slot.can ? .semibold : .regular))
               .strikethrough(!slot.can)
               .foregroundStyle(Tokens.color(slot.can ? palette.ink : palette.inkDim))
+              .accessibilityElement(children: .combine)
               .accessibilityLabel(slot.title + (slot.can ? ", can" : ", not in this version"))
               .accessibilityValue(slot.can ? "can" : "struck")
               .accessibilityIdentifier(ShellID.composeSlotPrefix + slot.id)
@@ -285,19 +288,34 @@ struct ProposalRegion: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
+      // The region's state rides on its first line: a containing group
+      // drops its value on macOS.
+      Group {
+        switch model.proposal {
+        case .empty:
+          Text("Proposal region. Empty. The input below stays yours.")
+            .font(.system(size: 11))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+        case .ready(let text):
+          Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(Tokens.color(palette.ink))
+        case .moved:
+          Text("MOVED to the composer \u{00B7} no longer a proposal")
+            .font(.system(size: 11))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+        }
+      }
+      .accessibilityElement(children: .combine)
+      .accessibilityValue(model.proposal.value)
+      .accessibilityIdentifier(ShellID.composeProposal)
       switch model.proposal {
       case .empty:
-        Text("Proposal region. Empty. The input below stays yours.")
-          .font(.system(size: 11))
-          .foregroundStyle(Tokens.color(palette.inkDim))
         SettingsButton(title: "Ask for a draft  \u{2325}\u{2318}D", palette: palette, id: ShellID.composeProposalAsk) {
           model.askForDraft()
         }
         .keyboardShortcut("d", modifiers: [.command, .option])
-      case .ready(let text):
-        Text(text)
-          .font(.system(size: 13))
-          .foregroundStyle(Tokens.color(palette.ink))
+      case .ready:
         Text("DRAFT \u{00B7} fixture text: no agent is connected in this version")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(Tokens.color(palette.inkDim))
@@ -306,9 +324,7 @@ struct ProposalRegion: View {
           SettingsButton(title: "Hold", palette: palette, id: ShellID.composeProposalHold) { model.dropProposal() }
         }
       case .moved:
-        Text("MOVED to the composer \u{00B7} no longer a proposal")
-          .font(.system(size: 11))
-          .foregroundStyle(Tokens.color(palette.inkDim))
+        EmptyView()
       }
     }
     .padding(12)
@@ -319,8 +335,6 @@ struct ProposalRegion: View {
         style: model.proposal == .empty ? BubbleStroke.placeholder : BubbleStroke.dashed))
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Proposal region")
-    .accessibilityValue(model.proposal.value)
-    .accessibilityIdentifier(ShellID.composeProposal)
   }
 }
 

@@ -46,10 +46,14 @@ struct SettingsWindow: View {
         }
         .padding(.top, ShellView.titleBand + 0.5)
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        // Under the confirm card the window is a scrim: out of the tree, so
+        // neither VoiceOver nor the audit reads what the card covers.
+        .accessibilityHidden(model.confirm != nil)
         VStack(spacing: 0) {
           band
           Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
         }
+        .accessibilityHidden(model.confirm != nil)
         if let what = model.confirm {
           ConfirmCard(model: model, what: what, palette: palette)
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -115,6 +119,8 @@ struct SettingsWindow: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(pane.title + ", " + model.stateLine(pane))
         .accessibilityValue(shown ? "shown" : "")
+        // Ignoring children drops the Button's press; give it back.
+        .accessibilityAction { model.pane = pane }
         .accessibilityIdentifier(ShellID.settingsPanePrefix + pane.rawValue)
       }
       Spacer(minLength: 0)

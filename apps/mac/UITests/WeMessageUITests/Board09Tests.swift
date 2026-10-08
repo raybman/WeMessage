@@ -84,7 +84,7 @@ final class Board09Tests: XCTestCase {
 
     // Bare Return outside the bulk card: nothing starts.
     app.typeKey(.return, modifierFlags: [])
-    Thread.sleep(forTimeInterval: 0.5)
+    try await Task.sleep(nanoseconds: 500_000_000)
     XCTAssertTrue(meta().hasPrefix("DRAFT"), "Return approved: meta reads \(meta())")
     XCTAssertFalse(QueueUI.element(app, ID.undoRing).exists, "Return started a batch")
 
@@ -143,7 +143,7 @@ final class Board09Tests: XCTestCase {
     app.typeKey("a", modifierFlags: [])
     app.typeKey("a", modifierFlags: .shift)
     app.typeKey(.return, modifierFlags: [])
-    Thread.sleep(forTimeInterval: 0.5)
+    try await Task.sleep(nanoseconds: 500_000_000)
     XCTAssertFalse(QueueUI.element(app, ID.bulkSheet).exists, "kill: shift-A opened the card")
     XCTAssertFalse(QueueUI.element(app, ID.undoRing).exists, "kill: a batch started")
     XCTAssertTrue(meta().hasPrefix("HELD by kill switch"), "kill: a key changed the draft: \(meta())")

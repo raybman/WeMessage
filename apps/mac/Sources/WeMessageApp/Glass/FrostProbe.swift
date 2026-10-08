@@ -62,6 +62,11 @@ public enum FrostProbe {
     /// it moves under the banner (`killBannerHeight`), still clear of the
     /// pane's centred text. The bottom patch stays where the shell's is.
     case banner
+    /// Board 02's kill state: a thread open under the kill banner. The
+    /// banner pushes the pane down by its height, so the thread head's top
+    /// patch moves with it, to where the banner layout's sits; the bottom
+    /// one stays in the rail, as the thread layout's does.
+    case threadBanner
   }
 
   /// The kill banner's height (KillBanner.height): the banner layout's top
@@ -88,7 +93,7 @@ public enum FrostProbe {
     case .shell: Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
     case .thread: Rect(x: windowWidth - 140, y: 58, width: patchSide, height: patchSide)
     case .atlas: atlasBandPatch
-    case .banner: Rect(x: windowWidth - 140, y: 52 + killBannerHeight + 6, width: patchSide, height: patchSide)
+    case .banner, .threadBanner: Rect(x: windowWidth - 140, y: 52 + killBannerHeight + 6, width: patchSide, height: patchSide)
     }
   }
 
@@ -96,7 +101,7 @@ public enum FrostProbe {
   public static func gradientBottom(windowWidth: Double, windowHeight: Double, layout: Layout = .shell) -> Rect {
     switch layout {
     case .shell: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
-    case .thread: Rect(x: 9, y: windowHeight - 120, width: patchSide, height: patchSide)
+    case .thread, .threadBanner: Rect(x: 9, y: windowHeight - 120, width: patchSide, height: patchSide)
     case .atlas: Rect(x: stripePatch.x, y: windowHeight - 120, width: patchSide, height: patchSide)
     case .banner: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
     }

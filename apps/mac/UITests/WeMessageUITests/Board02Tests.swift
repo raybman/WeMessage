@@ -51,11 +51,11 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     let geometry = settledGeometry(app)
     let started = Date()
-    func shoot(_ state: String) {
+    func shoot(_ state: String, _ layout: FrostProbe.Layout = .thread) {
       settle()
       capture(
         app, geometry: geometry, appearance: appearance, frost: true, name: "board-02-\(state)-\(appearance).png",
-        layout: .thread, luminance: luminance)
+        layout: layout, luminance: luminance)
     }
 
     // draft: Priya's SMS thread with sol-main's pending draft. Approve, Edit
@@ -123,7 +123,8 @@ final class Board02Tests: XCTestCase {
     XCTAssertFalse(element(app, ID.draftEdit).exists, "kill: Edit is placed under the kill switch")
     assertNoHoldUntil(app, "kill")
     XCTAssertTrue(fieldText(app).contains("ring me after 4"), "kill: the typed text was dropped: \(fieldText(app))")
-    shoot("kill")
+    // S4f: the kill banner now heads the pane and pushes the thread down.
+    shoot("kill", .threadBanner)
 
     print("BOARD02| \(appearance) states=7 seconds=\(Int(Date().timeIntervalSince(started)))")
     try await Self.assertSends(1, "at the end of the board")

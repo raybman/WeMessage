@@ -132,6 +132,38 @@ struct ComposeModelTests {
     #expect(transport.requests.isEmpty, "the proposal reached the daemon")
   }
 
+  /// Counts ticks across the model's task.
+  actor Ticks {
+    var count = 0
+    func bump() -> Int {
+      count += 1
+      return count
+    }
+  }
+
+  @Test("the window is real: a tick in, nothing is written yet, and Undo still holds")
+  func windowRuns() async throws {
+    // The first tick passes at once; the second holds until cancelled, so
+    // the window is provably open and a tick in, with no timing guess.
+    let ticks = Ticks()
+    let (model, transport) = Self.model(tick: {
+      if await ticks.bump() > 1 { try await Task.sleep(nanoseconds: 30_000_000_000) }
+    })
+    model.choose(Self.person("maya"))
+    model.body = "On my way."
+    model.send()
+    for _ in 0..<200 where model.phase != .undo(secondsLeft: 3) {
+      try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    #expect(model.phase == .undo(secondsLeft: 3), "the window did not tick: \(model.phase)")
+    #expect(transport.requests.isEmpty, "wrote inside the window: \(Self.calls(transport))")
+    model.undo()
+    await model.settle()
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(transport.requests.isEmpty, "undo a tick in still wrote: \(Self.calls(transport))")
+    #expect(model.phase == .composing)
+  }
+
   @Test("Send then Undo inside the window: nothing is written and the text is back")
   func undoWritesNothing() async throws {
     let (model, transport) = Self.model(tick: { try await Task.sleep(nanoseconds: 100_000_000) })

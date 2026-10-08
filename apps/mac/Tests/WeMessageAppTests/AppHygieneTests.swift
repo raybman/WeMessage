@@ -1214,6 +1214,11 @@ struct AppHygieneTests {
     if undoFirst == nil || create == nil || undoFirst!.lowerBound > create!.lowerBound {
       leaks.append("\(model): send() does not open the undo window before the create")
     }
+    // Opening the window is not enough: the create waits for every tick.
+    let window = send.range(of: "for left in stride(from: Self.undoSeconds - 1")
+    if window == nil || create == nil || window!.lowerBound > create!.lowerBound {
+      leaks.append("\(model): send() creates the draft before the undo window has run")
+    }
     if !Self.function("createDraft(chatGuid:", in: modelText).contains("guard !Task.isCancelled, case .undo = phase else { return }") {
       leaks.append("\(model): the create does not check the window was not undone")
     }
@@ -1255,6 +1260,7 @@ struct AppHygieneTests {
       (model, "proposal = .ready(propose(person))", "body = propose(person)"),
       (model, "guard let person else { return [] }", "let person = person ?? people[0]"),
       (model, "guard !Task.isCancelled, case .undo = phase else { return }", "guard !Task.isCancelled else { return }"),
+      (model, "      for left in stride(", "      await self.createDraft(chatGuid: guid, body: text)\n      for left in stride("),
       (views, ".foregroundStyle(Tokens.color(palette.inkDim))", ".foregroundStyle(Color." + "green)"),
       (hooks, "composeBoard = isUITest && environment", "composeBoard = environment"),
     ]

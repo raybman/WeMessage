@@ -39,23 +39,29 @@ final class AccessibilityTests: XCTestCase {
     try app.performAccessibilityAudit() { issue in
       let who = issue.element.map { "\($0.elementType.rawValue) \($0.identifier) '\($0.label)' frame=\($0.frame)" } ?? "(no element)"
       let chrome = Self.isSystemChrome(issue, in: app)
+      let editor = Self.isFieldEditor(issue, in: app)
       var measured: PixelContrast.Measurement?
+      var away = false
       if !chrome, let element = issue.element, element.exists {
         let shot = element.screenshot()
         test.add(XCTAttachment(data: shot.pngRepresentation, uniformTypeIdentifier: "public.png").kept("audit-\(element.identifier)"))
         if issue.auditType == .contrast, let image = shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
           measured = PixelContrast.measure(image)
+          if measured?.passes != true { away = Self.isScrolledAway(element, in: app) }
         }
       }
       let cleared = measured?.passes ?? false
-      let note = chrome ? " (system chrome, ignored)" : measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
+      var note = measured.map { " (pixels: \($0)\($0.passes ? ", ignored" : ""))" } ?? ""
+      if chrome { note = " (system chrome, ignored)" }
+      if editor { note = " (AppKit field editor, ignored)" }
+      if away { note += " (scrolled out of its scroll view, ignored)" }
       print("audit issue: \(issue.auditType) \(who): \(issue.compactDescription)\(note)")
       print("audit detail: \(issue.detailedDescription)")
-      if !chrome && !cleared, let element = issue.element, element.exists {
+      if !chrome && !editor && !cleared && !away, let element = issue.element, element.exists {
         // A kept issue names its element's subtree, so a red run says which view it was.
         print("audit tree: \(element.debugDescription)")
       }
-      return chrome || cleared
+      return chrome || editor || cleared || away
     }
   }
 
@@ -138,6 +144,47 @@ final class AccessibilityTests: XCTestCase {
       return fullScreen.children(matching: .group).allElementsBoundByIndex.contains { $0.frame == frame }  // 17F113
     }
     return false
+  }
+
+  /// v2 S4i, run 37756434645: while one of board 11's text fields holds the
+  /// keyboard, the audit raises one "Parent/Child mismatch" that names no
+  /// element. The same run audited boards 02, 06, 08, 09, 10 and 12 (the
+  /// composer is a text view, not a field) without it, and raised it in
+  /// both board 11 audits, each with a field focused: it is AppKit's field
+  /// editor, the text view a focused NSTextField borrows, which XCUI cannot
+  /// resolve to an element. It matches only with no element, that exact
+  /// description, and keyboard focus on one of the three named fields.
+  @MainActor
+  static func isFieldEditor(_ issue: XCUIAccessibilityAuditIssue, in app: XCUIApplication) -> Bool {
+    guard issue.element == nil, issue.auditType == .parentChild,
+      issue.compactDescription == "Parent/Child mismatch"
+    else { return false }
+    let fields = [ID.searchField, ID.findField, ID.switcherField]
+    let focused = app.textFields.matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+    return focused.exists && fields.contains(focused.identifier)
+  }
+
+  /// v2 S4i, run 37756434645: with a thread scrolled to a find match, a
+  /// transcript label below the scroll view's edge is still in the tree,
+  /// and its screenshot is whatever is drawn over that spot (the channel
+  /// banner). A contrast issue is set aside here only when the element is
+  /// a descendant of a scroll view, by frame, and not wholly inside that
+  /// scroll view's visible frame: nobody can read it there, and board 02's
+  /// audit reads the same labels in view.
+  @MainActor
+  static func isScrolledAway(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+    let frame = element.frame
+    guard !frame.isEmpty else { return false }
+    var inside = false
+    for scroll in app.scrollViews.allElementsBoundByIndex where !inside && !scroll.frame.contains(frame) {
+      guard let tree = try? scroll.snapshot() else { continue }
+      var queue: [XCUIElementSnapshot] = tree.children
+      while !inside, let node = queue.popLast() {
+        inside = node.frame == frame && node.elementType == element.elementType
+        queue.append(contentsOf: node.children)
+      }
+    }
+    return inside
   }
 
   /// The element that has keyboard focus now, by identifier ("" when it has none).

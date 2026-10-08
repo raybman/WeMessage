@@ -245,9 +245,12 @@ struct TokenChipView: View {
         Capsule().strokeBorder(Tokens.color(palette.ink), style: BubbleStroke.placeholder)
       }
     }
-    .accessibilityElement(children: .contain)
+    // One element: a container's value never reaches AX on macOS (run
+    // 37756434645 read "" on every chip), and its x stays a named action.
+    .accessibilityElement(children: .ignore)
     .accessibilityLabel(spoken)
     .accessibilityValue(chip.parsed ? "parsed" : "unparsed")
+    .accessibilityAction(named: "Remove") { remove() }
     .accessibilityIdentifier(ShellID.searchTokenPrefix + String(chip.id))
   }
 }
@@ -405,6 +408,8 @@ struct ResultRow: View {
     .accessibilityAddTraits(.isButton)
     .accessibilityLabel(spoken)
     .accessibilityValue(selected ? "selected" : "")
+    // Ignoring children drops the Button's press; give it back.
+    .accessibilityAction { open() }
     .accessibilityIdentifier(ShellID.searchResultPrefix + hit.id)
   }
 }
@@ -605,6 +610,7 @@ struct SwitcherRow: View {
     .accessibilityAddTraits(.isButton)
     .accessibilityLabel(spoken)
     .accessibilityValue(selected ? "selected" : "")
+    .accessibilityAction { open() }
     .accessibilityIdentifier(ShellID.switcherRowPrefix + row.id)
   }
 }

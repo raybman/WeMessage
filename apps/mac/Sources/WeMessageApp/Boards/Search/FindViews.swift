@@ -42,9 +42,11 @@ struct FindBar: View {
         }
         .accessibilityLabel("Find in this thread")
         .accessibilityIdentifier(ShellID.findField)
+      // Ink, not inkDim: "2 of 4" in 10 pt dim drew one full-ink pixel
+      // on the 1x runner (run 37756434645).
       Text(find.counter)
-        .font(.system(size: 10, design: .monospaced))
-        .foregroundStyle(Tokens.color(palette.inkDim))
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundStyle(Tokens.color(palette.ink))
         .lineLimit(1)
         .fixedSize()
         .accessibilityLabel(find.counter.isEmpty ? "No search" : find.counter)
@@ -179,6 +181,7 @@ struct YearRow: View {
     .accessibilityAddTraits(.isButton)
     .accessibilityLabel(spoken)
     .accessibilityValue(state)
+    .accessibilityAction { choose() }
     .accessibilityIdentifier(identifier)
   }
 }

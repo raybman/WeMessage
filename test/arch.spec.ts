@@ -14061,8 +14061,40 @@ describe('v2 S1: the Swift tree', () => {
     const returns = handler.match(/\breturn\b[^\n]*/g) ?? [];
     // R-A13c: the one other way out is a contrast issue whose own pixels
     // clear WCAG AA (see the PixelContrast row below).
-    expect(returns).toEqual(['return chrome || cleared']);
+    // v2 S4i adds two more ways out, each pinned below: AppKit's field
+    // editor under a focused board 11 field, and a contrast issue on a
+    // label its own scroll view has scrolled out of sight (run 37756434645).
+    expect(returns).toEqual(['return chrome || editor || cleared || away']);
     expect(handler).toContain('Self.isSystemChrome(issue, in: app)');
+    expect(handler).toContain(
+      'let editor = Self.isFieldEditor(issue, in: app)',
+    );
+    // `away` is only ever asked after a contrast issue's own pixels failed.
+    expect(handler).toContain(
+      'if measured?.passes != true { away = Self.isScrolledAway(element, in: app) }',
+    );
+    expect(handler.match(/away = Self\./g) ?? []).toHaveLength(1);
+    const editorHelper =
+      /static func isFieldEditor[\s\S]*?\n {2}\}/.exec(a11y)?.[0] ?? '';
+    for (const needed of [
+      'issue.element == nil',
+      'issue.auditType == .parentChild',
+      'issue.compactDescription == "Parent/Child mismatch"',
+      '[ID.searchField, ID.findField, ID.switcherField]',
+      'hasKeyboardFocus == true',
+      'fields.contains(focused.identifier)',
+    ])
+      expect([needed, editorHelper.includes(needed)]).toEqual([needed, true]);
+    expect(editorHelper).not.toMatch(/return true/);
+    const awayHelper =
+      /static func isScrolledAway[\s\S]*?\n {2}\}/.exec(a11y)?.[0] ?? '';
+    for (const needed of [
+      'app.scrollViews',
+      '!scroll.frame.contains(frame)',
+      'node.frame == frame && node.elementType == element.elementType',
+    ])
+      expect([needed, awayHelper.includes(needed)]).toEqual([needed, true]);
+    expect(awayHelper).not.toMatch(/return true/);
     const helper =
       /static func isSystemChrome[\s\S]*?\n {2}\}/.exec(a11y)?.[0] ?? '';
     for (const needed of [

@@ -971,6 +971,12 @@ struct AppHygieneTests {
       }
     }
     if swept < 5 { leaks.append("swept \(swept) board 11 files") }
+    // A match is told by weight and an underline, never by a hue: the
+    // highlight sets no colour of any kind (S4i tooth 3).
+    let views = searchDir + "SearchViews.swift"
+    let styled = function("styled(", in: text(views)).components(separatedBy: "\n  }\n").first ?? ""
+    if !styled.contains("run.underlineStyle = .single") { leaks.append("\(views): the highlight lost its underline") }
+    if styled.contains("Color") || styled.contains("Tokens.") { leaks.append("\(views): the highlight sets a colour") }
     // The outlines a jump and find draw over bubbles are ink too.
     let outline = text(transcript).components(separatedBy: "struct Board11" + "Outline").dropFirst().first?
       .components(separatedBy: "\n}\n").first ?? ""
@@ -1011,6 +1017,7 @@ struct AppHygieneTests {
     let swaps: [(String, String, String)] = [
       (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foregroundColor = ." + "green"),
       (views, "run.underlineStyle = .single", "run.background" + "Color = .yellow"),
+      (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foreground" + "Color = Tokens.color(palette.ok)"),
       (model, "guard case .ok(let page)? = try? await client.listThreads()", "_ = try? await client.send" + "(to: \"x\")"),
       (model, "public func load() async -> SearchCorpus {", "public func load() async -> SearchCorpus {\n    _ = File" + "Manager.default"),
       (transcript, ".strokeBorder(Tokens.color(palette.ink), lineWidth: width)", ".strokeBorder(Tokens." + "tint, lineWidth: width)"),

@@ -95,7 +95,7 @@ struct OSLayerRoot: View {
   @ViewBuilder
   private var content: some View {
     if page == .menu {
-      MenuReadback(lines: hub.menuDump, palette: palette)
+      MenuReadback(lines: hub.menuDump, installs: hub.menuInstalls, palette: palette)
         .padding(16)
     } else {
       HStack(alignment: .top, spacing: 24) {
@@ -172,6 +172,7 @@ private struct SidePanel: View {
         }
       }
       .accessibilityElement(children: .ignore)
+      .accessibilityAddTraits(.isStaticText)
       .accessibilityLabel("Dock badge " + (badge ?? "none") + ". " + lines.map(\.title).joined(separator: "; "))
       .accessibilityIdentifier(ShellID.osLayerDock)
       heading("NOTIFICATIONS")
@@ -191,11 +192,12 @@ private struct SidePanel: View {
 /// The live main menu, as the delegate read it back from the application.
 private struct MenuReadback: View {
   let lines: [String]
+  let installs: Int
   let palette: Tokens.Palette
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("\(lines.count) menu items, read back from the installed main menu")
+      Text("\(lines.count) menu items, read back from the installed main menu (installed \(installs)x)")
         .font(.system(size: 12, weight: .semibold))
         .foregroundStyle(Tokens.color(palette.ink))
         .accessibilityElement(children: .ignore)

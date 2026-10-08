@@ -373,10 +373,11 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   notification center. `wemessage.oslayer.tab.<page>` (`healthy`,
   `degraded`, `killed`, `confirm`, `menu`, valued `shown`);
   `wemessage.oslayer.glyph.<state>`, the extra's five glyphs, labelled by
-  what VoiceOver says; `wemessage.oslayer.dock`, labelled `Dock badge
-  <n|none>. <lines>`; `wemessage.oslayer.menu`, labelled by the live main
-  menu read back from the application, one `path | id | title | chord |
-  state` line per item (16.A, 16.E, 16.F, 16.G)
+  what VoiceOver says; `wemessage.oslayer.dock`, labelled
+  `Dock badge <n|none>. <lines>`; `wemessage.oslayer.menu`, labelled by
+  the live main menu read back from the application, one
+  `path | id | title | chord | state` line per item (16.A, 16.E, 16.F,
+  16.G)
 - `wemessage.popover` (labelled `healthy`, `degraded`, `killed` or
   `disconnected`, plus ` confirm` while the kill confirm is up) with
   `wemessage.popover.title`, `wemessage.popover.stamp`,

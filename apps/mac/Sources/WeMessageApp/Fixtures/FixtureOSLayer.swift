@@ -61,10 +61,11 @@ enum FixtureOSLayer {
       entries: entries, sources: liveSources, oldestSync: "1m ago", killedSince: "16:42:19")
   }
 
-  /// One snapshot per extra state, for the glyph strip.
+  /// One snapshot per extra state, for the glyph strip; twelve waiting, so
+  /// the strip shows the menu bar's 9+ cap.
   static let states: [(StatusState, OSSnapshot)] = [
     (.idle, OSSnapshot(count: 0, fresh: true, connected: true, killed: false)),
-    (.waiting, OSSnapshot(count: 9, fresh: true, connected: true, killed: false)),
+    (.waiting, OSSnapshot(count: 12, fresh: true, connected: true, killed: false)),
     (.degraded, OSSnapshot(count: 9, fresh: false, connected: true, killed: false)),
     (.killed, OSSnapshot(count: 9, fresh: true, connected: true, killed: true)),
     (.disconnected, OSSnapshot(count: 9, fresh: true, connected: false, killed: false)),

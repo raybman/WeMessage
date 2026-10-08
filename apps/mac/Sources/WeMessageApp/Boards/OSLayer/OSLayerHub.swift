@@ -30,6 +30,8 @@ final class OSLayerHub {
   /// Under the UI-test flag only: the live main menu, as the delegate read
   /// it back from the application (testMenuTitlesAndIds).
   var menuDump: [String] = []
+  /// Under the UI-test flag only: how many times the table was installed.
+  var menuInstalls = 0
 
   /// Commands by id. The window registers its own when it is shown.
   private var handlers: [String: @MainActor () -> Void] = [:]

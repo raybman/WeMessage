@@ -15,8 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var backdrop: BackdropWindow?
   /// v2 S4l, board 16: the main menu this delegate installed, the context
   /// it was built for, and the extra (never made under the UI-test flag).
-  private var installedMenu: NSMenu?
   private var installedContext: MenuContext?
+  /// The top-level ids of the table as last installed, and when.
+  private var installedTop: [String] = []
+  private var lastInstall = Date.distantPast
+  private var retryQueued = false
   private var statusItem: StatusItemController?
 
   func applicationDidFinishLaunching(_ note: Notification) {
@@ -123,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if TestHooks.osLayerBoard {
       // Read the menu back after SwiftUI has had its turn at it.
       Task { @MainActor in
-        for _ in 0..<5 {
+        for _ in 0..<20 {
           try? await Task.sleep(for: .milliseconds(400))
           self.installMenuIfReplaced()
         }
@@ -131,23 +134,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  /// SwiftUI refills the main menu with its own items when a scene
+  /// updates (run 37839556829 read back one WeMessage item with no id, and
+  /// the bar showed SwiftUI's WeMessage, View, Window and Help, while the
+  /// identity check saw nothing to do). So the table's items are moved into
+  /// whatever menu is current, and the menu is judged by its top-level ids,
+  /// not by identity.
   private func installMenu() {
     let context = OSLayerHub.shared.menuContext
-    let menu = MenuBuilder.build(AppMenu.top(context))
-    NSApp.mainMenu = menu
+    let built = MenuBuilder.build(AppMenu.top(context))
+    let menu: NSMenu
+    if let current = NSApp.mainMenu {
+      let items = built.items
+      built.removeAllItems()
+      current.removeAllItems()
+      for item in items { current.addItem(item) }
+      menu = current
+    } else {
+      NSApp.mainMenu = built
+      menu = built
+    }
     if let services = menu.items.first?.submenu?.items.first(where: { $0.identifier?.rawValue == "app:services" }) {
       NSApp.servicesMenu = services.submenu
     }
-    installedMenu = menu
     installedContext = context
-    if TestHooks.osLayerBoard { OSLayerHub.shared.menuDump = MenuBuilder.dump(NSApp.mainMenu) }
+    installedTop = Self.topIds(menu)
+    lastInstall = Date()
+    if TestHooks.osLayerBoard {
+      OSLayerHub.shared.menuInstalls += 1
+      OSLayerHub.shared.menuDump = MenuBuilder.dump(NSApp.mainMenu)
+    }
   }
 
-  /// SwiftUI may put its own menu back when a scene changes: the table
-  /// wins, every time.
+  private static func topIds(_ menu: NSMenu?) -> [String] {
+    (menu?.items ?? []).map { $0.identifier?.rawValue ?? "" }
+  }
+
+  /// The table wins, every time SwiftUI has had a turn; at most four times
+  /// a second, so the two can never spin against each other.
   private func installMenuIfReplaced() {
-    if NSApp.mainMenu !== installedMenu || installedContext != OSLayerHub.shared.menuContext {
-      installMenu()
+    let replaced = installedTop.isEmpty || Self.topIds(NSApp.mainMenu) != installedTop
+    if replaced || installedContext != OSLayerHub.shared.menuContext {
+      if Date().timeIntervalSince(lastInstall) > 0.25 {
+        installMenu()
+      } else if !retryQueued {
+        retryQueued = true
+        Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(300))
+          self.retryQueued = false
+          self.installMenuIfReplaced()
+        }
+      }
     } else if TestHooks.osLayerBoard {
       let dump = MenuBuilder.dump(NSApp.mainMenu)
       if dump != OSLayerHub.shared.menuDump { OSLayerHub.shared.menuDump = dump }

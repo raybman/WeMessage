@@ -148,6 +148,7 @@ struct PopoverView: View {
               Spacer(minLength: 0)
             }
             .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
             .accessibilityLabel(source.printed)
             .accessibilityIdentifier(ShellID.popoverSourcePrefix + source.channel.lowercased())
           }
@@ -181,6 +182,7 @@ struct PopoverView: View {
       }
     }
     .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(.isStaticText)
     .accessibilityLabel(content.notes.joined(separator: " "))
     .accessibilityIdentifier(ShellID.popoverNotes)
   }

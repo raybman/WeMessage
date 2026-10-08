@@ -83,7 +83,8 @@ struct ProgressTests {
     #expect(folder.standardizedFileURL.path.hasPrefix(temp))
     #expect(folder.lastPathComponent.hasPrefix(ProvisionalUI.cardTestExportFolder + "-"))
     #expect(!ShareCardExport.refused(folder))
-    #expect(ShareCardExport.refused(URL(fileURLWithPath: "/Users/someone/Downloads/card.png")))
-    #expect(ShareCardExport.refused(URL(fileURLWithPath: "/Users/someone/Desktop")))
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    #expect(ShareCardExport.refused(home.appendingPathComponent("Downloads/card.png")))
+    #expect(ShareCardExport.refused(home.appendingPathComponent("Desktop", isDirectory: true)))
   }
 }

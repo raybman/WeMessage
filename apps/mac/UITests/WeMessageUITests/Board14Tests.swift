@@ -128,7 +128,7 @@ final class Board14Tests: XCTestCase {
     shot("undo")
     undo.click()
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.composeBubble).exists }, "undo left the bubble up")
-    Thread.sleep(forTimeInterval: 4.5)
+    try await Task.sleep(for: .milliseconds(4500))
     seen = try await writes()
     XCTAssertEqual(seen, [], "undo still created a draft")
     XCTAssertEqual(QueueUI.value(app, ID.composeField), Self.proposal, "undo lost the text")

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import WeMessageKit
 
 /// The appearance a UI test asks for through WEMESSAGE_UI_APPEARANCE.
 public enum Appearance: String, Sendable {
@@ -66,6 +67,19 @@ enum TestHooks {
   /// shipped thread in this version (D-UI-102, H-S4-11).
   static private(set) var attachmentsBoard = false
 
+  /// Board 16's OS layer, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=16: the popover's content view, the extra's five
+  /// glyphs and the Dock menu in a window of their own over fixtures
+  /// (D-UI-112). No status item is made and nothing posts.
+  static private(set) var osLayerBoard = false
+
+  /// Board 16's popover inputs (healthy, degraded, killed) and the glyph
+  /// strip's five snapshots: fixtures in this version (D-UI-112).
+  static var osLayerInputs: (healthy: PopoverInput, degraded: PopoverInput, killed: PopoverInput) {
+    (FixtureOSLayer.healthy, FixtureOSLayer.degraded, FixtureOSLayer.killed)
+  }
+  static var osLayerStates: [(StatusState, OSSnapshot)] { FixtureOSLayer.states }
+
   /// Board 15's thread and the files its doors bring: fixtures in this
   /// version (D-UI-103).
   static var mediaContent: MediaContent { FixtureAttachments.content() }
@@ -88,6 +102,7 @@ enum TestHooks {
     settingsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "13"
     composeBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "14"
     attachmentsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "15"
+    osLayerBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "16"
   }
 
   /// The flag returns first: under it the store is memory and the seam the

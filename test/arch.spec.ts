@@ -13454,12 +13454,27 @@ describe('v2 S1: the Swift tree', () => {
       'WeMessageKit',
     ];
     const contactsHome = `${APP_SOURCES}/Models/ContactsAvatarProvider.swift`;
+    // v2 S4l: UserNotifications is imported by the board 16 notifications
+    // file and nothing else (AppHygiene H-A1 and H-S4-12).
+    const notesHome = `${APP_SOURCES}/Boards/OSLayer/Notifications.swift`;
     expect(
       offendingImports(
-        app.filter((f) => f !== contactsHome),
+        app.filter((f) => f !== contactsHome && f !== notesHome),
         new Set(uiFrameworks),
       ),
     ).toEqual([]);
+    expect(app).toContain(notesHome);
+    expect(
+      offendingImports(
+        [notesHome],
+        new Set([...uiFrameworks, 'UserNotifications']),
+      ),
+    ).toEqual([]);
+    expect(
+      app.filter((f) =>
+        swiftImports(archRead(f)).includes('UserNotifications'),
+      ),
+    ).toEqual([notesHome]);
     // v2 S4g: Contacts is imported by the avatar provider and nothing else,
     // so the one file that can reach the contacts store is the one the
     // AppHygiene H-S4-5 row guards.

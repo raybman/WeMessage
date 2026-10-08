@@ -242,6 +242,34 @@ enum ID {
   static let mediaRefusal = "wemessage.media.refusal"
   static let mediaRefusalPartPrefix = "wemessage.media.refusal.part."
   static let mediaRefusalTake = "wemessage.media.refusal.take"
+  // v2 S4l, board 16: the OS layer, reachable only with WEMESSAGE_UI_BOARD=16
+  // under the UI-test flag (D-UI-112). The board window and its tabs (this
+  // prefix and healthy, degraded, killed, confirm, menu), the popover
+  // (label its mode), its title, stamp and line, a row per entry (this
+  // prefix and the entry id), the more line, a source line per channel
+  // (this prefix and the channel), the notes, the fixed footer's three
+  // items, the extra's glyph per state (this prefix and the state, label
+  // its spoken words), the Dock badge and menu, the live main menu read
+  // back (label its lines), and the kill confirm with Engage and Cancel.
+  static let osLayer = "wemessage.oslayer"
+  static let osLayerTabPrefix = "wemessage.oslayer.tab."
+  static let osLayerGlyphPrefix = "wemessage.oslayer.glyph."
+  static let osLayerDock = "wemessage.oslayer.dock"
+  static let osLayerMenu = "wemessage.oslayer.menu"
+  static let popover = "wemessage.popover"
+  static let popoverTitle = "wemessage.popover.title"
+  static let popoverStamp = "wemessage.popover.stamp"
+  static let popoverLine = "wemessage.popover.line"
+  static let popoverRowPrefix = "wemessage.popover.row."
+  static let popoverMore = "wemessage.popover.more"
+  static let popoverSourcePrefix = "wemessage.popover.source."
+  static let popoverNotes = "wemessage.popover.notes"
+  static let popoverOpen = "wemessage.popover.open"
+  static let popoverKill = "wemessage.popover.kill"
+  static let popoverSettings = "wemessage.popover.settings"
+  static let killConfirm = "wemessage.killconfirm"
+  static let killConfirmEngage = "wemessage.killconfirm.engage"
+  static let killConfirmCancel = "wemessage.killconfirm.cancel"
   static let mediaMatrixPrefix = "wemessage.media.matrix."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }

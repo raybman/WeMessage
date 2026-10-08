@@ -243,6 +243,34 @@ enum ShellID {
   static let mediaRefusal = "wemessage.media.refusal"
   static let mediaRefusalPartPrefix = "wemessage.media.refusal.part."
   static let mediaRefusalTake = "wemessage.media.refusal.take"
+  // v2 S4l, board 16: the OS layer, reachable only with WEMESSAGE_UI_BOARD=16
+  // under the UI-test flag (D-UI-112). The board window and its tabs (this
+  // prefix and healthy, degraded, killed, confirm, menu), the popover
+  // (label its mode), its title, stamp and line, a row per entry (this
+  // prefix and the entry id), the more line, a source line per channel
+  // (this prefix and the channel), the notes, the fixed footer's three
+  // items, the extra's glyph per state (this prefix and the state, label
+  // its spoken words), the Dock badge and menu, the live main menu read
+  // back (label its lines), and the kill confirm with Engage and Cancel.
+  static let osLayer = "wemessage.oslayer"
+  static let osLayerTabPrefix = "wemessage.oslayer.tab."
+  static let osLayerGlyphPrefix = "wemessage.oslayer.glyph."
+  static let osLayerDock = "wemessage.oslayer.dock"
+  static let osLayerMenu = "wemessage.oslayer.menu"
+  static let popover = "wemessage.popover"
+  static let popoverTitle = "wemessage.popover.title"
+  static let popoverStamp = "wemessage.popover.stamp"
+  static let popoverLine = "wemessage.popover.line"
+  static let popoverRowPrefix = "wemessage.popover.row."
+  static let popoverMore = "wemessage.popover.more"
+  static let popoverSourcePrefix = "wemessage.popover.source."
+  static let popoverNotes = "wemessage.popover.notes"
+  static let popoverOpen = "wemessage.popover.open"
+  static let popoverKill = "wemessage.popover.kill"
+  static let popoverSettings = "wemessage.popover.settings"
+  static let killConfirm = "wemessage.killconfirm"
+  static let killConfirmEngage = "wemessage.killconfirm.engage"
+  static let killConfirmCancel = "wemessage.killconfirm.cancel"
   static let mediaMatrixPrefix = "wemessage.media.matrix."
   // v2 S4h, board 12: onboarding. The window, its step counter, and a page
   // per step (this prefix and the step's slug: 1, 2a, 2b, 2c, 2c-copy, 3,
@@ -324,6 +352,8 @@ struct ShellView: View {
   @State private var model = ShellModel(client: GatewayClient(), avatars: AvatarBook(provider: TestHooks.avatarProvider()))
   /// The system's display options, with a UI test's forced values on top.
   @State private var mirror = AccessibilityMirror.live()
+  /// v2 S4l, board 16: the OS layer reads what this window pushes.
+  @State private var hub = OSLayerHub.shared
   @Environment(\.colorScheme) private var scheme
   /// 12.I: the first thread after onboarding. The rail has words until its
   /// first tile click, and the coach row sits under the panes until its
@@ -410,6 +440,20 @@ struct ShellView: View {
     // frame, never a mid-transition one (H-S1).
     .transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }
     .task { model.start() }
+    // Board 16: the extra, the Dock and the main menu read one snapshot,
+    // and their commands reach this model through the hub.
+    .onAppear { model.bindOSLayer(hub) }
+    .onChange(of: model.osSnapshot, initial: true) { _, now in hub.snapshot = now }
+    .onChange(of: model.popoverInput, initial: true) { _, now in hub.popover = now }
+    .onChange(of: model.menuContext, initial: true) { _, now in hub.menuContext = now }
+    .sheet(isPresented: $hub.killConfirmShown) {
+      KillConfirmView(
+        held: model.state.queue.filter { $0.state == .pending }.count, palette: palette,
+        onEngage: { hub.perform("kill:engage") }, onCancel: { hub.perform("kill:cancel") }
+      )
+      .padding(18)
+      .frame(width: 400)
+    }
   }
 }
 

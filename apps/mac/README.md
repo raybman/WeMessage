@@ -367,6 +367,28 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.media.refusal` with `.part.1` to `.part.4`,
   `wemessage.media.refusal.take` (moves the words, sends nothing), and
   `wemessage.media.matrix.<n>` (15.B, 15.H, D-UI-111)
+- `wemessage.oslayer`: board 16's OS layer window, under the UI-test flag
+  with `WEMESSAGE_UI_BOARD=16` only (D-UI-112). It builds no client, makes
+  no status item, sets no Dock badge and registers nothing with the
+  notification center. `wemessage.oslayer.tab.<page>` (`healthy`,
+  `degraded`, `killed`, `confirm`, `menu`, valued `shown`);
+  `wemessage.oslayer.glyph.<state>`, the extra's five glyphs, labelled by
+  what VoiceOver says; `wemessage.oslayer.dock`, labelled `Dock badge
+  <n|none>. <lines>`; `wemessage.oslayer.menu`, labelled by the live main
+  menu read back from the application, one `path | id | title | chord |
+  state` line per item (16.A, 16.E, 16.F, 16.G)
+- `wemessage.popover` (labelled `healthy`, `degraded`, `killed` or
+  `disconnected`, plus ` confirm` while the kill confirm is up) with
+  `wemessage.popover.title`, `wemessage.popover.stamp`,
+  `wemessage.popover.line`, `wemessage.popover.row.<id>` (at most four,
+  drafts first, D-UI-114), `wemessage.popover.more`,
+  `wemessage.popover.source.<channel>` (degraded only),
+  `wemessage.popover.notes`, and the fixed footer
+  `wemessage.popover.open`, `wemessage.popover.kill` and
+  `wemessage.popover.settings` (16.B)
+- `wemessage.killconfirm` with `wemessage.killconfirm.engage` and
+  `wemessage.killconfirm.cancel`: Esc cancels, nothing binds Return, and
+  Engage is never the default button (16.H)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

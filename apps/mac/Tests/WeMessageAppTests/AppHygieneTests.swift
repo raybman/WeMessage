@@ -100,6 +100,11 @@ struct AppHygieneTests {
     "wemessage.media.viewer.close", "wemessage.media.viewer.previous", "wemessage.media.viewer.next",
     "wemessage.media.viewer.kinds", "wemessage.media.viewer.save", "wemessage.media.viewer.reveal",
     "wemessage.media.viewer.copy", "wemessage.media.refusal", "wemessage.media.refusal.take",
+    // v2 S4l, board 16.
+    "wemessage.oslayer", "wemessage.oslayer.dock", "wemessage.oslayer.menu", "wemessage.popover",
+    "wemessage.popover.title", "wemessage.popover.stamp", "wemessage.popover.line", "wemessage.popover.more",
+    "wemessage.popover.notes", "wemessage.popover.open", "wemessage.popover.kill", "wemessage.popover.settings",
+    "wemessage.killconfirm", "wemessage.killconfirm.engage", "wemessage.killconfirm.cancel",
   ]
 
   static let nsApp = "NS" + "App"
@@ -144,18 +149,27 @@ struct AppHygieneTests {
   static let contactsFile = appDir + "/Models/ContactsAvatarProvider.swift"
   static let contactsModule = "Con" + "tacts"
 
-  @Test("H-A1: every file under Sources/WeMessageApp imports only Foundation, SwiftUI, AppKit, Observation and WeMessageKit; Contacts only in ContactsAvatarProvider.swift")
+  /// v2 S4l: the one file that may reach the notification center.
+  static let notesFile = appDir + "/Boards/OSLayer/Notifications.swift"
+  static let notesModule = "User" + "Notifications"
+
+  @Test("H-A1: every file under Sources/WeMessageApp imports only Foundation, SwiftUI, AppKit, Observation and WeMessageKit; Contacts only in ContactsAvatarProvider.swift; UserNotifications only in Notifications.swift")
   func importRule() throws {
     let files = try Self.sources(Self.appDir)
     #expect(files.count >= 6)
     var contacts: [String] = []
+    var notes: [String] = []
     for (path, text) in files {
       let modules = Set(try Self.imports(text))
-      let allowed = path == Self.contactsFile ? Self.allowedImports.union([Self.contactsModule]) : Self.allowedImports
+      var allowed = Self.allowedImports
+      if path == Self.contactsFile { allowed.insert(Self.contactsModule) }
+      if path == Self.notesFile { allowed.insert(Self.notesModule) }
       #expect(modules.isSubset(of: allowed), "\(path) imports \(modules.subtracting(allowed).sorted())")
       if modules.contains(Self.contactsModule) { contacts.append(path) }
+      if modules.contains(Self.notesModule) { notes.append(path) }
     }
     #expect(contacts == [Self.contactsFile], "Contacts imported by \(contacts)")
+    #expect(notes == [Self.notesFile], "UserNotifications imported by \(notes)")
   }
 
   @Test("H-A2: no file under Sources/WeMessageApp or UITests names the daemon host, a spawn, a signal, a new session or Combine")
@@ -384,8 +398,9 @@ struct AppHygieneTests {
   /// (where boards 06 and 09 leave a choice open), and S4g's 54..57 (the
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
-  /// S4h2's 69..78 (the same for board 12).
-  static let dUIKeys = (1...111).map { "D-UI-\($0)" }
+  /// S4h2's 69..78 (the same for board 12), and on to S4l's 112..120
+  /// (the OS layer, board 16).
+  static let dUIKeys = (1...120).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -402,11 +417,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..111, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..120, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..111 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..120 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -414,7 +429,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...111), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...120), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1393,6 +1408,133 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.mediaLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+
+  // MARK: S4l
+
+  static let kitDir = "apps/mac/Sources/WeMessageKit"
+  static let kitTestsDir = "apps/mac/Tests/WeMessageKitTests"
+
+  /// The H-S4-12 verdicts over (path, text) pairs of the app, kit, test and
+  /// UI test sources: no inline reply anywhere (the word for it is never
+  /// spelled and no action takes text); the notification center is reached
+  /// from Notifications.swift alone, through switches with no default, and
+  /// nothing outranks Focus; the extra, the Dock badge and the system poster
+  /// are made only outside the UI-test flag; board 16 holds no client and
+  /// names no route; nothing is green; and the board opens only with 16
+  /// under the flag.
+  static func osLayerLeaks(_ files: [(String, String)]) -> [String] {
+    let dir = appDir + "/Boards/OSLayer/"
+    let notes = notesFile
+    let statusFile = dir + "StatusItemController.swift"
+    let delegate = appDir + "/AppDelegate.swift"
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let kitFiles = [kitDir + "/Boards/OSLayer.swift", kitDir + "/Boards/AppMenu.swift"]
+    let reply = "has" + "Reply"
+    let textAction = "UNTextInput" + "NotificationAction"
+    let center = "UNUser" + "NotificationCenter"
+    let writes = ["client", "GatewayClient", "Outbound.", "/v1/", "URLSession", "httpMethod", "\"POST\"", "approve" + "Draft("]
+    let colours = ["." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent"]
+    let extra = "StatusItem" + "Controller("
+    let poster = "System" + "Poster("
+    let loud = ["." + "timeSensitive", "." + "critical", "criticalAlert", "provisional" + "Authorization"]
+    var leaks: [String] = []
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    let code = { (source: String) in
+      source.split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+        .joined(separator: "\n")
+    }
+    var swept = 0
+    for (path, source) in files {
+      if source.contains(reply) { leaks.append("\(path): \(reply)") }
+      let body = code(source)
+      if path != notes {
+        for token in [textAction, center] where body.contains(token) { leaks.append("\(path): names \(token)") }
+        if body.contains(poster) && path != delegate { leaks.append("\(path): builds the system poster") }
+      }
+      if body.contains(extra) && path != delegate && path != statusFile {
+        leaks.append("\(path): builds the extra")
+      }
+      if body.contains("NSStatus" + "Bar") && path != statusFile { leaks.append("\(path): names the status bar") }
+      if body.contains("dock" + "Tile") && path != delegate { leaks.append("\(path): marks the Dock") }
+      if path.hasPrefix(dir) || kitFiles.contains(path) {
+        swept += 1
+        for token in writes + colours + loud where body.contains(token) { leaks.append("\(path): \(token)") }
+      }
+    }
+    if swept < 8 { leaks.append("swept \(swept) board 16 files") }
+    // The one door to the notification center: no text, no default.
+    let notesCode = code(text(notes))
+    if notesCode.components(separatedBy: textAction).count != 2 || !notesCode.contains("$0 is " + textAction) {
+      leaks.append("\(notes): a text action is named other than in the refusal check")
+    }
+    if notesCode.contains("default:") || notesCode.contains("@unknown") { leaks.append("\(notes): a switch has a default") }
+    for name in ["action(_ action: NotificationAction)", "route(_ actionId: String"] {
+      let body = Self.function(name, in: notesCode)
+      if !body.contains("switch action {") { leaks.append("\(notes): \(name) does not switch over the union") }
+    }
+    for token in loud where notesCode.contains(token) { leaks.append("\(notes): \(token)") }
+    if !notesCode.contains("content.interruptionLevel = .active") { leaks.append("\(notes): the level is not active") }
+    // The delegate: the extra, the poster and the badge sit behind the flag.
+    let delegateCode = code(text(delegate))
+    let start = Self.function("startOSLayer()", in: delegateCode)
+    let gate =
+      "    if !TestHooks.isUITest {\n      statusItem = " + extra + "hub: hub) { self.showWindow() }\n"
+      + "      if Bundle.main.bundleIdentifier != nil {\n        Notifications.poster = " + poster + "center: .current())\n"
+    if !start.contains(gate) { leaks.append("\(delegate): the extra or the poster is made under the flag") }
+    if delegateCode.components(separatedBy: extra).count != 2
+      || delegateCode.components(separatedBy: poster).count != 2
+    {
+      leaks.append("\(delegate): the extra or the poster is made more than once")
+    }
+    let badge = delegateCode.split(separator: "\n").filter { $0.contains("dock" + "Tile") }
+    if badge.count != 1 || !(badge.first ?? "").contains("if !TestHooks.isUITest { " + nsApp + ".dock" + "Tile.badgeLabel = OSLayer.dockBadge(") {
+      leaks.append("\(delegate): the Dock badge is set under the flag or not from OSLayer.dockBadge")
+    }
+    // The door.
+    if !text(hooks).contains(#"osLayerBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "16""#) {
+      leaks.append("\(hooks): board 16 is not gated on the flag")
+    }
+    for (path, source) in files where source.contains("OSLayerRoot" + "(") && path != app && !path.hasPrefix(dir) {
+      leaks.append("\(path): opens board 16")
+    }
+    if !text(app).contains("} else if TestHooks.osLayerBoard {") { leaks.append("\(app): never opens board 16") }
+    return leaks
+  }
+
+  @Test("H-S4-12: board 16 never replies inline: no text action and no word for one; the notification center is reached from one file through switches with no default, never louder than active; no extra, Dock badge or system poster under the flag; no client, no route, nothing green; it opens only with board 16 under the flag")
+  func osLayerSealed() throws {
+    let files = try Self.sources(Self.appDir) + Self.sources(Self.kitDir) + Self.sources(Self.uiTestsDir)
+      + Self.sources(Self.appTestsDir) + Self.sources(Self.kitTestsDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/OSLayer").count >= 6)
+    let leaks = Self.osLayerLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let dir = Self.appDir + "/Boards/OSLayer/"
+    let delegate = Self.appDir + "/AppDelegate.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let swaps: [(String, String, String)] = [
+      (Self.kitDir + "/Boards/AppMenu.swift", "  public static let inlineReply = false\n",
+       "  public static let inlineReply = false\n  public static let " + "has" + "Reply = false\n"),
+      (Self.notesFile, "    case .done: options = []\n    }\n", "    case .done: options = []\n    @unknown default: options = []\n    }\n"),
+      (Self.notesFile, "    case .done: hub.actOn(thread, \"popover:done\")\n",
+       "    default: hub.actOn(thread, \"popover:done\")\n"),
+      (Self.notesFile, "content.interruptionLevel = .active", "content.interruptionLevel = .time" + "Sensitive"),
+      (dir + "PopoverView.swift", "import SwiftUI\n", "import SwiftUI\nlet probe = UNTextInput" + "NotificationAction.self\n"),
+      (delegate, "    if !TestHooks.isUITest {\n      statusItem", "    if true {\n      statusItem"),
+      (delegate, "if !TestHooks.isUITest { " + Self.nsApp + ".dock" + "Tile", "if true { " + Self.nsApp + ".dock" + "Tile"),
+      (dir + "OSLayerHub.swift", "Task { await self.engageKillSwitch() }", "Task { _ = try? await client.settings() }"),
+      (dir + "PopoverView.swift", "import SwiftUI\n", "import SwiftUI\nlet probe = Color." + "green\n"),
+      (hooks, "osLayerBoard = isUITest && environment", "osLayerBoard = environment"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.osLayerLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..111 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..120 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -16,7 +16,9 @@ import Foundation
 // board 13 and the plan disagree or the daemon cannot serve what it draws;
 // D-UI-95..101: the S4j build, where board 14 asks for what this version
 // cannot do; D-UI-102..111: the S4k build, where board 15 draws media this
-// version can stage but not yet send, open or probe).
+// version can stage but not yet send, open or probe; D-UI-112..120: the
+// S4l build, where board 16 and its table disagree or the OS layer asks
+// for what this version cannot do).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1015,4 +1017,70 @@ public enum ProvisionalUI {
     case iMessageColumn
   }
   public static let refusalChannel: RefusalChannel = .iMessageColumn
+
+  // D-UI-112: board 16 under the UI-test flag is a window of its own over
+  // fixtures: the popover's content view at its drawn size, the extra's
+  // five glyphs and the Dock menu. No status item is made, no Dock badge is
+  // set and no notification is posted under the flag.
+  public enum OSLayerTestSurface: Sendable {
+    case fixtureWindowNoStatusItem
+  }
+  public static let osLayerTestSurface: OSLayerTestSurface = .fixtureWindowNoStatusItem
+
+  // D-UI-113: a 16.G command this version cannot perform (Settings, New
+  // Message, the snooze presets, Hold Until, Pause, Help) is in the menu,
+  // disabled, rather than left out: the table is the menu, and an item
+  // that appears later moves nothing.
+  public enum UnwiredMenuCommands: Sendable {
+    case presentDisabled
+  }
+  public static let unwiredMenuCommands: UnwiredMenuCommands = .presentDisabled
+
+  // D-UI-114: the popover lists drafts first, then messages, each oldest
+  // first (16.B's legend and the brief), not the drawing's newest-first
+  // order of 9:41, 9:38, 9:28, Fri.
+  public enum PopoverRowOrder: Sendable {
+    case draftsThenOldest
+  }
+  public static let popoverRowOrder: PopoverRowOrder = .draftsThenOldest
+
+  // D-UI-115: the triage letters (E, H, M, R, Return) appear in the menu as
+  // a dim hint after a tab, never as a key equivalent.
+  public enum MenuHintStyle: Sendable {
+    case dimTrailingHint
+  }
+  public static let menuHintStyle: MenuHintStyle = .dimTrailingHint
+
+  // D-UI-116: notification categories are registered with the five action
+  // ids, but nothing posts yet: the daemon does not tell a Stream question
+  // from a DM, a LinkedIn request or a group stack, and a banner that
+  // guesses is worse than none.
+  public enum NotificationPosting: Sendable {
+    case categoriesOnly
+  }
+  public static let notificationPosting: NotificationPosting = .categoriesOnly
+
+  // D-UI-117: closing the window still quits the app in this version; the
+  // daemon is its own process, so reading and the queue continue, but the
+  // extra goes with the window until the app can reopen it on its own.
+  public static let closingWindowQuits = true
+
+  // D-UI-118: the title bar's KILL chip (board 01) still engages on one
+  // press. The 16.H confirm guards the menu, the popover and the Dock menu,
+  // the paths a stray click can reach without the window in front.
+  public static let killChipConfirms = false
+
+  // D-UI-119: macOS adds Start Dictation and Emoji & Symbols to Edit on its
+  // own, so the builder lists them in the table and does not add them; the
+  // Window menu is not the system's window list.
+  public enum SystemMenuItems: Sendable {
+    case systemInsertedNoWindowList
+  }
+  public static let systemMenuItems: SystemMenuItems = .systemInsertedNoWindowList
+
+  // D-UI-120: the extra is a speech bubble symbol with the badge as text
+  // beside it, monochrome; a diagonal stroke for the kill switch; this
+  // alpha when disconnected.
+  public static let statusSymbol = "bubble.left"
+  public static let statusDisconnectedAlpha: Double = 0.45
 }

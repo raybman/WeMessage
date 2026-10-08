@@ -60,6 +60,37 @@ enum ID {
   static let smsPrefix = "wemessage.bubble.sms."
   static let effectPrefix = "wemessage.bubble.effect."
   static let unsupportedPrefix = "wemessage.bubble.unsupported."
+  // v2 S4f, boards 06 and 09.
+  static let triageBar = "wemessage.triage.bar"
+  static let bulkStrip = "wemessage.bulk.strip"
+  static let bulkOpen = "wemessage.bulk.open"
+  static let auditOpen = "wemessage.audit.open"
+  static let bulkSheet = "wemessage.bulk.sheet"
+  static let bulkConfirm = "wemessage.bulk.confirm"
+  static let bulkCancel = "wemessage.bulk.cancel"
+  static let bulkIncludedPrefix = "wemessage.bulk.included."
+  static let bulkExcludedPrefix = "wemessage.bulk.excluded."
+  static let undoRing = "wemessage.undo.ring"
+  static let verbs = "wemessage.verbs"
+  static let verbReply = "wemessage.verb.reply"
+  static let verbDone = "wemessage.verb.done"
+  static let verbSnooze = "wemessage.verb.snooze"
+  static let verbMute = "wemessage.verb.mute"
+  /// A draft's verbs outside Recent: the prefix, the id, then the verb.
+  static let draftPrefix = "wemessage.draft."
+  static let release = "wemessage.thread.release"
+  static let killBanner = "wemessage.kill.banner"
+  static let killDisengage = "wemessage.kill.disengage"
+  static let zero = "wemessage.zero"
+  static let zeroReceipt = "wemessage.zero.receipt"
+  static let zeroVerify = "wemessage.zero.verify"
+  static let connectCard = "wemessage.connect.card"
+  static let audit = "wemessage.audit"
+  static let auditClose = "wemessage.audit.close"
+  static let auditRowPrefix = "wemessage.audit.row."
+
+  static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
+
   /// Never placed: no typing indicator is drawn either way (08.J). Tests
   /// assert it is absent; the app never spells it.
   static let typing = "wemessage.typing"

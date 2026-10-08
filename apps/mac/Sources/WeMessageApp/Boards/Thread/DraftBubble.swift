@@ -10,6 +10,11 @@ struct DraftBubble: View {
   let isGroup: Bool
   let maxWidth: Double
   let palette: Tokens.Palette
+  /// Outside Recent: the 09.B meta line, in place of the why line (the
+  /// rationale has its own block in Needs You).
+  var meta: String? = nil
+  /// Expired or held by the kill switch: drawn muted (09.B).
+  var absent = false
 
   private var label: String {
     var parts = ["Draft", draft.adapterId]
@@ -17,7 +22,9 @@ struct DraftBubble: View {
     return parts.joined(separator: " \u{00B7} ").uppercased()
   }
 
-  private var why: String? { ProvisionalUI.whyLine(proactiveReason: draft.proactiveReason, ruleId: draft.ruleId) }
+  private var why: String? {
+    meta == nil ? ProvisionalUI.whyLine(proactiveReason: draft.proactiveReason, ruleId: draft.ruleId) : nil
+  }
 
   var body: some View {
     HStack(spacing: 0) {
@@ -29,8 +36,16 @@ struct DraftBubble: View {
           .foregroundStyle(Tokens.color(palette.inkDim))
         Text(draft.body)
           .font(.system(size: 13))
-          .foregroundStyle(Tokens.color(palette.ink))
+          .foregroundStyle(Tokens.color(absent ? palette.inkDim : palette.ink))
           .fixedSize(horizontal: false, vertical: true)
+        if let meta {
+          Text(meta)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(meta)
+            .accessibilityIdentifier(ShellID.draftVerb(draft.id, "meta"))
+        }
         if let why {
           Text(why)
             .font(.system(size: 10))
@@ -48,11 +63,12 @@ struct DraftBubble: View {
       .background(RoundedRectangle(cornerRadius: TranscriptLayout.radius).fill(Tokens.color(palette.layer1)))
       .overlay {
         RoundedRectangle(cornerRadius: TranscriptLayout.radius)
-          .strokeBorder(Tokens.color(Tokens.draftOutline), style: BubbleStroke.dashed)
+          .strokeBorder(
+            absent ? Tokens.color(palette.inkDim, opacity: 0.5) : Tokens.color(Tokens.draftOutline), style: BubbleStroke.dashed)
       }
     }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel([label, draft.body, why].compactMap { $0 }.joined(separator: ", "))
+    .accessibilityLabel([label, draft.body, meta ?? why].compactMap { $0 }.joined(separator: ", "))
     .accessibilityValue(draft.id)
   }
 }
@@ -63,6 +79,10 @@ struct HeldBubble: View {
   let draft: DraftPayload
   let maxWidth: Double
   let palette: Tokens.Palette
+  /// Outside Recent: the 09.B meta line ("HELD by you ...").
+  var meta: String? = nil
+  /// Back to awaiting (09.B), when the kill switch is off.
+  var release: (() -> Void)? = nil
 
   var body: some View {
     HStack(spacing: 0) {
@@ -76,6 +96,19 @@ struct HeldBubble: View {
           .font(.system(size: 13))
           .foregroundStyle(Tokens.color(palette.inkDim))
           .fixedSize(horizontal: false, vertical: true)
+        if let meta {
+          Text(meta)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(meta)
+            .accessibilityIdentifier(ShellID.draftVerb(draft.id, "meta"))
+        }
+        if let release {
+          QueueButton(title: "Release to awaiting", key: nil, filled: false, palette: palette, action: release)
+            .accessibilityLabel("Release to awaiting")
+            .accessibilityIdentifier(ShellID.release)
+        }
       }
       .frame(maxWidth: max(0, maxWidth - 2 * TranscriptLayout.horizontalPadding), alignment: .leading)
       .padding(.vertical, 8)
@@ -97,20 +130,38 @@ struct HeldBubble: View {
 /// the one that reaches the daemon, through Outbound, after its 10 s undo.
 /// There is no Hold until here, in any state (02.J).
 struct DraftVerbs: View {
+  /// The three identifiers: the composer's in Recent, or the draft's own
+  /// (ShellID.draftVerb) in Needs You and Triage.
+  struct IDs {
+    var approve = ShellID.draftApprove
+    var edit = ShellID.draftEdit
+    var hold = ShellID.draftHold
+
+    static func draft(_ id: String) -> IDs {
+      IDs(approve: ShellID.draftVerb(id, "approve"), edit: ShellID.draftVerb(id, "edit"), hold: ShellID.draftVerb(id, "hold"))
+    }
+  }
+
   let palette: Tokens.Palette
-  let approve: () -> Void
-  let edit: () -> Void
+  /// A nil verb is refused by its gate and is not drawn (09.F rule 1).
+  let approve: (() -> Void)?
+  let edit: (() -> Void)?
   let hold: (() -> Void)?
+  var ids = IDs()
 
   var body: some View {
     HStack(spacing: 8) {
-      verb("Approve", key: "A", filled: true, action: approve)
-        .accessibilityIdentifier(ShellID.draftApprove)
-      verb("Edit", key: "R", filled: false, action: edit)
-        .accessibilityIdentifier(ShellID.draftEdit)
+      if let approve {
+        verb("Approve", key: "A", filled: true, action: approve)
+          .accessibilityIdentifier(ids.approve)
+      }
+      if let edit {
+        verb("Edit", key: "R", filled: false, action: edit)
+          .accessibilityIdentifier(ids.edit)
+      }
       if let hold {
         verb("Hold", key: "\u{232B}", filled: false, dim: true, action: hold)
-          .accessibilityIdentifier(ShellID.draftHold)
+          .accessibilityIdentifier(ids.hold)
       }
       Spacer(minLength: 0)
     }

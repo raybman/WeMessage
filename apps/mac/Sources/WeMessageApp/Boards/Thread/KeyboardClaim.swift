@@ -13,8 +13,10 @@ import SwiftUI
 /// once the text view is in the window, rather than through a FocusState
 /// written before the field has a platform view.
 struct KeyboardClaim: NSViewRepresentable {
-  /// A new token is a new claim: the thread's chat guid.
-  let token: String
+  /// A new token is a new claim: the thread's chat guid. nil makes no
+  /// claim (Needs You and Triage keep the keyboard on the list until R or
+  /// Edit asks for the field).
+  let token: String?
 
   func makeNSView(context: Context) -> ClaimView { ClaimView() }
 
@@ -29,7 +31,12 @@ struct KeyboardClaim: NSViewRepresentable {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var acceptsFirstResponder: Bool { false }
 
-    func want(_ token: String) {
+    func want(_ token: String?) {
+      guard let token else {
+        wanted = nil
+        claimed = nil
+        return
+      }
       guard token != wanted else { return }
       wanted = token
       schedule(attempt: 0)

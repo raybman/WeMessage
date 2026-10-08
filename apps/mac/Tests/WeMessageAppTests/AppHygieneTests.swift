@@ -45,6 +45,14 @@ struct AppHygieneTests {
     // bubble.reaction.<guid>.<n>, bubble.delivery.<guid>, bubble.draft.<id>,
     // bubble.sms.<guid>, bubble.effect.<guid>, bubble.unsupported.<guid>).
     "wemessage.atlas",
+    // v2 S4f, boards 06 and 09 (prefixes: bulk.included.<id>,
+    // bulk.excluded.<id>, draft.<id>.<verb>, audit.row.<seq>).
+    "wemessage.triage.bar", "wemessage.bulk.strip", "wemessage.bulk.open", "wemessage.audit.open",
+    "wemessage.bulk.sheet", "wemessage.bulk.confirm", "wemessage.bulk.cancel", "wemessage.undo.ring",
+    "wemessage.verbs", "wemessage.verb.reply", "wemessage.verb.done", "wemessage.verb.snooze", "wemessage.verb.mute",
+    "wemessage.thread.release", "wemessage.kill.banner", "wemessage.kill.disengage", "wemessage.zero",
+    "wemessage.zero.receipt", "wemessage.zero.verify", "wemessage.connect.card", "wemessage.audit",
+    "wemessage.audit.close",
   ]
 
   static let nsApp = "NS" + "App"
@@ -586,6 +594,15 @@ struct AppHygieneTests {
         head.contains("guard press.modifiers.contains(.command) else { return .ignored }"),
         "a Return handler in the composer does not require cmd: \(head)")
     }
+    // Raw key codes live in TriageKeys only, and its bare Return confirms the
+    // bulk card and nothing else (09.D); its verbs reach the model, never the client.
+    for (path, text) in try Self.sources(Self.appDir) where text.contains("keyCode") {
+      #expect(path.hasSuffix("/Boards/Queue/TriageKeys.swift"), "\(path) reads raw key codes")
+    }
+    let triage = try Repo.text(Self.appDir + "/Boards/Queue/TriageKeys.swift")
+    let returnCase = triage.components(separatedBy: "case Self.returnKey, Self.enterKey:").dropFirst().first ?? ""
+    #expect(String(returnCase.prefix(200)).contains("guard model.bulkSheetShown else { return }"), "bare Return is not confined to the bulk card")
+    #expect(!triage.contains("model.client") && !triage.contains("perform("), "a triage key reaches the client")
   }
 
   @Test("H-S4d: board 02 never places Hold until while D-UI-17 is absent-with-reason, and the cmd-Z undo lives under the composer")

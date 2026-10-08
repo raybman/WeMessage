@@ -459,4 +459,66 @@ struct ShellModelTests {
     #expect(m.board.queue.count == 5)
     m.stop()
   }
+
+  @Test("09.A and 09.F: A approves only a drawn draft with the kill switch off, nothing leaves inside the window, and the kill switch takes every draft verb away")
+  func approvePendingGates() async throws {
+    let transport = try Self.scenarioTransport("pending")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    let guid = "iMessage;-;+15550100001"
+    m.choose(.needsYou)
+    // Never drawn: refused, no entry.
+    #expect(!m.approvePending(in: guid))
+    #expect(m.outbound.entries.isEmpty)
+    #expect(m.metaLine(m.pendingDraft(for: guid)!, long: true)?.hasPrefix("DRAFT \u{00B7} proposed by echo ") == true)
+    // Drawn: the window starts and nothing reaches the daemon.
+    m.outbound.markRendered("drf-0101")
+    #expect(m.approvePending(in: guid))
+    #expect(m.metaLine(m.pendingDraft(for: guid)!, long: true)?.hasPrefix("APPROVED by you ") == true)
+    #expect(transport.requests.allSatisfy { $0.url?.path != "/v1/send" && !($0.url?.path ?? "").contains("approve") })
+    #expect(m.undoLast())
+    // Kill switch on: approve, edit and hold are refused; the draft reads held.
+    var status = try JSONDecoder().decode(StatusPayload.self, from: Reply.scenario("kill", "status.json").body)
+    #expect(status.killSwitch == true)
+    m.status = status
+    let gates = m.gates(for: guid)
+    for verb in [Verb.approve, .edit, .hold, .reply] {
+      #expect(CompletionRules.permit(verb, gates) == .killSwitch, "\(verb) drawn under the kill switch")
+    }
+    #expect(!m.approvePending(in: guid))
+    m.holdPending(in: guid)
+    #expect(m.thread.held.isEmpty, "Hold under the kill switch")
+    m.replyOrEdit(in: guid)
+    #expect(m.composerClaim == nil, "Reply under the kill switch")
+    #expect(m.metaLine(m.pendingDraft(for: guid)!, long: true)?.hasPrefix("HELD by kill switch") == true)
+    #expect(m.bulkPlan.included.isEmpty)
+    // Unknown counts as on.
+    status.killSwitch = nil
+    m.status = status
+    #expect(!m.approvePending(in: guid))
+    #expect(transport.requests.allSatisfy { $0.url?.path != "/v1/send" && !($0.url?.path ?? "").contains("approve") })
+    m.stop()
+  }
+
+  @Test("06.C: Escape climbs the ladder (composer, selection, thread, Triage) and cmd-T toggles Triage")
+  func escapeLadder() throws {
+    let m = Self.model(.connected(state: "connected"))
+    m.toggleTriage()
+    #expect(m.lens == .triage)
+    m.composerClaim = "g1"
+    m.selectedThread = "g1"
+    m.queue.selection = ["g1"]
+    m.escape(fromComposer: true)
+    #expect(m.composerClaim == nil)
+    m.escape(fromComposer: false)
+    #expect(m.queue.selection.isEmpty)
+    m.escape(fromComposer: false)
+    #expect(m.selectedThread == nil)
+    m.escape(fromComposer: false)
+    #expect(m.lens == .recent)
+    m.toggleTriage()
+    m.toggleTriage()
+    #expect(m.lens == .recent)
+  }
 }

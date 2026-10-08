@@ -36,15 +36,27 @@ struct TranscriptView: View {
             }
           }
           if let draft = model.pendingDraft(for: thread.chatGuid) {
+            let queued = model.lens != .recent
+            let meta = queued ? model.metaLine(draft, long: model.lens == .needsYou) : nil
             if model.thread.held.contains(draft.id) {
-              HeldBubble(draft: draft, maxWidth: maxWidth, palette: palette)
-                .padding(.top, TranscriptLayout.senderChangeGap)
-                .accessibilityIdentifier(ShellID.heldPrefix + draft.id)
+              HeldBubble(
+                draft: draft, maxWidth: maxWidth, palette: palette, meta: meta,
+                release: queued && model.killSwitch == false ? { model.thread.release(draft.id) } : nil
+              )
+              .padding(.top, TranscriptLayout.senderChangeGap)
+              .accessibilityIdentifier(ShellID.heldPrefix + draft.id)
             } else {
-              DraftBubble(draft: draft, isGroup: thread.isGroup, maxWidth: maxWidth, palette: palette)
-                .padding(.top, TranscriptLayout.senderChangeGap)
-                .onAppear { model.outbound.markRendered(draft.id) }
-                .accessibilityIdentifier(ShellID.draft)
+              DraftBubble(
+                draft: draft, isGroup: thread.isGroup, maxWidth: maxWidth, palette: palette, meta: meta,
+                absent: model.phase(of: draft)?.readsAbsent ?? false
+              )
+              .padding(.top, TranscriptLayout.senderChangeGap)
+              .onAppear { model.outbound.markRendered(draft.id) }
+              .accessibilityIdentifier(ShellID.draft)
+              if model.lens == .needsYou {
+                NeedsYouDraft(model: model, draft: draft, palette: palette)
+                  .padding(.top, 6)
+              }
             }
           }
           if let entry = model.outbound.latest(for: thread.chatGuid), entry.phase != .undone {

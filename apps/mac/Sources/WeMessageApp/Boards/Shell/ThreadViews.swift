@@ -48,11 +48,19 @@ struct ListRow: View {
   let asOf: Date?
   let palette: Tokens.Palette
   let dark: Bool
+  /// Boards 06 and 09: the row's queue note ("Draft ready", "opened 14:02",
+  /// an exclusion reason, "Snoozed until Monday 9:00").
+  var note: String? = nil
+  /// A snoozed row stays listed in Triage, dimmed (06.C).
+  var dimmed = false
+  /// X selected this row for a bulk act (06.F).
+  var checked = false
   let action: () -> Void
 
   private var spoken: String {
     let channel = ShellModel.Scope(rawValue: thread.channel)?.fullLabel ?? thread.channel
-    return [thread.title, channel, ShellText.preview(thread)].compactMap { $0 }.joined(separator: ", ")
+    return [checked ? "Selected" : nil, thread.title, channel, ShellText.preview(thread), note].compactMap { $0 }
+      .joined(separator: ", ")
   }
 
   private var selectedFill: Color {
@@ -72,6 +80,13 @@ struct ListRow: View {
   var body: some View {
     Button(action: action) {
       HStack(alignment: .top, spacing: 8) {
+        if checked {
+          Text("\u{2713}")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(Tokens.color(palette.ink))
+            .frame(width: 12)
+            .accessibilityHidden(true)
+        }
         InitialsDisc(title: thread.title, size: 36, palette: palette)
         VStack(alignment: .leading, spacing: 2) {
           HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -95,8 +110,16 @@ struct ListRow: View {
               .multilineTextAlignment(.leading)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
+          if let note {
+            Text(note)
+              .font(.system(size: 9, weight: .semibold, design: .monospaced))
+              .foregroundStyle(Tokens.color(palette.ink))
+              .lineLimit(1)
+              .truncationMode(.tail)
+          }
         }
       }
+      .opacity(dimmed ? 0.45 : 1)
       .padding(.vertical, 8)
       .padding(.horizontal, 12)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,7 +151,22 @@ struct ContentPane: View {
   let palette: Tokens.Palette
 
   var body: some View {
-    if let thread = model.selected {
+    VStack(spacing: 0) {
+      if model.killSwitch == true {
+        KillBanner(model: model, palette: palette)
+      }
+      pane
+    }
+  }
+
+  /// The audit, the bulk card, the thread, a zero screen outside Recent, or
+  /// the empty state, in that order.
+  @ViewBuilder private var pane: some View {
+    if model.auditShown {
+      AuditView(model: model, palette: palette)
+    } else if model.bulkSheetShown {
+      BulkConfirmCard(model: model, palette: palette)
+    } else if let thread = model.selected {
       VStack(spacing: 0) {
         ThreadHeader(thread: thread, asOf: model.thread.asOf, palette: palette) { model.inspectorShown.toggle() }
         Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
@@ -139,6 +177,8 @@ struct ContentPane: View {
       .accessibilityElement(children: .contain)
       .accessibilityLabel(thread.title)
       .accessibilityIdentifier(ShellID.content)
+    } else if model.lens != .recent && model.scopedQueue.isEmpty {
+      ZeroScreen(model: model, palette: palette)
     } else {
       Text(ProvisionalUI.contentEmpty)
         .font(.system(size: 13))

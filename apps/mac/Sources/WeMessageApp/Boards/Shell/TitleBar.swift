@@ -12,7 +12,11 @@ struct TitleBar: View {
   /// The leading band the hidden title bar leaves to the traffic lights.
   static let lightsReserve: CGFloat = 78
 
-  private var title: String { model.scope == .all ? "All Messages" : model.scope.fullLabel }
+  private var title: String {
+    let scope = model.scope == .all ? "All Messages" : model.scope.fullLabel
+    // 06.C: Triage names itself in the title while it runs.
+    return model.lens == .triage ? "Triage \u{00B7} " + scope : scope
+  }
 
   private var showsCounter: Bool {
     switch ProvisionalUI.titleCounter {
@@ -128,10 +132,11 @@ struct LensPicker: View {
       .clipShape(RoundedRectangle(cornerRadius: 5))
       .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(rule, lineWidth: 1))
       Button {
-        model.lens = .triage
+        model.toggleTriage()
       } label: {
+        // 06.C: inside Triage the same button leaves it, under the same key.
         Text(
-          "\(Text("Triage").font(.system(size: 10, weight: .semibold)))\(Text(" \u{2318}T").font(.system(size: 8, weight: .medium, design: .monospaced)))"
+          "\(Text(on(.triage) ? "Leave" : "Triage").font(.system(size: 10, weight: .semibold)))\(Text(" \u{2318}T").font(.system(size: 8, weight: .medium, design: .monospaced)))"
         )
           .foregroundColor(label(on(.triage)))
           .lineLimit(1)
@@ -156,7 +161,7 @@ struct LensPicker: View {
 
   private func segment(_ lens: ShellModel.Lens, _ text: Text) -> some View {
     Button {
-      model.lens = lens
+      model.choose(lens)
     } label: {
       text
         .font(.system(size: 10, weight: .medium))

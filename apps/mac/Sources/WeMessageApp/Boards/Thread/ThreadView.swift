@@ -24,6 +24,9 @@ struct ThreadView: View {
       if thread.isGroup { Inv5Strip(palette: palette) }
       TranscriptView(model: model, thread: thread, palette: palette)
       ChannelBanner(thread: thread, palette: palette)
+      if model.lens == .triage {
+        VerbRow(model: model, thread: thread, palette: palette)
+      }
       ComposerView(model: model, thread: thread, palette: palette)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

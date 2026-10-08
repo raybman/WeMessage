@@ -65,6 +65,49 @@ enum ShellID {
   static let effectPrefix = "wemessage.bubble.effect."
   /// The honest fallback for a type the app cannot render.
   static let unsupportedPrefix = "wemessage.bubble.unsupported."
+  // v2 S4f, boards 06 and 09.
+  /// Triage's list header (06.C): the counter and the burn-down bar; its
+  /// value is the counter's sentence.
+  static let triageBar = "wemessage.triage.bar"
+  /// Needs You's bulk strip (09.D) and its two buttons.
+  static let bulkStrip = "wemessage.bulk.strip"
+  static let bulkOpen = "wemessage.bulk.open"
+  static let auditOpen = "wemessage.audit.open"
+  /// The bulk confirm card (09.D): the one place bare Return approves.
+  static let bulkSheet = "wemessage.bulk.sheet"
+  static let bulkConfirm = "wemessage.bulk.confirm"
+  static let bulkCancel = "wemessage.bulk.cancel"
+  /// One included or excluded draft on the card: the prefix and its id.
+  static let bulkIncludedPrefix = "wemessage.bulk.included."
+  static let bulkExcludedPrefix = "wemessage.bulk.excluded."
+  /// The batch's one undo (09.D); its value is the seconds left.
+  static let undoRing = "wemessage.undo.ring"
+  /// Triage's verb row (06.C) and its queue verbs.
+  static let verbs = "wemessage.verbs"
+  static let verbReply = "wemessage.verb.reply"
+  static let verbDone = "wemessage.verb.done"
+  static let verbSnooze = "wemessage.verb.snooze"
+  static let verbMute = "wemessage.verb.mute"
+  /// A draft's own verbs, rationale and meta outside Recent (09.A): the
+  /// prefix, the draft id, then .approve, .edit, .hold, .why or .meta.
+  static let draftPrefix = "wemessage.draft."
+  /// Release to awaiting on a held draft (09.B).
+  static let release = "wemessage.thread.release"
+  /// The kill banner (09.F) and its click-only Disengage (D-UI-50).
+  static let killBanner = "wemessage.kill.banner"
+  static let killDisengage = "wemessage.kill.disengage"
+  /// The zero screen (06.E); its value is which zero it is.
+  static let zero = "wemessage.zero"
+  static let zeroReceipt = "wemessage.zero.receipt"
+  static let zeroVerify = "wemessage.zero.verify"
+  /// The not-connected zero's card (09.H, D-UI-48).
+  static let connectCard = "wemessage.connect.card"
+  /// The audit view (09.G), one row per seq, and its close.
+  static let audit = "wemessage.audit"
+  static let auditClose = "wemessage.audit.close"
+  static let auditRowPrefix = "wemessage.audit.row."
+
+  static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
   static func rail(_ scope: ShellModel.Scope) -> String {
     switch scope {
@@ -287,6 +330,26 @@ private struct SidebarView: View {
     }
   }
 
+  /// The row's queue note (06.C, 09.D), or nil in Recent.
+  private func note(_ guid: String) -> String? {
+    if let until = model.snoozedThreads[guid] {
+      return "Snoozed until " + QueueStateStore.snoozeLabel(until)
+    }
+    guard model.lens != .recent, let draft = model.pendingDraft(for: guid), !model.thread.held.contains(draft.id) else {
+      return nil
+    }
+    if model.lens == .triage { return "Draft ready" }
+    if model.hasUnsavedEdit(guid) { return QueueStateStore.reasonText(.unsavedEdit) }
+    if let opened = model.outbound.renderedAt[draft.id] { return "opened " + ShellText.shortClock(opened) }
+    return QueueStateStore.reasonText(.notRendered)
+  }
+
+  /// The Triage and Needs You keys' claim: a new value whenever the list
+  /// should take the keyboard back.
+  private var keysToken: String {
+    "\(model.lens.rawValue)-\(model.triageClaim)-\(model.selectedThread ?? "")-\(model.bulkSheetShown)-\(model.auditShown)"
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 5) {
@@ -311,6 +374,14 @@ private struct SidebarView: View {
       // --t-caption) stays the wireframe size and is read with its chip.
       .accessibilityElement(children: .combine)
       Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
+      switch model.lens {
+      case .triage: TriageBar(model: model, palette: palette)
+      case .needsYou: BulkStrip(model: model, palette: palette)
+      case .recent: EmptyView()
+      }
+      if !model.outbound.countingBatch.isEmpty {
+        UndoRing(model: model, palette: palette)
+      }
       let rows = model.rows
       if rows.isEmpty {
         Spacer(minLength: 0)
@@ -326,7 +397,9 @@ private struct SidebarView: View {
             ForEach(rows, id: \.chatGuid) { thread in
               ListRow(
                 thread: thread, showsChannel: model.scope == .all, selected: model.selectedThread == thread.chatGuid,
-                asOf: asOf, palette: palette, dark: dark
+                asOf: asOf, palette: palette, dark: dark, note: note(thread.chatGuid),
+                dimmed: model.snoozedThreads[thread.chatGuid] != nil,
+                checked: model.queue.selection.contains(thread.chatGuid)
               ) { model.selectedThread = thread.chatGuid }
               .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
             }
@@ -345,6 +418,11 @@ private struct SidebarView: View {
     }
     .frame(width: ShellView.sidebarWidth)
     .frame(maxHeight: .infinity)
+    .background {
+      if model.lens != .recent {
+        TriageKeys(model: model, token: keysToken).frame(width: 0, height: 0).accessibilityHidden(true)
+      }
+    }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(ShellID.sidebar)
   }

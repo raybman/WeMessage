@@ -21,6 +21,7 @@ struct ComposerView: View {
   static let draftHint = "Or just start typing. Your keystrokes always win."
   static let killNote =
     "No Send and no Hold until while the kill switch is on. Both are absent rather than greyed: a send verb that cannot reach a wire is an invitation to a click that can never succeed. Release the switch in the menu bar and both come back."
+  static let killHint = "Sending is off while the kill switch is on. You can still read."
   static let killKept = "Your text is still here. Nothing was deleted and nothing was queued."
 
   private var guid: String { thread.chatGuid }
@@ -44,7 +45,11 @@ struct ComposerView: View {
     }
   }
 
-  private var showsVerbs: Bool { draft != nil && killOff && !busy }
+  /// The composer's draft verbs are Recent's (02.A); Needs You draws them
+  /// under the draft and Triage in its verb row.
+  private var showsVerbs: Bool { draft != nil && killOff && !busy && model.lens == .recent }
+  /// Outside Recent the field takes the keyboard only when R or Edit asks.
+  private var claimToken: String? { model.lens == .recent || model.composerClaim == guid ? guid : nil }
   private var borderless: Bool { draft != nil && ProvisionalUI.draftComposer == .verbsAboveField }
 
   var body: some View {
@@ -104,13 +109,13 @@ struct ComposerView: View {
   private var field: some View {
     ZStack(alignment: .topLeading) {
       if text.wrappedValue.isEmpty {
-        Text(borderless ? Self.draftHint : Self.fieldHint)
+        Text(killOff ? (borderless ? Self.draftHint : Self.fieldHint) : Self.killHint)
           .font(.system(size: borderless ? 10 : 13))
           .foregroundStyle(Tokens.color(palette.inkDim))
           .padding(.vertical, borderless ? 2 : 7)
           .padding(.horizontal, borderless ? 0 : 12)
           .allowsHitTesting(false)
-          .accessibilityHidden(true)
+          .accessibilityHidden(killOff)
       }
       TextEditor(text: text)
         .font(.system(size: 13))
@@ -122,7 +127,13 @@ struct ComposerView: View {
         .focused($focused)
         // The draft hint promises that plain typing lands here, so the field
         // takes the keyboard when a thread opens, the first one included.
-        .background(KeyboardClaim(token: guid))
+        .background(KeyboardClaim(token: claimToken))
+        // Outside Recent, Escape hands the keyboard back to the list (06.C).
+        .onKeyPress(.escape) {
+          guard model.lens != .recent else { return .ignored }
+          model.escape(fromComposer: true)
+          return .handled
+        }
         // Measured (run 37594298009): with the text view first responder the
         // hidden cmd-Return button never fires, so the field hears cmd-Return
         // itself. Anything without cmd falls through to the editor: a newline.

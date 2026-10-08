@@ -57,7 +57,16 @@ public enum FrostProbe {
     /// light 211.6, std 2.1, against 223 on bare pane), so it sits in the
     /// title band, between the capped title and the page dots.
     case atlas
+    /// Boards 06 and 09 with the kill banner on and no thread open: the
+    /// 36 pt ink band under the title band covers the shell's top patch, so
+    /// it moves under the banner (`killBannerHeight`), still clear of the
+    /// pane's centred text. The bottom patch stays where the shell's is.
+    case banner
   }
+
+  /// The kill banner's height (KillBanner.height): the banner layout's top
+  /// patch sits this far below the title band, plus a margin.
+  public static let killBannerHeight: Double = 36
 
   /// Board 08: the bare gutter between the specimen sheet's two columns,
   /// from the title band to the foot of the window. The sheet derives its
@@ -79,6 +88,7 @@ public enum FrostProbe {
     case .shell: Rect(x: windowWidth - 140, y: 80, width: patchSide, height: patchSide)
     case .thread: Rect(x: windowWidth - 140, y: 58, width: patchSide, height: patchSide)
     case .atlas: atlasBandPatch
+    case .banner: Rect(x: windowWidth - 140, y: 52 + killBannerHeight + 6, width: patchSide, height: patchSide)
     }
   }
 
@@ -88,6 +98,7 @@ public enum FrostProbe {
     case .shell: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
     case .thread: Rect(x: 9, y: windowHeight - 120, width: patchSide, height: patchSide)
     case .atlas: Rect(x: stripePatch.x, y: windowHeight - 120, width: patchSide, height: patchSide)
+    case .banner: Rect(x: windowWidth - 140, y: windowHeight - 120, width: patchSide, height: patchSide)
     }
   }
 }

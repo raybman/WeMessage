@@ -292,6 +292,68 @@ public final class ShellModel {
     return queue.undo()
   }
 
+  /// A (09.A, 06.C): the thread's pending draft, approved through the funnel
+  /// with its approve gesture. Refused unless 09.F's gates pass: never under
+  /// the kill switch, never a draft whose body was not drawn, never over an
+  /// unsaved edit. Nothing reaches the daemon before the undo window closes.
+  /// True when the undo window started.
+  @discardableResult
+  public func approvePending(in chatGuid: String) -> Bool {
+    guard let draft = pendingDraft(for: chatGuid), !thread.held.contains(draft.id) else { return false }
+    guard CompletionRules.permit(.approve, gates(for: chatGuid)) == nil else { return false }
+    return outbound.perform(.approve(draftId: draft.id, chatGuid: chatGuid, editedBody: nil), gesture: .approveButton) == nil
+  }
+
+  /// R (06.D): the composer takes the keyboard, holding the agent's draft
+  /// when there is one (Edit), else empty (Reply). Never while the kill
+  /// switch is on: the field says sending is off.
+  public func replyOrEdit(in chatGuid: String) {
+    guard killSwitch == false else { return }
+    if let draft = pendingDraft(for: chatGuid), !thread.held.contains(draft.id),
+      (composerText[chatGuid] ?? "").isEmpty
+    {
+      composerText[chatGuid] = draft.body
+      editedFrom[chatGuid] = draft.id
+    }
+    selectedThread = chatGuid
+    composerClaim = chatGuid
+  }
+
+  /// Backspace (09.A): a local hold (D-UI-36). Absent under the kill switch,
+  /// which already holds every draft.
+  public func holdPending(in chatGuid: String) {
+    guard let draft = pendingDraft(for: chatGuid), killSwitch == false else { return }
+    thread.hold(draft.id, at: queueClock)
+  }
+
+  /// The draft as 09.B draws it: the daemon's state, plus an approval still
+  /// counting here and a local hold, measured on the queue's clock.
+  public func phase(of draft: DraftPayload) -> DraftPhase? {
+    let counting = outbound.entries.last { entry in
+      guard entry.intent.draftId == draft.id, case .counting = entry.phase else { return false }
+      return true
+    }
+    // Expiry, the kill switch and a hold are read on the queue's clock (the
+    // daemon's); a local approval counts on the wall clock it started on.
+    let base = DraftPhase.project(draft, now: queueClock, heldAt: thread.heldAt[draft.id], killSwitch: killSwitch)
+    guard case .awaiting = base, let counting else { return base }
+    let sends = counting.startedAt.addingTimeInterval(Double(counting.window))
+    return Date() < sends ? .approvedInUndo(approvedAt: counting.startedAt, sendsAt: sends) : base
+  }
+
+  /// 09.A and 09.B's meta line under a draft: its state, who, and when.
+  /// `long` is the open draft's form in Needs You.
+  public func metaLine(_ draft: DraftPayload, long: Bool) -> String? {
+    phase(of: draft)?.meta(
+      adapter: draft.adapterId, clock: { ShellText.shortClock($0) }, longClock: { ShellText.clock($0) }, long: long,
+      heldTail: { ProvisionalUI.heldTail(expires: $0.map { ShellText.shortClock($0) }) })
+  }
+
+  /// The zero screen's receipt (06.E): this session's work.
+  public var receipt: QueueStateStore.Receipt {
+    QueueStateStore.receipt(entries: outbound.entries, acts: queue.acts)
+  }
+
   /// Escape's ladder (06.C): the composer gives the keyboard back to the
   /// list, then the selection clears, then Triage ends.
   public func escape(fromComposer: Bool) {

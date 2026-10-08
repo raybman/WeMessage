@@ -128,6 +128,24 @@ final class SnapshotTests: XCTestCase {
     }
     XCTAssertLessThan(atlasTop.midY, FrostProbe.stripePatch.midY)
     XCTAssertLessThan(FrostProbe.stripePatch.midY, atlasBottom.midY)
+
+    // v2 S4f: the kill banner layout's patches read the same way, and the
+    // top one sits under the banner and above the stripe band.
+    guard let bannerFlat = FrostEvidence.read(flat, window: window, layout: .banner),
+      let bannerClear = FrostEvidence.read(clear, window: window, layout: .banner),
+      let bannerFrost = FrostEvidence.read(blurred, window: window, layout: .banner)
+    else { return XCTFail("the banner layout's patches did not read") }
+    XCTAssertFalse(FrostEvidence.frostFailures(bannerFlat).isEmpty, "a flat fill passes as frost (banner)")
+    XCTAssertTrue(
+      FrostEvidence.frostFailures(bannerClear).contains { $0.hasPrefix("stripe std") }, "unblurred stripes pass (banner)")
+    XCTAssertEqual(FrostEvidence.frostFailures(bannerFrost), [], bannerFrost.line)
+    let bannerTop = FrostProbe.gradientTop(windowWidth: window.width, layout: .banner)
+    let bannerBottom = FrostProbe.gradientBottom(windowWidth: window.width, windowHeight: window.height, layout: .banner)
+    XCTAssertGreaterThanOrEqual(bannerTop.y, 52.5 + FrostProbe.killBannerHeight, "the banner's top patch is under the banner")
+    XCTAssertGreaterThanOrEqual(
+      bannerTop.x, FrostProbe.stripeBand.x + FrostProbe.stripeBand.width + 60, "the banner's top patch is in the stripe's blur")
+    XCTAssertLessThan(bannerTop.midY, FrostProbe.stripePatch.midY)
+    XCTAssertLessThan(FrostProbe.stripePatch.midY, bannerBottom.midY)
   }
 
   /// Non-vacuity of the sweep and of the tint count, on synthetic PNGs.

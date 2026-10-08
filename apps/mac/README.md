@@ -163,6 +163,47 @@ equal):
 - `wemessage.bubble.effect.<guid>`: a message sent with an effect
 - `wemessage.bubble.unsupported.<guid>`: the honest fallback for a type the
   app cannot render
+- `wemessage.triage.bar`: Triage's list header (06.C), the counter and the
+  burn-down bar with no percentage; its label is the counter's sentence
+- `wemessage.bulk.strip`: Needs You's bulk strip (09.D), how many drafts
+  were opened this session and how many were skipped
+- `wemessage.bulk.open`: Approve N (shift-A), which opens the confirm card
+- `wemessage.audit.open`: opens the audit view (09.G, D-UI-49)
+- `wemessage.bulk.sheet`: the bulk confirm card; the one place bare Return
+  approves, and only the drafts it lists as included
+- `wemessage.bulk.confirm`: Approve N (Return on the card): one batch, one
+  undo window
+- `wemessage.bulk.cancel`: Cancel (Escape)
+- `wemessage.bulk.included.<draftId>` and `wemessage.bulk.excluded.<draftId>`:
+  one draft on the card; an excluded one's label carries its reason
+- `wemessage.undo.ring`: the batch's one undo (cmd-Z or Z); its label carries
+  the seconds left
+- `wemessage.verbs`: Triage's verb row under the reader (06.C)
+- `wemessage.verb.reply`: Reply (R) when no draft is pending
+- `wemessage.verb.done`, `wemessage.verb.snooze`, `wemessage.verb.mute`:
+  Done (E), Snooze (H), Mute (M), local to this window (D-UI-51)
+- `wemessage.draft.<draftId>.approve`, `.edit`, `.hold`: a draft's own verbs
+  outside Recent (A, R, Backspace); absent, never greyed, under the kill
+  switch, and Approve absent until the body was drawn
+- `wemessage.draft.<draftId>.meta`: the draft's 09.B meta line (`DRAFT ·
+proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
+- `wemessage.draft.<draftId>.why`: the rationale block (09.C, D-UI-53)
+- `wemessage.thread.release`: Release to awaiting on a held draft
+- `wemessage.kill.banner`: the kill banner (09.F), present only while the
+  switch is on
+- `wemessage.kill.disengage`: Disengage, a click only (D-UI-50)
+- `wemessage.zero`: the zero screen (06.E); its value is `clear`,
+  `cannot say` or `not connected`
+- `wemessage.zero.receipt`: the receipt line
+- `wemessage.zero.verify`: Verify now, which reads every source again
+- `wemessage.connect.card`: the not-connected zero's channel card (D-UI-48)
+- `wemessage.audit`: the audit view
+- `wemessage.audit.row.<seq>`: one audit row
+- `wemessage.audit.close`: closes the audit view (Escape)
+- In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
+  X, Z, J, K, shift-A) are heard only by the list's key view, never while
+  the composer has the keyboard; bare Return does nothing outside the
+  confirm card.
 - No typing indicator is ever drawn, so no identifier exists for one, and
   no react affordance is placed on an iMessage bubble.
 

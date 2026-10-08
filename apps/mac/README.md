@@ -249,6 +249,28 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.coach`: the first thread's coach row (12.I), until any key
 - `wemessage.voice.dock`: the voice dock's idle line at the foot of the
   handover rail (D-UI-70)
+- `wemessage.search`: board 11's search pane, on shift-cmd-F; it takes the
+  list and thread panes, so no composer is in the window while it is up
+- `wemessage.search.field`: the query field; Up and Down move the result
+  cursor, cmd-Return opens the hit (bare Return does nothing)
+- `wemessage.search.token.<n>`: one token chip; its value is `parsed` or
+  `unparsed`, and an unparsed chip's label names the token and why
+- `wemessage.search.group.<channel>`, `wemessage.search.result.<guid>`: a
+  channel group and one hit, the cursor's value `selected`
+- `wemessage.search.summary`, `wemessage.search.coverage`: the count line
+  and the coverage strip (`Searched ...`, `Not searched: ...`, D-UI-79)
+- `wemessage.search.prompt`: the empty query's prompt; a query with no hits
+  shows board 10's `wemessage.empty.<case>` instead, case `search`
+- `wemessage.search.facets`, `wemessage.search.facet.<n>`: the facet row
+- `wemessage.find`, `wemessage.find.field`, `wemessage.find.counter`: the
+  in-thread find bar on cmd-F, its field and its `n of m` counter
+- `wemessage.scrubber`, `wemessage.scrubber.line`,
+  `wemessage.scrubber.year.<year>`: the year scrubber on option-cmd-G, its
+  `viewing <year> ...` line and one year, valued `viewing` or `empty`;
+  option-cmd-Up and option-cmd-Down step a year
+- `wemessage.switcher`, `wemessage.switcher.field`,
+  `wemessage.switcher.row.<id>`: the cmd-K switcher, which opens empty every
+  time, its field and one row
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

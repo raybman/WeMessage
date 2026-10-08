@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..57 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..68 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -8,7 +8,9 @@ import Foundation
 // D-UI-39..42: the S4e build, where board 08 and the plan disagree or the
 // wireframe leaves a choice open; D-UI-43..53: the S4f build, where boards
 // 06 and 09 leave a choice open or the daemon cannot serve what they draw;
-// D-UI-54..57: the S4g build, where the avatar plan leaves a choice open).
+// D-UI-54..57: the S4g build, where the avatar plan leaves a choice open;
+// D-UI-58..68: the S4h build, where board 10 leaves a choice open or the
+// daemon cannot serve what it draws).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -546,4 +548,102 @@ public enum ProvisionalUI {
     case white
   }
   public static let avatarInk: AvatarInk = .paletteInk
+
+  // v2 S4h, board 10. Defaults first; each is Eric's to confirm.
+
+  // D-UI-58: the trust banner (10.A) says since when, as a clock, not how
+  // long, as a duration: a duration needs the wall clock, and the board's
+  // fold reads none (rule 8: never show a number you cannot date).
+  public enum TrustBannerAge: Sendable {
+    case sinceClock
+    case duration
+  }
+  public static let trustBannerAge: TrustBannerAge = .sinceClock
+
+  // D-UI-59: the banner's one action. 10.A's is WhatsApp's Re-link device;
+  // iMessage has no re-link, so the action opens the per-channel ages.
+  public static let trustBannerAction = "Show ages"
+
+  // D-UI-60: the age table's count column (10.A). The daemon serves today's
+  // count, not a mirrored total, so each live row prints N today, the
+  // healthy foot is Mirrored as of, and a stale row turns the foot to
+  // CANNOT SAY. A channel that is not connected prints no number.
+  public enum FreshnessCount: Sendable {
+    case today
+    case mirroredTotal
+  }
+  public static let freshnessCount: FreshnessCount = .today
+
+  // D-UI-61: the same table in Settings. There is no Settings window yet,
+  // so the same FreshnessTable and PacingTable views are drawn on the 10.B
+  // sheet's second page; Settings places them when it lands.
+  public enum StatesSettingsCopy: Sendable {
+    case sheetUntilSettings
+  }
+  public static let statesSettingsCopy: StatesSettingsCopy = .sheetUntilSettings
+
+  // D-UI-62: each empty offers exactly one action (10.B). The wireframe
+  // draws two on inbox zero (LinkedIn next, Done for now) and two on search
+  // (Include muted, Attachments too); this build keeps one each, stays on
+  // the channel (D-UI-52), and drops the hold-to-ask clause from the
+  // unselected empty, because voice is not built.
+  // Keyed by EmptyStateCase's raw value (this file is Foundation only).
+  public static let emptyActions: [String: String] = [
+    "zero": "Done for now",
+    "quiet": "Show yesterday",
+    "unselected": "Open Needs You",
+    "search": "Include muted",
+    "new": "Write the first message",
+  ]
+
+  // D-UI-63: the 10.B sheet's channels. The build syncs iMessage only, so
+  // the earned zero, the quiet day and the new thread are iMessage's, and
+  // the not-connected empty is LinkedIn's, as 10.B draws it. The shell's
+  // own empties keep their S3 and S4f lines until a slice places these.
+  public enum EmptiesChannel: Sendable {
+    case iMessageWithLinkedInUnconnected
+  }
+  public static let emptiesChannel: EmptiesChannel = .iMessageWithLinkedInUnconnected
+
+  // D-UI-64: Full Disk Access (10.C). The screen opens nothing itself: it
+  // asks FullDiskAccessSeam, whose fixture under the UI-test flag counts
+  // the ask. Skip iMessage for now closes the screen for this window only.
+  // The deep link itself lands with onboarding (board 12).
+  public enum FDASkip: Sendable {
+    case closeForThisWindow
+  }
+  public static let fdaSkip: FDASkip = .closeForThisWindow
+
+  // D-UI-65: the revoked banner's up to (10.C) is the last scan this
+  // window saw before the daemon said source-unavailable, held in memory.
+  // The daemon does not serve when access was lost.
+  public enum RevokedSince: Sendable {
+    case lastScanThisWindowSaw
+  }
+  public static let revokedSince: RevokedSince = .lastScanThisWindowSaw
+
+  // D-UI-66: the pacing table (10.D) draws iMessage's two rows only. The
+  // daemon does not serve sends today, so the live table would print not
+  // served; the 10.B sheet passes the fixture's count.
+  public enum PacingChannels: Sendable {
+    case iMessageOnly
+  }
+  public static let pacingChannels: PacingChannels = .iMessageOnly
+
+  // D-UI-67: the collision notice (10.E) is drawn on the 10.B sheet. The
+  // composer places it when the daemon serves a draft-arrived-while-typing
+  // event; today it serves none.
+  public enum CollisionPlacement: Sendable {
+    case sheetOnly
+  }
+  public static let collisionPlacement: CollisionPlacement = .sheetOnly
+
+  // D-UI-68: the age table's popover is drawn inside the window, beside the
+  // rail, not as a separate popover window, so a snapshot holds it. Rail
+  // hover opens it and leaving closes it; the banner's action pins it until
+  // pressed again.
+  public enum FreshnessPopover: Sendable {
+    case inWindowOverlay
+  }
+  public static let freshnessPopover: FreshnessPopover = .inWindowOverlay
 }

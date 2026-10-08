@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..101 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..111 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -15,7 +15,8 @@ import Foundation
 // D-UI-79..87: the S4i build, board 11; D-UI-88..94: the S4j build, where
 // board 13 and the plan disagree or the daemon cannot serve what it draws;
 // D-UI-95..101: the S4j build, where board 14 asks for what this version
-// cannot do).
+// cannot do; D-UI-102..111: the S4k build, where board 15 draws media this
+// version can stage but not yet send, open or probe).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -935,4 +936,83 @@ public enum ProvisionalUI {
   // channel card's detail and the composed specimen's caption were
   // reworded instead, since that copy is ours, not the board's.
   public static let composeSpokenSlots: [String: String] = ["richtext": "Rich formatting"]
+
+  // D-UI-102: board 15 opens only under the UI-test flag with board 15. No
+  // attach button, paste or drop reaches the shipped thread's composer in
+  // this version; where the tray lives in the shipped window is Eric's call.
+  public enum AttachmentsEntry: Sendable {
+    case uiTestBoardOnly
+  }
+  public static let attachmentsEntry: AttachmentsEntry = .uiTestBoardOnly
+
+  // D-UI-103: the three doors are driven by fixture files through the
+  // board's own key doors (opt-cmd-1 to opt-cmd-6), not by a real drag or
+  // an attach menu. A real file cannot be staged honestly yet: the app may
+  // not import a media framework (H-A1), so a dropped video's duration
+  // cannot be probed, and a video without a duration is not staged (08.D).
+  // The attach menu of 15.A door 1 is not drawn.
+  public enum MediaDoors: Sendable {
+    case fixtureKeyDoors
+  }
+  public static let mediaDoors: MediaDoors = .fixtureKeyDoors
+
+  // D-UI-104: the tray's Send does not send. The daemon has no attachment
+  // route (G-15a), so Send parks the set, says so, and keeps it staged.
+  // Nothing goes over the wire, and nothing offers to send anyway.
+  public static let mediaParkedNote = "Parked. This daemon has no route for attachments yet, so nothing left this Mac. The set stays staged."
+
+  // D-UI-105: the compression table is a report for iMessage only. No row
+  // can be chosen (there is no transcoder in this version) and the other
+  // three channels' fit tokens are not drawn.
+  public enum CompressionChoice: Sendable {
+    case iMessageReportOnly
+  }
+  public static let compressionChoice: CompressionChoice = .iMessageReportOnly
+
+  // D-UI-106: the refusal panel's fourth part, the thing that works, moves
+  // the drafted words into the composer instead of sending them as a
+  // message: one send path. The words are a fixture, since no agent drafts
+  // in this version.
+  public enum RefusalRemedy: Sendable {
+    case moveWordsToComposer
+  }
+  public static let refusalRemedy: RefusalRemedy = .moveWordsToComposer
+
+  // D-UI-107: the viewer draws a box with the kind and frame where the
+  // pixels go: CI's files are synthetic and the daemon serves no
+  // attachment bytes (G-15b). Space does nothing, since nothing plays.
+  public enum ViewerPixels: Sendable {
+    case framedPlaceholder
+  }
+  public static let viewerPixels: ViewerPixels = .framedPlaceholder
+
+  // D-UI-108: under the UI-test flag, Save writes the converted copy into a
+  // temporary folder named Downloads, never the runner's own; Reveal and
+  // Copy are recorded, not performed (no Finder window, no pasteboard).
+  public enum MediaActions: Sendable {
+    case temporaryDownloadsRecordedRevealAndCopy
+  }
+  public static let mediaActions: MediaActions = .temporaryDownloadsRecordedRevealAndCopy
+
+  // D-UI-109: after Esc the originating message is outlined for this many
+  // seconds (15.F's two), with the kit's 3 pt spot in tint.
+  public static let viewerOutlineSeconds = 2
+  public static let viewerOutlineWidth: Double = 3
+
+  // D-UI-110: two 15.C affordances are not drawn: drag to reorder (the
+  // numbered order is fixed as staged) and "Show what is removed" (the
+  // fixture files carry no metadata to show).
+  public enum TrayExtras: Sendable {
+    case numberedFixedOrderNoInspect
+  }
+  public static let trayExtras: TrayExtras = .numberedFixedOrderNoInspect
+
+  // D-UI-111: the board is drawn on iMessage, the one live channel. The
+  // 15.H matrix shows the iMessage column, and the full size refusal panel
+  // is drawn for iMessage's absent voice note rather than LinkedIn's PHONE
+  // state.
+  public enum RefusalChannel: Sendable {
+    case iMessageColumn
+  }
+  public static let refusalChannel: RefusalChannel = .iMessageColumn
 }

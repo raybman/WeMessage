@@ -189,6 +189,60 @@ enum ID {
   static let composeUndo = "wemessage.compose.undo"
   static let composeBubble = "wemessage.compose.bubble"
   static let composeStatePrefix = "wemessage.compose.state."
+  // v2 S4k, board 15: media, reachable only with WEMESSAGE_UI_BOARD=15
+  // under the UI-test flag (D-UI-102). The window, its tabs and pages (these
+  // prefixes and thread, walls, refusal), the rail (value refused), the
+  // list row, the header, the drop target (value resting, targeted,
+  // dwelling, refused), its card and printed reason, the thread (value
+  // y=<offset>), a message and an attachment per id (these prefixes), the
+  // tray (value its header) with a cell and a remove per item, its lines,
+  // the recipient grid and the compression table (a row per target's first
+  // word), the composer field, Send (value enabled or inert), the record
+  // slot, the note; the viewer (value n / N) and its parts; a wall per
+  // channel; the refusal panel, a part per number and its one action; a
+  // matrix row per index.
+  static let media = "wemessage.media"
+  static let mediaTabPrefix = "wemessage.media.tab."
+  static let mediaPagePrefix = "wemessage.media.page."
+  static let mediaRail = "wemessage.media.rail"
+  static let mediaRowPrefix = "wemessage.media.row."
+  static let mediaHeader = "wemessage.media.header"
+  static let mediaDrop = "wemessage.media.drop"
+  static let mediaDropCard = "wemessage.media.drop.card"
+  static let mediaDropReason = "wemessage.media.drop.reason"
+  static let mediaThread = "wemessage.media.thread"
+  static let mediaMessagePrefix = "wemessage.media.message."
+  static let mediaItemPrefix = "wemessage.media.item."
+  static let mediaTray = "wemessage.media.tray"
+  static let mediaTrayItemPrefix = "wemessage.media.tray.item."
+  static let mediaTrayRemovePrefix = "wemessage.media.tray.remove."
+  static let mediaConversion = "wemessage.media.conversion"
+  static let mediaLocation = "wemessage.media.location"
+  static let mediaCounter = "wemessage.media.counter"
+  static let mediaGrid = "wemessage.media.grid"
+  static let mediaCompression = "wemessage.media.compression"
+  static let mediaCompressionRowPrefix = "wemessage.media.compression.row."
+  static let mediaField = "wemessage.media.field"
+  static let mediaSend = "wemessage.media.send"
+  static let mediaRecord = "wemessage.media.record"
+  static let mediaNote = "wemessage.media.note"
+  static let mediaViewer = "wemessage.media.viewer"
+  static let mediaViewerPosition = "wemessage.media.viewer.position"
+  static let mediaViewerMeta = "wemessage.media.viewer.meta"
+  static let mediaViewerLine = "wemessage.media.viewer.line"
+  static let mediaViewerOrigin = "wemessage.media.viewer.origin"
+  static let mediaViewerClose = "wemessage.media.viewer.close"
+  static let mediaViewerPrevious = "wemessage.media.viewer.previous"
+  static let mediaViewerNext = "wemessage.media.viewer.next"
+  static let mediaViewerKinds = "wemessage.media.viewer.kinds"
+  static let mediaViewerSave = "wemessage.media.viewer.save"
+  static let mediaViewerReveal = "wemessage.media.viewer.reveal"
+  static let mediaViewerCopy = "wemessage.media.viewer.copy"
+  static let mediaWallPrefix = "wemessage.media.wall."
+  static let mediaRefusal = "wemessage.media.refusal"
+  static let mediaRefusalPartPrefix = "wemessage.media.refusal.part."
+  static let mediaRefusalTake = "wemessage.media.refusal.take"
+  static let mediaMatrixPrefix = "wemessage.media.matrix."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

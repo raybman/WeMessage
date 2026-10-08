@@ -327,6 +327,44 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.compose.bubble`: the live message after Send, valued
   `undo`, `drafting`, `drafted` or `failed`;
   `wemessage.compose.state.<state>`: a 14.F specimen, valued by its border
+- `wemessage.media`: board 15's media window, under the UI-test flag with
+  `WEMESSAGE_UI_BOARD=15` only (D-UI-102). It builds no client. Fixture
+  key doors stand in for a drag, a pick and a paste (D-UI-103): opt-cmd-1
+  drags over the thread, 2 over the rail, 6 over the list row, 3 releases,
+  4 attaches, 5 pastes, 0 leaves and 9 clears the tray
+- `wemessage.media.tab.<page>`, `wemessage.media.page.<page>`: `thread`,
+  `walls` and `refusal`; `wemessage.media.header`, the thread's name, channel and handle
+- `wemessage.media.drop`: the content pane, valued `resting`, `dwelling`,
+  `targeted` or `refused`; `wemessage.media.drop.card` while targeted;
+  `wemessage.media.rail` (valued `refused` when hatched) and
+  `wemessage.media.drop.reason`, the printed refusal (15.A)
+- `wemessage.media.thread` (valued `y=<offset>`),
+  `wemessage.media.message.<id>` (valued `outlined` after the viewer
+  closes, for D-UI-109's seconds) and `wemessage.media.item.<id>`, the
+  attachment that opens the viewer
+- `wemessage.media.tray` (valued by its header),
+  `wemessage.media.tray.item.<id>` (valued by its chip, a video always with
+  its duration), `wemessage.media.tray.remove.<id>`,
+  `wemessage.media.conversion`, `wemessage.media.location`,
+  `wemessage.media.counter`, `wemessage.media.grid` and
+  `wemessage.media.compression` with `.row.<target>` (15.C, 15.D)
+- `wemessage.media.field`, `wemessage.media.send` (cmd-Return, valued
+  `enabled` or `inert`; the only call to the sink, which this version
+  parks, D-UI-104), `wemessage.media.note`, and `wemessage.media.record`:
+  the record slot, a printed reason and no control on iMessage (15.E)
+- `wemessage.media.viewer` (valued `<n> / <count>`) with
+  `wemessage.media.viewer.position`, `wemessage.media.viewer.meta`,
+  `wemessage.media.viewer.line`, `wemessage.media.viewer.origin`,
+  `wemessage.media.viewer.close`, `wemessage.media.viewer.previous`,
+  `wemessage.media.viewer.next`, `wemessage.media.viewer.kinds`,
+  `wemessage.media.viewer.save` (cmd-S), `wemessage.media.viewer.reveal`
+  (opt-cmd-R) and `wemessage.media.viewer.copy` (cmd-C). The bare arrows
+  and Esc are key presses on the focused viewer, never app-wide shortcuts;
+  Esc restores the pinned offset (15.F)
+- `wemessage.media.wall.<channel>` (valued by the dated wall),
+  `wemessage.media.refusal` with `.part.1` to `.part.4`,
+  `wemessage.media.refusal.take` (moves the words, sends nothing), and
+  `wemessage.media.matrix.<n>` (15.B, 15.H, D-UI-111)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

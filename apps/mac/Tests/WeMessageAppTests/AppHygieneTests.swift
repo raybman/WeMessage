@@ -87,6 +87,19 @@ struct AppHygieneTests {
     "wemessage.compose.strip", "wemessage.compose.proposal", "wemessage.compose.proposal.ask",
     "wemessage.compose.proposal.take", "wemessage.compose.proposal.hold", "wemessage.compose.field",
     "wemessage.compose.send", "wemessage.compose.undo", "wemessage.compose.bubble",
+    // v2 S4k, board 15 (prefixes: media.tab.<p>, media.page.<p>, media.row.<id>,
+    // media.message.<id>, media.item.<id>, media.tray.item.<id>,
+    // media.tray.remove.<id>, media.compression.row.<w>, media.wall.<c>,
+    // media.refusal.part.<n>, media.matrix.<n>).
+    "wemessage.media", "wemessage.media.rail", "wemessage.media.header", "wemessage.media.drop",
+    "wemessage.media.drop.card", "wemessage.media.drop.reason", "wemessage.media.thread", "wemessage.media.tray",
+    "wemessage.media.conversion", "wemessage.media.location", "wemessage.media.counter", "wemessage.media.grid",
+    "wemessage.media.compression", "wemessage.media.field", "wemessage.media.send", "wemessage.media.record",
+    "wemessage.media.note", "wemessage.media.viewer", "wemessage.media.viewer.position",
+    "wemessage.media.viewer.meta", "wemessage.media.viewer.line", "wemessage.media.viewer.origin",
+    "wemessage.media.viewer.close", "wemessage.media.viewer.previous", "wemessage.media.viewer.next",
+    "wemessage.media.viewer.kinds", "wemessage.media.viewer.save", "wemessage.media.viewer.reveal",
+    "wemessage.media.viewer.copy", "wemessage.media.refusal", "wemessage.media.refusal.take",
   ]
 
   static let nsApp = "NS" + "App"
@@ -372,7 +385,7 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12).
-  static let dUIKeys = (1...101).map { "D-UI-\($0)" }
+  static let dUIKeys = (1...111).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -389,11 +402,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..101, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..111, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..101 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..111 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -401,7 +414,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...101), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...111), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1269,6 +1282,117 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.composeLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+
+  // MARK: S4k
+
+  /// The H-S4-11 verdicts over (path, text) pairs of the app sources: board
+  /// 15 holds no client and names no route; every door stages and none
+  /// sends; the sink is called once, from sendTray, with a set built only
+  /// from the tray; the record slot prints a reason and draws no control,
+  /// greyed or otherwise; nothing offers to send anyway, opens a camera or
+  /// synthesises a voice; nothing is green; and the window opens only under
+  /// the flag with board 15.
+  static func mediaLeaks(_ files: [(String, String)]) -> [String] {
+    let dir = appDir + "/Boards/Attachments/"
+    let model = appDir + "/Models/AttachmentsModel.swift"
+    let fixture = appDir + "/Fixtures/FixtureAttachments.swift"
+    let trayView = dir + "StagingTray.swift"
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let writes = [
+      "client", "GatewayClient", "Outbound.", "Outbound(", ".send" + "(to:", "approve" + "Draft(", "httpMethod", "\"POST\"",
+      "/v1/", "URLSession", "NSWork" + "space", "NSPaste" + "board", "downloads" + "Directory",
+    ]
+    let refused = ["Send " + "anyway", "Cam" + "era", "Speech" + "Synthesizer", "AVSpeech", "Delete"]
+    let colours = ["." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent"]
+    var leaks: [String] = []
+    var swept = 0
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    let code = { (source: String) in
+      source.split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") && !$0.trimmingCharacters(in: .whitespaces).hasPrefix("///") }
+        .joined(separator: "\n")
+    }
+    let count = { (pattern: String, body: String) -> Int in (try? Self.count(pattern, in: body)) ?? -1 }
+    var trayCalls = 0
+    for (path, source) in files where path.hasPrefix(dir) || path == model || path == fixture {
+      swept += 1
+      let body = code(source)
+      for token in writes + refused + colours where body.contains(token) { leaks.append("\(path): \(token)") }
+      if path.hasPrefix(dir) {
+        let calls = count(#"sendTray\(\)"#, body)
+        trayCalls += calls
+        if calls > 0 && path != trayView { leaks.append("\(path): calls sendTray") }
+      }
+    }
+    if swept < 8 { leaks.append("swept \(swept) board 15 files") }
+    if trayCalls != 1 { leaks.append("\(trayView): \(trayCalls) sendTray calls, not one") }
+    // The sink: one call, from sendTray, with the tray's set.
+    let modelText = code(text(model))
+    if count(#"(?<![A-Za-z.])send\("#, modelText) != 1 { leaks.append("\(model): the sink is called other than once") }
+    if !Self.function("sendTray(", in: modelText).contains("note = send(set)") {
+      leaks.append("\(model): sendTray does not hand the sink its set")
+    }
+    let builds = files.map { count(#"OutboundAttachments\("#, code($0.1)) }.reduce(0, +)
+    if builds != 1 || !Self.function("sendTray(", in: modelText).contains("guard let set = OutboundAttachments(tray: tray) else { return }") {
+      leaks.append("\(model): a set is built other than once, from the tray")
+    }
+    if !modelText.contains("init?(tray: StagingTray) {\n    guard tray.canSend else { return nil }") {
+      leaks.append("\(model): a set can be built from a tray that cannot send")
+    }
+    // No door sends.
+    for door in ["hover(", "dwellElapsed(", "leave(", "release(", "attach(", "paste(", "takeDraftedWords("] {
+      let body = Self.function(door, in: modelText)
+      if body.isEmpty { leaks.append("\(model): no \(door)") }
+      if body.contains("send(") || body.contains("sendTray(") { leaks.append("\(model): \(door) sends") }
+    }
+    // The record slot: a printed reason, and no control of any kind.
+    let slot = Self.block("RecordSlot", in: code(text(trayView)))
+    if !slot.contains("control.reason") { leaks.append("\(trayView): the record slot prints no reason") }
+    for token in ["Button", ".disabled(", "Toggle(", ".opacity(", "onTapGesture"] where slot.contains(token) {
+      leaks.append("\(trayView): the record slot draws a control (\(token))")
+    }
+    // The door.
+    if !text(hooks).contains(#"attachmentsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "15""#) {
+      leaks.append("\(hooks): the media board is not gated on the flag and board 15")
+    }
+    for (path, source) in files where source.contains("AttachmentsRoot" + "(") && path != app && !path.hasPrefix(dir) {
+      leaks.append("\(path): opens the media window")
+    }
+    if !text(app).contains("} else if TestHooks.attachmentsBoard {") { leaks.append("\(app): never opens the media window") }
+    return leaks
+  }
+
+  @Test("H-S4-11: board 15 never sends from a door: no client, no route, one sink call from sendTray with the tray's set; the record slot is a reason with no control; no send anyway, camera or voice; nothing is green; it opens only with board 15 under the flag")
+  func mediaSealed() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Attachments").count >= 6)
+    let leaks = Self.mediaLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let model = Self.appDir + "/Models/AttachmentsModel.swift"
+    let dir = Self.appDir + "/Boards/Attachments/"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let swaps: [(String, String, String)] = [
+      (model, "      tray.stage(staged)\n", "      tray.stage(staged)\n      sendTray()\n"),
+      (model, "    note = send(set)\n", "    note = send(set)\n    _ = send(set)\n"),
+      (model, "    guard tray.canSend else { return nil }\n", "\n"),
+      (model, "  func attach(_ files: [StagedFile]) {\n", "  func attach(_ files: [StagedFile]) {\n    _ = send(OutboundAttachments(tray: tray)!)\n"),
+      (dir + "StagingTray.swift", "    if let reason = control.reason {\n",
+       "    Button(\"Record\") {}.disabled(true)\n    if let reason = control.reason {\n"),
+      (dir + "StagingTray.swift", "Text(\"\\u{2715}\")", "Text(\"Send " + "anyway\")"),
+      (dir + "RefusalPanel.swift", "            model.takeDraftedWords()\n", "            model.sendTray()\n"),
+      (dir + "DropTarget.swift", ".fill(Tokens.color(palette.layer0, opacity: look.scrim))", ".fill(Color." + "green)"),
+      (dir + "ViewerWindow.swift", "{ model.copyCurrent() }", "{ _ = try? await client.settings() }"),
+      (hooks, "attachmentsBoard = isUITest && environment", "attachmentsBoard = environment"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.mediaLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

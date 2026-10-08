@@ -61,6 +61,23 @@ enum TestHooks {
   static var composePeople: [ComposePerson] { FixtureCompose.people }
   static let composeProposal: @Sendable (ComposePerson) -> String = { FixtureCompose.proposal(for: $0) }
 
+  /// Board 15's media window, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=15 only: no attach, drop or paste door reaches the
+  /// shipped thread in this version (D-UI-102, H-S4-11).
+  static private(set) var attachmentsBoard = false
+
+  /// Board 15's thread and the files its doors bring: fixtures in this
+  /// version (D-UI-103).
+  static var mediaContent: MediaContent { FixtureAttachments.content() }
+
+  /// Where board 15's Save writes under the flag: a temporary folder named
+  /// Downloads, never the runner's own (D-UI-108).
+  static var mediaDownloads: URL {
+    FileManager.default.temporaryDirectory
+      .appendingPathComponent("wemessage-ui-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+      .appendingPathComponent("Downloads", isDirectory: true)
+  }
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
@@ -70,6 +87,7 @@ enum TestHooks {
     onboarding = onboardingModel(board: environment["WEMESSAGE_UI_BOARD"])
     settingsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "13"
     composeBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "14"
+    attachmentsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "15"
   }
 
   /// The flag returns first: under it the store is memory and the seam the

@@ -15,6 +15,8 @@ struct ShellApp: App {
         SettingsRoot()
       } else if TestHooks.composeBoard {
         ComposeRoot()
+      } else if TestHooks.attachmentsBoard {
+        AttachmentsRoot()
       } else if let onboarding = TestHooks.onboarding {
         OnboardingRoot(model: onboarding)
       } else {

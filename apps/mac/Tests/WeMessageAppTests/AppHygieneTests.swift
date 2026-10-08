@@ -995,6 +995,15 @@ struct AppHygieneTests {
     if at.contains(where: { $0 == nil }) || zip(at, at.dropFirst()).contains(where: { $0! >= $1! }) {
       leaks.append("\(shell): the panes are not replaced while board 11 is up")
     }
+    // The find counter is ink at 11 pt: in 10 pt inkDim the audit could
+    // not measure it (run 37756434645), and the UI test audits the
+    // results only.
+    let find = searchDir + "FindViews.swift"
+    let counter = text(find).components(separatedBy: "Text(find.counter)").dropFirst().first?
+      .components(separatedBy: ".accessibilityLabel(").first ?? ""
+    if !counter.contains(".foregroundStyle(Tokens.color(palette.ink))") || !counter.contains("size: 11") {
+      leaks.append("\(find): the find counter is not 11 pt ink")
+    }
     // The find field holds the keyboard while it is up; the composer
     // takes it back after.
     if !text(composer).contains("guard !model.find.shown else { return nil }") {
@@ -1014,6 +1023,7 @@ struct AppHygieneTests {
     let model = Self.appDir + "/Models/SearchModel.swift"
     let shell = Self.appDir + "/ShellView.swift"
     let transcript = Self.appDir + "/Boards/Thread/TranscriptView.swift"
+    let find = Self.appDir + "/Boards/Search/FindViews.swift"
     let swaps: [(String, String, String)] = [
       (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foregroundColor = ." + "green"),
       (views, "run.underlineStyle = .single", "run.background" + "Color = .yellow"),
@@ -1023,6 +1033,8 @@ struct AppHygieneTests {
       (transcript, ".strokeBorder(Tokens.color(palette.ink), lineWidth: width)", ".strokeBorder(Tokens." + "tint, lineWidth: width)"),
       (shell, "      Board11Keys(model: model)", "      if TestHooks.isUITest { Board11Keys(model: model) }"),
       (shell, "} else if model.search.shown {", "} else if model.search.hidden {"),
+      (find, "        .foregroundStyle(Tokens.color(palette.ink))\n        .lineLimit(1)", "        .foregroundStyle(Tokens.color(palette.inkDim))\n        .lineLimit(1)"),
+      (find, "size: 11, weight: .semibold, design: .monospaced))\n        .foregroundStyle(Tokens.color(palette.ink))\n        .lineLimit(1)", "size: 10, design: .monospaced))\n        .foregroundStyle(Tokens.color(palette.ink))\n        .lineLimit(1)"),
     ]
     for (path, from, to) in swaps {
       let source = files.first { $0.0 == path }?.1 ?? ""

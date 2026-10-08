@@ -20,7 +20,8 @@ import XCTest
 ///   (11.C, 11.D);
 /// - cmd-K opens the switcher empty, every time: "theo", Escape, cmd-K
 ///   again and nothing of "theo" is left (11.E).
-/// The light launch runs the accessibility audit. The launch ends on the
+/// The light launch runs the accessibility audit once, on the results.
+/// The launch ends on the
 /// journal: no send, no draft action, no write. Shots are
 /// board-11-<state>-<appearance>.png. CI only.
 final class Board11Tests: XCTestCase {
@@ -165,7 +166,9 @@ final class Board11Tests: XCTestCase {
     app.typeKey(.downArrow, modifierFlags: [])
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.label(app, ID.findCounter) == "2 of 4" }, "down: \(QueueUI.label(app, ID.findCounter))")
     shot("find")
-    if light { try audit(app, window: "audit-board-11-find") }
+    // No second audit here: it cost 25 s of the light launch (run
+    // 37764667738) and the budget is 2 min; the counter's ink, the one
+    // thing it ever caught, is pinned by H-S4-8.
     // Escape closes the bar; the next goes back to the same results.
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.findBar).exists }, "Escape left the find bar up")

@@ -309,6 +309,7 @@ describe('row 4: Info.plist', () => {
     'LSApplicationCategoryType',
     'LSMinimumSystemVersion',
     'NSAppleEventsUsageDescription',
+    'NSContactsUsageDescription',
     'NSHumanReadableCopyright',
   ];
 
@@ -364,8 +365,21 @@ describe('row 4: Info.plist', () => {
     expect(keys).not.toContain('CFBundleURLTypes');
   });
 
-  it('exactly the thirteen keys', () => {
+  it('exactly the fourteen keys', () => {
     expect(Object.keys(plist()).sort()).toEqual(KEYS);
+  });
+
+  it("v2 S4g: the Contacts prompt is ProvisionalUI's D-UI-9 copy, not retyped", () => {
+    // The Swift source holds the one copy (AppHygiene's D-UI row keeps it
+    // out of every other Swift file); the plist must say the same words.
+    const swift = read('apps/mac/Sources/WeMessageApp/ProvisionalUI.swift');
+    const match = /public static let contactsUsage =\s*"([^"\\\n]+)"/.exec(
+      swift,
+    );
+    expect(match).not.toBeNull();
+    const copy = match?.[1] ?? '';
+    expect(copy.length).toBeGreaterThan(40);
+    expect(plist()['NSContactsUsageDescription']).toBe(copy);
   });
 });
 

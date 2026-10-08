@@ -13446,18 +13446,30 @@ describe('v2 S1: the Swift tree', () => {
     ).toEqual([]);
     // v2 S3: the window target may name the UI frameworks and the kit, never
     // the host (the GUI spawns nothing) and never Combine.
+    const uiFrameworks = [
+      'Foundation',
+      'SwiftUI',
+      'AppKit',
+      'Observation',
+      'WeMessageKit',
+    ];
+    const contactsHome = `${APP_SOURCES}/Models/ContactsAvatarProvider.swift`;
     expect(
       offendingImports(
-        app,
-        new Set([
-          'Foundation',
-          'SwiftUI',
-          'AppKit',
-          'Observation',
-          'WeMessageKit',
-        ]),
+        app.filter((f) => f !== contactsHome),
+        new Set(uiFrameworks),
       ),
     ).toEqual([]);
+    // v2 S4g: Contacts is imported by the avatar provider and nothing else,
+    // so the one file that can reach the contacts store is the one the
+    // AppHygiene H-S4-5 row guards.
+    expect(app).toContain(contactsHome);
+    expect(
+      offendingImports([contactsHome], new Set([...uiFrameworks, 'Contacts'])),
+    ).toEqual([]);
+    expect(
+      app.filter((f) => swiftImports(archRead(f)).includes('Contacts')),
+    ).toEqual([contactsHome]);
     // Every tracked Swift file under Sources and Tests sits in a listed
     // directory, so a new target cannot pass this row by being unlisted.
     const listed = [...SOURCES, ...TESTS];

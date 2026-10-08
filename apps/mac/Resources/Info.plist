@@ -12,6 +12,10 @@
   No LSUIElement: the host has no UI in this slice and is launched by launchd
   in daemon mode, so there is no Dock icon to hide. No CFBundleURLTypes: the
   wemessage URL scheme belongs to the Electron app until a Swift UI exists.
+
+  The Contacts prompt (S4g) is D-UI-9's copy, ProvisionalUI.contactsUsage,
+  and pack-swift.spec.ts holds the two equal. The app asks for Contacts only
+  when the user opens a thread (D-UI-54), never at launch.
 -->
 <plist version="1.0">
   <dict>
@@ -39,6 +43,8 @@
     <string>26.0</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>WeMessage sends replies through Messages on your behalf, and only ones you have approved.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>WeMessage shows the names and photos from your Contacts next to messages. Nothing is uploaded. You can say no; initials are shown instead.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 the WeMessage authors</string>
   </dict>

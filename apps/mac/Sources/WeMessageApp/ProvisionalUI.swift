@@ -1,13 +1,14 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..53 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..57 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
 // where board 02 left one open or the daemon cannot yet say what it draws;
 // D-UI-39..42: the S4e build, where board 08 and the plan disagree or the
 // wireframe leaves a choice open; D-UI-43..53: the S4f build, where boards
-// 06 and 09 leave a choice open or the daemon cannot serve what they draw).
+// 06 and 09 leave a choice open or the daemon cannot serve what they draw;
+// D-UI-54..57: the S4g build, where the avatar plan leaves a choice open).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -510,4 +511,39 @@ public enum ProvisionalUI {
     case servedOnly
   }
   public static let rationaleLines: RationaleLines = .servedOnly
+
+  // D-UI-54: when Contacts is asked for. Never at launch: the first time
+  // the user opens a thread, once, and never again (S4g). The plan names no
+  // moment; an inspector button or an onboarding step are the others.
+  public enum ContactsPromptMoment: Sendable {
+    case firstThreadOpened
+    case inspectorButton
+    case onboarding
+  }
+  public static let contactsPromptMoment: ContactsPromptMoment = .firstThreadOpened
+
+  // D-UI-55: a group thread's avatar. The plan's avatar is one person's;
+  // a group draws its title's initials on a disc keyed by the chat guid.
+  public enum GroupAvatar: Sendable {
+    case titleInitials
+    case stackedPhotos
+    case glyph
+  }
+  public static let groupAvatar: GroupAvatar = .titleInitials
+
+  // D-UI-56: a title with no letters (a bare number) draws a person glyph
+  // on the disc rather than digits.
+  public enum LetterlessAvatar: Sendable {
+    case personGlyph
+    case lastTwoDigits
+  }
+  public static let letterlessAvatar: LetterlessAvatar = .personGlyph
+
+  // D-UI-57: the letters on a disc are the appearance's ink (7:1 on every
+  // disc), not white, which fails 7:1 on the light blue discs.
+  public enum AvatarInk: Sendable {
+    case paletteInk
+    case white
+  }
+  public static let avatarInk: AvatarInk = .paletteInk
 }

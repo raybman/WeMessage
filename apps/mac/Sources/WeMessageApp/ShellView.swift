@@ -130,7 +130,7 @@ enum ShellID {
 struct ShellView: View {
   /// The client reads WEMESSAGE_PORT and WEMESSAGE_DIR/daemon.token from the
   /// environment, as the shipped app does (H10-H12).
-  @State private var model = ShellModel(client: GatewayClient())
+  @State private var model = ShellModel(client: GatewayClient(), avatars: AvatarBook(provider: TestHooks.avatarProvider()))
   /// The system's display options, with a UI test's forced values on top.
   @State private var mirror = AccessibilityMirror.live()
   @Environment(\.colorScheme) private var scheme
@@ -153,7 +153,7 @@ struct ShellView: View {
         ContentPane(model: model, palette: palette)
         if model.inspectorShown, let thread = model.selected {
           Hairline(mirror: mirror, palette: palette, dark: dark)
-          InspectorPane(thread: thread, palette: palette)
+          InspectorPane(thread: thread, image: model.avatars.image(for: thread), palette: palette)
         }
       }
       .padding(.top, Self.titleBand + 0.5)
@@ -399,8 +399,9 @@ private struct SidebarView: View {
                 thread: thread, showsChannel: model.scope == .all, selected: model.selectedThread == thread.chatGuid,
                 asOf: asOf, palette: palette, dark: dark, note: note(thread.chatGuid),
                 dimmed: model.snoozedThreads[thread.chatGuid] != nil,
-                checked: model.queue.selection.contains(thread.chatGuid)
-              ) { model.selectedThread = thread.chatGuid }
+                checked: model.queue.selection.contains(thread.chatGuid),
+                image: model.avatars.image(for: thread)
+              ) { model.open(thread.chatGuid) }
               .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
             }
           }

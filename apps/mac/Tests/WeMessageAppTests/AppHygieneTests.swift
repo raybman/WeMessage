@@ -93,14 +93,22 @@ struct AppHygieneTests {
       in: text)
   }
 
-  @Test("H-A1: every file under Sources/WeMessageApp imports only Foundation, SwiftUI, AppKit, Observation and WeMessageKit")
+  /// v2 S4g: the one file that may reach Contacts, and the one module it adds.
+  static let contactsFile = appDir + "/Models/ContactsAvatarProvider.swift"
+  static let contactsModule = "Con" + "tacts"
+
+  @Test("H-A1: every file under Sources/WeMessageApp imports only Foundation, SwiftUI, AppKit, Observation and WeMessageKit; Contacts only in ContactsAvatarProvider.swift")
   func importRule() throws {
     let files = try Self.sources(Self.appDir)
     #expect(files.count >= 6)
+    var contacts: [String] = []
     for (path, text) in files {
       let modules = Set(try Self.imports(text))
-      #expect(modules.isSubset(of: Self.allowedImports), "\(path) imports \(modules.subtracting(Self.allowedImports).sorted())")
+      let allowed = path == Self.contactsFile ? Self.allowedImports.union([Self.contactsModule]) : Self.allowedImports
+      #expect(modules.isSubset(of: allowed), "\(path) imports \(modules.subtracting(allowed).sorted())")
+      if modules.contains(Self.contactsModule) { contacts.append(path) }
     }
+    #expect(contacts == [Self.contactsFile], "Contacts imported by \(contacts)")
   }
 
   @Test("H-A2: no file under Sources/WeMessageApp or UITests names the daemon host, a spawn, a signal, a new session or Combine")
@@ -326,8 +334,9 @@ struct AppHygieneTests {
   /// S4c's 22..26 (choices the board 01 wireframe left open), S4d's
   /// 27..38 (choices board 02 left open, or the daemon cannot yet serve)
   /// S4e's 39..42 (where board 08 and the plan disagree) and S4f's 43..53
-  /// (where boards 06 and 09 leave a choice open).
-  static let dUIKeys = (1...53).map { "D-UI-\($0)" }
+  /// (where boards 06 and 09 leave a choice open), and S4g's 54..57 (the
+  /// avatar choices the plan leaves open).
+  static let dUIKeys = (1...57).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -344,11 +353,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..53, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..57, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..53 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..57 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -356,7 +365,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...53), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...57), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -392,14 +401,82 @@ struct AppHygieneTests {
 
   // MARK: S4a
 
-  @Test("H-S4-0: no file under apps/mac/Sources or UITests names the contacts store (a TCC prompt hangs the ui job)")
-  func noContactsStore() throws {
+  /// The H-S4-5 verdicts over (path, text) pairs: every way the contacts
+  /// store could be named outside its one file, or built where the UI-test
+  /// flag could reach it (a TCC prompt hangs the ui job).
+  static func contactsLeaks(_ files: [(String, String)], home: String, hooks: String) -> [String] {
     let store = "CN" + "Contact" + "Store"
-    let files = try Self.sources("apps/mac/Sources") + Self.sources(Self.uiTestsDir)
-    #expect(files.count >= 30)
+    let system = "System" + "Contacts("
+    let provider = "Contacts" + "AvatarProvider("
+    let guardLine = "precondition(!TestHooks.isUITest"
+    var leaks: [String] = []
     for (path, text) in files {
-      #expect(!text.contains(store), "\(path) names the contacts store")
+      if path != home && text.contains(store) { leaks.append("\(path): names the store") }
+      if path != hooks && text.contains(system) { leaks.append("\(path): builds the system seam") }
+      if path != hooks && path != home && text.contains(provider) && !path.contains("/Tests/") {
+        leaks.append("\(path): builds the provider")
+      }
     }
+    // Its own file builds the store once, as the first act of an init whose
+    // first statement refuses the UI-test flag; the provider's init refuses
+    // it too.
+    let own = files.first { $0.0 == home }?.1 ?? ""
+    let builds = own.components(separatedBy: store + "(").count - 1
+    if builds != 1 { leaks.append("\(home): builds the store \(builds) times") }
+    if let at = own.range(of: store + "(") {
+      let head = own[..<at.lowerBound]
+      let initAt = head.range(of: "init(", options: .backwards)
+      let body = initAt.map { String(head[$0.upperBound...]) } ?? ""
+      let first = body.split(separator: "{", maxSplits: 1).dropFirst().first?
+        .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        .first { !$0.isEmpty && !$0.hasPrefix("//") } ?? ""
+      if !first.hasPrefix(guardLine) { leaks.append("\(home): the store is built after \(first)") }
+    }
+    let inits = own.components(separatedBy: "init(").count - 1
+    let guarded = own.components(separatedBy: guardLine).count - 1
+    if guarded < 2 || guarded < inits { leaks.append("\(home): \(inits) inits, \(guarded) refuse the flag") }
+    // The hooks build the seam once, on the line after the flag returns.
+    let hooksText = files.first { $0.0 == hooks }?.1 ?? ""
+    let lines = hooksText.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    let at = lines.indices.filter { lines[$0].contains(system) }
+    if at.count != 1 {
+      leaks.append("\(hooks): builds the system seam \(at.count) times")
+    } else if let line = at.first {
+      let before = lines[..<line].last { !$0.isEmpty && !$0.hasPrefix("//") } ?? ""
+      if !before.hasPrefix("if isUITest { return ") { leaks.append("\(hooks): the seam is not behind the flag: \(before)") }
+    }
+    return leaks
+  }
+
+  @Test("H-S4-5: the contacts store is named only in ContactsAvatarProvider.swift, built once behind a UI-test-flag refusal, and the hooks build it only after the flag returns the fixtures")
+  func contactsStoreOnlyInProvider() throws {
+    let home = Self.contactsFile
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let files =
+      try Self.sources("apps/mac/Sources") + Self.sources(Self.uiTestsDir) + Self.sources(Self.appTestsDir)
+    #expect(files.count >= 40)
+    #expect(Self.contactsLeaks(files, home: home, hooks: hooks) == [])
+    // The provider is built in the hooks, and nowhere else in the app.
+    let hooksText = try Repo.text(hooks)
+    #expect(hooksText.contains("if isUITest { return FixtureAvatarProvider() }"))
+    let seam = "System" + "Contacts()"
+    #expect(hooksText.contains("return ContactsAvatarProvider(fetching: \(seam))"))
+
+    // Non-vacuity, on planted trees.
+    let store = "CN" + "Contact" + "Store"
+    let good = [
+      (home, "final class S {\n  @MainActor init() {\n    precondition(!TestHooks.isUITest, \"x\")\n    s = \(store)()\n  }\n}\nstruct P {\n  @MainActor init(f: F) {\n    precondition(!TestHooks.isUITest, \"x\")\n  }\n}"),
+      (hooks, "static func p() -> any AvatarProvider {\n    if isUITest { return FixtureAvatarProvider() }\n    return ContactsAvatarProvider(fetching: \(seam))\n  }"),
+    ]
+    #expect(Self.contactsLeaks(good, home: home, hooks: hooks) == [])
+    let named = good + [("app/ShellView.swift", "let s = \(store).self")]
+    #expect(Self.contactsLeaks(named, home: home, hooks: hooks) == ["app/ShellView.swift: names the store"])
+    let late = [(home, good[0].1.replacingOccurrences(of: "    precondition(!TestHooks.isUITest, \"x\")\n    s =", with: "    s =")), good[1]]
+    #expect(Self.contactsLeaks(late, home: home, hooks: hooks).contains { $0.contains("the store is built after") })
+    let unguarded = [good[0], (hooks, good[1].1.replacingOccurrences(of: "    if isUITest { return FixtureAvatarProvider() }\n", with: ""))]
+    #expect(Self.contactsLeaks(unguarded, home: home, hooks: hooks).contains { $0.contains("not behind the flag") })
+    let elsewhere = good + [("app/ShellModel.swift", "let a = \(seam)")]
+    #expect(Self.contactsLeaks(elsewhere, home: home, hooks: hooks) == ["app/ShellModel.swift: builds the system seam"])
   }
 
   /// Types declared in a file under Fixtures/, and every name that looks like

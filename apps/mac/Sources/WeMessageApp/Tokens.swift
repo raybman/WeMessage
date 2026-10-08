@@ -97,6 +97,58 @@ public enum Tokens {
     }
   }
 
+  /// The initials discs (D-UI-8): six per option and appearance. A key
+  /// lands on one by FNV-1a (AvatarKey.step), so a handle keeps its disc.
+  /// blueFamily is hues 200 to 240 at three saturations and two
+  /// lightnesses; no option has a hue in 75 to 165, and the appearance's ink
+  /// reads at 7:1 on every disc (AvatarPaletteTests).
+  public enum Avatar {
+    public static let blueLight: [RGB] = [
+      RGB(0xB5, 0xD1, 0xE3), RGB(0xAD, 0xB1, 0xEB), RGB(0xA6, 0xC9, 0xF2),
+      RGB(0xCF, 0xD5, 0xED), RGB(0xCA, 0xD7, 0xF2), RGB(0xC5, 0xD9, 0xF7),
+    ]
+    public static let blueDark: [RGB] = [
+      RGB(0x1C, 0x38, 0x4A), RGB(0x14, 0x18, 0x52), RGB(0x0D, 0x30, 0x59),
+      RGB(0x26, 0x32, 0x64), RGB(0x1C, 0x37, 0x6E), RGB(0x11, 0x3B, 0x78),
+    ]
+    public static let mixedLight: [RGB] = [
+      RGB(0xBE, 0xD2, 0xEF), RGB(0xD2, 0xC0, 0xED), RGB(0xF3, 0xD4, 0xBA),
+      RGB(0xEF, 0xC1, 0xBE), RGB(0xD0, 0xD4, 0xDC), RGB(0xC0, 0xE5, 0xED),
+    ]
+    public static let mixedDark: [RGB] = [
+      RGB(0x16, 0x32, 0x5A), RGB(0x33, 0x19, 0x57), RGB(0x5F, 0x35, 0x11),
+      RGB(0x5A, 0x1B, 0x16), RGB(0x30, 0x35, 0x41), RGB(0x19, 0x4D, 0x57),
+    ]
+    public static let monoLight: [RGB] = [
+      RGB(0xCC, 0xCC, 0xCC), RGB(0xD4, 0xD4, 0xD4), RGB(0xDB, 0xDB, 0xDB),
+      RGB(0xE3, 0xE3, 0xE3), RGB(0xEB, 0xEB, 0xEB), RGB(0xF2, 0xF2, 0xF2),
+    ]
+    public static let monoDark: [RGB] = [
+      RGB(0x1F, 0x1F, 0x1F), RGB(0x26, 0x26, 0x26), RGB(0x2E, 0x2E, 0x2E),
+      RGB(0x36, 0x36, 0x36), RGB(0x3D, 0x3D, 0x3D), RGB(0x45, 0x45, 0x45),
+    ]
+
+    public static func discs(_ option: ProvisionalUI.AvatarPalette, dark: Bool) -> [RGB] {
+      switch option {
+      case .blueFamily: dark ? blueDark : blueLight
+      case .mixedNoGreen: dark ? mixedDark : mixedLight
+      case .monochrome: dark ? monoDark : monoLight
+      }
+    }
+
+    /// The disc for a normalised key.
+    public static func disc(
+      for key: String, dark: Bool, palette: ProvisionalUI.AvatarPalette = ProvisionalUI.avatarPalette
+    ) -> RGB {
+      discs(palette, dark: dark)[AvatarKey.step(for: key)]
+    }
+
+    /// Every disc of every option, for the no-green sweep.
+    public static var every: [RGB] {
+      blueLight + blueDark + mixedLight + mixedDark + monoLight + monoDark
+    }
+  }
+
   /// The snapshot luminance bands (SnapshotTests): a light shell's mean
   /// luminance stays above the floor and a dark one below the ceiling; the
   /// frost arithmetic keeps the margin clear of both.
@@ -136,6 +188,7 @@ public enum Tokens {
       + [Hairline.light.rgb, Hairline.dark.rgb, Hairline.opaqueLight, Hairline.opaqueDark]
       + [Backdrop.lightTop, Backdrop.lightBottom, Backdrop.darkTop, Backdrop.darkBottom]
       + [Backdrop.stripeDark, Backdrop.stripeLight]
+      + Avatar.every
   }
 
   /// WCAG 2 contrast ratio between two opaque sRGB colours, 1...21, order

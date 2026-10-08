@@ -10,7 +10,10 @@ import XCTest
 /// teeth: a digit on a stale tile fails, a total while degraded fails, the
 /// kill chip missing fails, and the journal never holds POST /v1/send.
 /// The plan's testBoard01DegradedLight/Dark and testKillChipAlwaysVisible
-/// are states inside these two launches, not launches of their own.
+/// are states inside these two launches, not launches of their own, and so
+/// are S4g's testBoard01AvatarsLight/Dark: the rich state holds a photo row
+/// and an initials row by identifier before it is shot, so
+/// board-01-rich-<appearance>.png is the avatar shot.
 /// CI only.
 final class Board01Tests: XCTestCase {
   override func setUp() async throws {
@@ -101,6 +104,7 @@ final class Board01Tests: XCTestCase {
       XCTAssertTrue(
         settled,
         "\(name): iM=\(value(app, ID.railIMessage)) ALL=\(value(app, ID.railAll)) counter=\(value(app, ID.titleCounter))")
+      if expect.state == "rich" { assertAvatars(app, name: name) }
       settle()
       assertBoard(app, expect, name: name)
       capture(app, geometry: geometry, appearance: appearance, frost: true, name: name, luminance: luminance)
@@ -152,6 +156,25 @@ final class Board01Tests: XCTestCase {
     XCTAssertFalse(element(app, ID.content).exists, "\(name): a thread is selected in the snapshot")
     XCTAssertFalse(element(app, ID.inspector).exists, "\(name): the inspector is open in the snapshot")
     XCTAssertTrue(element(app, ID.contentEmpty).exists, "\(name): the content pane is not empty")
+  }
+
+  /// S4g: under the UI-test flag the fixture photos stand in for Contacts.
+  /// Maya, Priya and Sam draw a photo; Daniel and the Saturday hike group
+  /// draw initials. Each row says which on its accessibility value.
+  static let avatarRows: [(guid: String, look: String)] = [
+    ("iMessage;-;+15550100001", "photo"),
+    ("SMS;-;+15550100004", "photo"),
+    ("iMessage;-;sam.whitfield@example.com", "photo"),
+    ("iMessage;-;+15550100002", "initials"),
+    ("iMessage;+;chat5550100103", "initials"),
+  ]
+
+  @MainActor
+  private func assertAvatars(_ app: XCUIApplication, name: String) {
+    let held = waitUntil { Self.avatarRows.allSatisfy { value(app, ID.rowPrefix + $0.guid) == $0.look } }
+    let seen = Self.avatarRows.map { "\($0.guid)=\(value(app, ID.rowPrefix + $0.guid))" }.joined(separator: " ")
+    XCTAssertTrue(held, "\(name): avatars \(seen)")
+    print("AVATARS| \(name) \(seen)")
   }
 
   /// The kill chip is on screen in every state.

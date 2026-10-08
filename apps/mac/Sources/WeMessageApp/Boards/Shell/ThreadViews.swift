@@ -1,27 +1,6 @@
+import AppKit
 import SwiftUI
 import WeMessageKit
-
-/// The initials disc (wireframe .av: a grey disc with a rule border). The
-/// D-UI-8 colours arrive with the avatar work; board 01 draws the disc as
-/// the wireframe does.
-struct InitialsDisc: View {
-  let title: String
-  let size: CGFloat
-  let palette: Tokens.Palette
-
-  var body: some View {
-    Circle()
-      .fill(Tokens.color(palette.layer2))
-      .overlay(Circle().strokeBorder(Tokens.color(palette.inkDim, opacity: 0.35), lineWidth: 1))
-      .overlay(
-        Text(ShellText.initials(title))
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(Tokens.color(palette.inkDim))
-      )
-      .frame(width: size, height: size)
-      .accessibilityHidden(true)
-  }
-}
 
 /// The channel tag (wireframe .ch: mono 700 8, ink border, radius 3).
 struct ChannelTag: View {
@@ -55,6 +34,8 @@ struct ListRow: View {
   var dimmed = false
   /// X selected this row for a bulk act (06.F).
   var checked = false
+  /// The contact's photo, or nil for the initials disc (S4g).
+  var image: NSImage? = nil
   let action: () -> Void
 
   private var spoken: String {
@@ -87,7 +68,7 @@ struct ListRow: View {
             .frame(width: 12)
             .accessibilityHidden(true)
         }
-        InitialsDisc(title: thread.title, size: 36, palette: palette)
+        AvatarView(thread: thread, image: image, size: 36)
         VStack(alignment: .leading, spacing: 2) {
           HStack(alignment: .firstTextBaseline, spacing: 6) {
             if showsChannel { ChannelTag(channel: thread.channel, palette: palette) }
@@ -137,6 +118,9 @@ struct ListRow: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spoken)
     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    // Under the UI-test flag only: which avatar the row draws, so board 01
+    // can hold both a photo and an initials disc on screen (S4g).
+    .accessibilityValue(TestHooks.isUITest ? (image == nil ? "initials" : "photo") : "")
     // Ignoring children drops the Button's press; give it back so
     // VoiceOver and the audit see an action on the row.
     .accessibilityAction { action() }
@@ -168,7 +152,9 @@ struct ContentPane: View {
       BulkConfirmCard(model: model, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {
-        ThreadHeader(thread: thread, asOf: model.thread.asOf, palette: palette) { model.inspectorShown.toggle() }
+        ThreadHeader(thread: thread, image: model.avatars.image(for: thread), asOf: model.thread.asOf, palette: palette) {
+          model.inspectorShown.toggle()
+        }
         Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
         ThreadView(model: model, thread: thread, palette: palette)
       }
@@ -200,13 +186,14 @@ func threadHandle(_ thread: ThreadSummary) -> String? {
 /// The thread head: avatar, name, channel and handle, and the ⓘ toggle.
 struct ThreadHeader: View {
   let thread: ThreadSummary
+  var image: NSImage? = nil
   var asOf: Date? = nil
   let palette: Tokens.Palette
   let toggle: () -> Void
 
   var body: some View {
     HStack(spacing: 8) {
-      InitialsDisc(title: thread.title, size: 28, palette: palette)
+      AvatarView(thread: thread, image: image, size: 28)
       VStack(alignment: .leading, spacing: 2) {
         Text(thread.title)
           .font(.system(size: 13, weight: .semibold))
@@ -249,12 +236,13 @@ struct ThreadHeader: View {
 /// The inspector column (D-UI-24: identity only until S4d and S4g).
 struct InspectorPane: View {
   let thread: ThreadSummary
+  var image: NSImage? = nil
   let palette: Tokens.Palette
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       if ProvisionalUI.inspectorContent == .identityOnly {
-        InitialsDisc(title: thread.title, size: 36, palette: palette)
+        AvatarView(thread: thread, image: image, size: 36)
         Text(thread.title)
           .font(.system(size: 13, weight: .semibold))
           .foregroundStyle(Tokens.color(palette.ink))

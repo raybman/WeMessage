@@ -66,6 +66,11 @@ public final class ShellModel {
   public var selectedThread: String?
   /// The inspector column beside the thread (toggled by its button; no key).
   public var inspectorShown = false
+  /// The avatar photos for the listed threads (S4g). Contacts is asked for
+  /// only from open(_:) and step(_:), the user's own acts (D-UI-54).
+  let avatars: AvatarBook
+  /// The latest avatar resolve, so a test can wait for it.
+  private(set) var avatarTask: Task<Void, Never>?
 
   /// The last status read; nil until one succeeds.
   public internal(set) var status: StatusPayload?
@@ -270,10 +275,24 @@ public final class ShellModel {
     selectedThread = after ?? ahead
   }
 
+  /// A click on a list row: selects the thread, and is the user act that
+  /// may ask for Contacts (D-UI-54; AvatarCache asks at most once).
+  public func open(_ chatGuid: String) {
+    selectedThread = chatGuid
+    userOpenedThread()
+  }
+
+  func userOpenedThread() {
+    let avatars = self.avatars
+    let listed = threads?.threads ?? []
+    avatarTask = Task { await avatars.userActed(listed) }
+  }
+
   /// J and K: the next or previous row.
   public func step(_ delta: Int) {
     let list = rows.map(\.chatGuid)
     guard !list.isEmpty else { return }
+    defer { userOpenedThread() }
     guard let current = selectedThread, let at = list.firstIndex(of: current) else {
       selectedThread = delta >= 0 ? list.first : list.last
       return
@@ -375,8 +394,13 @@ public final class ShellModel {
     return threads?.threads.first { $0.chatGuid == selectedThread }
   }
 
-  public init(client: GatewayClient) {
+  public convenience init(client: GatewayClient) {
+    self.init(client: client, avatars: AvatarBook.initialsOnly())
+  }
+
+  init(client: GatewayClient, avatars: AvatarBook) {
     self.client = client
+    self.avatars = avatars
     self.thread = ThreadModel(client: client)
     let shell = WeakShell()
     self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
@@ -427,7 +451,12 @@ public final class ShellModel {
       if case .idle = connection { connection = .down(reason: "unreachable") }
       return
     }
-    if case .ok(let page)? = try? await client.listThreads() { threads = page }
+    if case .ok(let page)? = try? await client.listThreads() {
+      threads = page
+      let avatars = self.avatars
+      avatarTask?.cancel()
+      avatarTask = Task { await avatars.prefetch(page.threads) }
+    }
     // 09.C: the agent undo window is send.undoGraceSeconds, clamped 5...30.
     if let envelope = try? await client.settings() {
       outbound.approveSeconds = UndoWindow.agent(fromSetting: envelope.settings["send.undoGraceSeconds"]?.value)

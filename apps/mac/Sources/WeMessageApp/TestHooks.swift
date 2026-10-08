@@ -43,6 +43,14 @@ enum TestHooks {
     accessibilityOverrides = isUITest ? AccessibilityMirror.Overrides.parse(environment) : AccessibilityMirror.Overrides()
     specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08" ? try? FixtureCatalogue.specimens() : nil
   }
+
+  /// Where the window's avatars come from: the fixture photos under the
+  /// UI-test flag, the user's contacts otherwise. The flag returns first,
+  /// so the contact store is never built on the CI runner (H-S4-5).
+  static func avatarProvider() -> any AvatarProvider {
+    if isUITest { return FixtureAvatarProvider() }
+    return ContactsAvatarProvider(fetching: SystemContacts())
+  }
 }
 
 /// "frame=<w>x<h> visible=<w>x<h>", integers in points, or nil when the

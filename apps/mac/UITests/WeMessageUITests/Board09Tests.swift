@@ -10,6 +10,10 @@ import XCTest
 /// table are opaque over the frost probe patches, so those two are glanced
 /// (attached and swept for green) rather than held to the frost evidence.
 ///
+/// The thread is Priya's: it is short, so the stripe patch above it stays
+/// bare pane (Maya's longer thread covered it, run 37717485936), and Maya's
+/// draft, never opened, is the one the bulk card leaves out.
+///
 /// The behaviour rows ride in the same launch (the UI job's time budget):
 /// - Return outside the bulk card does nothing (09.D: bare Return is the
 ///   bulk card's alone);
@@ -62,22 +66,22 @@ final class Board09Tests: XCTestCase {
         layout: layout, luminance: luminance)
       QueueUI.printTime("BOARD09", appearance, state, since: started)
     }
-    let maya = QueueUI.mayaDraft
-    let approve = ID.draftVerb(maya, "approve")
-    func meta() -> String { QueueUI.meta(app, maya) }
+    let priya = QueueUI.priyaDraft
+    let approve = ID.draftVerb(priya, "approve")
+    func meta() -> String { QueueUI.meta(app, priya) }
 
-    // needsyou: the lens, the bulk strip, Maya's draft with its long meta
+    // needsyou: the lens, the bulk strip, Priya's draft with its long meta
     // line, the rationale and the three verbs.
     let lens = QueueUI.element(app, ID.lensNeedsYou)
     XCTAssertTrue(lens.waitForExistence(timeout: UITestApp.timeout), "no Needs You segment")
     lens.click()
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, ID.bulkStrip).exists }, "needsyou: no bulk strip")
-    QueueUI.open(app, QueueUI.maya)
-    XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, approve).exists }, "needsyou: no Approve on Maya's draft")
+    QueueUI.open(app, QueueUI.priya)
+    XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, approve).exists }, "needsyou: no Approve on Priya's draft")
     for verb in ["edit", "hold", "why"] {
-      XCTAssertTrue(QueueUI.element(app, ID.draftVerb(maya, verb)).exists, "needsyou: no \(verb)")
+      XCTAssertTrue(QueueUI.element(app, ID.draftVerb(priya, verb)).exists, "needsyou: no \(verb)")
     }
-    XCTAssertTrue(meta().hasPrefix("DRAFT \u{00B7} proposed by echo "), "needsyou: meta reads \(meta())")
+    XCTAssertTrue(meta().hasPrefix("DRAFT \u{00B7} proposed by sol-main "), "needsyou: meta reads \(meta())")
     XCTAssertTrue(meta().contains("not sent"), "needsyou: meta reads \(meta())")
     shoot("needsyou", .thread)
     if appearance == "light" { try audit(app, window: "audit-board-09-needsyou") }
@@ -98,15 +102,15 @@ final class Board09Tests: XCTestCase {
     XCTAssertTrue(QueueUI.waitUntil { meta().hasPrefix("DRAFT") }, "recall: meta reads \(meta())")
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, approve).exists }, "recall: Approve did not come back")
 
-    // bulk: shift-A. Maya's draft was drawn and is included; Priya's never
+    // bulk: shift-A. Priya's draft was drawn and is included; Maya's never
     // was and is excluded with its reason. Return confirms; one Z undoes.
     app.typeKey("a", modifierFlags: .shift)
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, ID.bulkSheet).exists }, "bulk: no confirm card")
-    XCTAssertTrue(QueueUI.element(app, ID.bulkIncludedPrefix + maya).exists, "bulk: Maya's drawn draft is not included")
+    XCTAssertTrue(QueueUI.element(app, ID.bulkIncludedPrefix + priya).exists, "bulk: Priya's drawn draft is not included")
     XCTAssertFalse(
-      QueueUI.element(app, ID.bulkIncludedPrefix + QueueUI.priyaDraft).exists, "bulk: Priya's undrawn draft is included")
-    let excluded = QueueUI.label(app, ID.bulkExcludedPrefix + QueueUI.priyaDraft)
-    XCTAssertTrue(excluded.contains("not yet shown"), "bulk: Priya's exclusion reads \(excluded)")
+      QueueUI.element(app, ID.bulkIncludedPrefix + QueueUI.mayaDraft).exists, "bulk: Maya's undrawn draft is included")
+    let excluded = QueueUI.label(app, ID.bulkExcludedPrefix + QueueUI.mayaDraft)
+    XCTAssertTrue(excluded.contains("not yet shown"), "bulk: Maya's exclusion reads \(excluded)")
     XCTAssertTrue(QueueUI.label(app, ID.bulkConfirm).hasPrefix("Approve 1"), "bulk: confirm reads \(QueueUI.label(app, ID.bulkConfirm))")
     glance(app, name: "board-09-bulk-\(appearance).png")
     app.typeKey(.return, modifierFlags: [])
@@ -125,9 +129,9 @@ final class Board09Tests: XCTestCase {
     QueueUI.element(app, ID.auditClose).click()
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.audit).exists }, "audit: Close left it open")
 
-    // kill: the switch goes on with Maya open. Every draft verb is absent,
+    // kill: the switch goes on with Priya open. Every draft verb is absent,
     // the banner says so, the composer gives its reason, the draft is held.
-    XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, approve).exists }, "kill: Maya's draft is not open")
+    XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, approve).exists }, "kill: Priya's draft is not open")
     try await FakeDaemon.scenario("kill")
     app.typeKey("r", modifierFlags: [.command, .option])
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.element(app, ID.killBanner).exists }, "kill: no banner")
@@ -136,7 +140,10 @@ final class Board09Tests: XCTestCase {
     for fragment in [".edit", ".hold", ID.composerSend, ID.bulkOpen, ID.release] {
       XCTAssertEqual(QueueUI.count(app, containing: fragment), 0, "kill: \(fragment) is placed under the kill switch")
     }
-    let hint = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", Self.killHint)).firstMatch
+    // A Text's words reach XCUI as its value on macOS, its label empty.
+    let hint = app.staticTexts.matching(
+      NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", Self.killHint, Self.killHint)
+    ).firstMatch
     XCTAssertTrue(hint.waitForExistence(timeout: UITestApp.timeout), "kill: the composer does not give its reason")
     XCTAssertTrue(QueueUI.waitUntil { meta().hasPrefix("HELD by kill switch") }, "kill: meta reads \(meta())")
     // A, shift-A and Return do nothing under the switch.

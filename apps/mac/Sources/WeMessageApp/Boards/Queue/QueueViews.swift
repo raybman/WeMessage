@@ -39,9 +39,10 @@ struct TriageBar: View {
     }
     .padding(.vertical, 8)
     .padding(.horizontal, 12)
-    .accessibilityElement(children: .ignore)
+    // A group that contains its sentence, as the bulk strip is: an ignored
+    // element has no role, and the audit flags it (run 37717485936).
+    .accessibilityElement(children: .contain)
     .accessibilityLabel(sentence.isEmpty ? "Triage" : sentence)
-    .accessibilityValue(sentence)
     .accessibilityIdentifier(ShellID.triageBar)
   }
 }
@@ -525,11 +526,15 @@ struct VerbRow: View {
         .font(.system(size: 9, design: .monospaced))
         .foregroundStyle(Tokens.color(palette.inkDim))
         .fixedSize()
+        // The row's hint speaks it: as its own element the 9pt glyphs are
+        // too few pixels for the 1x audit to measure (run 37717485936).
+        .accessibilityHidden(true)
     }
     .padding(.vertical, 6)
     .padding(.horizontal, 12)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Verbs")
+    .accessibilityHint("X selects, Z undoes")
     .accessibilityIdentifier(ShellID.verbs)
   }
 

@@ -18,9 +18,16 @@ enum QueueUI {
     app.descendants(matching: .any).matching(identifier: id).firstMatch
   }
 
+  /// What an element says: its label, or, for a SwiftUI Text on macOS,
+  /// whose label reaches XCUI empty and whose words arrive as its value
+  /// (run 37717485936), the value.
   static func label(_ app: XCUIApplication, _ id: String) -> String {
     let e = element(app, id)
-    return e.exists ? e.label : "(missing)"
+    return e.exists ? words(e) : "(missing)"
+  }
+
+  static func words(_ e: XCUIElement) -> String {
+    e.label.isEmpty ? ((e.value as? String) ?? "") : e.label
   }
 
   static func value(_ app: XCUIApplication, _ id: String) -> String {
@@ -37,7 +44,7 @@ enum QueueUI {
   /// else the bubble's label, which carries it.
   static func meta(_ app: XCUIApplication, _ draftId: String) -> String {
     let own = element(app, ID.draftVerb(draftId, "meta"))
-    return own.exists ? own.label : label(app, ID.draft)
+    return own.exists ? words(own) : label(app, ID.draft)
   }
 
   /// Polls until `done` holds or the wait runs out; true when it held.

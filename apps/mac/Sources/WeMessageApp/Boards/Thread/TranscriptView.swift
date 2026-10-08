@@ -263,8 +263,10 @@ struct BubbleView: View {
       .foregroundStyle(Tokens.color(palette.inkDim))
       .fixedSize()
       // The sheet's bubble already speaks its time; a second, five-glyph
-      // element is one the 1x audit cannot measure (run 37618816522).
-      .accessibilityHidden(style == .specimen)
+      // element is one the 1x audit cannot measure (run 37618816522). The
+      // same holds in a thread when the stamp is the time alone (run
+      // 37717485936): the bubble's label ends with it.
+      .accessibilityHidden(style == .specimen || stamp == ShellText.shortClock(turn.sentAt, zone: zone))
   }
 
   private var content: some View {

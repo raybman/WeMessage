@@ -76,8 +76,10 @@ struct StagingTrayView: View {
               .accessibilityLabel("Remove \(item.wireName)")
               .accessibilityIdentifier(ShellID.mediaTrayRemovePrefix + item.id)
             }
+            // Semibold: at 10 pt on a 1x display a regular monospaced
+            // stroke never reaches full ink, and the contrast audit reads pixels.
             Text("\(index + 1) \u{00B7} " + item.wireName)
-              .font(.system(size: 10).monospaced())
+              .font(.system(size: 10, weight: .semibold).monospaced())
               .foregroundStyle(Tokens.color(palette.ink))
               .lineLimit(1)
               .frame(width: 96, alignment: .leading)

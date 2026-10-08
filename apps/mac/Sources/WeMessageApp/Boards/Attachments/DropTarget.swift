@@ -187,28 +187,34 @@ struct MediaThumb: View {
   let width: Double
   let height: Double
 
+  /// A filmstrip cell is too small for the kind and dimensions; it draws
+  /// the chip alone, centred, so the words never overlap.
+  private var compact: Bool { height < 60 }
+
   var body: some View {
-    ZStack(alignment: .bottomLeading) {
+    ZStack(alignment: compact ? .center : .bottomLeading) {
       RoundedRectangle(cornerRadius: 8)
         .fill(Tokens.color(palette.layer2))
-      VStack(spacing: 2) {
-        Text(item.isVideo ? "VIDEO" : item.isImage ? "IMG" : item.chip)
-          .font(.system(size: 10, weight: .semibold))
-          .tracking(1)
-        if let w = item.width, let h = item.height {
-          Text("\(w)\u{00D7}\(h)")
-            .font(.system(size: 10).monospacedDigit())
+      if !compact {
+        VStack(spacing: 2) {
+          Text(item.isVideo ? "VIDEO" : item.isImage ? "IMG" : item.chip)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(1)
+          if let w = item.width, let h = item.height {
+            Text("\(w)\u{00D7}\(h)")
+              .font(.system(size: 10).monospacedDigit())
+          }
         }
+        .foregroundStyle(Tokens.color(palette.inkDim))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      .foregroundStyle(Tokens.color(palette.inkDim))
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
       Text(item.chip)
         .font(.system(size: 10, weight: .semibold).monospacedDigit())
         .foregroundStyle(Tokens.color(palette.ink))
         .padding(.vertical, 2)
         .padding(.horizontal, 5)
         .background(Capsule().fill(Tokens.color(palette.layer1)))
-        .padding(6)
+        .padding(compact ? 0 : 6)
     }
     .frame(width: width, height: height)
     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Tokens.color(palette.ink), lineWidth: 1))

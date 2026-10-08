@@ -333,7 +333,12 @@ struct ShellModelTests {
     let transport = try Self.scenarioTransport("pending")
     let m = ShellModel(client: testClient(transport))
     m.start()
-    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    // Wait for the stream's request too: start() opens it after the reads,
+    // and counting before it lands raced on CI (6 against 5).
+    await Self.settle(m) { _ in
+      m.state.queue.count == 7 && m.threads != nil
+        && transport.requests.contains { $0.url?.path == "/v1/events/sse" }
+    }
     let before = transport.requests.count
     m.choose(.triage)
     #expect(m.queue.triageStart == 5)

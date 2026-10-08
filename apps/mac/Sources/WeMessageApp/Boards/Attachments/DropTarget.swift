@@ -225,6 +225,18 @@ struct MediaThumb: View {
     )
     .accessibilityElement(children: .ignore)
     .accessibilityAddTraits(.isImage)
-    .accessibilityLabel(item.name + ", " + item.chip)
+    .accessibilityLabel(spoken)
+  }
+
+  /// Words, not a file name: the audit reads "IMG_4410.HEIC" as not human
+  /// readable. The chip's own text stays in the label, so the text drawn
+  /// inside the image is the text it announces.
+  private var spoken: String {
+    if item.isVideo { return "Video, " + item.chip }
+    if item.isImage {
+      let frame = item.width.flatMap { w in item.height.map { h in ", \(w) by \(h)" } } ?? ""
+      return "Photo, " + item.chip + frame
+    }
+    return item.chip + " document"
   }
 }

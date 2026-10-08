@@ -263,7 +263,7 @@ struct CapabilityStrip: View {
               .strikethrough(!slot.can)
               .foregroundStyle(Tokens.color(slot.can ? palette.ink : palette.inkDim))
               .accessibilityElement(children: .combine)
-              .accessibilityLabel(slot.title + (slot.can ? ", can" : ", not in this version"))
+              .accessibilityLabel(slot.spoken + (slot.can ? ", can" : ", not in this version"))
               .accessibilityValue(slot.can ? "can" : "struck")
               .accessibilityIdentifier(ShellID.composeSlotPrefix + slot.id)
           }

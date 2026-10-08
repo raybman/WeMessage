@@ -37,23 +37,16 @@ struct SettingsWindow: View {
   var body: some View {
     GeometryReader { geometry in
       ZStack(alignment: .topLeading) {
-        HStack(spacing: 0) {
-          sidebar
-            .frame(width: Self.sidebarWidth, alignment: .topLeading)
-          Hairline(mirror: mirror, palette: palette, dark: dark)
-          page
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .padding(.top, ShellView.titleBand + 0.5)
-        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         // Under the confirm card the window is a scrim: out of the tree, so
-        // neither VoiceOver nor the audit reads what the card covers.
-        .accessibilityHidden(model.confirm != nil)
-        VStack(spacing: 0) {
-          band
-          Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
+        // neither VoiceOver nor the audit reads what the card covers. A
+        // branch, not a toggled accessibilityHidden: toggling it on a live
+        // subtree left the root "not an accessibility child of the parent"
+        // (run 37781688313), and its false re-exposed the hairlines.
+        if model.confirm != nil {
+          backdrop(geometry.size).accessibilityHidden(true)
+        } else {
+          backdrop(geometry.size)
         }
-        .accessibilityHidden(model.confirm != nil)
         if let what = model.confirm {
           ConfirmCard(model: model, what: what, palette: palette)
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -69,6 +62,26 @@ struct SettingsWindow: View {
     .accessibilityValue(TestHooks.geometry.value ?? "")
     .accessibilityLabel(Text(TestHooks.geometry.value ?? ""))
     .transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }
+  }
+
+  /// The panes and the title band: everything the confirm card covers.
+  private func backdrop(_ size: CGSize) -> some View {
+    ZStack(alignment: .topLeading) {
+      HStack(spacing: 0) {
+        sidebar
+          .frame(width: Self.sidebarWidth, alignment: .topLeading)
+        Hairline(mirror: mirror, palette: palette, dark: dark)
+        page
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      }
+      .padding(.top, ShellView.titleBand + 0.5)
+      .frame(width: size.width, height: size.height, alignment: .topLeading)
+      VStack(spacing: 0) {
+        band
+        Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
+      }
+    }
+    .frame(width: size.width, height: size.height, alignment: .topLeading)
   }
 
   /// The title band: the window's name and the pane's, clear of the lights.

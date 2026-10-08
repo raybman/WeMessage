@@ -112,6 +112,22 @@ struct ComposeModelTests {
     #expect(slots.filter(\.can).map(\.id) == ["emoji"])
   }
 
+  @Test("D-UI-101: no label compose speaks repeats the role 'text', and the strip still shows 14.C's words")
+  func noLabelRepeatsItsRole() {
+    // The audit fails "Label duplicates role description" on a static text
+    // whose label says "text" (run 37781688313).
+    let (model, _) = Self.model()
+    model.choose(Self.person("maya"))
+    var spoken = ComposeModel.capabilities.map(\.spoken)
+    spoken += model.channels.map { $0.headline + " " + $0.detail }
+    spoken += SendState.allCases.map(\.caption)
+    for label in spoken {
+      #expect(!label.lowercased().contains("text"), "\(label)")
+    }
+    #expect(ComposeModel.capabilities.first { $0.id == "richtext" }?.title == "Rich text")
+    #expect(ComposeModel.capabilities.first { $0.id == "richtext" }?.spoken == "Rich formatting")
+  }
+
   @Test("the proposal never touches the input; Approve moves it, Hold drops it, and the input is untouched")
   func proposal() {
     let (model, transport) = Self.model()

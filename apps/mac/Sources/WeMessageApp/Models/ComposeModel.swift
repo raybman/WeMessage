@@ -77,6 +77,10 @@ struct CapabilitySlot: Equatable, Sendable {
   let id: String
   let title: String
   let can: Bool
+
+  /// What VoiceOver says for the slot. The title, except where the title
+  /// would repeat the role a static text already announces (D-UI-101).
+  var spoken: String { ProvisionalUI.composeSpokenSlots[id] ?? title }
 }
 
 /// The six send states 14.F draws, and how each is bordered. Only Sent is
@@ -121,7 +125,7 @@ enum SendState: String, CaseIterable, Sendable {
   /// What the specimen means, in a sentence.
   var caption: String {
     switch self {
-    case .composed: "Nothing sent. The text is yours and only yours."
+    case .composed: "Nothing sent. The words are yours and only yours."
     case .undo: "Nothing has left this Mac. Dashed, because it is not sent."
     case .queued: "Queued is dated and names its next attempt. A spinner with no time is a stall."
     case .sending: "Still dashed. Undo is gone: this one is out of our hands."
@@ -260,7 +264,7 @@ final class ComposeModel {
           return ChannelCardState(
             channel: channel, kind: .default,
             headline: "Free. " + Self.printed(handle) + " \u{00B7} on this Mac",
-            detail: "Default because " + defaultReason(person) + ". Plain text only in this version.")
+            detail: "Default because " + defaultReason(person) + ". Words and emoji only in this version.")
         }
         return ChannelCardState(
           channel: channel, kind: .noHandle,

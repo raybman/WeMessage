@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..100 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..101 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -14,7 +14,7 @@ import Foundation
 // board 12 leaves a choice open or the daemon cannot serve what it draws;
 // D-UI-79..87: the S4i build, board 11; D-UI-88..94: the S4j build, where
 // board 13 and the plan disagree or the daemon cannot serve what it draws;
-// D-UI-95..100: the S4j build, where board 14 asks for what this version
+// D-UI-95..101: the S4j build, where board 14 asks for what this version
 // cannot do).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
@@ -922,4 +922,12 @@ public enum ProvisionalUI {
     case fixturesOnly
   }
   public static let composeContacts: ComposeContacts = .fixturesOnly
+
+  // D-UI-101: the macOS audit fails a static text whose label repeats its
+  // role (Label duplicates role description, run 37781688313), and that
+  // role is text. The strip keeps 14.C's word for the rich text slot on
+  // screen, but VoiceOver says the word below for that one slot. The
+  // channel card's detail and the composed specimen's caption were
+  // reworded instead, since that copy is ours, not the board's.
+  public static let composeSpokenSlots: [String: String] = ["richtext": "Rich formatting"]
 }

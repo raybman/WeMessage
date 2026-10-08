@@ -88,6 +88,25 @@ enum ID {
   static let audit = "wemessage.audit"
   static let auditClose = "wemessage.audit.close"
   static let auditRowPrefix = "wemessage.audit.row."
+  // v2 S4h, board 10.
+  static let trustBanner = "wemessage.trust.banner"
+  static let trustAction = "wemessage.trust.action"
+  static let freshness = "wemessage.freshness"
+  /// A row of the age table: the prefix and the scope.
+  static let freshnessRowPrefix = "wemessage.freshness.row."
+  static let freshnessFooter = "wemessage.freshness.footer"
+  static let revokedBanner = "wemessage.revoked.banner"
+  static let revokedFix = "wemessage.revoked.fix"
+  static let fda = "wemessage.fda"
+  static let fdaOpen = "wemessage.fda.open"
+  static let fdaSkip = "wemessage.fda.skip"
+  static let states = "wemessage.states"
+  static let statesTabPrefix = "wemessage.states.tab."
+  static let statesPagePrefix = "wemessage.states.page."
+  /// An empty: the prefix and its case; its action adds ".action".
+  static let emptyPrefix = "wemessage.empty."
+  static let pacing = "wemessage.pacing"
+  static let collision = "wemessage.collision"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

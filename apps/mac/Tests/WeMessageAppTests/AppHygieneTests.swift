@@ -53,6 +53,11 @@ struct AppHygieneTests {
     "wemessage.thread.release", "wemessage.kill.banner", "wemessage.kill.disengage", "wemessage.zero",
     "wemessage.zero.receipt", "wemessage.zero.verify", "wemessage.connect.card", "wemessage.audit",
     "wemessage.audit.close",
+    // v2 S4h, board 10 (prefixes: freshness.row.<scope>, states.tab.<page>,
+    // states.page.<page>, empty.<case>, empty.<case>.action).
+    "wemessage.trust.banner", "wemessage.trust.action", "wemessage.freshness", "wemessage.freshness.footer",
+    "wemessage.revoked.banner", "wemessage.revoked.fix", "wemessage.fda", "wemessage.fda.open", "wemessage.fda.skip",
+    "wemessage.states", "wemessage.pacing", "wemessage.collision",
   ]
 
   static let nsApp = "NS" + "App"
@@ -768,6 +773,52 @@ struct AppHygieneTests {
         let fromTests = try triple(#"\b"# + name + side + #": RGB = \("# + hex + #"\)"#, in: palette)
         let fromTokens = try triple(#"static let "# + name + #" = RGB\("# + hex + #"\)"#, in: block)
         #expect(fromTests.count == 3 && fromTests == fromTokens, "\(name) \(side): \(fromTests) vs \(fromTokens)")
+      }
+    }
+  }
+
+  // MARK: S4h
+
+  @Test("H-S4-6: the states sheet opens only under the UI-test flag with board 10.B; the FDA screen opens nothing and the hooks build the fixture seam first; board 10 paints no system colour")
+  func statesSheetAndFDASeam() throws {
+    let name = "States" + "Sheet"
+    let states = Self.appDir + "/Boards/States/"
+    let app = Self.appDir + "/ShellApp.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let fixtures = Self.appDir + "/Fixtures/"
+    var namedIn: [String] = []
+    for (path, text) in try Self.sources(Self.appDir) where try Self.count(#"\b"# + name + #"\b"#, in: text) > 0 {
+      namedIn.append(path)
+    }
+    #expect(namedIn.contains(app), "the window group never opens the sheet")
+    for path in namedIn {
+      #expect(path.hasPrefix(states) || path == app, "\(path) names the sheet")
+    }
+    let appText = try Repo.text(app)
+    #expect(appText.contains("} else if let states = TestHooks.statesSheet {"))
+    let hooksText = try Repo.text(hooks)
+    #expect(
+      hooksText.contains(#"statesSheet = isUITest && environment["WEMESSAGE_UI_BOARD"] == "10.B""#),
+      "the states content is not gated on the flag and board 10.B")
+    #expect(try Self.naming("TestHooks.statesSheet", under: Self.appDir) == [app])
+    // The seam: the fixture under the flag, checked before anything else,
+    // and the shipped seam refuses to run under it.
+    #expect(hooksText.contains("if isUITest { return Fixture" + "FullDiskAccess() }"))
+    let model = try Repo.text(Self.appDir + "/Models/StatesModel.swift")
+    #expect(model.contains("precondition(!TestHooks.isUITest"))
+    #expect(try Self.naming("Fixture" + "FullDiskAccess()", under: Self.appDir) == [hooks])
+    // Nothing on board 10 opens a URL, a pane or an app; no menu or key.
+    let opens = ["x-apple." + "systempreferences", "NSWork" + "space", "openURL", "open" + "Application", "URL(string"]
+    let menus = ["Command" + "Menu", ".com" + "mands", "Menu" + "Builder", ".keyboard" + "Shortcut", "Command" + "Group"]
+    let colours = ["." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent"]
+    var files = try Self.sources(Self.appDir + "/Boards/States")
+    #expect(files.count >= 2)
+    files.append((Self.appDir + "/Models/StatesModel.swift", model))
+    files += try Self.sources(Self.appDir + "/Fixtures").filter { $0.0.hasPrefix(fixtures + "Fixture" + "FullDiskAccess") || $0.0.hasPrefix(fixtures + "FixtureStates") }
+    #expect(files.count >= 5)
+    for (path, text) in files {
+      for token in opens + menus + colours {
+        #expect(!text.contains(token), "\(path) contains \(token)")
       }
     }
   }

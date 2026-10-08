@@ -139,7 +139,18 @@ struct ContentPane: View {
       if model.killSwitch == true {
         KillBanner(model: model, palette: palette)
       }
-      pane
+      // Board 10: lost access outranks a stale tile; the FDA screen takes
+      // the pane while it is up (10.A, 10.C).
+      if case .revoked(let at) = model.fda {
+        RevokedBanner(model: model, lastReadable: at, palette: palette)
+      } else if let line = model.trustLine {
+        TrustBannerView(model: model, line: line, palette: palette)
+      }
+      if model.fdaScreenUp {
+        FDAScreen(model: model, palette: palette)
+      } else {
+        pane
+      }
     }
   }
 

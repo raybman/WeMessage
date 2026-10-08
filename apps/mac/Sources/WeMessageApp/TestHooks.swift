@@ -37,11 +37,24 @@ enum TestHooks {
   /// item and no key lead there.
   static private(set) var specimens: SpecimenContent? = nil
 
+  /// Board 10.B's states sheet, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=10.B only: the one way to reach it (H-S4-6).
+  static private(set) var statesSheet: StatesContent? = nil
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
     accessibilityOverrides = isUITest ? AccessibilityMirror.Overrides.parse(environment) : AccessibilityMirror.Overrides()
     specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08" ? try? FixtureCatalogue.specimens() : nil
+    statesSheet = isUITest && environment["WEMESSAGE_UI_BOARD"] == "10.B" ? FixtureStates.content() : nil
+  }
+
+  /// Full Disk Access (10.C): the fixture under the UI-test flag, which
+  /// counts an ask and opens nothing; the system seam otherwise. The flag
+  /// returns first (H-S4-6).
+  static func fullDiskAccess() -> any FullDiskAccessSeam {
+    if isUITest { return FixtureFullDiskAccess() }
+    return SystemFullDiskAccess()
   }
 
   /// Where the window's avatars come from: the fixture photos under the

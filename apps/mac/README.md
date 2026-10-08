@@ -200,6 +200,29 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.audit`: the audit view
 - `wemessage.audit.row.<seq>`: one audit row
 - `wemessage.audit.close`: closes the audit view (Escape)
+- `wemessage.trust.banner`: the trust banner (10.A), present only while a
+  connected channel is stale; its label names the channel and since when
+- `wemessage.trust.action`: Show ages, which pins the per-channel age table
+- `wemessage.freshness`: the per-channel age table, off the rail on hover
+  and pinned by the trust banner (D-UI-68), and in the states sheet
+- `wemessage.freshness.row.<scope>`: one channel's row; a channel that is
+  not connected says so and shows no number
+- `wemessage.freshness.footer`: the table's foot, the clock it was computed
+  at or CANNOT SAY
+- `wemessage.revoked.banner`: lost access to chat.db while running (10.C)
+- `wemessage.revoked.fix`: Fix, which opens the Full Disk Access screen
+- `wemessage.fda`: the Full Disk Access screen (10.C), four headings
+- `wemessage.fda.open`: Open System Settings; asks the seam only, and its
+  value counts the asks (`asked 1`)
+- `wemessage.fda.skip`: Skip iMessage for now (D-UI-64)
+- `wemessage.states`: board 10's sheet, only with `WEMESSAGE_UI_BOARD=10.B`
+  under the UI-test flag (H-S4-6)
+- `wemessage.states.tab.<page>`, `wemessage.states.page.<page>`: the sheet's
+  tabs and pages, `empties` and `settings`
+- `wemessage.empty.<case>`: one of the six empties (10.B), and
+  `wemessage.empty.<case>.action` its one action
+- `wemessage.pacing`: the pacing table (10.D), iMessage's rows (D-UI-66)
+- `wemessage.collision`: the collision notice (10.E)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

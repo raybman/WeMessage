@@ -106,6 +106,34 @@ enum ShellID {
   static let audit = "wemessage.audit"
   static let auditClose = "wemessage.audit.close"
   static let auditRowPrefix = "wemessage.audit.row."
+  // v2 S4h, board 10.
+  /// The trust banner (10.A); its label is the line. Its one action pins
+  /// the per-channel ages.
+  static let trustBanner = "wemessage.trust.banner"
+  static let trustAction = "wemessage.trust.action"
+  /// The per-channel age table, a row per channel (this prefix and the
+  /// scope), and its foot.
+  static let freshness = "wemessage.freshness"
+  static let freshnessRowPrefix = "wemessage.freshness.row."
+  static let freshnessFooter = "wemessage.freshness.footer"
+  /// Lost access while running (10.C) and its Fix.
+  static let revokedBanner = "wemessage.revoked.banner"
+  static let revokedFix = "wemessage.revoked.fix"
+  /// The Full Disk Access screen (10.C); Open's value is how many times it
+  /// asked the seam.
+  static let fda = "wemessage.fda"
+  static let fdaOpen = "wemessage.fda.open"
+  static let fdaSkip = "wemessage.fda.skip"
+  /// Board 10's sheet (10.B), reachable only with WEMESSAGE_UI_BOARD=10.B
+  /// under the UI-test flag (H-S4-6): its tabs and pages by slug.
+  static let states = "wemessage.states"
+  static let statesTabPrefix = "wemessage.states.tab."
+  static let statesPagePrefix = "wemessage.states.page."
+  /// One empty is this prefix and its case; its one action adds ".action".
+  static let emptyPrefix = "wemessage.empty."
+  /// The pacing table (10.D) and the collision notice (10.E).
+  static let pacing = "wemessage.pacing"
+  static let collision = "wemessage.collision"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
@@ -160,6 +188,15 @@ struct ShellView: View {
       VStack(spacing: 0) {
         TitleBar(model: model, palette: palette)
         Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
+      }
+      if model.freshnessPinned || model.freshnessHover {
+        // The per-channel ages off the rail (10.A, D-UI-68): an in-window
+        // overlay beside the rail, pinned by the trust banner's action.
+        FreshnessTable(rows: model.freshnessRows, palette: palette)
+          .frame(width: 380)
+          .padding(.leading, ProvisionalUI.railWidth + 8)
+          .padding(.top, Self.titleBand + 8)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
       }
       if TestHooks.isUITest {
         // Under the UI-test flag only: cmd-opt-R reads status, threads and
@@ -217,6 +254,10 @@ private struct RailView: View {
     .padding(.vertical, 12)
     .frame(width: ProvisionalUI.railWidth)
     .frame(maxHeight: .infinity)
+    .contentShape(Rectangle())
+    // Hover shows the ages (D-UI-68); never under the UI-test flag, where a
+    // parked pointer would make a shot depend on where it rests.
+    .onHover { inside in if !TestHooks.isUITest { model.freshnessHover = inside } }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(ShellID.rail)
   }

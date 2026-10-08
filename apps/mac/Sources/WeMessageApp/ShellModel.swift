@@ -105,6 +105,29 @@ public final class ShellModel {
   /// composer, a new selection).
   public internal(set) var triageClaim = 0
 
+  // v2 S4h, board 10.
+  /// The per-channel age table (10.A) is pinned open by the trust banner's
+  /// action (D-UI-68).
+  public var freshnessPinned = false
+  /// The pointer is over the rail (D-UI-68); never set under the UI-test
+  /// flag, so a click that leaves the pointer on the rail cannot open the
+  /// table in another board's snapshot.
+  public var freshnessHover = false
+  /// The daemon's last thread list answered source-unavailable: it cannot
+  /// read chat.db (10.C).
+  public internal(set) var sourceUnavailable = false
+  /// The last scan this window saw, held across a lost source (D-UI-65).
+  public internal(set) var lastReadableScan: Date?
+  /// The revoked banner's Fix opened the FDA screen (10.C).
+  public var fdaScreenShown = false
+  /// Skip iMessage for now, for this window (D-UI-64).
+  public var fdaSkipped = false
+  /// How often the FDA screen asked the seam to open System Settings,
+  /// mirrored from the seam so the view redraws.
+  public internal(set) var fdaAsked = 0
+  /// Full Disk Access, behind its seam: the fixture under the UI-test flag.
+  let fullDiskAccess: any FullDiskAccessSeam
+
   private let client: GatewayClient
   private var task: Task<Void, Never>?
 
@@ -115,6 +138,24 @@ public final class ShellModel {
     return ShellBoard.fold(
       status: status, threads: threads, drafts: state.queue, window: window,
       excluding: excludedDrafts(clock: clock, window: window))
+  }
+
+  /// Board 10.A: the trust banner's line, nil while no connected channel
+  /// is stale.
+  public var trustLine: String? { TrustBanner.line(board: board) }
+  /// Board 10.A: the per-channel age rows.
+  public var freshnessRows: [FreshnessRow] { Freshness.rows(board: board, status: status) }
+  /// Board 10.C: Full Disk Access, as the seam folds the daemon's answer.
+  public var fda: FDAState { fullDiskAccess.state(sourceUnavailable: sourceUnavailable, lastReadable: lastReadableScan) }
+  /// The FDA screen takes the content pane: on first run until skipped, or
+  /// after the revoked banner's Fix.
+  public var fdaScreenUp: Bool { fdaScreenShown || (fda == .firstRun && !fdaSkipped) }
+
+  /// Asks the seam to open System Settings (10.C). Nothing reaches the
+  /// daemon.
+  public func openFullDiskAccess() {
+    fullDiskAccess.openSettings()
+    fdaAsked = fullDiskAccess.asked
   }
 
   /// D-UI-44 mapped onto the Kit's rule.
@@ -402,6 +443,7 @@ public final class ShellModel {
     self.client = client
     self.avatars = avatars
     self.thread = ThreadModel(client: client)
+    self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()
     self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
     shell.model = self
@@ -451,7 +493,11 @@ public final class ShellModel {
       if case .idle = connection { connection = .down(reason: "unreachable") }
       return
     }
-    if case .ok(let page)? = try? await client.listThreads() {
+    if let scan = status?.cursor.flatMap({ WireDate.parse($0.lastScanAt) }) { lastReadableScan = scan }
+    let listed = try? await client.listThreads()
+    if case .refused(.sourceUnavailable)? = listed { sourceUnavailable = true }
+    if case .ok(let page)? = listed {
+      sourceUnavailable = false
       threads = page
       let avatars = self.avatars
       avatarTask?.cancel()

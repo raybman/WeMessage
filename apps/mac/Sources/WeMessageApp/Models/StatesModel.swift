@@ -298,6 +298,23 @@ public protocol FullDiskAccessSeam: AnyObject {
   var asked: Int { get }
 }
 
+/// The shipped seam. The daemon's answer is the probe, as the fixture's is;
+/// the ask is counted and opens nothing yet: the deep link into System
+/// Settings lands with onboarding, board 12 (D-UI-64). Never built under
+/// the UI-test flag (H-S4-6).
+@MainActor
+public final class SystemFullDiskAccess: FullDiskAccessSeam {
+  public private(set) var asked = 0
+  public init() {}
+  public func state(sourceUnavailable: Bool, lastReadable: Date?) -> FDAState {
+    FDAState.fold(sourceUnavailable: sourceUnavailable, lastReadable: lastReadable)
+  }
+  public func openSettings() {
+    precondition(!TestHooks.isUITest, "the system Full Disk Access seam under the UI-test flag")
+    asked += 1
+  }
+}
+
 /// The FDA screen's words (10.C): the four headings and what each says.
 public enum FDACopy {
   public static let title = "WeMessage needs Full Disk Access"

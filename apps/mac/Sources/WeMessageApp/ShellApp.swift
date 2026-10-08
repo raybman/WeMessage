@@ -9,6 +9,8 @@ struct ShellApp: App {
     WindowGroup("WeMessage") {
       if let specimens = TestHooks.specimens {
         SpecimenSheet(content: specimens)
+      } else if let states = TestHooks.statesSheet {
+        StatesSheet(content: states)
       } else {
         ShellView()
       }

@@ -145,6 +145,7 @@ final class Board15Tests: XCTestCase {
   /// The thread's reported offset, from the header name's value "y=N".
   /// The scroll view's own value is not reliably exposed, so the model's
   /// offset rides on a Text, which keeps it.
+  @MainActor
   private static func offset(_ app: XCUIApplication) -> Int {
     let value = QueueUI.value(app, ID.mediaHeader)
     return Int(value.replacingOccurrences(of: "y=", with: "")) ?? -1

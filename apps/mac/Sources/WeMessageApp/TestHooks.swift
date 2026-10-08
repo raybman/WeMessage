@@ -41,12 +41,27 @@ enum TestHooks {
   /// WEMESSAGE_UI_BOARD=10.B only: the one way to reach it (H-S4-6).
   static private(set) var statesSheet: StatesContent? = nil
 
+  /// Board 12's onboarding: under the UI-test flag only with
+  /// WEMESSAGE_UI_BOARD=12, in memory, over the fixture seam; otherwise the
+  /// shipped store and seam, until the handover is spent (H-S4-7).
+  static private(set) var onboarding: OnboardingModel? = nil
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
     accessibilityOverrides = isUITest ? AccessibilityMirror.Overrides.parse(environment) : AccessibilityMirror.Overrides()
     specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08" ? try? FixtureCatalogue.specimens() : nil
     statesSheet = isUITest && environment["WEMESSAGE_UI_BOARD"] == "10.B" ? FixtureStates.content() : nil
+    onboarding = onboardingModel(board: environment["WEMESSAGE_UI_BOARD"])
+  }
+
+  /// The flag returns first: under it the store is memory and the seam the
+  /// fixture, so no defaults are written and no pane opens (H-S4-7).
+  static func onboardingModel(board: String?) -> OnboardingModel? {
+    if isUITest { return board == "12" ? OnboardingModel(store: MemoryOnboardingStore(), seam: fullDiskAccess()) : nil }
+    let store = DefaultsOnboardingStore()
+    if store.load()?.finished == true { return nil }
+    return OnboardingModel(store: store, seam: fullDiskAccess())
   }
 
   /// Full Disk Access (10.C): the fixture under the UI-test flag, which

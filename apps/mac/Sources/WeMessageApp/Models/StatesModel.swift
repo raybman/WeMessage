@@ -296,15 +296,24 @@ public protocol FullDiskAccessSeam: AnyObject {
   /// How many times openSettings was asked (the fixture's record; the
   /// system seam counts too, for the same accessibility value).
   var asked: Int { get }
+  /// Onboarding's poll (12.B, every 2 s on 2b): can chat.db be read now?
+  func probe() async -> Bool
+  /// How many times probe was asked.
+  var probes: Int { get }
+  /// 2c's count query, once readable; nil when it is not served.
+  func sizing() async -> CopySizing?
+  /// CopyProgress, once the copy was asked for; nil when it is not served.
+  func copyProgress() async -> CopyProgressFacts?
 }
 
 /// The shipped seam. The daemon's answer is the probe, as the fixture's is;
-/// the ask is counted and opens nothing yet: the deep link into System
-/// Settings lands with onboarding, board 12 (D-UI-64). Never built under
-/// the UI-test flag (H-S4-6).
+/// the ask opens the Full Disk Access pane through SystemSettingsPane, the
+/// one file that names it (D-UI-64, H-S4-7). Never built under the UI-test
+/// flag (H-S4-6).
 @MainActor
 public final class SystemFullDiskAccess: FullDiskAccessSeam {
   public private(set) var asked = 0
+  public private(set) var probes = 0
   public init() {}
   public func state(sourceUnavailable: Bool, lastReadable: Date?) -> FDAState {
     FDAState.fold(sourceUnavailable: sourceUnavailable, lastReadable: lastReadable)
@@ -312,7 +321,21 @@ public final class SystemFullDiskAccess: FullDiskAccessSeam {
   public func openSettings() {
     precondition(!TestHooks.isUITest, "the system Full Disk Access seam under the UI-test flag")
     asked += 1
+    SystemSettingsPane.openFullDiskAccess()
   }
+  /// The daemon reads chat.db, so its thread list is the probe: readable
+  /// unless it answers source-unavailable or does not answer.
+  public func probe() async -> Bool {
+    precondition(!TestHooks.isUITest, "the system Full Disk Access seam under the UI-test flag")
+    probes += 1
+    guard let listed = try? await GatewayClient().listThreads(limit: 1) else { return false }
+    if case .ok = listed { return true }
+    return false
+  }
+  /// The daemon serves no count query yet (D-UI-72).
+  public func sizing() async -> CopySizing? { nil }
+  /// The daemon serves no copy progress yet (D-UI-72).
+  public func copyProgress() async -> CopyProgressFacts? { nil }
 }
 
 /// The FDA screen's words (10.C): the four headings and what each says.

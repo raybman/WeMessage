@@ -22,7 +22,14 @@ struct ThreadView: View {
   var body: some View {
     VStack(spacing: 0) {
       if thread.isGroup { Inv5Strip(palette: palette) }
-      TranscriptView(model: model, thread: thread, palette: palette)
+      if model.find.shown { FindBar(model: model, find: model.find, palette: palette) }
+      HStack(spacing: 0) {
+        TranscriptView(model: model, thread: thread, palette: palette)
+        if model.scrubberShown {
+          Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.25)).frame(width: 0.5)
+          YearScrubberView(model: model, palette: palette)
+        }
+      }
       ChannelBanner(thread: thread, palette: palette)
       if model.lens == .triage {
         VerbRow(model: model, thread: thread, palette: palette)
@@ -36,6 +43,10 @@ struct ThreadView: View {
     .accessibilityLabel("Conversation: " + loadValue)
     .accessibilityValue(loadValue)
     .accessibilityIdentifier(ShellID.thread)
+    // An open find bar follows the turns as they load.
+    .onChange(of: model.thread.turns.map(\.guid)) { _, _ in
+      if model.find.shown { model.find.update(turns: model.thread.turns) }
+    }
   }
 }
 

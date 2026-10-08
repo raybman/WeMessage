@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..78 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..87 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -739,7 +739,7 @@ public enum ProvisionalUI {
   // D-UI-79: the daemon serves no search route (G-11a). Search runs here,
   // over what the daemon already serves through GETs: the thread list, then
   // each listed thread's newest window of turns. At most 60 threads, 200
-  // turns each. A channel with no transcript served is "not searched" in
+  // turns each. A channel with no transcript served is named as not searched in
   // the coverage line, never silently absent. Nothing reads chat.db.
   public static let searchThreadCap = 60
   public static let searchWindow = 200
@@ -789,7 +789,7 @@ public enum ProvisionalUI {
   public static let switcherDraftHint = "draft waiting"
 
   // D-UI-85: find in thread (cmd-F) starts at the newest match and steps
-  // with the arrow keys, wrapping at either end; the counter reads "2 of 4".
+  // with the arrow keys, wrapping at either end; the counter reads 2 of 4.
   // It searches the turns the thread has loaded, and says so.
   public enum FindStart: Sendable {
     case newestMatch

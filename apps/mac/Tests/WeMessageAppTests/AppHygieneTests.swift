@@ -65,6 +65,13 @@ struct AppHygieneTests {
     "wemessage.onboarding.sizing", "wemessage.onboarding.progress", "wemessage.onboarding.notbuilt",
     "wemessage.onboarding.agent.off", "wemessage.onboarding.agent.draft", "wemessage.onboarding.kill",
     "wemessage.onboarding.done", "wemessage.coach", "wemessage.voice.dock",
+    // v2 S4i, board 11 (prefixes: search.token.<n>, search.group.<channel>,
+    // search.result.<guid>, search.facet.<n>, scrubber.year.<year>,
+    // switcher.row.<id>).
+    "wemessage.search", "wemessage.search.field", "wemessage.search.summary", "wemessage.search.coverage",
+    "wemessage.search.prompt", "wemessage.search.facets", "wemessage.find", "wemessage.find.field",
+    "wemessage.find.counter", "wemessage.scrubber", "wemessage.scrubber.line", "wemessage.switcher",
+    "wemessage.switcher.field",
   ]
 
   static let nsApp = "NS" + "App"
@@ -350,7 +357,7 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12).
-  static let dUIKeys = (1...78).map { "D-UI-\($0)" }
+  static let dUIKeys = (1...87).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -367,11 +374,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..78, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..87, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..78 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..87 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -379,7 +386,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...78), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...87), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -673,18 +680,22 @@ struct AppHygieneTests {
     #expect(composer.contains(".keyboardShortcut(.return, modifiers: .command)"))
     #expect(composer.contains("perform(") && composer.contains("gesture: .commandReturn"))
     #expect(!composer.contains("model.client"), "the composer reaches the client directly")
-    // The field's own Return handler: only in the composer, and only with cmd.
+    // A field's own Return handler: only in the composer and board 11's
+    // search and switcher fields (D-UI-81), and every one requires cmd.
     let keyPress = ".onKeyPress(" + ".return"
+    let returnFiles = ["/Boards/Thread/ComposerView.swift", "/Boards/Search/SearchViews.swift"]
+    var handlerCount = 0
     for (path, text) in try Self.sources(Self.appDir) where text.contains(keyPress) {
-      #expect(path.hasSuffix("/Boards/Thread/ComposerView.swift"), "\(path) handles Return")
+      #expect(returnFiles.contains { path.hasSuffix($0) }, "\(path) handles Return")
+      for handler in text.components(separatedBy: keyPress).dropFirst() {
+        handlerCount += 1
+        let head = String(handler.prefix(160))
+        #expect(
+          head.contains("guard press.modifiers.contains(.command) else { return .ignored }"),
+          "a Return handler in \(path) does not require cmd: \(head)")
+      }
     }
-    let handlers = composer.components(separatedBy: keyPress).dropFirst()
-    for handler in handlers {
-      let head = String(handler.prefix(160))
-      #expect(
-        head.contains("guard press.modifiers.contains(.command) else { return .ignored }"),
-        "a Return handler in the composer does not require cmd: \(head)")
-    }
+    #expect(handlerCount >= 3, "the composer, search and switcher Return handlers were not all swept")
     // Raw key codes live in TriageKeys only, and its bare Return confirms the
     // bulk card and nothing else (09.D); its verbs reach the model, never the client.
     for (path, text) in try Self.sources(Self.appDir) where text.contains("keyCode") {

@@ -128,6 +128,28 @@ enum ID {
   static let onboardingDone = "wemessage.onboarding.done"
   static let coach = "wemessage.coach"
   static let voiceDock = "wemessage.voice.dock"
+  /// Board 11 (prefixes: search.token.<n>, search.group.<channel>,
+  /// search.result.<guid>, search.facet.<n>, scrubber.year.<year>,
+  /// switcher.row.<id>).
+  static let search = "wemessage.search"
+  static let searchField = "wemessage.search.field"
+  static let searchSummary = "wemessage.search.summary"
+  static let searchCoverage = "wemessage.search.coverage"
+  static let searchPrompt = "wemessage.search.prompt"
+  static let searchFacets = "wemessage.search.facets"
+  static let searchTokenPrefix = "wemessage.search.token."
+  static let searchGroupPrefix = "wemessage.search.group."
+  static let searchResultPrefix = "wemessage.search.result."
+  static let searchFacetPrefix = "wemessage.search.facet."
+  static let findBar = "wemessage.find"
+  static let findField = "wemessage.find.field"
+  static let findCounter = "wemessage.find.counter"
+  static let scrubber = "wemessage.scrubber"
+  static let scrubberLine = "wemessage.scrubber.line"
+  static let scrubberYearPrefix = "wemessage.scrubber.year."
+  static let switcher = "wemessage.switcher"
+  static let switcherField = "wemessage.switcher.field"
+  static let switcherRowPrefix = "wemessage.switcher.row."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

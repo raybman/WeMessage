@@ -20,60 +20,100 @@ struct TranscriptView: View {
   var body: some View {
     GeometryReader { geometry in
       let maxWidth = TranscriptLayout.maxBubbleWidth(paneWidth: geometry.size.width)
-      ScrollView {
-        VStack(spacing: 0) {
-          ForEach(rows) { row in
-            switch row {
-            case .day(let id, let label):
-              DaySeparator(label: label, palette: palette)
-                .accessibilityIdentifier(ShellID.dayPrefix + id)
-            case .bubble(let bubble):
-              BubbleView(
-                bubble: bubble, sms: isSMSChat(thread.chatGuid), title: thread.title, maxWidth: maxWidth,
-                palette: palette
-              )
-              .accessibilityIdentifier(ShellID.bubblePrefix + bubble.turn.guid)
-            }
-          }
-          if let draft = model.pendingDraft(for: thread.chatGuid) {
-            let queued = model.lens != .recent
-            let meta = queued ? model.metaLine(draft, long: model.lens == .needsYou) : nil
-            if model.thread.held.contains(draft.id) {
-              HeldBubble(
-                draft: draft, maxWidth: maxWidth, palette: palette, meta: meta,
-                release: queued && model.killSwitch == false ? { model.thread.release(draft.id) } : nil
-              )
-              .padding(.top, TranscriptLayout.senderChangeGap)
-              .accessibilityIdentifier(ShellID.heldPrefix + draft.id)
-            } else {
-              DraftBubble(
-                draft: draft, isGroup: thread.isGroup, maxWidth: maxWidth, palette: palette, meta: meta,
-                absent: model.phase(of: draft)?.readsAbsent ?? false
-              )
-              .padding(.top, TranscriptLayout.senderChangeGap)
-              .onAppear { model.outbound.markRendered(draft.id) }
-              .accessibilityIdentifier(ShellID.draft)
-              if model.lens == .needsYou {
-                NeedsYouDraft(model: model, draft: draft, palette: palette)
-                  .padding(.top, 6)
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(spacing: 0) {
+            ForEach(rows) { row in
+              switch row {
+              case .day(let id, let label):
+                DaySeparator(label: label, palette: palette)
+                  .accessibilityIdentifier(ShellID.dayPrefix + id)
+              case .bubble(let bubble):
+                BubbleView(
+                  bubble: bubble, sms: isSMSChat(thread.chatGuid), title: thread.title, maxWidth: maxWidth,
+                  palette: palette
+                )
+                .overlay { Board11Outline(guid: bubble.turn.guid, model: model, palette: palette) }
+                .accessibilityIdentifier(ShellID.bubblePrefix + bubble.turn.guid)
+                .id(bubble.turn.guid)
               }
             }
-          }
-          if let entry = model.outbound.latest(for: thread.chatGuid), entry.phase != .undone {
-            OutboxBubble(entry: entry, maxWidth: maxWidth, palette: palette) {
-              ComposerView.undo(model: model, chatGuid: thread.chatGuid)
+            if let draft = model.pendingDraft(for: thread.chatGuid) {
+              let queued = model.lens != .recent
+              let meta = queued ? model.metaLine(draft, long: model.lens == .needsYou) : nil
+              if model.thread.held.contains(draft.id) {
+                HeldBubble(
+                  draft: draft, maxWidth: maxWidth, palette: palette, meta: meta,
+                  release: queued && model.killSwitch == false ? { model.thread.release(draft.id) } : nil
+                )
+                .padding(.top, TranscriptLayout.senderChangeGap)
+                .accessibilityIdentifier(ShellID.heldPrefix + draft.id)
+              } else {
+                DraftBubble(
+                  draft: draft, isGroup: thread.isGroup, maxWidth: maxWidth, palette: palette, meta: meta,
+                  absent: model.phase(of: draft)?.readsAbsent ?? false
+                )
+                .padding(.top, TranscriptLayout.senderChangeGap)
+                .onAppear { model.outbound.markRendered(draft.id) }
+                .accessibilityIdentifier(ShellID.draft)
+                if model.lens == .needsYou {
+                  NeedsYouDraft(model: model, draft: draft, palette: palette)
+                    .padding(.top, 6)
+                }
+              }
             }
-            .padding(.top, TranscriptLayout.senderChangeGap)
+            if let entry = model.outbound.latest(for: thread.chatGuid), entry.phase != .undone {
+              OutboxBubble(entry: entry, maxWidth: maxWidth, palette: palette) {
+                ComposerView.undo(model: model, chatGuid: thread.chatGuid)
+              }
+              .padding(.top, TranscriptLayout.senderChangeGap)
+            }
           }
+          .padding(.vertical, TranscriptLayout.verticalPadding)
+          .padding(.horizontal, TranscriptLayout.horizontalPadding)
+          .frame(maxWidth: .infinity)
         }
-        .padding(.vertical, TranscriptLayout.verticalPadding)
-        .padding(.horizontal, TranscriptLayout.horizontalPadding)
-        .frame(maxWidth: .infinity)
+        .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .accessibilityLabel("Transcript")
+        // Board 11: a result, a year or a find match scrolls its message
+        // into the middle of the pane, once the rows that hold it are drawn.
+        .onChange(of: model.scrollTarget) { _, target in
+          if let target { proxy.scrollTo(target, anchor: .center) }
+        }
+        .onChange(of: rows.count) { _, _ in
+          if let target = model.scrollTarget { proxy.scrollTo(target, anchor: .center) }
+        }
+        .onAppear {
+          if let target = model.scrollTarget { proxy.scrollTo(target, anchor: .center) }
+        }
       }
-      .defaultScrollAnchor(.bottom, for: .alignment)
-      .defaultScrollAnchor(.bottom, for: .initialOffset)
-      .defaultScrollAnchor(.bottom, for: .sizeChanges)
-      .accessibilityLabel("Transcript")
+    }
+  }
+}
+
+/// 11.C and 11.D: the message a jump landed on, or find's current match,
+/// is outlined 3 pt in ink; find's other matches 1 pt. A rule, never a
+/// colour.
+struct Board11Outline: View {
+  let guid: String
+  let model: ShellModel
+  let palette: Tokens.Palette
+
+  private var width: CGFloat {
+    if model.scrollTarget == guid { return 3 }
+    if model.find.shown && model.find.matches.contains(guid) { return 1 }
+    return 0
+  }
+
+  var body: some View {
+    if width > 0 {
+      RoundedRectangle(cornerRadius: TranscriptLayout.radius + 3)
+        .strokeBorder(Tokens.color(palette.ink), lineWidth: width)
+        .padding(-3)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
   }
 }

@@ -83,6 +83,16 @@ public final class ShellModel {
   public let thread: ThreadModel
   /// The one send funnel: every send and approval goes through it.
   public let outbound: Outbound
+  /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
+  /// find in thread (cmd-F) and the year scrubber (opt-cmd-G). All read;
+  /// none writes (D-UI-79).
+  public let search: SearchModel
+  public let switcher = QuickSwitcherModel()
+  public let find = FindBarModel()
+  public var scrubberShown = false
+  public internal(set) var scrubberYear: Int?
+  /// The message a result or a year landed on: outlined 3 pt (11.D).
+  public internal(set) var jumpAnchor: String?
   /// What the human has typed in each thread's composer, by chatGuid. Never
   /// sent from here: only Outbound sends.
   public var composerText: [String: String] = [:]
@@ -417,7 +427,10 @@ public final class ShellModel {
   /// Escape's ladder (06.C): the composer gives the keyboard back to the
   /// list, then the selection clears, then Triage ends.
   public func escape(fromComposer: Bool) {
-    if fromComposer {
+    if escapeIsBoard11 {
+      // Board 11 first: a panel closes, or a jump goes back to its results.
+      escapeBoard11()
+    } else if fromComposer {
       composerClaim = nil
       triageClaim += 1
     } else if !queue.selection.isEmpty {
@@ -443,10 +456,122 @@ public final class ShellModel {
     self.client = client
     self.avatars = avatars
     self.thread = ThreadModel(client: client)
+    self.search = SearchModel(source: DaemonSearchSource(client: client))
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()
     self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
     shell.model = self
+  }
+
+  // MARK: board 11
+
+  /// True while search or the switcher holds the list and thread panes
+  /// (D-UI-86): the composer is not in the window then.
+  public var searchUp: Bool { search.shown || switcher.shown }
+
+  /// Shift-cmd-F: search everything, from an empty field.
+  public func openSearch() {
+    switcher.close()
+    find.close()
+    search.open()
+  }
+
+  /// cmd-K: the switcher, empty, over the current list.
+  public func openSwitcher() {
+    search.close()
+    find.close()
+    let waiting = Set(state.queue.filter { $0.state == .pending }.map(\.chatGuid))
+    switcher.open(threads: threads?.threads ?? [], draftsWaiting: waiting)
+  }
+
+  /// cmd-F: find in the open thread, only when one is open.
+  public func openFind() {
+    guard selected != nil, !searchUp else { return }
+    find.open(turns: thread.turns)
+  }
+
+  /// opt-cmd-G: the year scrubber beside the open thread.
+  public func toggleScrubber() {
+    guard selected != nil, !searchUp else { return }
+    scrubberShown.toggle()
+  }
+
+  /// The scrubber over what the open thread has loaded.
+  public var scrubber: YearScrubber { YearScrubber(turns: thread.turns) }
+
+  /// A year row: land on its first message, or the nearest (11.F).
+  public func jump(toYear year: Int) {
+    scrubberYear = year
+    jumpAnchor = scrubber.anchor(for: year)
+  }
+
+  /// A result opens its thread at that message (11.D).
+  public func open(_ hit: SearchHit) {
+    search.opened(hit)
+    find.close()
+    lens = .recent
+    scope = .all
+    selectedThread = hit.doc.threadGuid
+    jumpAnchor = hit.id
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    scrubberYear = calendar.component(.year, from: hit.doc.sentAt)
+    scrubberShown = true
+    userOpenedThread()
+  }
+
+  /// A switcher row: a thread opens, a channel selects its tile.
+  public func open(_ row: QuickSwitcherModel.Row) {
+    switcher.close()
+    switch row.target {
+    case .thread(let guid):
+      jumpAnchor = nil
+      scrubberShown = false
+      open(guid)
+    case .channel(let scope):
+      self.scope = scope
+    }
+  }
+
+  /// What the transcript scrolls to and outlines: the find bar's current
+  /// match while it is up, else the jump.
+  public var scrollTarget: String? { find.shown ? find.currentGuid : jumpAnchor }
+
+  /// opt-cmd-up and opt-cmd-down on the scrubber: a newer or an older year.
+  public func stepYear(_ delta: Int) {
+    guard scrubberShown else { return }
+    let years = scrubber.years.map(\.year)
+    guard !years.isEmpty else { return }
+    let at = scrubberYear.flatMap { years.firstIndex(of: $0) }
+    let next = at.map { min(max($0 + delta, 0), years.count - 1) } ?? 0
+    jump(toYear: years[next])
+  }
+
+  /// True while board 11 owns Escape: a panel is up, or a jump can go
+  /// back to its results. Otherwise Escape is the list's (06.C).
+  public var escapeIsBoard11: Bool {
+    switcher.shown || search.shown || find.shown || scrubberShown
+      || (jumpAnchor != nil && search.jumpedFrom != nil)
+  }
+
+  /// Board 11's Escape, innermost first: the switcher, search, the find
+  /// bar, then a jump back to its results (11.D), then the scrubber.
+  public func escapeBoard11() {
+    if switcher.shown {
+      switcher.close()
+    } else if search.shown {
+      search.escape()
+    } else if find.shown {
+      find.close()
+    } else if jumpAnchor != nil, search.jumpedFrom != nil {
+      // 11.D: Esc from a jumped-to thread goes back to the same results.
+      jumpAnchor = nil
+      scrubberShown = false
+      search.back()
+    } else if scrubberShown {
+      scrubberShown = false
+      jumpAnchor = nil
+    }
   }
 
   /// The pending agent draft for `chatGuid`, newest last in the queue.

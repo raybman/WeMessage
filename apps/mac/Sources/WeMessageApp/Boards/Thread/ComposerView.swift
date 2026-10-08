@@ -129,8 +129,10 @@ struct ComposerView: View {
         // takes the keyboard when a thread opens, the first one included.
         .background(KeyboardClaim(token: claimToken))
         // Outside Recent, Escape hands the keyboard back to the list (06.C).
+        // In any lens it first climbs board 11: the find bar, the scrubber,
+        // a jump back to its results (11.D).
         .onKeyPress(.escape) {
-          guard model.lens != .recent else { return .ignored }
+          guard model.lens != .recent || model.escapeIsBoard11 else { return .ignored }
           model.escape(fromComposer: true)
           return .handled
         }

@@ -165,6 +165,28 @@ enum ShellID {
   /// 12.I: the coach row and the voice dock's idle line.
   static let coach = "wemessage.coach"
   static let voiceDock = "wemessage.voice.dock"
+  /// Board 11 (prefixes: search.token.<n>, search.group.<channel>,
+  /// search.result.<guid>, search.facet.<n>, scrubber.year.<year>,
+  /// switcher.row.<id>).
+  static let search = "wemessage.search"
+  static let searchField = "wemessage.search.field"
+  static let searchSummary = "wemessage.search.summary"
+  static let searchCoverage = "wemessage.search.coverage"
+  static let searchPrompt = "wemessage.search.prompt"
+  static let searchFacets = "wemessage.search.facets"
+  static let searchTokenPrefix = "wemessage.search.token."
+  static let searchGroupPrefix = "wemessage.search.group."
+  static let searchResultPrefix = "wemessage.search.result."
+  static let searchFacetPrefix = "wemessage.search.facet."
+  static let findBar = "wemessage.find"
+  static let findField = "wemessage.find.field"
+  static let findCounter = "wemessage.find.counter"
+  static let scrubber = "wemessage.scrubber"
+  static let scrubberLine = "wemessage.scrubber.line"
+  static let scrubberYearPrefix = "wemessage.scrubber.year."
+  static let switcher = "wemessage.switcher"
+  static let switcherField = "wemessage.switcher.field"
+  static let switcherRowPrefix = "wemessage.switcher.row."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
@@ -214,12 +236,20 @@ struct ShellView: View {
         HStack(spacing: 0) {
           RailView(model: model, palette: palette, mirror: mirror, dark: dark, handover: handover)
           Hairline(mirror: mirror, palette: palette, dark: dark)
-          SidebarView(model: model, palette: palette, dark: dark)
-          Hairline(mirror: mirror, palette: palette, dark: dark)
-          ContentPane(model: model, palette: palette)
-          if model.inspectorShown, let thread = model.selected {
+          if model.switcher.shown {
+            // Board 11 takes the list and thread panes (D-UI-86): the
+            // composer, and its Send, is not in the window while it is up.
+            QuickSwitcherPane(model: model, switcher: model.switcher, palette: palette)
+          } else if model.search.shown {
+            SearchPane(model: model, search: model.search, palette: palette)
+          } else {
+            SidebarView(model: model, palette: palette, dark: dark)
             Hairline(mirror: mirror, palette: palette, dark: dark)
-            InspectorPane(thread: thread, image: model.avatars.image(for: thread), palette: palette)
+            ContentPane(model: model, palette: palette)
+            if model.inspectorShown, let thread = model.selected {
+              Hairline(mirror: mirror, palette: palette, dark: dark)
+              InspectorPane(thread: thread, image: model.avatars.image(for: thread), palette: palette)
+            }
           }
         }
         if let handover, handover.coachShown {
@@ -243,6 +273,8 @@ struct ShellView: View {
           .padding(.top, Self.titleBand + 8)
           .frame(maxWidth: .infinity, alignment: .topLeading)
       }
+      // Board 11's keys, in every build: search, the switcher, find, years.
+      Board11Keys(model: model)
       if TestHooks.isUITest {
         // Under the UI-test flag only: cmd-opt-R reads status, threads and
         // drafts again, so one launch can show several fake-daemon

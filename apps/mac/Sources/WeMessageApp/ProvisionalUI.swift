@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..77 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..78 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -10,7 +10,7 @@ import Foundation
 // 06 and 09 leave a choice open or the daemon cannot serve what they draw;
 // D-UI-54..57: the S4g build, where the avatar plan leaves a choice open;
 // D-UI-58..68: the S4h build, where board 10 leaves a choice open or the
-// daemon cannot serve what it draws; D-UI-69..77: the S4h2 build, where
+// daemon cannot serve what it draws; D-UI-69..78: the S4h2 build, where
 // board 12 leaves a choice open or the daemon cannot serve what it draws).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
@@ -727,4 +727,12 @@ public enum ProvisionalUI {
     case choicesOnly
   }
   public static let setupComplete: SetupComplete = .choicesOnly
+
+  // D-UI-78: step 6 (12.F) is two columns, as the wireframe draws it: the
+  // choice, the channel boxes, the invariant and Finish setup on the left,
+  // KillIntro and the draft specimen beside them on the right. The page is
+  // 960 pt wide, not the other pages' 720, so the step fits the window
+  // without scrolling and nothing on it is drawn below the window's edge.
+  public static let agentPageWidth: Double = 960
+  public static let agentSideColumnWidth: Double = 300
 }

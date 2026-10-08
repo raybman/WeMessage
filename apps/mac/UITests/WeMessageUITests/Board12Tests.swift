@@ -83,7 +83,10 @@ final class Board12Tests: XCTestCase {
 
     // 12.B, 2a: board 10's FDA screen; Open asks the fixture seam only.
     next(app, to: "2a")
-    XCTAssertTrue(QueueUI.element(app, ID.fda).exists, "2a: no FDA screen")
+    // FDAScreen's own identifier is folded into the page's on 2a, so the
+    // screen is known by its two controls.
+    XCTAssertTrue(QueueUI.element(app, ID.fdaOpen).exists, "2a: no Open System Settings")
+    XCTAssertTrue(QueueUI.element(app, ID.fdaSkip).exists, "2a: no Skip")
     XCTAssertEqual(QueueUI.value(app, ID.fdaOpen), "asked 0")
     shot("2a")
     QueueUI.element(app, ID.fdaOpen).click()

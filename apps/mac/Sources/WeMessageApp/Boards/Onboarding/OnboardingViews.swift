@@ -88,23 +88,25 @@ struct OnboardingWindow: View {
     case .email:
       Scroll(slug: model.step.slug) { ChannelStepPage(model: model, channel: .email, palette: palette) }
     case .agent:
-      Scroll(slug: model.step.slug) { AgentStepPage(model: model, palette: palette) }
+      Scroll(slug: model.step.slug, width: ProvisionalUI.agentPageWidth) { AgentStepPage(model: model, palette: palette) }
     case .done, .firstThread:
       Scroll(slug: OnboardingStep.done.slug) { DonePage(model: model, palette: palette) }
     }
   }
 }
 
-/// A page: scrolled, centred, at most 720 pt wide, identified by its slug.
+/// A page: scrolled, centred, at most 720 pt wide (step 6: D-UI-78),
+/// identified by its slug.
 private struct Scroll<Content: View>: View {
   let slug: String
+  var width: Double = 720
   @ViewBuilder let content: () -> Content
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) { content() }
         .padding(24)
-        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: width, alignment: .leading)
         .frame(maxWidth: .infinity)
     }
     .scrollIndicators(.never)
@@ -441,12 +443,25 @@ private struct ChannelStepPage: View {
 
 // MARK: - 12.F, step 6
 
-/// AgentStep: off by default and drawn selected; the invariant; KillIntro.
+/// AgentStep: off by default and drawn selected; the invariant; KillIntro
+/// and the draft specimen beside them (D-UI-78).
 private struct AgentStepPage: View {
   @Bindable var model: OnboardingModel
   let palette: Tokens.Palette
 
   var body: some View {
+    HStack(alignment: .top, spacing: 20) {
+      VStack(alignment: .leading, spacing: 16) { choice }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      VStack(alignment: .leading, spacing: 12) {
+        KillIntro(palette: palette)
+        DraftSpecimen(palette: palette)
+      }
+      .frame(width: ProvisionalUI.agentSideColumnWidth)
+    }
+  }
+
+  @ViewBuilder private var choice: some View {
     Heading(text: OnboardingCopy.agentTitle, palette: palette)
     Text(OnboardingCopy.agentQuestion)
       .font(.system(size: 14, weight: .bold))
@@ -489,8 +504,6 @@ private struct AgentStepPage: View {
     StepButton(title: OnboardingCopy.finish, weight: .outlined, palette: palette, id: ShellID.onboardingNext) {
       model.finish()
     }
-    KillIntro(palette: palette)
-    DraftSpecimen(palette: palette)
   }
 }
 
@@ -584,6 +597,7 @@ private struct DraftSpecimen: View {
       Text("Thursday at 3 works. I will send a calendar invite.")
         .font(.system(size: 12))
         .foregroundStyle(Tokens.color(palette.ink))
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
         .overlay(

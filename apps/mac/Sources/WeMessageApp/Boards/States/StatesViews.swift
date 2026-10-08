@@ -342,6 +342,7 @@ struct PacingTable: View {
       Text(footer)
         .font(.system(size: 10))
         .foregroundStyle(Tokens.color(palette.inkDim))
+        .fixedSize(horizontal: false, vertical: true)
     }
     .padding(14)
     .background(RoundedRectangle(cornerRadius: 8).fill(Tokens.color(palette.layer1)))

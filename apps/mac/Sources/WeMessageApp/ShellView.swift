@@ -193,7 +193,7 @@ struct ShellView: View {
         // The per-channel ages off the rail (10.A, D-UI-68): an in-window
         // overlay beside the rail, pinned by the trust banner's action.
         FreshnessTable(rows: model.freshnessRows, palette: palette)
-          .frame(width: 380)
+          .frame(width: 400)
           .padding(.leading, ProvisionalUI.railWidth + 8)
           .padding(.top, Self.titleBand + 8)
           .frame(maxWidth: .infinity, alignment: .topLeading)

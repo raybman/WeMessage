@@ -107,7 +107,18 @@ final class Board01Tests: XCTestCase {
       if expect.state == "rich" { assertAvatars(app, name: name) }
       settle()
       assertBoard(app, expect, name: name)
-      capture(app, geometry: geometry, appearance: appearance, frost: true, name: name, luminance: luminance)
+      // v2 S4h (10.A): a stale tile raises the trust banner over the
+      // content pane, where the kill banner sits, so the shot reads the
+      // banner layout's patches.
+      let banner = element(app, ID.trustBanner)
+      if expect.mark == "stale" {
+        XCTAssertTrue(waitUntil { banner.exists }, "\(name): stale with no trust banner")
+      } else {
+        XCTAssertFalse(banner.exists, "\(name): a trust banner while every tile is fresh")
+      }
+      capture(
+        app, geometry: geometry, appearance: appearance, frost: true, name: name,
+        layout: expect.mark == "stale" ? .banner : .shell, luminance: luminance)
     }
 
     // The kill scenario: the chip reads the status's switch, and is still

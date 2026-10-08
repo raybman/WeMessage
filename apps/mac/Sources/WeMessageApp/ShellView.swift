@@ -271,6 +271,33 @@ enum ShellID {
   static let killConfirm = "wemessage.killconfirm"
   static let killConfirmEngage = "wemessage.killconfirm.engage"
   static let killConfirmCancel = "wemessage.killconfirm.cancel"
+  // v2 S4m, board 17: progress, reachable only with WEMESSAGE_UI_BOARD=17
+  // under the UI-test flag (D-UI-121, D-UI-123). The board window and its
+  // tabs (this prefix and the page), a meter row per channel (this prefix
+  // and the scope; its mark adds ".state", label the state in words) and
+  // the global row, the streak block with its two runs and the ribbon
+  // (label its days), a stat tile per key (this prefix and the key), the
+  // card with Copy, Save and Share and its export status (label the png
+  // size, bytes, pasteboard, where Save wrote, numeral boxes), and the
+  // zero screen's kind (label "<kind>: <heading>"), Progress link and
+  // streak line.
+  static let progress = "wemessage.progress"
+  static let progressTabPrefix = "wemessage.progress.tab."
+  static let meterPrefix = "wemessage.meter."
+  static let meterAll = "wemessage.meter.all"
+  static let streak = "wemessage.streak"
+  static let streakCurrent = "wemessage.streak.current"
+  static let streakLongest = "wemessage.streak.longest"
+  static let streakRibbon = "wemessage.streak.ribbon"
+  static let statPrefix = "wemessage.stat."
+  static let card = "wemessage.card"
+  static let cardCopy = "wemessage.card.copy"
+  static let cardSave = "wemessage.card.save"
+  static let cardShare = "wemessage.card.share"
+  static let cardStatus = "wemessage.card.status"
+  static let zeroKind = "wemessage.zero.kind"
+  static let zeroProgress = "wemessage.zero.progress"
+  static let zeroStreak = "wemessage.zero.streak"
   static let mediaMatrixPrefix = "wemessage.media.matrix."
   // v2 S4h, board 12: onboarding. The window, its step counter, and a page
   // per step (this prefix and the step's slug: 1, 2a, 2b, 2c, 2c-copy, 3,
@@ -516,7 +543,7 @@ private struct RailView: View {
 /// One rail tile (wireframe .rail-btn: 38 pt, radius 9, a rule border; the
 /// selected tile per D-UI-6). The mark is drawn on the tile and published as
 /// its accessibility value: the digit, "clear", "stale", or nothing.
-private struct RailTile: View {
+struct RailTile: View {
   let scope: ShellModel.Scope
   let selected: Bool
   let mark: RailMark

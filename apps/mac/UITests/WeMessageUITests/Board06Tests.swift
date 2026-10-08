@@ -85,7 +85,9 @@ final class Board06Tests: XCTestCase {
     XCTAssertTrue(QueueUI.waitUntil { QueueUI.label(app, ID.zero) == "Zero: clear" }, "zero: reads \(QueueUI.label(app, ID.zero))")
     XCTAssertTrue(
       QueueUI.label(app, ID.zeroReceipt).contains("5 done"), "zero: receipt reads \(QueueUI.label(app, ID.zeroReceipt))")
-    XCTAssertTrue(QueueUI.element(app, ID.zeroVerify).exists, "zero: no Verify now")
+    // 17.H: an earned zero carries the receipt and no Verify (D-UI-128).
+    XCTAssertTrue(QueueUI.label(app, ID.zeroKind).hasPrefix("earned: "), "zero: kind reads \(QueueUI.label(app, ID.zeroKind))")
+    XCTAssertFalse(QueueUI.element(app, ID.zeroVerify).exists, "zero: Verify now on an earned zero")
     XCTAssertFalse(QueueUI.element(app, ID.verbs).exists, "zero: a verb row with nothing open")
     shoot("zero", .shell)
 

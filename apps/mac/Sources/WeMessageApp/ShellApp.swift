@@ -19,6 +19,8 @@ struct ShellApp: App {
         AttachmentsRoot()
       } else if TestHooks.osLayerBoard {
         OSLayerRoot()
+      } else if TestHooks.progressBoard {
+        ProgressWindow()
       } else if let onboarding = TestHooks.onboarding {
         OnboardingRoot(model: onboarding)
       } else {

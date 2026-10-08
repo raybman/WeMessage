@@ -304,15 +304,51 @@ struct KillBanner: View {
   }
 }
 
-/// The zero screen (06.E): which zero it is, said plainly. Clear with the
-/// receipt, cannot say with the reason, or not connected with nothing to
-/// count and the iMessage card (D-UI-48). It stays on its channel
-/// (D-UI-52).
+/// The zero screen (06.E, 17.H): which zero it is, said plainly. Clear is
+/// one of three (earned, still clear, nothing arrived) drawn by ZeroPanel;
+/// cannot say comes with the reason; not connected has nothing to count
+/// and the iMessage card (D-UI-48). It stays on its channel (D-UI-52).
 struct ZeroScreen: View {
   @Bindable var model: ShellModel
   let palette: Tokens.Palette
+  /// When this screen appeared: the praise window's start (D-UI-129).
+  @State private var appearedAt = Date()
 
   private var counter: ShellBoard.Counter { model.board.counter(model.scope) }
+
+  /// The clear zero's words at `now`: what was cleared is the receipt's
+  /// replies, approvals and Dones; what arrived is the inbound threads
+  /// since today's 04:00.
+  private func clearContent(now: Date) -> ZeroContent {
+    let receipt = model.receipt
+    let cleared = receipt.replied + receipt.done + receipt.approved
+    let start = ProgressRules.dayBoundary(now, tz: .current)
+    let arrived = (model.threads?.threads ?? []).filter { thread in
+      guard !thread.lastFromMe, let at = WireDate.parse(thread.lastAt) else { return false }
+      return at >= start
+    }.count
+    let kind = ProgressRules.zeroKind(
+      arrivedToday: arrived, clearedToday: cleared, lastClearAt: cleared > 0 ? appearedAt : nil, now: now,
+      praiseFor: ProvisionalUI.zeroPraiseSeconds)
+    let evidence = model.board.asOf.map { "Zero across 1 source, last event " + ShellText.clock($0) + "." }
+    let snooze = model.queue.nextSnooze(after: model.queueClock).map {
+      "Next snooze returns " + QueueStateStore.snoozeLabel($0) + "."
+    }
+    switch kind {
+    case .earned:
+      return ZeroContent(
+        kind: kind, heading: ZeroWords.heading(kind), lines: [evidence].compactMap { $0 }, receipt: receipt.line,
+        footer: [snooze].compactMap { $0 }, streakLine: nil)
+    case .stillClear:
+      return ZeroContent(
+        kind: kind, heading: ZeroWords.heading(kind), lines: [evidence].compactMap { $0 }, receipt: nil,
+        footer: ["\(cleared) cleared today.", snooze].compactMap { $0 }, streakLine: nil)
+    case .nothingArrived:
+      return ZeroContent(
+        kind: kind, heading: ZeroWords.heading(kind), lines: [ZeroWords.quietLine], receipt: nil,
+        footer: [evidence, ZeroWords.wrongLine].compactMap { $0 }, streakLine: nil)
+    }
+  }
 
   private var kind: String {
     switch counter {
@@ -326,17 +362,11 @@ struct ZeroScreen: View {
     VStack(spacing: 10) {
       switch counter {
       case .left, .clear:
-        numeral("0")
-        heading(model.scope == .all ? "You are done" : model.scope.fullLabel + " is clear")
-        if let asOf = model.board.asOf {
-          words("Zero across 1 source, last event " + ShellText.clock(asOf) + ".")
+        TimelineView(.periodic(from: appearedAt, by: 60)) { context in
+          ZeroPanel(
+            content: clearContent(now: context.date), palette: palette,
+            onVerify: { Task { await model.refresh() } }, onProgress: nil)
         }
-        words(model.receipt.line)
-          .accessibilityIdentifier(ShellID.zeroReceipt)
-        if let next = model.queue.nextSnooze(after: model.queueClock) {
-          words("Next snooze returns " + QueueStateStore.snoozeLabel(next) + ".")
-        }
-        verify
       case .cannotSay(let since):
         numeral("?")
         heading("We cannot tell")
@@ -387,11 +417,7 @@ struct ZeroScreen: View {
   }
 
   private var verify: some View {
-    QueueButton(title: "Verify now", key: nil, filled: false, palette: palette) {
-      Task { await model.refresh() }
-    }
-    .accessibilityLabel("Verify now")
-    .accessibilityIdentifier(ShellID.zeroVerify)
+    ZeroPanel.verify(palette: palette) { Task { await model.refresh() } }
   }
 }
 

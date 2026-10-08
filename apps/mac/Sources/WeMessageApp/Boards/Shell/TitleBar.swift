@@ -80,11 +80,28 @@ struct TitleCounter: View {
     }
   }
 
+  private var clear: Bool {
+    if case .clear = counter { return true }
+    return false
+  }
+
+  /// CLEAR carries the rail tile's mark (17.G): a rule under it, not a
+  /// check, at D-UI-130's weight. Remaining, cannot say and hidden carry
+  /// none.
   var body: some View {
     text
       .tracking(0.6)
       .lineLimit(1)
       .fixedSize()
+      .padding(.bottom, clear ? 4 : 0)
+      .overlay(alignment: .bottom) {
+        if clear {
+          Rectangle()
+            .fill(Tokens.color(palette.ink))
+            .frame(height: ProvisionalUI.titleClearBaseline)
+            .accessibilityHidden(true)
+        }
+      }
   }
 }
 

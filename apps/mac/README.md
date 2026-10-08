@@ -390,6 +390,25 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.killconfirm` with `wemessage.killconfirm.engage` and
   `wemessage.killconfirm.cancel`: Esc cancels, nothing binds Return, and
   Engage is never the default button (16.H)
+- `wemessage.progress`: board 17's Progress window, under the UI-test
+  flag with `WEMESSAGE_UI_BOARD=17` only (D-UI-121, D-UI-123). It builds
+  no client and nothing opens it in this version.
+  `wemessage.progress.tab.<page>` (`meters`, `atzero`, `degraded`,
+  `streak`, `broken`, `stats`, `card`, `cardzero`, `chrome`, `earned`,
+  `still`, `quiet`, valued `shown`); `wemessage.meter.<scope>` and
+  `wemessage.meter.all`, labelled `<channel>: <state>`, each with a
+  `.state` mark labelled `<n> left`, `clear`, `cannot tell` or
+  `not connected` (17.A, 17.B); `wemessage.streak` with
+  `wemessage.streak.current`, `wemessage.streak.longest` and
+  `wemessage.streak.ribbon` (17.C); `wemessage.stat.<key>`, labelled
+  `<LABEL>: <value>. <caveat>` (17.D); `wemessage.card` (an image) with
+  `wemessage.card.copy`, `wemessage.card.save`, `wemessage.card.share`
+  and `wemessage.card.status`, labelled
+  `png=<w>x<h> bytes=<n> pasteboard=<name> saved=<where> boxes=<x,y,w,h;...>`
+  (17.E, D-UI-131: under the flag Copy uses a named test pasteboard and
+  Save a temporary folder); the zero screen's `wemessage.zero.kind`,
+  labelled `<earned|still clear|nothing arrived>: <heading>`,
+  `wemessage.zero.progress` and `wemessage.zero.streak` (17.H, D-UI-128)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

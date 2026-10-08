@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..120 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..131 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -18,7 +18,8 @@ import Foundation
 // cannot do; D-UI-102..111: the S4k build, where board 15 draws media this
 // version can stage but not yet send, open or probe; D-UI-112..120: the
 // S4l build, where board 16 and its table disagree or the OS layer asks
-// for what this version cannot do).
+// for what this version cannot do; D-UI-121..131: the S4m build, where
+// board 17 leaves a choice open or this version keeps no history to draw).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1083,4 +1084,84 @@ public enum ProvisionalUI {
   // alpha when disconnected.
   public static let statusSymbol = "bubble.left"
   public static let statusDisconnectedAlpha: Double = 0.45
+
+  // D-UI-121: board 17 under the UI-test flag is a window of its own over
+  // fixtures: the meters, the ribbon, the five tiles, the card and the three
+  // zero screens, one page each. This version keeps no day history, so no
+  // live window draws a streak; the meters, the card and the zeros are the
+  // same views the live app would feed.
+  public enum ProgressTestSurface: Sendable {
+    case fixtureWindowNoHistory
+  }
+  public static let progressTestSurface: ProgressTestSurface = .fixtureWindowNoHistory
+
+  // D-UI-122: the praise is spent once. A clear this many seconds old or
+  // newer is the earned zero; after that the same day reads as still clear
+  // (17.H).
+  public static let zeroPraiseSeconds: Double = 600
+
+  // D-UI-123: no live door opens the Progress window yet. 17.G names three
+  // (the Window menu, the popover footer, the zero screen's link); all three
+  // wait for a day history, so the link is drawn on board 17's zero pages
+  // only and nowhere in the shell.
+  public enum ProgressEntry: Sendable {
+    case boardOnlyUntilHistory
+  }
+  public static let progressEntry: ProgressEntry = .boardOnlyUntilHistory
+
+  // D-UI-124: a degraded day (a source stale all day) is skipped like an
+  // absence and drawn as a dotted cell with its own key entry, so the
+  // ribbon says why the day did not count. 17.C rules it skipped but draws
+  // no mark for it.
+  public enum DegradedCell: Sendable {
+    case dottedWithKey
+  }
+  public static let degradedCell: DegradedCell = .dottedWithKey
+
+  // D-UI-125: the streak is computed by ProgressRules, never typed. 17.C's
+  // intact ribbon draws twelve filled days under "11 days in a row", so the
+  // fixture draws Sep 1 as nothing arrived and the computed run is 11.
+  public static let streakIsComputed = true
+
+  // D-UI-126: Share... hands the rendered PNG to the system share sheet
+  // (ShareLink); the image exists before the sheet opens, and WeMessage
+  // never learns where it went. The UI tests never open the sheet.
+  public enum CardShare: Sendable {
+    case systemShareSheetPNG
+  }
+  public static let cardShare: CardShare = .systemShareSheetPNG
+
+  // D-UI-127: the card is laid out absolutely at 640 by 400, black on white
+  // in both appearances, system sans with monospaced numerals; each number
+  // sits in a fixed, clipped box, so no label moves when a number grows.
+  public enum CardLayout: Sendable {
+    case absoluteClippedNumeralBoxes
+  }
+  public static let cardLayout: CardLayout = .absoluteClippedNumeralBoxes
+
+  // D-UI-128: Verify now is drawn on the quiet zero (and on cannot say),
+  // not on an earned or still-clear zero (17.H legend 3). Board 06's earned
+  // zero loses the button it had in S4f.
+  public static let verifyOnEarnedZero = false
+
+  // D-UI-129: the live earned zero is timed from the moment the zero screen
+  // appeared in this session, and counts the session receipt's replied, done
+  // and approved as cleared; arrivals are threads whose last inbound is past
+  // today's 04:00. This version keeps no clear history to time it by.
+  public enum LiveZeroClock: Sendable {
+    case zeroScreenAppeared
+  }
+  public static let liveZeroClock: LiveZeroClock = .zeroScreenAppeared
+
+  // D-UI-130: the title bar's CLEAR carries the same 3 pt ink baseline as
+  // the rail tile and the meter row (17.G legend 2): one mark, four places.
+  public static let titleClearBaseline: Double = 3
+
+  // D-UI-131: under the UI-test flag, Copy Image writes to this named
+  // pasteboard and Save to File writes into this temporary folder, never
+  // the general pasteboard, Downloads or the Desktop. A board 17 page of its
+  // own draws the same card with every number at 0, so the test can
+  // compare the two renders.
+  public static let cardTestPasteboard = "com.wemessage.uitest.sharecard"
+  public static let cardTestExportFolder = "wemessage-uitest-export"
 }

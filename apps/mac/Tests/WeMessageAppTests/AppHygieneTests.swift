@@ -105,6 +105,11 @@ struct AppHygieneTests {
     "wemessage.popover.title", "wemessage.popover.stamp", "wemessage.popover.line", "wemessage.popover.more",
     "wemessage.popover.notes", "wemessage.popover.open", "wemessage.popover.kill", "wemessage.popover.settings",
     "wemessage.killconfirm", "wemessage.killconfirm.engage", "wemessage.killconfirm.cancel",
+    // v2 S4m, board 17.
+    "wemessage.progress", "wemessage.meter.all", "wemessage.streak", "wemessage.streak.current",
+    "wemessage.streak.longest", "wemessage.streak.ribbon", "wemessage.card", "wemessage.card.copy",
+    "wemessage.card.save", "wemessage.card.share", "wemessage.card.status", "wemessage.zero.kind",
+    "wemessage.zero.progress", "wemessage.zero.streak",
   ]
 
   static let nsApp = "NS" + "App"
@@ -399,8 +404,8 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12), and on to S4l's 112..120
-  /// (the OS layer, board 16).
-  static let dUIKeys = (1...120).map { "D-UI-\($0)" }
+  /// (the OS layer, board 16) and S4m's 121..131 (board 17, progress).
+  static let dUIKeys = (1...131).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -417,11 +422,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..120, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..131, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..120 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..131 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -429,7 +434,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...120), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...131), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1535,6 +1540,167 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.osLayerLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+
+  /// v2 S4m: board 17's files.
+  static let progressDir = appDir + "/Boards/Progress/"
+  static let cardViewFile = progressDir + "ShareCardView.swift"
+  static let cardExportFile = progressDir + "ShareCardExport.swift"
+  static let statTileFile = progressDir + "StatTile.swift"
+
+  /// Code with `//` comments dropped, whole-line or trailing.
+  static func uncommented(_ source: String) -> String {
+    source.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+      let text = String(line)
+      if text.trimmingCharacters(in: .whitespaces).hasPrefix("//") { return "" }
+      if let cut = text.range(of: " // ") { return String(text[..<cut.lowerBound]) }
+      return text
+    }.joined(separator: "\n")
+  }
+
+  /// Every type the app and the kit declare.
+  static func declaredTypes(_ files: [(String, String)]) -> Set<String> {
+    let regex = try! NSRegularExpression(pattern: #"\b(?:struct|enum|class|actor|protocol|typealias)\s+([A-Z][A-Za-z0-9_]*)"#)
+    var names: Set<String> = []
+    for (path, source) in files where path.hasPrefix(appDir) || path.hasPrefix(kitDir) {
+      for m in regex.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
+        if let r = Range(m.range(at: 1), in: source) { names.insert(String(source[r])) }
+      }
+    }
+    return names
+  }
+
+  /// The H-S4-13 verdicts over (path, text) pairs of the app, kit and test
+  /// sources: the card's view imports SwiftUI and the one struct and names
+  /// no other app or kit type; board 17 prints no percentage, arrow, gauge
+  /// or trend; no chrome file says streak; a stat tile cannot be made
+  /// without its caveat; nothing is green; the export reaches the test
+  /// pasteboard and the temporary folder under the flag; and the board
+  /// opens only with 17 under the flag.
+  static func progressLeaks(_ files: [(String, String)]) -> [String] {
+    let dir = progressDir
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let shell = appDir + "/ShellView.swift"
+    let swept = [appDir + "/Models/ProgressModel.swift", appDir + "/Fixtures/FixtureProgress.swift"]
+    let chrome = [
+      appDir + "/Boards/Shell/TitleBar.swift", shell, appDir + "/AppDelegate.swift",
+      kitDir + "/Boards/OSLayer.swift", kitDir + "/Boards/AppMenu.swift",
+    ]
+    let unwelcome = ["%", "percent", "\u{2191}", "\u{2193}", "\u{2192}", "\u{2190}", "\u{25B2}", "\u{25BC}", "arrow.", "gauge", "trend"]
+    let colours = ["." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent"]
+    var leaks: [String] = []
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    // The card's view: two imports, and no app or kit type but the card.
+    let card = text(cardViewFile)
+    let imports = card.split(separator: "\n").map(String.init).filter { $0.hasPrefix("import ") }
+    if imports != ["import SwiftUI", "import struct WeMessageKit.ShareCard"] {
+      leaks.append("\(cardViewFile): imports \(imports)")
+    }
+    let bare = uncommented(card).split(separator: "\n").filter { !$0.hasPrefix("import ") }.joined(separator: "\n")
+      .replacingOccurrences(of: #""[^"\n]*""#, with: "\"\"", options: .regularExpression)
+    let ident = try! NSRegularExpression(pattern: #"\b[A-Z][A-Za-z0-9_]*\b"#)
+    let named = Set(
+      ident.matches(in: bare, range: NSRange(bare.startIndex..., in: bare)).compactMap {
+        Range($0.range, in: bare).map { String(bare[$0]) }
+      })
+    let foreign = named.intersection(declaredTypes(files)).subtracting(["ShareCard", "ShareCardView"])
+    if !foreign.isEmpty { leaks.append("\(cardViewFile): names \(foreign.sorted())") }
+    // Board 17 and its words: nothing that reads as a score.
+    var board = 0
+    for (path, source) in files where path.hasPrefix(dir) || swept.contains(path) {
+      board += 1
+      let body = uncommented(source)
+      for token in unwelcome where body.lowercased().contains(token) { leaks.append("\(path): \(token)") }
+      for token in colours where body.contains(token) { leaks.append("\(path): \(token)") }
+    }
+    if board < 9 { leaks.append("swept \(board) board 17 files") }
+    // Chrome: the rail, the title bar, the menu bar, the Dock never say streak.
+    for (path, source) in files where chrome.contains(path) || path.hasPrefix(appDir + "/Boards/OSLayer/") {
+      var body = uncommented(source)
+      if path == shell, let start = body.range(of: "enum ShellID {") {
+        let rest = body[start.lowerBound...]
+        let end = rest.range(of: "\n}\n")?.upperBound ?? rest.endIndex
+        body.removeSubrange(start.lowerBound..<end)
+      }
+      if body.lowercased().contains("streak") { leaks.append("\(path): says streak") }
+    }
+    // The tile: a caveat with no default and no way round it.
+    let tile = uncommented(text(statTileFile))
+    if !tile.contains("  let caveat: String\n") || tile.contains("init(") || tile.contains("caveat: String =")
+      || tile.contains("caveat: String?")
+    {
+      leaks.append("\(statTileFile): the caveat can be left out")
+    }
+    // The export: the test pasteboard and the temporary folder under the flag.
+    let export = uncommented(text(cardExportFile))
+    if !export.contains("uiTest ? NSPasteboard.Name(ProvisionalUI.cardTestPasteboard) : .general")
+      || export.components(separatedBy: ".general").count != 2
+    {
+      leaks.append("\(cardExportFile): copy reaches the general pasteboard under the flag")
+    }
+    let save = function("save(_ data: Data, uiTest: Bool)", in: export)
+    guard let flagged = save.range(of: "if uiTest {"), let panel = save.range(of: "NSSavePanel()"),
+      flagged.lowerBound < panel.lowerBound, save.contains("let folder = testFolder()")
+    else {
+      leaks.append("\(cardExportFile): save opens a panel or leaves the temporary folder under the flag")
+      return leaks
+    }
+    if !function("testFolder()", in: export).contains("FileManager.default.temporaryDirectory") {
+      leaks.append("\(cardExportFile): the test folder is not temporary")
+    }
+    for (path, source) in files where path.hasPrefix(appDir) {
+      let body = uncommented(source)
+      for call in ["ShareCardExport.copy(", "ShareCardExport.save("] {
+        for piece in body.components(separatedBy: call).dropFirst()
+        where !(piece.split(separator: "\n").first ?? "").contains("uiTest: TestHooks.isUITest)") {
+          leaks.append("\(path): \(call) without the flag")
+        }
+      }
+      if path != cardExportFile && (body.contains("NSPasteboard") || body.contains("NSSavePanel")) {
+        leaks.append("\(path): reaches a pasteboard or a save panel")
+      }
+    }
+    // The door.
+    if !text(hooks).contains(#"progressBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "17""#) {
+      leaks.append("\(hooks): board 17 is not gated on the flag")
+    }
+    for (path, source) in files where source.contains("ProgressWindow" + "(") && path != app && !path.hasPrefix(dir) {
+      leaks.append("\(path): opens board 17")
+    }
+    if !text(app).contains("} else if TestHooks.progressBoard {") { leaks.append("\(app): never opens board 17") }
+    return leaks
+  }
+
+  @Test("H-S4-13: the share card's view imports SwiftUI and ShareCard alone and names no other app or kit type; board 17 has no percentage, arrow, gauge or trend; no chrome says streak; a stat tile needs its caveat; nothing is green; export under the flag reaches only the test pasteboard and a temporary folder; it opens only with board 17 under the flag")
+  func progressSealed() throws {
+    let files = try Self.sources(Self.appDir) + Self.sources(Self.kitDir) + Self.sources(Self.uiTestsDir)
+      + Self.sources(Self.appTestsDir) + Self.sources(Self.kitTestsDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Progress").count >= 7)
+    let leaks = Self.progressLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let dir = Self.progressDir
+    let swaps: [(String, String, String)] = [
+      (Self.cardViewFile, "import struct WeMessageKit.ShareCard\n", "import WeMessageKit\n"),
+      (Self.cardViewFile, "  let card: ShareCard\n", "  let card: ShareCard\n  let thread: ThreadSummary\n"),
+      (dir + "MeterRowView.swift", "case .count(let n): \"\\(n) left\"", "case .count(let n): \"\\(n)% left\""),
+      (dir + "MeterRowView.swift", "      Text(\"CLEAR\")\n", "      Text(\"CLEAR \u{2193}\")\n"),
+      (dir + "StatTile.swift", "  let caveat: String\n", "  var caveat: String = \"\"\n"),
+      (dir + "StatTile.swift", "import WeMessageKit\n", "import WeMessageKit\nlet probe = Color." + "green\n"),
+      (Self.appDir + "/Boards/Shell/TitleBar.swift", "import SwiftUI\n", "import SwiftUI\nlet probe = \"streak\"\n"),
+      (Self.cardExportFile, "uiTest ? NSPasteboard.Name(ProvisionalUI.cardTestPasteboard) : .general",
+       "NSPasteboard.Name.general"),
+      (Self.cardExportFile, "    if uiTest {\n      let folder", "    if false {\n      let folder"),
+      (dir + "ProgressWindow.swift", "copy(data, uiTest: TestHooks.isUITest)", "copy(data, uiTest: false)"),
+      (Self.appDir + "/TestHooks.swift", "progressBoard = isUITest && environment", "progressBoard = environment"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.progressLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

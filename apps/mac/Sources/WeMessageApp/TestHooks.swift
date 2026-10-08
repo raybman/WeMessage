@@ -80,6 +80,15 @@ enum TestHooks {
   }
   static var osLayerStates: [(StatusState, OSSnapshot)] { FixtureOSLayer.states }
 
+  /// Board 17's progress window, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=17 only: the meters, the ribbon, the tiles, the
+  /// card and the three zero screens over fixtures (D-UI-121, H-S4-13).
+  /// No menu item, key or link reaches it in this version (D-UI-123).
+  static private(set) var progressBoard = false
+
+  /// Board 17's words and numbers: fixtures in this version (D-UI-121).
+  static var progressContent: ProgressContent { FixtureProgress.content() }
+
   /// Board 15's thread and the files its doors bring: fixtures in this
   /// version (D-UI-103).
   static var mediaContent: MediaContent { FixtureAttachments.content() }
@@ -103,6 +112,7 @@ enum TestHooks {
     composeBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "14"
     attachmentsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "15"
     osLayerBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "16"
+    progressBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "17"
   }
 
   /// The flag returns first: under it the store is memory and the seam the

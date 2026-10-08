@@ -101,7 +101,7 @@ final class Board12Tests: XCTestCase {
     XCTAssertTrue(page(app, "2c").waitForExistence(timeout: UITestApp.timeout), "the poll never reached 2c")
     XCTAssertEqual(QueueUI.label(app, ID.onboardingStep), "Step 2 of 6 \u{00B7} access granted")
     XCTAssertEqual(QueueUI.value(app, ID.onboardingNext), "probes 2, polling off")
-    Thread.sleep(forTimeInterval: 2.5)
+    try await Task.sleep(for: .milliseconds(2500))
     XCTAssertEqual(QueueUI.value(app, ID.onboardingNext), "probes 2, polling off", "the poll probed after the grant")
     XCTAssertTrue(QueueUI.label(app, ID.onboardingSizing).contains("messages"), "2c: \(QueueUI.label(app, ID.onboardingSizing))")
     shot("2c")

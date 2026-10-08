@@ -134,6 +134,34 @@ enum ShellID {
   /// The pacing table (10.D) and the collision notice (10.E).
   static let pacing = "wemessage.pacing"
   static let collision = "wemessage.collision"
+  // v2 S4j, board 13: settings, reachable only with WEMESSAGE_UI_BOARD=13
+  // under the UI-test flag (D-UI-89). A sidebar row and a page per pane
+  // (these prefixes and the pane: accounts, drafting, notifications,
+  // appearance, keyboard, storage, confirm).
+  static let settings = "wemessage.settings"
+  static let settingsPanePrefix = "wemessage.settings.pane."
+  static let settingsPagePrefix = "wemessage.settings.page."
+  /// Appearance: the theme row and the three mirrored rows (this prefix and
+  /// reducetransparency, increasecontrast, reducemotion).
+  static let settingsTheme = "wemessage.settings.appearance.theme"
+  static let settingsAppearancePrefix = "wemessage.settings.appearance."
+  static let settingsReduceTransparency = "wemessage.settings.appearance.reducetransparency"
+  /// Keyboard: a row per binding (this prefix and the verb or fixed id).
+  static let settingsKeyboardRowPrefix = "wemessage.settings.keyboard.row."
+  /// Drafting: the parked rows (this prefix and autosend, schedules).
+  static let settingsParkedPrefix = "wemessage.settings.parked."
+  static let settingsParkedAutosend = "wemessage.settings.parked.autosend"
+  static let settingsParkedSchedules = "wemessage.settings.parked.schedules"
+  static let settingsStorage = "wemessage.settings.storage"
+  static let settingsStorageDelete = "wemessage.settings.storage.delete"
+  /// The confirm card, its Cancel and its one go control.
+  static let settingsConfirmSheet = "wemessage.settings.confirm.sheet"
+  static let settingsConfirmCancel = "wemessage.settings.confirm.cancel"
+  static let settingsConfirmGo = "wemessage.settings.confirm.go"
+  /// Confirmations: the kill switch's state (value on, off or unknown) and
+  /// Release, shown only while it is on.
+  static let settingsKillState = "wemessage.settings.kill.state"
+  static let settingsKillRelease = "wemessage.settings.kill.release"
   // v2 S4h, board 12: onboarding. The window, its step counter, and a page
   // per step (this prefix and the step's slug: 1, 2a, 2b, 2c, 2c-copy, 3,
   // 4, 5, 6, done).

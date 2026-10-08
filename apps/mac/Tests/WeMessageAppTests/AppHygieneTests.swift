@@ -72,6 +72,14 @@ struct AppHygieneTests {
     "wemessage.search.prompt", "wemessage.search.facets", "wemessage.find", "wemessage.find.field",
     "wemessage.find.counter", "wemessage.scrubber", "wemessage.scrubber.line", "wemessage.switcher",
     "wemessage.switcher.field",
+    // v2 S4j, board 13 (prefixes: settings.pane.<p>, settings.page.<p>,
+    // settings.appearance.<id>, settings.keyboard.row.<id>,
+    // settings.parked.<id>).
+    "wemessage.settings", "wemessage.settings.appearance.theme",
+    "wemessage.settings.appearance.reducetransparency", "wemessage.settings.parked.autosend",
+    "wemessage.settings.parked.schedules", "wemessage.settings.storage", "wemessage.settings.storage.delete",
+    "wemessage.settings.confirm.sheet", "wemessage.settings.confirm.cancel", "wemessage.settings.confirm.go",
+    "wemessage.settings.kill.state", "wemessage.settings.kill.release",
   ]
 
   static let nsApp = "NS" + "App"
@@ -357,7 +365,7 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12).
-  static let dUIKeys = (1...87).map { "D-UI-\($0)" }
+  static let dUIKeys = (1...94).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -374,11 +382,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..87, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..94, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..87 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..94 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -386,7 +394,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...87), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...94), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1046,6 +1054,112 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.searchLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+
+  // MARK: S4j
+
+  /// The H-S4-9 verdicts over (path, text) pairs of the app sources: board
+  /// 13 reads settings and writes nothing but the kill switch's release,
+  /// through the shell's own path and behind a confirm; parked features
+  /// hold no control; nothing destructive can run; nothing is green; and
+  /// the window opens only under the UI-test flag with board 13.
+  static func settingsLeaks(_ files: [(String, String)]) -> [String] {
+    let dir = appDir + "/Boards/Settings/"
+    let model = appDir + "/Models/SettingsModel.swift"
+    let panes = dir + "SettingsPanes.swift"
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let controls = ["Toggle" + "(", "Picker" + "(", "Slider" + "(", "Stepper" + "(", "TextField" + "("]
+    let writes = [
+      ".send" + "(", "approve" + "Draft(", "set" + "Settings(", "disconnect" + "(", "purge" + ":", "setKill" + "Switch",
+      "." + "engageKill" + "Switch", "httpMethod", "\"POST\"", "/v1/", "create" + "Draft(",
+    ]
+    let colours = [
+      "." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent", "Tokens." + "tint",
+    ]
+    var leaks: [String] = []
+    var swept = 0
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    for (path, source) in files where path.hasPrefix(dir) || path == model {
+      swept += 1
+      let body = source.split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+      for token in controls + writes + colours where body.contains(token) { leaks.append("\(path): \(token)") }
+      if body.contains("armable: true") { leaks.append("\(path): a parked feature is armable") }
+      // The only client call is the one settings read.
+      let regex = try? NSRegularExpression(pattern: #"\bclient\.([A-Za-z]+)"#)
+      for m in regex?.matches(in: body, range: NSRange(body.startIndex..., in: body)) ?? [] {
+        guard let r = Range(m.range(at: 1), in: body) else { continue }
+        if body[r] != "settings" { leaks.append("\(path): client.\(body[r])") }
+      }
+    }
+    if swept < 3 { leaks.append("swept \(swept) board 13 files") }
+    let modelText = text(model)
+    if modelText.components(separatedBy: "armable: false").count - 1 != 2 {
+      leaks.append("\(model): the two parked features are not both unarmable")
+    }
+    // The release is the shell's own disengage, once, behind the confirm;
+    // delete's go does nothing and cannot be pressed.
+    if modelText.components(separatedBy: "disengageKill" + "Switch()").count - 1 != 1
+      || !modelText.contains("case .releaseKill: await shell.disengageKill" + "Switch()")
+    {
+      leaks.append("\(model): the release is not the shell's one disengage")
+    }
+    if !modelText.contains("case .deleteCopy: break") { leaks.append("\(model): delete's go does something") }
+    if !modelText.contains("{ what == .releaseKill && shell.killSwitch == true }") {
+      leaks.append("\(model): a confirm other than release can go")
+    }
+    if !text(panes).contains(".disabled(!can)") { leaks.append("\(panes): the go control is never disabled") }
+    for (path, source) in files where !path.hasPrefix(dir) && path != model && source.contains("disengageKill" + "Switch()") {
+      if path != appDir + "/ShellModel.swift" && path != appDir + "/ShellView.swift" && !path.hasPrefix(appDir + "/Boards/Queue") {
+        leaks.append("\(path): another release path")
+      }
+    }
+    // The door: the flag and board 13, read once by the hooks, opened by
+    // the window group only.
+    if !text(hooks).contains(#"settingsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "13""#) {
+      leaks.append("\(hooks): the settings board is not gated on the flag and board 13")
+    }
+    for (path, source) in files where source.contains("SettingsRoot" + "(") && path != app && !path.hasPrefix(dir) {
+      leaks.append("\(path): opens the settings window")
+    }
+    if !text(app).contains("} else if TestHooks.settingsBoard {") { leaks.append("\(app): never opens the settings window") }
+    return leaks
+  }
+
+  @Test("H-S4-9: board 13 reads settings and writes nothing but the kill release, through the shell and behind a confirm; parked rows hold no control; nothing destructive runs; nothing is green; it opens only with board 13 under the flag")
+  func settingsSealed() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Settings").count >= 2)
+    let leaks = Self.settingsLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let model = Self.appDir + "/Models/SettingsModel.swift"
+    let panes = Self.appDir + "/Boards/Settings/SettingsPanes.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let swaps: [(String, String, String)] = [
+      (model, "armable: false),\n    ParkedFeature(", "armable: true),\n    ParkedFeature("),
+      (
+        panes, "SettingsLine(title: feature.title, detail: feature.copy, trailing: \"parked\", palette: palette)",
+        "Toggle" + "(feature.title, isOn: .constant(false))"
+      ),
+      (model, "envelope = try? await client.settings()", "_ = try? await client.set" + "Settings([:])"),
+      (model, "case .deleteCopy: break", "case .deleteCopy: _ = try? await client.disconnect" + "(purge" + ": true)"),
+      (
+        panes, ".foregroundStyle(Tokens.color(model.killState == \"on\" ? Tokens.danger : palette.ink))",
+        ".foregroundStyle(model.killState == \"on\" ? Color.red : Color." + "green)"
+      ),
+      (model, "{ what == .releaseKill && shell.killSwitch == true }", "{ true }"),
+      (panes, ".disabled(!can)", ".disabled(false)"),
+      (hooks, "settingsBoard = isUITest && environment", "settingsBoard = environment"),
+      (model, "case .releaseKill: await shell.disengageKill" + "Switch()", "case .releaseKill: break"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.settingsLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

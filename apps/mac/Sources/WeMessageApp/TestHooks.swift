@@ -46,6 +46,11 @@ enum TestHooks {
   /// shipped store and seam, until the handover is spent (H-S4-7).
   static private(set) var onboarding: OnboardingModel? = nil
 
+  /// Board 13's settings window, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=13 only: the one way to reach it in this version
+  /// (D-UI-89, H-S4-9).
+  static private(set) var settingsBoard = false
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
@@ -53,6 +58,7 @@ enum TestHooks {
     specimens = isUITest && environment["WEMESSAGE_UI_BOARD"] == "08" ? try? FixtureCatalogue.specimens() : nil
     statesSheet = isUITest && environment["WEMESSAGE_UI_BOARD"] == "10.B" ? FixtureStates.content() : nil
     onboarding = onboardingModel(board: environment["WEMESSAGE_UI_BOARD"])
+    settingsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "13"
   }
 
   /// The flag returns first: under it the store is memory and the seam the

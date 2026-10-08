@@ -276,6 +276,32 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.switcher`, `wemessage.switcher.field`,
   `wemessage.switcher.row.<id>`: the cmd-K switcher, which opens empty every
   time, its field and one row
+- `wemessage.settings`: board 13's settings window, under the UI-test flag
+  only with `WEMESSAGE_UI_BOARD=13`; no shipped door opens it in this
+  version (D-UI-89, H-S4-9)
+- `wemessage.settings.pane.<pane>`, `wemessage.settings.page.<pane>`: a
+  sidebar row and its page, panes `accounts`, `drafting`, `notifications`,
+  `appearance`, `keyboard`, `storage` and `confirm`; the shown row's value
+  is `shown`
+- `wemessage.settings.parked.autosend`, `wemessage.settings.parked.schedules`:
+  the two parked rows, valued `parked`, with no control in them
+- `wemessage.settings.appearance.theme`: the theme row, display only,
+  valued `system` (D-UI-94)
+- `wemessage.settings.appearance.<id>`, among them
+  `wemessage.settings.appearance.reducetransparency`: the mirrored
+  accessibility rows, valued `on` or `off`, never a control
+- `wemessage.settings.keyboard.row.<id>`: one keymap row, valued
+  `editable` or `fixed`; the table is read-only (D-UI-90)
+- `wemessage.settings.storage`, `wemessage.settings.storage.delete`: the
+  storage pane and its Delete the local copy, which only opens the confirm
+  card (D-UI-92)
+- `wemessage.settings.confirm.sheet`, `wemessage.settings.confirm.cancel`,
+  `wemessage.settings.confirm.go`: the confirm card, valued by what it
+  asks (`deleteCopy` or `releaseKill`); go's value is `enabled` or
+  `not in this version`
+- `wemessage.settings.kill.state`, `wemessage.settings.kill.release`: the
+  kill switch's state (`on`, `off` or `unknown`) and Release, shown only
+  while it is on; release confirms, engaging never does (13.H, D-UI-93)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

@@ -151,6 +151,24 @@ enum ID {
   static let switcherField = "wemessage.switcher.field"
   static let switcherRowPrefix = "wemessage.switcher.row."
 
+  // v2 S4j, board 13.
+  static let settings = "wemessage.settings"
+  static let settingsPanePrefix = "wemessage.settings.pane."
+  static let settingsPagePrefix = "wemessage.settings.page."
+  static let settingsTheme = "wemessage.settings.appearance.theme"
+  static let settingsAppearancePrefix = "wemessage.settings.appearance."
+  static let settingsReduceTransparency = "wemessage.settings.appearance.reducetransparency"
+  static let settingsKeyboardRowPrefix = "wemessage.settings.keyboard.row."
+  static let settingsParkedAutosend = "wemessage.settings.parked.autosend"
+  static let settingsParkedSchedules = "wemessage.settings.parked.schedules"
+  static let settingsStorage = "wemessage.settings.storage"
+  static let settingsStorageDelete = "wemessage.settings.storage.delete"
+  static let settingsConfirmSheet = "wemessage.settings.confirm.sheet"
+  static let settingsConfirmCancel = "wemessage.settings.confirm.cancel"
+  static let settingsConfirmGo = "wemessage.settings.confirm.go"
+  static let settingsKillState = "wemessage.settings.kill.state"
+  static let settingsKillRelease = "wemessage.settings.kill.release"
+
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
   /// Never placed: no typing indicator is drawn either way (08.J). Tests

@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..87 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..94 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -11,7 +11,9 @@ import Foundation
 // D-UI-54..57: the S4g build, where the avatar plan leaves a choice open;
 // D-UI-58..68: the S4h build, where board 10 leaves a choice open or the
 // daemon cannot serve what it draws; D-UI-69..78: the S4h2 build, where
-// board 12 leaves a choice open or the daemon cannot serve what it draws).
+// board 12 leaves a choice open or the daemon cannot serve what it draws;
+// D-UI-79..87: the S4i build, board 11; D-UI-88..94: the S4j build, where
+// board 13 and the plan disagree or the daemon cannot serve what it draws).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -805,4 +807,68 @@ public enum ProvisionalUI {
   // D-UI-87: a result's snippet is the sentence holding the first match,
   // cut at 140 characters around it.
   public static let snippetLimit = 140
+
+  // D-UI-88: settings has the plan's seven panes, in its order (accounts,
+  // drafting, notifications, appearance, keyboard, storage, confirmations),
+  // not the wireframe's eight. General folds away: its queue window is
+  // shown read-only under Notifications, and launch at login and the menu
+  // bar item are not built. Privacy & Data is Storage; Advanced is
+  // Confirmations. No "Needs attention" group and no settings search yet.
+  public enum SettingsPanes: Sendable {
+    case planSeven
+  }
+  public static let settingsPanes: SettingsPanes = .planSeven
+
+  // D-UI-89: in this version the settings window opens only under the
+  // UI-test flag with board 13. The shipped doors (cmd-comma, the
+  // WeMessage menu, the rail's Settings tile) are not wired yet, and the
+  // window is not a second scene.
+  public enum SettingsEntry: Sendable {
+    case uiTestBoardOnly
+  }
+  public static let settingsEntry: SettingsEntry = .uiTestBoardOnly
+
+  // D-UI-90: Keyboard is the bindings table with a who-sets-it column; the
+  // rebind editor is a later slice. The plan wins over the wireframe on S:
+  // the wireframe shows Done rebound to S, the plan holds S for Star, so
+  // Keymap.validate refuses it. keymap.bindings is not served by the
+  // daemon yet, so the table shows the defaults.
+  public enum KeymapEditing: Sendable {
+    case tableOnly
+  }
+  public static let keymapEditing: KeymapEditing = .tableOnly
+
+  // D-UI-91: the settings window writes no setting. The pacing caps and the
+  // undo window are printed with their floor and ceiling, read-only; the
+  // daemon's PATCH is not called from this window in this version.
+  public enum SettingsWrites: Sendable {
+    case none
+  }
+  public static let settingsWrites: SettingsWrites = .none
+
+  // D-UI-92: Delete the local copy opens its confirm card (removed, revoked,
+  // untouched), but the card's Delete is disabled and names the CLI path
+  // instead: nothing destructive runs from the window in this version.
+  public enum DeleteCopy: Sendable {
+    case confirmCardGoDisabled
+  }
+  public static let deleteCopy: DeleteCopy = .confirmCardGoDisabled
+
+  // D-UI-93: the kill switch's release lives in two places: the main
+  // window's banner Disengage (D-UI-50) and Confirmations, behind a
+  // confirm. Both call the same ShellModel path. The plan says "kill
+  // release here only"; removing the banner's is Eric's call. The
+  // wireframe's kill chip in the settings title band is not drawn.
+  public enum KillRelease: Sendable {
+    case bannerAndConfirmations
+  }
+  public static let killRelease: KillRelease = .bannerAndConfirmations
+
+  // D-UI-94: Theme follows macOS and is drawn, not offered: a three-way
+  // System, Light, Dark row with System filled. Text size is printed (13 pt,
+  // 11 pt floor), not adjustable.
+  public enum ThemeChoice: Sendable {
+    case followSystem
+  }
+  public static let themeChoice: ThemeChoice = .followSystem
 }

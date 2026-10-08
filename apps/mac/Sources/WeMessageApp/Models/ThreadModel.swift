@@ -25,6 +25,8 @@ public final class ThreadModel {
   /// Agent drafts the human parked here (D-UI-36). Local to this window:
   /// nothing is written to the daemon.
   public private(set) var held: Set<String> = []
+  /// When each hold was made (09.B: "HELD by you 9:47").
+  public private(set) var heldAt: [String: Date] = [:]
 
   private let client: GatewayClient
 
@@ -72,7 +74,14 @@ public final class ThreadModel {
   }
 
   /// Parks an agent draft for later review, here only (D-UI-36).
-  public func hold(_ draftId: String) {
+  public func hold(_ draftId: String, at now: Date = Date()) {
     held.insert(draftId)
+    if heldAt[draftId] == nil { heldAt[draftId] = now }
+  }
+
+  /// Release to awaiting (09.B): the held draft carries its verbs again.
+  public func release(_ draftId: String) {
+    held.remove(draftId)
+    heldAt[draftId] = nil
   }
 }

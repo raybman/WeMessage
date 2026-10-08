@@ -108,7 +108,9 @@ public final class Outbound {
   private let client: GatewayClient
   private let killSwitch: @MainActor () -> Bool?
   private let sleep: @Sendable (Duration) async throws -> Void
-  private var rendered: Set<String> = []
+  /// When each draft's body was first drawn on screen this session (09.D:
+  /// "opened 9:46").
+  public private(set) var renderedAt: [String: Date] = [:]
   private var tasks: [Int: Task<Void, Never>] = [:]
   private var nextID = 1
 
@@ -122,13 +124,13 @@ public final class Outbound {
   }
 
   /// The draft's body is on screen (09.D).
-  public func markRendered(_ draftId: String) {
-    rendered.insert(draftId)
+  public func markRendered(_ draftId: String, at now: Date = Date()) {
+    if renderedAt[draftId] == nil { renderedAt[draftId] = now }
   }
 
   /// True once the draft's body has been drawn on screen this session.
   public func isRendered(_ draftId: String) -> Bool {
-    rendered.contains(draftId)
+    renderedAt[draftId] != nil
   }
 
   /// The undo window `intent` would count down now.
@@ -147,7 +149,7 @@ public final class Outbound {
     case (.send(_, _, let body), .commandReturn), (.send(_, _, let body), .sendButton):
       if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .empty }
     case (.approve(let id, _, _), .approveButton):
-      if !rendered.contains(id) { return .notRendered }
+      if !isRendered(id) { return .notRendered }
     default:
       return .wrongGesture
     }
@@ -169,7 +171,7 @@ public final class Outbound {
     if intents.isEmpty { return .empty }
     for intent in intents {
       guard let draftId = intent.draftId else { return .wrongGesture }
-      if !rendered.contains(draftId) { return .notRendered }
+      if !isRendered(draftId) { return .notRendered }
     }
     guard killSwitch() == false else { return .killSwitch }
     let batch = nextID

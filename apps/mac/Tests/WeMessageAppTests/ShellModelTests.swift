@@ -313,4 +313,145 @@ struct ShellModelTests {
     let daniel = try #require(threads.threads.first { $0.lastLine == nil })
     #expect(ShellText.preview(daniel) == nil)
   }
+
+  // MARK: S4f, boards 06 and 09
+
+  @Test("D-UI-43: pending's queue clock is its newest draft (12:01:34), later than the scan, and five threads wait")
+  func pendingClock() async throws {
+    let transport = try Self.scenarioTransport("pending")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    #expect(m.board.asOf == WireDate.parse("2026-09-01T12:01:34.000Z"))
+    #expect(m.board.queue.count == 5)
+    #expect(m.board.mark(.imessage) == .digit(5))
+    m.stop()
+  }
+
+  @Test("06.A under D-UI-44: Done on a drafted thread takes it out of the queue, Z puts it back, and no request leaves")
+  func doneClearsDraftThenUndo() async throws {
+    let transport = try Self.scenarioTransport("pending")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    let before = transport.requests.count
+    m.choose(.triage)
+    #expect(m.queue.triageStart == 5)
+    let guid = "iMessage;-;+15550100001"
+    m.selectedThread = guid
+    m.act(.done, on: [guid])
+    #expect(m.board.queue.count == 4)
+    #expect(!m.board.queue.map(\.threadGuid).contains(guid))
+    #expect(m.selectedThread != guid, "the selection did not advance")
+    #expect(m.undoLast())
+    #expect(m.board.queue.count == 5)
+    #expect(transport.requests.count == before, "a queue act reached the daemon")
+    m.choose(.recent)
+    #expect(m.queue.triageStart == nil)
+    m.stop()
+  }
+
+  @Test("06.E: Done never succeeds against a source that is not connected")
+  func doneRefusedWhenStale() throws {
+    let m = Self.model(.down(reason: "unreachable"))
+    m.act(.done, on: ["iMessage;-;+15550100001"])
+    #expect(m.queue.acts.isEmpty)
+  }
+
+  @Test("06.A: the Needs You lens reads and writes nothing: every request from it is a GET, none marks seen")
+  func needsYouWritesNoSeen() async throws {
+    let transport = try Self.scenarioTransport("pending")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    m.choose(.needsYou)
+    for guid in m.rows.map(\.chatGuid) {
+      m.selectedThread = guid
+      m.step(1)
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(transport.requests.allSatisfy { $0.httpMethod == nil || $0.httpMethod == "GET" })
+    let words = Set(transport.requests.flatMap { ($0.url?.pathComponents ?? []).map { $0.lowercased() } })
+    #expect(words.isDisjoint(with: ["seen", "read", "mark-read", "markread"]), "a seen or mark-read route: \(words)")
+    m.stop()
+  }
+
+  @Test("09.C: the agent undo window is read from send.undoGraceSeconds and clamped 5...30")
+  func undoWindowFromSettings() async throws {
+    let status = try Reply.scenario("rich", "status.json")
+    for (value, expected) in [(25, 25), (2, 5), (90, 30)] {
+      let settings = Reply(
+        status: 200,
+        body: try JSONSerialization.data(withJSONObject: [
+          "settings": [
+            "send.undoGraceSeconds": [
+              "value": value, "default": 10, "version": 1, "type": "int", "readOnly": false, "floor": 0, "ceiling": 300,
+            ]
+          ]
+        ]),
+        headers: ["Content-Type": "application/json"])
+      let transport = FakeTransport { request in
+        switch request.url?.path {
+        case "/v1/status": return status
+        case "/v1/settings": return settings
+        default: throw Unreachable()
+        }
+      }
+      let m = ShellModel(client: testClient(transport))
+      await m.refresh()
+      #expect(m.outbound.approveSeconds == expected, "\(value) read as \(m.outbound.approveSeconds)")
+    }
+  }
+
+  @Test("09.F: Disengage posts the kill-switch toggle off once, re-reads status, and never sends")
+  func disengage() async throws {
+    let on = try Reply.scenario("kill", "status.json")
+    let off = try Reply.scenario("rich", "status.json")
+    let toggled = try Reply.golden("responses/toggles.killswitch.off.json")
+    final class Flag: @unchecked Sendable { var off = false }
+    let flag = Flag()
+    let transport = FakeTransport { request in
+      switch request.url?.path {
+      case "/v1/status": return flag.off ? off : on
+      case "/v1/toggles/kill-switch":
+        flag.off = true
+        return toggled
+      default: throw Unreachable()
+      }
+    }
+    let m = ShellModel(client: testClient(transport))
+    await m.refresh()
+    #expect(m.killSwitch == true)
+    await m.disengageKillSwitch()
+    #expect(m.killSwitch == false)
+    let toggles = transport.requests.filter { $0.url?.path == "/v1/toggles/kill-switch" }
+    #expect(toggles.count == 1)
+    let body = toggles.first?.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    #expect(body?["on"] as? Bool == false)
+    // Already off: a second click asks for nothing.
+    await m.disengageKillSwitch()
+    #expect(transport.requests.filter { $0.url?.path == "/v1/toggles/kill-switch" }.count == 1)
+    #expect(transport.requests.allSatisfy { $0.url?.path != "/v1/send" })
+  }
+
+  @Test("09.D: the model's bulk plan includes only drawn drafts, and approveAll writes one batch and no request inside the window")
+  func bulkFromModel() async throws {
+    let transport = try Self.scenarioTransport("pending")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    await Self.settle(m) { _ in m.state.queue.count == 7 && m.threads != nil }
+    #expect(m.bulkPlan.included.isEmpty)
+    #expect(m.approveAll() == .empty)
+    m.outbound.markRendered("drf-0101")
+    m.outbound.markRendered("drf-0106")
+    #expect(Set(m.bulkPlan.included.map(\.id)) == ["drf-0101", "drf-0106"])
+    #expect(m.bulkPlan.excluded.count == 3)
+    #expect(m.approveAll() == nil)
+    #expect(Set(m.outbound.entries.compactMap(\.batch)).count == 1)
+    #expect(m.board.queue.count == 3, "approved drafts still wait in the queue")
+    #expect(transport.requests.allSatisfy { $0.url?.path != "/v1/send" && !($0.url?.path ?? "").contains("approve") })
+    #expect(m.undoLast())
+    #expect(m.board.queue.count == 5)
+    m.stop()
+  }
 }

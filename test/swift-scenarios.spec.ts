@@ -1169,16 +1169,16 @@ describe('v2 S4f SC13: the kill switch toggle, only with --control', () => {
     const off = toggle(state, false);
     expect(off.out.status).toBe(200);
     expect(off.out.body).toEqual(
-      readJson<Golden>(
-        join(contract, 'responses/toggles.killswitch.off.json'),
-      ).body,
+      readJson<Golden>(join(contract, 'responses/toggles.killswitch.off.json'))
+        .body,
     );
     state = off.state;
     const k = killOf(state);
     expect(k.status.killSwitch).toBe(false);
     expect(k.status.armed).toEqual(
-      readJson<{ body: { armed: Json } }>(join(contract, 'responses/status.json'))
-        .body.armed,
+      readJson<{ body: { armed: Json } }>(
+        join(contract, 'responses/status.json'),
+      ).body.armed,
     );
     expect(k.setting).toBe(false);
     expect(

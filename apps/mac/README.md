@@ -198,4 +198,4 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..42 decisions.
+  provisional, pending the D-UI-1..53 decisions.

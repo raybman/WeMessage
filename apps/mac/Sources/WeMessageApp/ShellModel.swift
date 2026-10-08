@@ -6,8 +6,10 @@ import WeMessageKit
 /// queue once, then follows the kit's event stream; `apply` folds each
 /// status into the connection line and every frame into the kit's AppState.
 /// `board` is board 01's marks, counter and list, folded from all of it.
-/// Nothing here sends anything: the one write is the kill switch, and it
-/// only ever turns sending off.
+/// Nothing here sends anything (Outbound does, after its undo window): the
+/// one write is the kill switch, engaged from the chip and disengaged only
+/// from the banner's click (D-UI-50). Done, Snooze and Mute live in the
+/// local QueueStateStore (D-UI-51) and reach no route.
 @MainActor
 @Observable
 public final class ShellModel {
@@ -83,14 +85,79 @@ public final class ShellModel {
   /// Approve then carries the field as the edited body.
   public var editedFrom: [String: String] = [:]
 
+  /// Boards 06 and 09: the completion acts and the Triage selection.
+  public let queue = QueueStateStore()
+  /// The audit view (09.G) is open in the content pane.
+  public var auditShown = false
+  /// The audit rows last read, oldest first.
+  public internal(set) var audit: [AuditLine] = []
+  /// The bulk confirm card (06.F, 09.D) is open.
+  public var bulkSheetShown = false
+  /// A new value asks the composer's field for the keyboard (R in Triage,
+  /// Edit); nil leaves the keyboard with the list.
+  public var composerClaim: String?
+  /// A new value hands the keyboard back to the Triage keys (Escape in the
+  /// composer, a new selection).
+  public internal(set) var triageClaim = 0
+
   private let client: GatewayClient
   private var task: Task<Void, Never>?
 
   /// Board 01, folded from status, threads and the queue (D-UI-18 window).
   public var board: ShellBoard {
-    ShellBoard.fold(
-      status: status, threads: threads, drafts: state.queue,
-      window: QueueWindow(days: ProvisionalUI.queueWindowDays))
+    let window = QueueWindow(days: ProvisionalUI.queueWindowDays)
+    let clock = ShellBoard.clock(status: status, threads: threads, drafts: state.queue)
+    return ShellBoard.fold(
+      status: status, threads: threads, drafts: state.queue, window: window,
+      excluding: excludedDrafts(clock: clock, window: window))
+  }
+
+  /// D-UI-44 mapped onto the Kit's rule.
+  static var draftRule: DraftRule {
+    switch ProvisionalUI.draftQueueRule {
+    case .untilActedOn: .untilActedOn
+    case .always: .always
+    }
+  }
+
+  /// The pending drafts that are not waiting on the user: held here, in
+  /// (or past) an approval this window started, or cleared by a Done,
+  /// Snooze or Mute made after the draft (06.A under D-UI-44).
+  func excludedDrafts(clock: Date?, window: QueueWindow) -> Set<String> {
+    var out = Set<String>()
+    for draft in state.queue where draft.state == .pending {
+      if thread.held.contains(draft.id) {
+        out.insert(draft.id)
+        continue
+      }
+      if let entry = outbound.entries.last(where: { $0.intent.draftId == draft.id }) {
+        switch entry.phase {
+        case .counting, .sending, .approved, .sent:
+          out.insert(draft.id)
+          continue
+        default: break
+        }
+      }
+      guard let act = queue.acts[draft.chatGuid], let clock, let made = WireDate.parse(draft.createdAt) else { continue }
+      let facts = ThreadFacts(pendingDraftAt: made, act: act)
+      if !CompletionRules.inQueue(facts, now: clock, window: window, draftRule: Self.draftRule) {
+        out.insert(draft.id)
+      }
+    }
+    return out
+  }
+
+  /// The queue's clock, the moment every act is stamped with.
+  public var queueClock: Date { board.asOf ?? Date() }
+
+  /// Threads snoozed past the queue's clock: Triage still lists them, dimmed.
+  public var snoozedThreads: [String: Date] {
+    let clock = queueClock
+    var out: [String: Date] = [:]
+    for (guid, act) in queue.acts {
+      if case .snoozed(_, let until) = act, until > clock { out[guid] = until }
+    }
+    return out
   }
 
   /// The channel the counter speaks for: the selected one, or under ALL the
@@ -108,7 +175,137 @@ public final class ShellModel {
   public var killSwitch: Bool? { status?.killSwitch }
 
   /// The threads the list shows for the current scope and lens.
-  public var rows: [ThreadSummary] { board.rows(threads?.threads ?? [], scope: scope, lens: lens) }
+  public var rows: [ThreadSummary] {
+    board.rows(threads?.threads ?? [], scope: scope, lens: lens, including: Set(snoozedThreads.keys))
+  }
+
+  /// The queue items in the selected scope, in list order.
+  public var scopedQueue: [QueueItem] {
+    let channel = ShellBoard.channel(of: scope)
+    return board.queue.filter { item in channel.map { $0 == item.channel } ?? true }
+  }
+
+  /// Picks a lens. Entering Triage starts its burn-down; leaving it ends it.
+  public func choose(_ lens: Lens) {
+    if lens == .triage && self.lens != .triage { queue.beginTriage(count: scopedQueue.count) }
+    if lens != .triage { queue.endTriage() }
+    self.lens = lens
+    triageClaim += 1
+  }
+
+  /// cmd-T: into Triage, or back out of it to Recent ("Leave ⌘T", 06.C).
+  public func toggleTriage() {
+    choose(lens == .triage ? .recent : .triage)
+  }
+
+  /// The gates 09.F and 06.F read for `chatGuid`.
+  public func gates(for chatGuid: String) -> VerbGates {
+    let draft = pendingDraft(for: chatGuid).flatMap { thread.held.contains($0.id) ? nil : $0 }
+    let mark = board.mark(.imessage)
+    let stale: Bool
+    switch connection {
+    case .connected: stale = mark == .stale || mark == RailMark.none
+    default: stale = true
+    }
+    return VerbGates(
+      killSwitch: killSwitch, sourceStale: stale, bodyRendered: draft.map { outbound.isRendered($0.id) } ?? false,
+      hasDraft: draft != nil, unsavedEdit: hasUnsavedEdit(chatGuid))
+  }
+
+  /// The thread's field holds text the user typed (06.F, 09.D).
+  public func hasUnsavedEdit(_ chatGuid: String) -> Bool {
+    !(composerText[chatGuid] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// The bulk approve over the scope's queue (06.F, 09.D): one draft per
+  /// thread, each included only if its body was drawn this session.
+  public var bulkPlan: QueueStateStore.BulkPlan {
+    let ids = Set(scopedQueue.compactMap(\.draftId))
+    let drafts = state.queue.filter { ids.contains($0.id) }
+    let order = scopedQueue.compactMap(\.draftId)
+    let sorted = order.compactMap { id in drafts.first { $0.id == id } }
+    return QueueStateStore.bulkPlan(
+      drafts: sorted, killSwitch: killSwitch, rendered: Set(outbound.renderedAt.keys),
+      unsavedEdit: Set(sorted.map(\.chatGuid).filter { hasUnsavedEdit($0) }))
+  }
+
+  /// The bulk confirm's one gesture: one batch, one countdown, one undo.
+  @discardableResult
+  public func approveAll() -> Outbound.Refusal? {
+    let plan = bulkPlan
+    let intents = plan.included.map { Outbound.Intent.approve(draftId: $0.id, chatGuid: $0.chatGuid, editedBody: nil) }
+    bulkSheetShown = false
+    return outbound.approveAll(intents)
+  }
+
+  /// Done, Snooze or Mute on `guids` (the selection, else the open thread),
+  /// gated by 06.E: never against a stale or unreachable source. Selects
+  /// the next row; with none left the zero screen shows.
+  public func act(_ kind: QueueStateStore.Kind, on guids: [String]) {
+    let verb: Verb =
+      switch kind {
+      case .done: .done
+      case .snooze: .snooze
+      case .mute: .mute
+      }
+    let allowed = guids.filter { CompletionRules.permit(verb, gates(for: $0)) == nil }
+    guard !allowed.isEmpty else { return }
+    let before = rows.map(\.chatGuid)
+    queue.act(kind, on: allowed, at: queueClock)
+    advance(from: before, leaving: Set(allowed))
+  }
+
+  /// After an act, the next row below the one that left, else the one
+  /// above, else nothing.
+  func advance(from before: [String], leaving: Set<String>) {
+    guard let current = selectedThread, leaving.contains(current) else { return }
+    let live = Set(rows.map(\.chatGuid)).subtracting(leaving)
+    let snoozed = Set(snoozedThreads.keys)
+    guard let at = before.firstIndex(of: current) else {
+      selectedThread = nil
+      return
+    }
+    let after = before[(at + 1)...].first { live.contains($0) && !snoozed.contains($0) }
+    let ahead = before[..<at].last { live.contains($0) && !snoozed.contains($0) }
+    selectedThread = after ?? ahead
+  }
+
+  /// J and K: the next or previous row.
+  public func step(_ delta: Int) {
+    let list = rows.map(\.chatGuid)
+    guard !list.isEmpty else { return }
+    guard let current = selectedThread, let at = list.firstIndex(of: current) else {
+      selectedThread = delta >= 0 ? list.first : list.last
+      return
+    }
+    selectedThread = list[min(max(at + delta, 0), list.count - 1)]
+  }
+
+  /// Z: the newest send still counting comes back; else the newest act.
+  @discardableResult
+  public func undoLast() -> Bool {
+    if let entry = outbound.entries.last(where: {
+      if case .counting = $0.phase { return true } else { return false }
+    }) {
+      return outbound.undo(in: entry.batch == nil ? entry.intent.chatGuid : nil)
+    }
+    return queue.undo()
+  }
+
+  /// Escape's ladder (06.C): the composer gives the keyboard back to the
+  /// list, then the selection clears, then Triage ends.
+  public func escape(fromComposer: Bool) {
+    if fromComposer {
+      composerClaim = nil
+      triageClaim += 1
+    } else if !queue.selection.isEmpty {
+      queue.selection = []
+    } else if selectedThread != nil {
+      selectedThread = nil
+    } else if lens == .triage {
+      choose(.recent)
+    }
+  }
 
   /// The selected thread's summary, when it is still listed.
   public var selected: ThreadSummary? {
@@ -169,18 +366,36 @@ public final class ShellModel {
       return
     }
     if case .ok(let page)? = try? await client.listThreads() { threads = page }
+    // 09.C: the agent undo window is send.undoGraceSeconds, clamped 5...30.
+    if let envelope = try? await client.settings() {
+      outbound.approveSeconds = UndoWindow.agent(fromSetting: envelope.settings["send.undoGraceSeconds"]?.value)
+    }
     if let envelope = try? await client.listDrafts() { fold(.response(.drafts(envelope.drafts))) }
     await thread.reload()
   }
 
   /// Turns sending off (shift-cmd-K). Only ever this direction: turning it
-  /// back on is S4f's disengage, behind its own confirmation. The status
-  /// read after it is what the chip shows; a refusal leaves the chip as it
-  /// was.
+  /// back on is the banner's Disengage, a click with no key (D-UI-50). The
+  /// status read after it is what the chip shows; a refusal leaves the chip
+  /// as it was.
   public func engageKillSwitch() async {
     guard killSwitch != true else { return }
     _ = try? await client.setKillSwitch(true)
     if let status = try? await client.status() { self.status = status }
+  }
+
+  /// The banner's Disengage (09.F): turns sending back on. Held drafts
+  /// return to awaiting; nothing that was refused at the minute is resent.
+  public func disengageKillSwitch() async {
+    guard killSwitch == true else { return }
+    _ = try? await client.setKillSwitch(false)
+    if let status = try? await client.status() { self.status = status }
+  }
+
+  /// The audit view (09.G): reads the chain once per open, oldest first.
+  public func loadAudit() async {
+    guard let rows = try? await client.listAudit() else { return }
+    audit = rows.map(AuditLine.init).sorted { $0.seq < $1.seq }
   }
 
   /// Cancels the task `start()` made; the stream ends with it.

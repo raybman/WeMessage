@@ -1,12 +1,14 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..42 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..53 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
 // where board 02 left one open or the daemon cannot yet say what it draws;
 // D-UI-39..42: the S4e build, where board 08 and the plan disagree or the
-// wireframe leaves a choice open). Every value below is the
+// wireframe leaves a choice open; D-UI-43..53: the S4f build, where boards
+// 06 and 09 leave a choice open or the daemon cannot serve what they draw).
+// Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
 // live in this one file on purpose: when the decisions land, this file is
@@ -411,4 +413,101 @@ public enum ProvisionalUI {
     case tintDots
   }
   public static let atlasPageMarker: AtlasPageMarker = .tintDots
+
+  // D-UI-43: the queue's clock. 06.A measures the window and the counter
+  // against "now"; the daemon serves lastScan, and a draft can be newer than
+  // the last scan. The clock is the later of the two, so a draft made after
+  // the scan is never in the future of the board that draws it.
+  public enum QueueClock: Sendable {
+    case laterOfScanAndNewestDraft
+    case lastScanOnly
+  }
+  public static let queueClock: QueueClock = .laterOfScanAndNewestDraft
+
+  // D-UI-44: what a pending draft does to queue membership. 06.A's table
+  // says "always, overrides all"; 06.C draws Done, Snooze and Mute live
+  // beside a draft. Until acted on: an act clears the draft that was there,
+  // and a newer draft re-queues the thread (06.G).
+  public enum DraftQueueRule: Sendable {
+    case untilActedOn
+    case always
+  }
+  public static let draftQueueRule: DraftQueueRule = .untilActedOn
+
+  // D-UI-45: the tail of a held draft's meta line (09.B). The daemon has no
+  // hold route (D-UI-36), so the held draft keeps its daemon expiry; the
+  // line says so instead of 09.B's "will not expire".
+  public static func heldTail(expires clock: String?) -> String {
+    guard let clock else { return "no expiry served" }
+    return "still expires " + clock + ", daemon side"
+  }
+
+  // D-UI-46: Snooze (06.C "Snooze until Monday 9:00"). The daemon has no
+  // snooze route and 06 draws no picker, so a snooze runs to the next 9:00
+  // and is labelled with the weekday.
+  public static let snoozeHour = 9
+  public static let snoozeLabelPattern = "EEEE H:mm"
+
+  // D-UI-47: where the verbs sit. 09.A puts Approve A / Edit R / Hold ⌫
+  // under the draft bubble; 06.C puts the queue verbs in a row under the
+  // Triage header. Needs You draws the per-draft verbs under each bubble,
+  // Triage draws the VerbRow, every other lens keeps the composer's verbs.
+  // Bulk approve is ⇧A from the list (09.D), never a ⌘ chord.
+  public enum VerbPlacement: Sendable {
+    case bubbleInNeedsYouRowInTriage
+  }
+  public static let verbPlacement: VerbPlacement = .bubbleInNeedsYouRowInTriage
+
+  // D-UI-48: the not-connected zero (06.E) offers the connect flow, and
+  // 09.H draws the iMessage card with a message count and a button. The
+  // daemon serves neither the count nor a connect route the app can call,
+  // so the card prints the four paragraphs and no button.
+  public static let connectCardButton = false
+  public static let connectCardLines: [String] = [
+    "How it works. Apple offers no API for iMessage. WeMessage reads the database Messages.app keeps on this Mac (Full Disk Access) and sends through Messages.app with AppleScript.",
+    "What works. Read, search, full history, send text, attachments.",
+    "What does not, and cannot. Tapbacks, edit, unsend, effects, typing indicators.",
+    "Risk to you. No known Apple ID risk. A macOS update can break reading until WeMessage is updated.",
+  ]
+
+  // D-UI-49: the audit view (09.G). The daemon's audit rows carry no
+  // result column, so Result prints this; the view opens from the Needs
+  // You strip and lists the newest row at the bottom.
+  public static let auditResultUnserved = "not served"
+  public enum AuditEntry: Sendable {
+    case needsYouStrip
+  }
+  public static let auditEntry: AuditEntry = .needsYouStrip
+
+  // D-UI-50: the kill banner (09.F). The daemon does not serve when the
+  // switch went on, so the banner has no "since"; Disengage is a click only
+  // (no ⇧⌘K), so no chord can turn sending back on by accident.
+  public static let killBannerLine = "KILL SWITCH ON. Nothing can be sent by anything, including you."
+  public enum KillDisengage: Sendable {
+    case clickOnly
+  }
+  public static let killDisengage: KillDisengage = .clickOnly
+
+  // D-UI-51: Done, Snooze and Mute (06.C). The daemon has no route for
+  // them, so they live in this window's memory and end with it.
+  public enum QueueStatePersistence: Sendable {
+    case memoryOnly
+  }
+  public static let queueStatePersistence: QueueStatePersistence = .memoryOnly
+
+  // D-UI-52: the zero screen (06.E). It prints the last event's clock, not
+  // a relative age, and does not hand off to the next channel: the build
+  // syncs one source.
+  public enum ZeroHandOff: Sendable {
+    case stayOnChannel
+  }
+  public static let zeroHandOff: ZeroHandOff = .stayOnChannel
+
+  // D-UI-53: the rationale block (09.C). The daemon serves the rule id and
+  // the proactive reason, not style evidence, the messages read, or what
+  // was not done, so the block prints only the served lines.
+  public enum RationaleLines: Sendable {
+    case servedOnly
+  }
+  public static let rationaleLines: RationaleLines = .servedOnly
 }

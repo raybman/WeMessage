@@ -317,8 +317,9 @@ struct AppHygieneTests {
   /// 1..6, S4's 7..21 (plan section 5 and the S4a.0 spike's D-UI-21) and
   /// S4c's 22..26 (choices the board 01 wireframe left open), S4d's
   /// 27..38 (choices board 02 left open, or the daemon cannot yet serve)
-  /// and S4e's 39..42 (where board 08 and the plan disagree).
-  static let dUIKeys = (1...42).map { "D-UI-\($0)" }
+  /// S4e's 39..42 (where board 08 and the plan disagree) and S4f's 43..53
+  /// (where boards 06 and 09 leave a choice open).
+  static let dUIKeys = (1...53).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -335,11 +336,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..42, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..53, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..42 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..53 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -347,7 +348,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...42), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...53), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }

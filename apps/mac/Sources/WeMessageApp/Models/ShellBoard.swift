@@ -28,7 +28,7 @@ public struct ShellBoard: Equatable, Sendable {
   public var marks: [ShellModel.Scope: RailMark]
   /// The last scan, when the daemon has done one.
   public var lastScan: Date?
-  /// The queue's clock: the last scan, else the thread list's asOf.
+  /// The queue's clock: see `clock(status:threads:drafts:)`.
   public var asOf: Date?
   /// What is waiting, inside the window.
   public var queue: [QueueItem]
@@ -54,13 +54,14 @@ public struct ShellBoard: Equatable, Sendable {
   /// daemon cannot vouch for what it has not read). WhatsApp, LinkedIn and
   /// Email are not connected, so they say nothing.
   public static func fold(
-    status: StatusPayload?, threads: ThreadsPage?, drafts: [DraftPayload], window: QueueWindow
+    status: StatusPayload?, threads: ThreadsPage?, drafts: [DraftPayload], window: QueueWindow,
+    excluding: Set<String> = []
   ) -> ShellBoard {
     let lastScan = status?.cursor.flatMap { WireDate.parse($0.lastScanAt) }
-    let asOf = lastScan ?? threads.flatMap { WireDate.parse($0.asOf) }
+    let asOf = clock(status: status, threads: threads, drafts: drafts)
     let connected = status.map { $0.connectionState != "disconnected" } ?? false
     let fresh = connected && status?.connectionState == "fully-connected" && lastScan != nil
-    let items = QueueRules.items(drafts: drafts, threads: threads?.threads ?? [])
+    let items = QueueRules.items(drafts: drafts, threads: threads?.threads ?? [], excluding: excluding)
     let queue = asOf.map { now in
       items.filter { QueueRules.queueCount(items: [$0], now: now, window: window) == 1 }
     } ?? []
@@ -77,6 +78,19 @@ public struct ShellBoard: Equatable, Sendable {
     let channels = ShellModel.Scope.allCases.filter { $0 != .all }.map { marks[$0] ?? RailMark.none }
     marks[.all] = QueueRules.allMark(channels)
     return ShellBoard(marks: marks, lastScan: lastScan, asOf: asOf, queue: queue)
+  }
+
+  /// The queue's clock: the last scan, else the thread list's asOf, moved
+  /// on to the newest pending draft the daemon served when that is later
+  /// (D-UI-43: a draft the stream delivered after the last scan is still
+  /// waiting, and the counter, the rail and Triage say one number). Never
+  /// the wall clock; nil when the data carries no time at all.
+  public static func clock(status: StatusPayload?, threads: ThreadsPage?, drafts: [DraftPayload]) -> Date? {
+    let lastScan = status?.cursor.flatMap { WireDate.parse($0.lastScanAt) }
+    guard let base = lastScan ?? threads.flatMap({ WireDate.parse($0.asOf) }) else { return nil }
+    guard ProvisionalUI.queueClock == .laterOfScanAndNewestDraft else { return base }
+    let newest = drafts.filter { $0.state == .pending }.compactMap { WireDate.parse($0.createdAt) }.max()
+    return max(base, newest ?? base)
   }
 
   public func mark(_ scope: ShellModel.Scope) -> RailMark { marks[scope] ?? RailMark.none }
@@ -103,10 +117,14 @@ public struct ShellBoard: Equatable, Sendable {
   /// The threads the list shows for a scope and a lens: the scope's channel
   /// (ALL is every channel), and under Needs You or Triage only the threads
   /// something is waiting on, in the daemon's order.
-  public func rows(_ threads: [ThreadSummary], scope: ShellModel.Scope, lens: ShellModel.Lens) -> [ThreadSummary] {
+  /// `including` adds threads the queue no longer holds but Triage still
+  /// draws (a snoozed thread, at 45%, 06.C).
+  public func rows(
+    _ threads: [ThreadSummary], scope: ShellModel.Scope, lens: ShellModel.Lens, including: Set<String> = []
+  ) -> [ThreadSummary] {
     let scoped = threads.filter { thread in Self.channel(of: scope).map { $0 == thread.channel } ?? true }
     guard lens != .recent else { return scoped }
-    let waiting = Set(queue.map(\.threadGuid))
+    let waiting = Set(queue.map(\.threadGuid)).union(lens == .triage ? including : [])
     return scoped.filter { waiting.contains($0.chatGuid) }
   }
 }

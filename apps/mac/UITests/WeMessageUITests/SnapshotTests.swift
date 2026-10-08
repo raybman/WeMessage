@@ -178,7 +178,13 @@ final class SnapshotTests: XCTestCase {
     defer { app.terminate() }
     XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
     let geometry = settledGeometry(app)
-    capture(app, geometry: geometry, appearance: appearance, frost: frost, name: name, luminance: luminance)
+    // v2 S4h1: the S0 golden's cursor is null, so iMessage is stale and
+    // never synced, and the trust banner (10.A) sits under the title band;
+    // the frost patch reads below it.
+    XCTAssertTrue(
+      app.descendants(matching: .any)[ID.trustBanner].waitForExistence(timeout: UITestApp.timeout),
+      "the never-synced golden raised no trust banner")
+    capture(app, geometry: geometry, appearance: appearance, frost: frost, name: name, layout: .banner, luminance: luminance)
   }
 }
 

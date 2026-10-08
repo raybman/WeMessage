@@ -87,6 +87,9 @@ struct FreshnessTable: View {
         .font(.system(size: 11, design: .monospaced))
         .foregroundStyle(Tokens.color(row.state == .notConnected ? palette.inkDim : palette.ink))
         .accessibilityElement(children: .ignore)
+        // An ignored-children stack has no role of its own; the audit
+        // wants one, and a row of the age table is text.
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel(row.sentence(zone: zone))
         .accessibilityValue(row.sentence(zone: zone))
         .accessibilityIdentifier(ShellID.freshnessRowPrefix + row.scope.rawValue)

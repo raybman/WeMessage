@@ -25,14 +25,17 @@ struct FindBar: View {
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Tokens.color(palette.ink), lineWidth: 1))
         .frame(maxWidth: 260)
         .background(FieldClaim(token: find.shown ? "find" : nil))
-        .onKeyPress(.upArrow) {
+        .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
+          guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
           find.step(-1)
           return .handled
         }
-        .onKeyPress(.downArrow) {
+        .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
+          guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
           find.step(1)
           return .handled
         }
+        .onKeyPress(phases: .down) { press in Board11Keys.route(press, model: model) }
         .onKeyPress(.escape) {
           model.escapeBoard11()
           return .handled
@@ -49,7 +52,7 @@ struct FindBar: View {
       Spacer(minLength: 8)
       step("\u{2191} newer", "Newer match") { find.step(-1) }
       step("\u{2193} older", "Older match") { find.step(1) }
-      step("Done", "Close find") { find.close() }
+      step("Done", "Close find") { model.closeFind() }
     }
     .padding(.vertical, 6)
     .padding(.horizontal, 12)

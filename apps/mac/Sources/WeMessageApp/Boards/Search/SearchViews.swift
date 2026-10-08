@@ -59,14 +59,17 @@ struct SearchPane: View {
         .font(.system(size: 14))
         .foregroundStyle(Tokens.color(palette.ink))
         .background(FieldClaim(token: search.shown ? "search" : nil))
-        .onKeyPress(.upArrow) {
+        .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
+          guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
           search.move(-1)
           return .handled
         }
-        .onKeyPress(.downArrow) {
+        .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
+          guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
           search.move(1)
           return .handled
         }
+        .onKeyPress(phases: .down) { press in Board11Keys.route(press, model: model) }
         .onKeyPress(.escape) {
           model.escapeBoard11()
           return .handled
@@ -500,14 +503,17 @@ struct QuickSwitcherPane: View {
             .font(.system(size: 14))
             .foregroundStyle(Tokens.color(palette.ink))
             .background(FieldClaim(token: switcher.shown ? "switcher" : nil))
-            .onKeyPress(.upArrow) {
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
+              guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
               switcher.move(-1)
               return .handled
             }
-            .onKeyPress(.downArrow) {
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
+              guard !press.modifiers.contains(.command) else { return Board11Keys.route(press, model: model) }
               switcher.move(1)
               return .handled
             }
+            .onKeyPress(phases: .down) { press in Board11Keys.route(press, model: model) }
             .onKeyPress(.escape) {
               model.escapeBoard11()
               return .handled
@@ -641,5 +647,40 @@ struct Board11Keys: View {
     .frame(width: 0, height: 0)
     .opacity(0)
     .accessibilityHidden(true)
+  }
+
+  /// The same keys, heard by a field that holds the keyboard: the composer
+  /// and board 11's own fields. A text view can keep a key equivalent from
+  /// the hidden buttons (the composer's cmd-Return, run 37594298009), so a
+  /// field passes board 11's chords here; anything else is ignored.
+  static func route(_ press: KeyPress, model: ShellModel) -> KeyPress.Result {
+    route(press.key, press.characters, press.modifiers, model: model) ? .handled : .ignored
+  }
+
+  /// True when the chord was board 11's and has been acted on.
+  static func route(_ key: KeyEquivalent, _ characters: String, _ modifiers: EventModifiers, model: ShellModel) -> Bool {
+    guard modifiers.contains(.command), !modifiers.contains(.control) else { return false }
+    let letter = String(key.character).lowercased()
+    let typed = characters.lowercased()
+    let named: (String) -> Bool = { letter == $0 || typed == $0 }
+    if modifiers.contains(.option) {
+      if key == .upArrow || key == .downArrow {
+        guard model.scrubberShown else { return false }
+        model.stepYear(key == .upArrow ? -1 : 1)
+        return true
+      }
+      guard named("g"), !modifiers.contains(.shift) else { return false }
+      model.toggleScrubber()
+      return true
+    }
+    if named("f") {
+      if modifiers.contains(.shift) { model.openSearch() } else { model.openFind() }
+      return true
+    }
+    if named("k"), !modifiers.contains(.shift) {
+      model.openSwitcher()
+      return true
+    }
+    return false
   }
 }

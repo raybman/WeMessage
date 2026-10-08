@@ -934,4 +934,94 @@ struct AppHygieneTests {
       #expect(!Self.onboardingLeaks(swapped).isEmpty, "a planted \(planted) in \(path) went unseen")
     }
   }
+
+  // MARK: S4i
+
+  /// The H-S4-8 verdicts over (path, text) pairs of the app sources: board
+  /// 11 reads through the daemon's GETs only, never a file or a database,
+  /// paints its highlight and its outlines in ink, keeps its keys in every
+  /// build, and takes the panes (and the composer) while it is up.
+  static func searchLeaks(_ files: [(String, String)]) -> [String] {
+    let searchDir = appDir + "/Boards/Search/"
+    let models = [appDir + "/Models/SearchModel.swift", appDir + "/Models/SearchQuery.swift"]
+    let shell = appDir + "/ShellView.swift"
+    let transcript = appDir + "/Boards/Thread/TranscriptView.swift"
+    let composer = appDir + "/Boards/Thread/ComposerView.swift"
+    let reads = ["Library/" + "Messages", "chat" + ".db", "sqlite", "File" + "Manager", "CNContact", "Data(contentsOf"]
+    let writes = [".send" + "(", "approve" + "Draft(", "setKill" + "Switch", "engageKill" + "Switch", "/v1/", "httpMethod", "\"POST\""]
+    let colours = [
+      "." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent", "Tokens." + "tint",
+      "Tokens." + "danger", ".tint" + "(", "background" + "Color", "underline" + "Color",
+    ]
+    var leaks: [String] = []
+    var swept = 0
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    for (path, source) in files where path.hasPrefix(searchDir) || models.contains(path) {
+      swept += 1
+      // Code only: the doc comments name the routes they read (D-UI-79).
+      let body = source.split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+      for token in reads + writes + colours where body.contains(token) { leaks.append("\(path): \(token)") }
+      // The only client calls are the two GETs the corpus is built from.
+      let regex = try? NSRegularExpression(pattern: #"\bclient\.([A-Za-z]+)"#)
+      for m in regex?.matches(in: body, range: NSRange(body.startIndex..., in: body)) ?? [] {
+        guard let r = Range(m.range(at: 1), in: body) else { continue }
+        let call = String(body[r])
+        if call != "listThreads" && call != "readThread" { leaks.append("\(path): client.\(call)") }
+      }
+    }
+    if swept < 5 { leaks.append("swept \(swept) board 11 files") }
+    // The outlines a jump and find draw over bubbles are ink too.
+    let outline = text(transcript).components(separatedBy: "struct Board11" + "Outline").dropFirst().first?
+      .components(separatedBy: "\n}\n").first ?? ""
+    if !outline.contains("Tokens.color(palette.ink)") { leaks.append("\(transcript): the outline is not ink") }
+    for token in colours where outline.contains(token) { leaks.append("\(transcript): outline \(token)") }
+    // The keys are placed in every build, outside the UI-test block.
+    let shellText = text(shell)
+    let keys = shellText.components(separatedBy: "Board11Keys(model: model)")
+    if keys.count != 2 { leaks.append("\(shell): Board11Keys placed \(keys.count - 1) times") }
+    let lead = keys.first.map { String($0.suffix(160)) } ?? ""
+    if lead.contains("if ") { leaks.append("\(shell): Board11Keys sits under a condition") }
+    // Search and the switcher take the list and thread panes, so the
+    // composer (and its Send) is not in the window while they are up.
+    let order = ["if model.switcher.shown {", "} else if model.search.shown {", "SidebarView(", "ContentPane("]
+    let at = order.map { shellText.range(of: $0)?.lowerBound }
+    if at.contains(where: { $0 == nil }) || zip(at, at.dropFirst()).contains(where: { $0! >= $1! }) {
+      leaks.append("\(shell): the panes are not replaced while board 11 is up")
+    }
+    // The find field holds the keyboard while it is up; the composer
+    // takes it back after.
+    if !text(composer).contains("guard !model.find.shown else { return nil }") {
+      leaks.append("\(composer): the composer claims the keyboard over the find bar")
+    }
+    return leaks
+  }
+
+  @Test("H-S4-8: board 11 reads only through the daemon's GETs, never a file, paints its highlight and outlines in ink, keeps its keys in every build and takes the panes while it is up")
+  func searchSealed() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Search").count >= 3)
+    let leaks = Self.searchLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let views = Self.appDir + "/Boards/Search/SearchViews.swift"
+    let model = Self.appDir + "/Models/SearchModel.swift"
+    let shell = Self.appDir + "/ShellView.swift"
+    let transcript = Self.appDir + "/Boards/Thread/TranscriptView.swift"
+    let swaps: [(String, String, String)] = [
+      (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foregroundColor = ." + "green"),
+      (views, "run.underlineStyle = .single", "run.background" + "Color = .yellow"),
+      (model, "guard case .ok(let page)? = try? await client.listThreads()", "_ = try? await client.send" + "(to: \"x\")"),
+      (model, "public func load() async -> SearchCorpus {", "public func load() async -> SearchCorpus {\n    _ = File" + "Manager.default"),
+      (transcript, ".strokeBorder(Tokens.color(palette.ink), lineWidth: width)", ".strokeBorder(Tokens." + "tint, lineWidth: width)"),
+      (shell, "      Board11Keys(model: model)", "      if TestHooks.isUITest { Board11Keys(model: model) }"),
+      (shell, "} else if model.search.shown {", "} else if model.search.hidden {"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.searchLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
 }

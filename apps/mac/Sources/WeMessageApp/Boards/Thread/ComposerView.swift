@@ -49,7 +49,12 @@ struct ComposerView: View {
   /// under the draft and Triage in its verb row.
   private var showsVerbs: Bool { draft != nil && killOff && !busy && model.lens == .recent }
   /// Outside Recent the field takes the keyboard only when R or Edit asks.
-  private var claimToken: String? { model.lens == .recent || model.composerClaim == guid ? guid : nil }
+  /// The find bar's field holds the keyboard while it is up; when it
+  /// closes the claim is new again and the field takes it back.
+  private var claimToken: String? {
+    guard !model.find.shown else { return nil }
+    return model.lens == .recent || model.composerClaim == guid ? guid : nil
+  }
   private var borderless: Bool { draft != nil && ProvisionalUI.draftComposer == .verbsAboveField }
 
   var body: some View {
@@ -131,6 +136,9 @@ struct ComposerView: View {
         // Outside Recent, Escape hands the keyboard back to the list (06.C).
         // In any lens it first climbs board 11: the find bar, the scrubber,
         // a jump back to its results (11.D).
+        // Board 11's chords, which the text view can keep from the hidden
+        // buttons: search, the switcher, find and the scrubber.
+        .onKeyPress(phases: .down) { press in Board11Keys.route(press, model: model) }
         .onKeyPress(.escape) {
           guard model.lens != .recent || model.escapeIsBoard11 else { return .ignored }
           model.escape(fromComposer: true)

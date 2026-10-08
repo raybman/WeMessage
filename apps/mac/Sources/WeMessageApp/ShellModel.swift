@@ -490,6 +490,13 @@ public final class ShellModel {
     find.open(turns: thread.turns)
   }
 
+  /// The find bar's Done and Escape. Recent's composer takes the keyboard
+  /// back by itself; another lens hands it back to the list (06.C).
+  public func closeFind() {
+    find.close()
+    if lens != .recent && composerClaim == nil { triageClaim += 1 }
+  }
+
   /// opt-cmd-G: the year scrubber beside the open thread.
   public func toggleScrubber() {
     guard selected != nil, !searchUp else { return }
@@ -562,7 +569,7 @@ public final class ShellModel {
     } else if search.shown {
       search.escape()
     } else if find.shown {
-      find.close()
+      closeFind()
     } else if jumpAnchor != nil, search.jumpedFrom != nil {
       // 11.D: Esc from a jumped-to thread goes back to the same results.
       jumpAnchor = nil

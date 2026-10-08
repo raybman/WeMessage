@@ -399,3 +399,150 @@ struct YearScrubberTests {
     #expect(s.line(viewing: 2023) == "viewing 2023 · 0 messages in 2023 · 1 older than this")
   }
 }
+
+@Suite("ShellModel board 11")
+@MainActor
+struct ShellBoard11Tests {
+  static let maya = "iMessage;-;+15550100001"
+
+  /// A shell over the "search" scenario, its thread list in hand.
+  static func shell() throws -> (ShellModel, ScenarioDaemon) {
+    let daemon = try ScenarioDaemon()
+    let m = ShellModel(client: daemon.client)
+    m.threads = try JSONDecoder().decode(ThreadsPage.self, from: Reply.scenario("search", "threads.list.json").body)
+    return (m, daemon)
+  }
+
+  @Test func aHitOpensItsThreadAndEscapeClimbsBackOut() async throws {
+    let (m, daemon) = try Self.shell()
+    m.lens = .triage
+    m.openSearch()
+    await m.search.settled()
+    #expect(m.searchUp)
+    m.search.text = "cabin"
+    m.search.move(2)
+    let hit = try #require(m.search.selectedHit)
+    #expect(hit.id == "msg-0504")
+    m.open(hit)
+    #expect(!m.search.shown)
+    #expect(!m.searchUp)
+    #expect(m.lens == .recent)
+    #expect(m.selectedThread == Self.maya)
+    #expect(m.jumpAnchor == "msg-0504")
+    #expect(m.scrollTarget == "msg-0504")
+    #expect(m.scrubberShown)
+    #expect(m.scrubberYear == 2024)
+    await m.thread.open(m.selectedThread)
+    #expect(m.thread.turns.count == 17)
+
+    // Find over the jump: its match leads, then the jump again.
+    m.openFind()
+    m.find.text = "cabin"
+    #expect(m.find.counter == "1 of 4")
+    #expect(m.scrollTarget == "msg-0510")
+    m.escape(fromComposer: true)
+    #expect(!m.find.shown)
+    #expect(m.scrollTarget == "msg-0504")
+
+    // 11.D: the next Escape goes back to the same results and selection.
+    #expect(m.escapeIsBoard11)
+    m.escape(fromComposer: true)
+    #expect(m.search.shown)
+    #expect(m.search.selection == "msg-0504")
+    #expect(m.search.text == "cabin")
+    #expect(m.jumpAnchor == nil)
+    #expect(!m.scrubberShown)
+    // And the one after that closes search; Escape is the list's again.
+    m.escape(fromComposer: true)
+    #expect(!m.search.shown)
+    #expect(!m.escapeIsBoard11)
+    #expect(daemon.transport.requests.allSatisfy { $0.httpMethod == "GET" })
+  }
+
+  @Test func theScrubberStepsAYearAndClamps() async throws {
+    let (m, _) = try Self.shell()
+    m.toggleScrubber()
+    #expect(!m.scrubberShown, "a scrubber with no thread open")
+    m.open(Self.maya)
+    await m.thread.open(m.selectedThread)
+    m.toggleScrubber()
+    #expect(m.scrubberShown)
+    let years = m.scrubber.years.map { $0.year }
+    #expect(years.first == 2026)
+    #expect(years.last == 2022)
+    m.stepYear(1)
+    #expect(m.scrubberYear == years[0], "the first step lands on the newest year")
+    m.stepYear(1)
+    #expect(m.scrubberYear == years[1], "down is a year older")
+    #expect(m.jumpAnchor == m.scrubber.anchor(for: years[1]))
+    m.stepYear(-1)
+    #expect(m.scrubberYear == years[0], "up is a year newer")
+    m.stepYear(99)
+    #expect(m.scrubberYear == years.last)
+    #expect(m.jumpAnchor == "msg-0500")
+    m.escape(fromComposer: true)
+    #expect(!m.scrubberShown)
+    #expect(m.jumpAnchor == nil)
+    m.stepYear(-1)
+    #expect(m.scrubberYear == years.last, "a hidden scrubber stepped")
+  }
+
+  @Test func cmdKOpensEmptyEveryTime() throws {
+    let (m, _) = try Self.shell()
+    m.openSearch()
+    m.openSwitcher()
+    #expect(!m.search.shown, "search left up under the switcher")
+    m.switcher.text = "theo"
+    #expect(!m.switcher.rows.isEmpty)
+    m.escape(fromComposer: false)
+    #expect(!m.switcher.shown)
+    m.openSwitcher()
+    #expect(m.switcher.text == "")
+    #expect(m.switcher.rows.isEmpty)
+    #expect(m.switcher.selection == nil)
+    m.switcher.text = "maya"
+    let row = try #require(m.switcher.selectedRow)
+    #expect(row.id == "thread:" + Self.maya)
+    m.open(row)
+    #expect(!m.switcher.shown)
+    #expect(m.selectedThread == Self.maya)
+    #expect(m.jumpAnchor == nil)
+    #expect(!m.scrubberShown)
+  }
+
+  @Test func findNeedsAThreadAndNoPanel() throws {
+    let (m, _) = try Self.shell()
+    m.openFind()
+    #expect(!m.find.shown, "find with no thread open")
+    m.open(Self.maya)
+    m.openSearch()
+    m.openFind()
+    #expect(!m.find.shown, "find under the search pane")
+    m.escape(fromComposer: false)
+    m.openFind()
+    #expect(m.find.shown)
+    m.lens = .triage
+    let before = m.triageClaim
+    m.closeFind()
+    #expect(!m.find.shown)
+    #expect(m.triageClaim == before + 1, "closing find outside Recent left the keyboard nowhere")
+  }
+
+  @Test func aFieldHearsBoardElevensChordsAndNothingElse() throws {
+    let (m, _) = try Self.shell()
+    #expect(!Board11Keys.route("k", "k", [], model: m), "a bare k")
+    #expect(!Board11Keys.route("j", "j", [.command], model: m))
+    #expect(!Board11Keys.route("k", "k", [.command, .control], model: m))
+    #expect(Board11Keys.route("k", "k", [.command], model: m))
+    #expect(m.switcher.shown)
+    #expect(Board11Keys.route("f", "F", [.command, .shift], model: m))
+    #expect(m.search.shown && !m.switcher.shown)
+    m.escape(fromComposer: false)
+    m.open(Self.maya)
+    #expect(!Board11Keys.route(.downArrow, "", [.command, .option], model: m), "a step with no scrubber")
+    #expect(Board11Keys.route("g", "\u{00A9}", [.command, .option], model: m))
+    #expect(m.scrubberShown)
+    #expect(Board11Keys.route("f", "f", [.command], model: m))
+    #expect(m.find.shown)
+  }
+}

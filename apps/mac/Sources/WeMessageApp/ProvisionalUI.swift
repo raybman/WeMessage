@@ -851,6 +851,11 @@ public enum ProvisionalUI {
   // D-UI-92: Delete the local copy opens its confirm card (removed, revoked,
   // untouched), but the card's Delete is disabled and names the CLI path
   // instead: nothing destructive runs from the window in this version.
+  // While any confirm card is up (Delete or Release) it is the window's
+  // whole content over the dimmed frost, not a card floating over the
+  // panes: the macOS audit refuses every way of hiding the panes under a
+  // scrim (runs 37781688313, 37785906863), and a scrim VoiceOver can read
+  // through is not a confirm.
   public enum DeleteCopy: Sendable {
     case confirmCardGoDisabled
   }

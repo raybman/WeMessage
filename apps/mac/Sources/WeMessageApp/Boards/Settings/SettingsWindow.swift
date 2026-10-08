@@ -37,19 +37,17 @@ struct SettingsWindow: View {
   var body: some View {
     GeometryReader { geometry in
       ZStack(alignment: .topLeading) {
-        // Under the confirm card the window is a scrim: out of the tree, so
-        // neither VoiceOver nor the audit reads what the card covers. A
-        // branch, not a toggled accessibilityHidden: toggling it on a live
-        // subtree left the root "not an accessibility child of the parent"
-        // (run 37781688313), and its false re-exposed the hairlines.
-        if model.confirm != nil {
-          backdrop(geometry.size).accessibilityHidden(true)
-        } else {
-          backdrop(geometry.size)
-        }
+        // While a confirm card is up it is the window's whole content: the
+        // panes are not drawn under it, so neither VoiceOver nor the audit
+        // reads what it would cover (D-UI-92). Removed by a branch, the way
+        // compose drops its rows; hiding a live subtree, by a toggled
+        // accessibilityHidden or a hidden branch, left the root "not an
+        // accessibility child of the parent" (runs 37781688313, 37785906863).
         if let what = model.confirm {
           ConfirmCard(model: model, what: what, palette: palette)
             .frame(width: geometry.size.width, height: geometry.size.height)
+        } else {
+          backdrop(geometry.size)
         }
       }
       .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
@@ -64,7 +62,7 @@ struct SettingsWindow: View {
     .transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }
   }
 
-  /// The panes and the title band: everything the confirm card covers.
+  /// The panes and the title band: everything a confirm card replaces.
   private func backdrop(_ size: CGSize) -> some View {
     ZStack(alignment: .topLeading) {
       HStack(spacing: 0) {

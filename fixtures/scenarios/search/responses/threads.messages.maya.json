@@ -6,6 +6,15 @@
     "channel": "imessage",
     "turns": [
       {
+        "guid": "msg-0500",
+        "from": "them",
+        "kind": "text",
+        "text": "found the photos from the lake, finally",
+        "at": "2022-08-14T17:30:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0
+      },
+      {
         "guid": "msg-0501",
         "from": "them",
         "kind": "text",

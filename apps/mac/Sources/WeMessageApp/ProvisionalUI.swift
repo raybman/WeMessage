@@ -735,4 +735,74 @@ public enum ProvisionalUI {
   // without scrolling and nothing on it is drawn below the window's edge.
   public static let agentPageWidth: Double = 960
   public static let agentSideColumnWidth: Double = 300
+
+  // D-UI-79: the daemon serves no search route (G-11a). Search runs here,
+  // over what the daemon already serves through GETs: the thread list, then
+  // each listed thread's newest window of turns. At most 60 threads, 200
+  // turns each. A channel with no transcript served is "not searched" in
+  // the coverage line, never silently absent. Nothing reads chat.db.
+  public static let searchThreadCap = 60
+  public static let searchWindow = 200
+
+  // D-UI-80: a chunk typed like an operator that does not parse (foo:bar,
+  // before:last) is drawn as a dashed token and still constrains the search
+  // as literal text. It is never dropped and never drawn as parsed.
+  public enum UnparsedToken: Sendable {
+    case dashedAndMatchedAsText
+  }
+  public static let unparsedToken: UnparsedToken = .dashedAndMatchedAsText
+
+  // D-UI-81: a result, a switcher row and a find match open with cmd-Return,
+  // not a bare Return: H-S4-2b keeps a bare Return from ever being bound
+  // in the app, so it can never send. Arrow keys move; Esc goes back, then
+  // closes.
+  public enum OpenKey: Sendable {
+    case commandReturn
+  }
+  public static let searchOpenKey: OpenKey = .commandReturn
+
+  // D-UI-82: Messages mode only. The Media, Files and Links grid (11.E) and
+  // the thread library (11.I) are not built on this board: the daemon
+  // serves attachment counts, never the files.
+  public enum SearchModes: Sendable {
+    case messagesOnly
+  }
+  public static let searchModes: SearchModes = .messagesOnly
+
+  // D-UI-83: the year scrubber is shown on opt-cmd-G, or after a jump from
+  // a result, beside the open thread; it is not drawn by default, so boards
+  // 02, 06 and 09 are unchanged. It spans the thread's oldest loaded year
+  // to the newest; a year with no message is a muted row, not removed.
+  // Choosing an empty year lands on the nearest message (an earlier one on
+  // a tie). The 200-a-window loader is deferred: the scrubber jumps within
+  // the turns the thread already loaded, and says how many are older.
+  public enum ScrubberShown: Sendable {
+    case onCommandOptionGOrJump
+  }
+  public static let scrubberShown: ScrubberShown = .onCommandOptionGOrJump
+
+  // D-UI-84: the quick switcher (cmd-K) matches thread titles and handles
+  // only, never message bodies. A person on two channels is two rows. A
+  // channel row selects that rail tile. A row with a pending agent draft
+  // says "draft waiting". It opens empty, every time.
+  public static let switcherRowCap = 8
+  public static let switcherDraftHint = "draft waiting"
+
+  // D-UI-85: find in thread (cmd-F) starts at the newest match and steps
+  // with the arrow keys, wrapping at either end; the counter reads "2 of 4".
+  // It searches the turns the thread has loaded, and says so.
+  public enum FindStart: Sendable {
+    case newestMatch
+  }
+  public static let findStart: FindStart = .newestMatch
+
+  // D-UI-86: while search or the switcher is up it takes the list and the
+  // thread panes, so the composer, and its cmd-Return Send, is not in the
+  // window at all. The facets column lists at most four people, then
+  // "N more".
+  public static let facetPeopleCap = 4
+
+  // D-UI-87: a result's snippet is the sentence holding the first match,
+  // cut at 140 characters around it.
+  public static let snippetLimit = 140
 }

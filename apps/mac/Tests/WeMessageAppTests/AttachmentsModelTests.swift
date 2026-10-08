@@ -39,6 +39,18 @@ struct AttachmentsModelTests {
   @Test("a drop stages into the tray and reaches no sink: every door lands in the tray, and only Send reaches Outbound")
   func dropNeverSends() {
     let (model, seen) = Self.model()
+    // Under the wall first, where a send would go through if a door tried.
+    let under = model.content.dropped.filter { !$0.isVideo }
+    model.hover(.thread, files: under)
+    #expect(model.release(under) == .staged(under))
+    #expect(model.tray.canSend, "the under-wall set is not sendable, so this proves nothing")
+    #expect(seen.sent.isEmpty, "a drop under the wall reached the sink: \(seen.sent)")
+    model.attach(model.content.attached)
+    let pasted = model.content.pasted
+    model.paste(bytes: pasted.bytes, width: pasted.width, height: pasted.height, at: pasted.at)
+    #expect(model.tray.canSend)
+    #expect(seen.sent.isEmpty, "a pick or a paste under the wall reached the sink: \(seen.sent)")
+    model.clearTray()
     let dropped = model.content.dropped
     model.hover(.thread, files: dropped)
     guard case .targeted = model.drop.state else {

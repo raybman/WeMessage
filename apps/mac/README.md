@@ -302,6 +302,31 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.settings.kill.state`, `wemessage.settings.kill.release`: the
   kill switch's state (`on`, `off` or `unknown`) and Release, shown only
   while it is on; release confirms, engaging never does (13.H, D-UI-93)
+- `wemessage.compose`: board 14's compose window, under the UI-test flag
+  with `WEMESSAGE_UI_BOARD=14` only (D-UI-95)
+- `wemessage.compose.tab.<page>`, `wemessage.compose.page.<page>`: the
+  band's tabs (valued `shown`) and their pages, `new` and `states`
+- `wemessage.compose.to`: the one field before a person (14.A);
+  `wemessage.compose.result.<id>`: a resolution row, ordered by last
+  exchange; `wemessage.compose.recipient`: the chosen person's chip,
+  valued by the person's id
+- `wemessage.compose.channel.<channel>`: a channel's report, valued
+  `default`, `no handle` or `not connected`; never a picker (D-UI-97)
+- `wemessage.compose.banner`: the channel and handle Send is on, from the
+  first keystroke (kit rule 7)
+- `wemessage.compose.strip`, `wemessage.compose.slot.<id>`: the capability
+  strip's twelve slots, valued `can` or `struck` (14.C)
+- `wemessage.compose.proposal`: the proposal region, valued `empty`,
+  `proposal` or `moved`; `wemessage.compose.proposal.ask` (opt-cmd-D),
+  `wemessage.compose.proposal.take` (Approve: the one way its text reaches
+  the input) and `wemessage.compose.proposal.hold` (14.E, D-UI-98)
+- `wemessage.compose.field`, `wemessage.compose.send`,
+  `wemessage.compose.undo`: the input, Send (cmd-Return) and Undo (cmd-Z,
+  during the 4 s window only). Send creates a pending draft after the
+  window; it never sends (D-UI-96, D-UI-99)
+- `wemessage.compose.bubble`: the live message after Send, valued
+  `undo`, `drafting`, `drafted` or `failed`;
+  `wemessage.compose.state.<state>`: a 14.F specimen, valued by its border
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

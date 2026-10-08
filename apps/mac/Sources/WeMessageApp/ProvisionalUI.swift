@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..94 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..100 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -13,7 +13,9 @@ import Foundation
 // daemon cannot serve what it draws; D-UI-69..78: the S4h2 build, where
 // board 12 leaves a choice open or the daemon cannot serve what it draws;
 // D-UI-79..87: the S4i build, board 11; D-UI-88..94: the S4j build, where
-// board 13 and the plan disagree or the daemon cannot serve what it draws).
+// board 13 and the plan disagree or the daemon cannot serve what it draws;
+// D-UI-95..100: the S4j build, where board 14 asks for what this version
+// cannot do).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -871,4 +873,53 @@ public enum ProvisionalUI {
     case followSystem
   }
   public static let themeChoice: ThemeChoice = .followSystem
+
+  // D-UI-95: compose opens only under the UI-test flag with board 14. The
+  // wireframe's cmd-N sheet over the main window is not wired in this
+  // version; where it opens (sheet or window) is Eric's call.
+  public enum ComposeEntry: Sendable {
+    case uiTestBoardOnly
+  }
+  public static let composeEntry: ComposeEntry = .uiTestBoardOnly
+
+  // D-UI-96: Send does not send. After the undo window it creates a pending
+  // draft (POST /v1/drafts) that waits in Needs You, and the queue's own
+  // approve is the one send call site (H-S4-2). The wireframe's 14.E
+  // Approve and send button with its 10 s grace is not drawn: there is one send
+  // path in this version, and compose is not it.
+  public enum ComposeSend: Sendable {
+    case draftAfterUndo
+  }
+  public static let composeSend: ComposeSend = .draftAfterUndo
+
+  // D-UI-97: the channel cards are a report, not a picker. iMessage is the
+  // one live channel; WhatsApp, LinkedIn and Email say they are not
+  // connected on this Mac, with no Connect control, and no card can be chosen over the
+  // derived default (14.B's one-click change waits for a second channel).
+  public enum ComposeChannels: Sendable {
+    case iMessageOnlyDisplayCards
+  }
+  public static let composeChannels: ComposeChannels = .iMessageOnlyDisplayCards
+
+  // D-UI-98: opt-cmd-D fills the proposal region with a fixture sentence:
+  // no agent route exists for a compose draft yet. The region, the
+  // handoff and the input's untouchability are real; the words are not
+  // an agent's.
+  public enum ProposalSource: Sendable {
+    case fixtureSpecimen
+  }
+  public static let proposalSource: ProposalSource = .fixtureSpecimen
+
+  // D-UI-99: the chat undo window is 4 s, the app's own timer before the
+  // draft is created (14.F state 2), separate from the daemon's
+  // send.undoGraceSeconds after an approve.
+  public static let composeUndoSeconds = 4
+
+  // D-UI-100: compose resolves against fixture people only (four: two
+  // with threads, one never messaged, one bare handle). Contacts and the
+  // daemon's handles are not searched from compose in this version.
+  public enum ComposeContacts: Sendable {
+    case fixturesOnly
+  }
+  public static let composeContacts: ComposeContacts = .fixturesOnly
 }

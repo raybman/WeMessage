@@ -80,6 +80,13 @@ struct AppHygieneTests {
     "wemessage.settings.parked.schedules", "wemessage.settings.storage", "wemessage.settings.storage.delete",
     "wemessage.settings.confirm.sheet", "wemessage.settings.confirm.cancel", "wemessage.settings.confirm.go",
     "wemessage.settings.kill.state", "wemessage.settings.kill.release",
+    // v2 S4j, board 14 (prefixes: compose.tab.<p>, compose.page.<p>,
+    // compose.result.<id>, compose.channel.<c>, compose.slot.<id>,
+    // compose.state.<s>).
+    "wemessage.compose", "wemessage.compose.to", "wemessage.compose.recipient", "wemessage.compose.banner",
+    "wemessage.compose.strip", "wemessage.compose.proposal", "wemessage.compose.proposal.ask",
+    "wemessage.compose.proposal.take", "wemessage.compose.proposal.hold", "wemessage.compose.field",
+    "wemessage.compose.send", "wemessage.compose.undo", "wemessage.compose.bubble",
   ]
 
   static let nsApp = "NS" + "App"
@@ -365,7 +372,7 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12).
-  static let dUIKeys = (1...94).map { "D-UI-\($0)" }
+  static let dUIKeys = (1...100).map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -382,11 +389,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..94, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..100, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..94 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..100 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -394,7 +401,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...94), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Array(1...100), "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1160,6 +1167,102 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.settingsLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+
+  /// The H-S4-10 verdicts over (path, text) pairs of the app sources: board
+  /// 14's one client call is createDraft, after the undo window; nothing in
+  /// it can send, approve or name a route; the proposal reaches the input
+  /// only through takeProposal; no channel exists before a person; nothing
+  /// is green; and the window opens only under the flag with board 14.
+  static func composeLeaks(_ files: [(String, String)]) -> [String] {
+    let dir = appDir + "/Boards/Compose/"
+    let model = appDir + "/Models/ComposeModel.swift"
+    let fixture = appDir + "/Fixtures/FixtureCompose.swift"
+    let hooks = appDir + "/TestHooks.swift"
+    let app = appDir + "/ShellApp.swift"
+    let writes = [
+      ".send" + "(to:", "approve" + "Draft(", "set" + "Settings(", "disconnect" + "(", "setKill" + "Switch",
+      "disengageKill" + "Switch", "httpMethod", "\"POST\"", "/v1/", "URLSession", "Picker" + "(",
+    ]
+    let colours = ["." + "green", "." + "mint", "." + "teal", "Color(" + "red:", "NSColor." + "system", "Color." + "accent"]
+    var leaks: [String] = []
+    var swept = 0
+    let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
+    let code = { (source: String) in
+      source.split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+    }
+    var creates = 0
+    for (path, source) in files where path.hasPrefix(dir) || path == model || path == fixture {
+      swept += 1
+      let body = code(source)
+      for token in writes + colours where body.contains(token) { leaks.append("\(path): \(token)") }
+      let regex = try? NSRegularExpression(pattern: #"\bclient\.([A-Za-z]+)"#)
+      for m in regex?.matches(in: body, range: NSRange(body.startIndex..., in: body)) ?? [] {
+        guard let r = Range(m.range(at: 1), in: body) else { continue }
+        if body[r] == "createDraft" { creates += 1 } else { leaks.append("\(path): client.\(body[r])") }
+      }
+    }
+    if swept < 4 { leaks.append("swept \(swept) board 14 files") }
+    if creates != 1 { leaks.append("\(model): \(creates) createDraft calls, not one") }
+    let modelText = code(text(model))
+    // The create runs only from the undo window's task, after the window.
+    let send = Self.function("send(", in: modelText)
+    let undoFirst = send.range(of: "phase = .undo(secondsLeft: Self.undoSeconds)")
+    let create = send.range(of: "await self.createDraft(")
+    if undoFirst == nil || create == nil || undoFirst!.lowerBound > create!.lowerBound {
+      leaks.append("\(model): send() does not open the undo window before the create")
+    }
+    if !Self.function("createDraft(chatGuid:", in: modelText).contains("guard !Task.isCancelled, case .undo = phase else { return }") {
+      leaks.append("\(model): the create does not check the window was not undone")
+    }
+    // Only takeProposal writes the input from the proposal.
+    for name in ["askForDraft(", "dropProposal(", "choose("] where Self.function(name, in: modelText).contains("body =") {
+      leaks.append("\(model): \(name) writes the input")
+    }
+    if !Self.function("takeProposal(", in: modelText).contains("body = text") {
+      leaks.append("\(model): Approve does not move the proposal down")
+    }
+    if !modelText.contains("guard let person else { return [] }") {
+      leaks.append("\(model): channels exist before a person")
+    }
+    // The door.
+    if !text(hooks).contains(#"composeBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "14""#) {
+      leaks.append("\(hooks): the compose board is not gated on the flag and board 14")
+    }
+    for (path, source) in files where source.contains("ComposeRoot" + "(") && path != app && !path.hasPrefix(dir) {
+      leaks.append("\(path): opens the compose window")
+    }
+    if !text(app).contains("} else if TestHooks.composeBoard {") { leaks.append("\(app): never opens the compose window") }
+    return leaks
+  }
+
+  @Test("H-S4-10: board 14 creates a draft after the undo window and nothing else: no send, no approve, no route; the proposal never writes the input; no channel before a person; nothing is green; it opens only with board 14 under the flag")
+  func composeSealed() throws {
+    let files = try Self.sources(Self.appDir)
+    #expect(try Self.sources(Self.appDir + "/Boards/Compose").count >= 2)
+    let leaks = Self.composeLeaks(files)
+    #expect(leaks.isEmpty, "\(leaks)")
+    // Non-vacuity: each kind of leak is seen when planted.
+    let model = Self.appDir + "/Models/ComposeModel.swift"
+    let views = Self.appDir + "/Boards/Compose/ComposeViews.swift"
+    let hooks = Self.appDir + "/TestHooks.swift"
+    let swaps: [(String, String, String)] = [
+      (model, "try await client.createDraft(", "try await client.send" + "(to: chatGuid, body: text) ?? client.createDraft("),
+      (model, "try await client.createDraft(", "try await client.approve" + "Draft(id: \"x\") ?? client.createDraft("),
+      (model, "phase = .drafting", "phase = .drafting\n    _ = try? await client.settings()"),
+      (model, "proposal = .ready(propose(person))", "body = propose(person)"),
+      (model, "guard let person else { return [] }", "let person = person ?? people[0]"),
+      (model, "guard !Task.isCancelled, case .undo = phase else { return }", "guard !Task.isCancelled else { return }"),
+      (views, ".foregroundStyle(Tokens.color(palette.inkDim))", ".foregroundStyle(Color." + "green)"),
+      (hooks, "composeBoard = isUITest && environment", "composeBoard = environment"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.composeLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

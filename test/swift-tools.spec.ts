@@ -141,6 +141,16 @@ describe('v2 S3b F4-F7: route', () => {
     expect(bodyOf(threads)).toEqual(golden('responses/threads.list.json').body);
     expect(call('GET', '/v1/threads').status).toBe(401);
   });
+  it('F5c POST /v1/drafts answers the create golden (201) with a bearer, and 401 without (S4j)', () => {
+    const created = call('POST', '/v1/drafts', `Bearer ${TOKEN}`);
+    expect(created.status).toBe(201);
+    expect(bodyOf(created)).toEqual(
+      golden('responses/drafts.create.json').body,
+    );
+    expect(call('POST', '/v1/drafts').status).toBe(401);
+    // The send route stays parked: a compose reaches the queue, never /v1/send.
+    expect(call('POST', '/v1/send', `Bearer ${TOKEN}`).status).toBe(409);
+  });
   it('F6 schedules, send and toggles are parked (409)', () => {
     const parked = golden('errors/409.parked.json').body;
     for (const [m, p] of [

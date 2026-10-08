@@ -55,6 +55,9 @@ const SERVED = [
   'GET /v1/health',
   'GET /v1/status',
   'GET /v1/drafts',
+  // v2 S4j: board 14's Send creates a pending draft after its undo window;
+  // the create golden answers it (201). The queue's approve still sends.
+  'POST /v1/drafts',
   'GET /v1/threads',
   'GET /v1/audit',
   'GET /v1/settings',

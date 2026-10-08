@@ -169,6 +169,27 @@ enum ID {
   static let settingsKillState = "wemessage.settings.kill.state"
   static let settingsKillRelease = "wemessage.settings.kill.release"
 
+  // v2 S4j, board 14.
+  static let compose = "wemessage.compose"
+  static let composeTabPrefix = "wemessage.compose.tab."
+  static let composePagePrefix = "wemessage.compose.page."
+  static let composeTo = "wemessage.compose.to"
+  static let composeRecipient = "wemessage.compose.recipient"
+  static let composeResultPrefix = "wemessage.compose.result."
+  static let composeChannelPrefix = "wemessage.compose.channel."
+  static let composeBanner = "wemessage.compose.banner"
+  static let composeStrip = "wemessage.compose.strip"
+  static let composeSlotPrefix = "wemessage.compose.slot."
+  static let composeProposal = "wemessage.compose.proposal"
+  static let composeProposalAsk = "wemessage.compose.proposal.ask"
+  static let composeProposalTake = "wemessage.compose.proposal.take"
+  static let composeProposalHold = "wemessage.compose.proposal.hold"
+  static let composeField = "wemessage.compose.field"
+  static let composeSend = "wemessage.compose.send"
+  static let composeUndo = "wemessage.compose.undo"
+  static let composeBubble = "wemessage.compose.bubble"
+  static let composeStatePrefix = "wemessage.compose.state."
+
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
   /// Never placed: no typing indicator is drawn either way (08.J). Tests

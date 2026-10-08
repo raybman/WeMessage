@@ -13,6 +13,8 @@ struct ShellApp: App {
         StatesSheet(content: states)
       } else if TestHooks.settingsBoard {
         SettingsRoot()
+      } else if TestHooks.composeBoard {
+        ComposeRoot()
       } else if let onboarding = TestHooks.onboarding {
         OnboardingRoot(model: onboarding)
       } else {

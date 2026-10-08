@@ -51,6 +51,16 @@ enum TestHooks {
   /// (D-UI-89, H-S4-9).
   static private(set) var settingsBoard = false
 
+  /// Board 14's compose window, under the UI-test flag with
+  /// WEMESSAGE_UI_BOARD=14 only: no cmd-N door in this version (D-UI-95,
+  /// H-S4-10).
+  static private(set) var composeBoard = false
+
+  /// Board 14's people and its opt-cmd-D proposal: fixtures in this version
+  /// (D-UI-98, D-UI-100).
+  static var composePeople: [ComposePerson] { FixtureCompose.people }
+  static let composeProposal: @Sendable (ComposePerson) -> String = { FixtureCompose.proposal(for: $0) }
+
   static func install(from environment: [String: String]) {
     isUITest = environment["WEMESSAGE_UI_TEST"] == "1"
     appearance = Appearance.parse(environment["WEMESSAGE_UI_APPEARANCE"])
@@ -59,6 +69,7 @@ enum TestHooks {
     statesSheet = isUITest && environment["WEMESSAGE_UI_BOARD"] == "10.B" ? FixtureStates.content() : nil
     onboarding = onboardingModel(board: environment["WEMESSAGE_UI_BOARD"])
     settingsBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "13"
+    composeBoard = isUITest && environment["WEMESSAGE_UI_BOARD"] == "14"
   }
 
   /// The flag returns first: under it the store is memory and the seam the

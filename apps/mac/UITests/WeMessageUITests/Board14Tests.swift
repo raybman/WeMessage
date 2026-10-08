@@ -36,7 +36,7 @@ final class Board14Tests: XCTestCase {
   }
 
   /// The writes the daemon has seen so far.
-  private func writes() async throws -> [String] {
+  private static func writes() async throws -> [String] {
     try await FakeDaemon.journal().requests.filter { $0.method != "GET" }.map(\.description)
   }
 
@@ -117,7 +117,7 @@ final class Board14Tests: XCTestCase {
     XCTAssertEqual(QueueUI.value(app, ID.composeProposal), "moved")
     XCTAssertEqual(QueueUI.value(app, ID.composeSend), "enabled", "Send is inert after the handoff")
     shot("handoff")
-    var seen = try await writes()
+    var seen = try await Self.writes()
     XCTAssertEqual(seen, [], "the proposal reached the daemon")
 
     // 14.F state 2: the undo window. Undo inside it writes nothing.
@@ -129,7 +129,7 @@ final class Board14Tests: XCTestCase {
     undo.click()
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.composeBubble).exists }, "undo left the bubble up")
     try await Task.sleep(for: .milliseconds(4500))
-    seen = try await writes()
+    seen = try await Self.writes()
     XCTAssertEqual(seen, [], "undo still created a draft")
     XCTAssertEqual(QueueUI.value(app, ID.composeField), Self.proposal, "undo lost the text")
     QueueUI.printTime("BOARD14", appearance, "undo", since: started)
@@ -159,7 +159,7 @@ final class Board14Tests: XCTestCase {
     // The journal: one draft created, nothing sent, nothing else written.
     let requests = try await FakeDaemon.journal().requests
     XCTAssertEqual(requests.filter { $0.path.hasPrefix("/v1/send") }, [], "compose asked to send")
-    seen = try await writes()
+    seen = try await Self.writes()
     XCTAssertEqual(seen, ["POST /v1/drafts 201"], "compose wrote more than one draft")
     print("BOARD14| \(appearance) states=8 seconds=\(Int(Date().timeIntervalSince(started)))")
   }

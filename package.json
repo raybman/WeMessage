@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:fast": "vitest run --project '!desktop'",
+    "test:node": "vitest run --project root --project fixtures --project adapter-testkit --project cli --project client --project core --project daemon --project daemon-lifecycle --project ingest --project protocol --project sendkit --project store --project adapter-echo --project adapter-hermes --project adapter-luna --project adapter-openclaw --project adapter-sol",
     "lint": "eslint . && prettier --check .",
     "dep:check": "depcruise packages apps fixtures tools --config .dependency-cruiser.cjs",
     "release:notarize": "node tools/release/bin/notarize.mjs",

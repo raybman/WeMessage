@@ -1265,16 +1265,19 @@ describe('s9 Sc15 row 10: the five workflows exist and the guard over them has t
     }
   });
 
-  it('the ad-hoc pack lane exists on the macOS CI workflow', () => {
+  it('the macOS CI workflow is the node gate on the release the app targets', () => {
     /*
-     * The lane this whole slice ships on. Notarization is deferred to
-     * v1.0.0, so `pack-adhoc` is the job that produces the artefact a user
-     * actually downloads, and it must be on the CI workflow rather than
-     * only on `release`, or the pack is unproven until tag day.
+     * v2 S6b. This row used to require `pack-adhoc`, the Electron pack job.
+     * The Electron bundle no longer ships: the app a user downloads is the
+     * Swift one, packed by `release.yml`'s `pack-swift` and built on every
+     * push by ci-swift. ci-macos is now the Node gate on macOS 26, the floor
+     * the app declares, and it must not grow a pack job back.
      */
     const macos = read('.github/workflows/ci-macos.yml');
-    expect(macos).toContain('pack-adhoc:');
-    expect(macos).toMatch(/pack-adhoc:\s*\n\s+needs: /);
+    expect(macos).toContain('runs-on: macos-26');
+    expect(macos).toContain('run: pnpm test:node');
+    expect(macos).not.toContain('pack-adhoc');
+    expect(macos).not.toContain('electron');
   });
 
   it('the Sc9 guard over the workflows is still in the tree and still counts', () => {
@@ -1286,10 +1289,10 @@ describe('s9 Sc15 row 10: the five workflows exist and the guard over them has t
     for (const w of WORKFLOWS)
       expect(guard, w).toContain(w.split('/').pop() ?? '');
     for (const marker of [
-      'row 2: exactly three jobs',
-      'row 5: names exactly the ten allowed secrets',
+      'row 2: exactly two jobs',
+      'row 5: names exactly the four allowed secrets',
       'row 8: every `uses:` is a 40-hex SHA',
-      'row 9: ci-macos gains a pack-adhoc job',
+      'row 9: ci-macos is one node-gate job on macos-26',
     ])
       expect(guard, marker).toContain(marker);
   });

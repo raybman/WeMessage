@@ -59,7 +59,7 @@ body:
     attributes:
       label: macOS version and chip
       description: Apple menu, About This Mac.
-      placeholder: macOS 15.7 on M2
+      placeholder: macOS 26.1 on M2
     validations:
       required: true
 

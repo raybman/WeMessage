@@ -12,7 +12,7 @@ ever leaves your Mac is what you route to an agent.
 
 ## Install
 
-Requires macOS 15 (Sequoia) or later on Apple silicon.
+Requires macOS 26 (Tahoe) or later on Apple silicon.
 
 ```sh
 brew tap raybman/wemessage

@@ -10206,40 +10206,98 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
           .join(' | '),
       );
 
-  it('the macOS lane runs the same gate as Linux, step for step', () => {
+  /**
+   * v2 S6b. The Linux gate as the macOS lane must run it: the Electron
+   * provisioning steps dropped (the shipped app is the Swift one, built and
+   * tested by ci-swift) and the suite narrowed to `pnpm test:node`. Linux
+   * keeps the Electron projects until S6c deletes them.
+   */
+  const ELECTRON_STEP = (s: string): boolean =>
+    s.includes('.cache/electron') || s.includes('install-electron');
+  const linuxAsMacos = (text: string): string[] =>
+    sc17Steps(sc17Job(text, GATE_JOB))
+      .filter((s) => !ELECTRON_STEP(s))
+      .map((s) =>
+        s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test:node'),
+      );
+
+  it('the macOS lane runs the Linux gate, step for step, minus Electron', () => {
     // The failure this catches is the one a "macOS smoke job" always drifts
-    // into: a lane that installs, builds, and then runs a subset — or worse,
-    // a lane that runs `pnpm test` with a filter, which is how the desktop
-    // project gets quietly excluded from the platform it actually ships on.
-    // The lanes are therefore compared as SEQUENCES rather than by spot
-    // checks, with the one legitimate difference normalised away: Linux has
-    // no window server and needs `xvfb-run -a`, macOS has one and must not
-    // use it. Any other difference is a difference.
-    const linux = sc17Steps(sc17Job(archRead(LINUX), GATE_JOB)).map((s) =>
-      s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
-    );
+    // into: a lane that installs, builds, and then runs a subset. The lanes
+    // are compared as SEQUENCES rather than by spot checks, with the
+    // legitimate differences normalised away: the Electron download and its
+    // cache (S6b: no Electron on macOS any more) and the suite command, which
+    // is the node projects here and the whole suite under xvfb there. Any
+    // other difference is a difference.
+    const linux = linuxAsMacos(archRead(LINUX));
     const macos = sc17Steps(sc17Job(archRead(MACOS), GATE_JOB));
-    expect(linux.length).toBeGreaterThanOrEqual(9);
+    expect(linux.length).toBeGreaterThanOrEqual(8);
     expect(macos).toEqual(linux);
     // …and the reader is not vacuous: it found the step that matters.
-    expect(macos).toContain('run: pnpm test');
+    expect(macos).toContain('run: pnpm test:node');
     expect(macos).toContain('run: pnpm build');
+    expect(macos.filter(ELECTRON_STEP)).toEqual([]);
   });
 
-  it('the macOS lane holds exactly the gate job and the pack job', () => {
+  it('test:node is every vitest project except the Electron ones', () => {
+    // An explicit list, because vitest ORs its --project filters and two
+    // negations would select everything. Explicit lists rot by omission, so
+    // this row derives the expected set from the configs on disk: a new
+    // package's project that is missing from the script turns it red.
+    const ELECTRON_PROJECTS = [
+      'desktop',
+      'desktop-tray',
+      'desktop-a11y',
+      'desktop-pack',
+      'release-smoke',
+    ];
+    const configs = execFileSync(
+      'git',
+      ['ls-files', '--', '*vitest*.config.ts'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    )
+      .split('\n')
+      .filter((f) => f.length > 0 && f !== 'vitest.config.ts');
+    const all = configs.flatMap((f) =>
+      [...archRead(f).matchAll(/\bname: '([\w-]+)'/g)].map((m) => m[1] ?? ''),
+    );
+    expect(all).toEqual(expect.arrayContaining(ELECTRON_PROJECTS));
+    const expected = [
+      'root',
+      ...all.filter((n) => !ELECTRON_PROJECTS.includes(n)),
+    ];
+    const pkg = JSON.parse(archRead('package.json')) as {
+      scripts: Record<string, string>;
+    };
+    const script = pkg.scripts['test:node'] ?? '';
+    expect(script.startsWith('vitest run ')).toBe(true);
+    const listed = [...script.matchAll(/--project (\S+)/g)].map(
+      (m) => m[1] ?? '',
+    );
+    expect([...listed].sort()).toEqual([...expected].sort());
+    expect(new Set(listed).size).toBe(listed.length);
+  });
+
+  it('the macOS lane holds exactly the gate job', () => {
     // The readers above name their job, so they can no longer notice a job
     // that was ADDED. This row is what replaces that: the job list is closed,
     // and growing it is a reviewed diff rather than a silent one.
     const jobsIn = (text: string): string[] =>
       [...sc17Jobs(text).matchAll(/^ {2}([\w-]+):$/gm)].map((m) => m[1] ?? '');
-    expect(jobsIn(archRead(MACOS))).toEqual([GATE_JOB, 'pack-adhoc']);
+    // S6b removed `pack-adhoc`: the Electron bundle no longer ships.
+    expect(jobsIn(archRead(MACOS))).toEqual([GATE_JOB]);
     // Linux has one job and spells its name the same way, which is the whole
     // reason the step-for-step comparison above means anything.
     expect(jobsIn(archRead(LINUX))).toEqual([GATE_JOB]);
   });
 
   it('runs on a real macOS runner, and Linux still runs on Linux', () => {
-    expect(archRead(MACOS)).toContain('runs-on: macos-15');
+    // S6b: the shipped floor, macOS 26 Tahoe, and nothing older.
+    expect(archRead(MACOS)).toContain('runs-on: macos-26');
+    expect(archRead(MACOS)).not.toMatch(/runs-on: macos-(?!26\b)/);
     expect(archRead(MACOS)).not.toContain('runs-on: ubuntu');
     expect(archRead(LINUX)).toContain('runs-on: ubuntu-latest');
     // A workflow that only ever runs when somebody presses a button is a
@@ -10253,10 +10311,8 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // project, and the repo is public. A step that pretended to sign would
     // either need a secret this repo must not carry, or would be a tick
     // attached to nothing — and the second is worse, because it reads as
-    // "signing is covered". s9 Sc9 added a `pack-adhoc` job to this file
-    // and that does not weaken this row: packing is not signing, the job
-    // carries no secret, and the sweep below reads the WHOLE file, so a
-    // signing step added to EITHER job still fails here.
+    // "signing is covered". The sweep reads the WHOLE file, so a signing
+    // step added anywhere in it fails here.
     const text = archRead(MACOS);
     for (const forbidden of [
       'secrets.',
@@ -10277,12 +10333,12 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
   it('PLANTED: a macOS lane that skips the suite is caught', () => {
     const rel = sc17Plant(
       '.github/workflows/__s8_sc17_probe__.yml',
-      archRead(MACOS).replace('      - run: pnpm test\n', ''),
+      archRead(MACOS).replace('      - run: pnpm test:node\n', ''),
     );
-    const linux = sc17Steps(sc17Job(archRead(LINUX), GATE_JOB)).map((s) =>
-      s.replace('run: xvfb-run -a pnpm test', 'run: pnpm test'),
+    expect(archRead(rel)).not.toEqual(archRead(MACOS));
+    expect(sc17Steps(sc17Job(archRead(rel), GATE_JOB))).not.toEqual(
+      linuxAsMacos(archRead(LINUX)),
     );
-    expect(sc17Steps(sc17Job(archRead(rel), GATE_JOB))).not.toEqual(linux);
   });
 
   it('LEGITIMATE NEAR-MISS: the same lane with a reworded comment is not a drift', () => {
@@ -10291,8 +10347,8 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     const rel = sc17Plant(
       '.github/workflows/__s8_sc17_probe__.yml',
       archRead(MACOS).replace(
-        '# No xvfb: macOS runners have a window server',
-        '# macOS runners have a window server, so no xvfb',
+        '# The ONE step that runs the suite.',
+        '# The single step that runs the suite.',
       ),
     );
     expect(sc17Steps(sc17Job(archRead(rel), GATE_JOB))).toEqual(
@@ -15026,5 +15082,69 @@ describe('v2 S5b: the disk image is built without Finder scripting', () => {
     ])
       expect([hit, BANNED.test(hit)]).toEqual([hit, true]);
     expect(BANNED.test('hdiutil create -volname WeMessage')).toBe(false);
+  });
+});
+
+/* ── v2 S6b: the macOS floor is 26, everywhere a floor is named ──────── */
+
+describe('v2 S6b: macOS floor files name 26', () => {
+  /*
+   * An explicit list of the files that state a floor to a reader, not a grep
+   * of the tree for "15": "macOS 15" is correct in a dozen comments that
+   * record history (the runner a GIF was captured on, the release that
+   * removed right-click Open), and a sweep would convict all of them. Each
+   * entry is the floor sentence the file must carry, and the older one it
+   * must not. `Info.plist` and the cask are the machine-readable floor; the
+   * rest are what a person reads before installing.
+   *
+   * Not here, by decision (D-S6b-3): `doctor.ts`'s MIN_SUPPORTED_MACOS (13).
+   * That check guards the headless daemon and CLI, which run from source on
+   * older systems; the app cannot launch below 26 whatever doctor says.
+   * Its Darwin-to-macOS map is listed, for the 26 entry only.
+   */
+  const FLOOR: ReadonlyArray<readonly [string, string, RegExp]> = [
+    [
+      'README.md',
+      'Requires macOS 26 (Tahoe) or later on Apple silicon.',
+      /macOS 1\d \(/,
+    ],
+    [
+      '.github/ISSUE_TEMPLATE/bug_report.yml',
+      'placeholder: macOS 26',
+      /placeholder: macOS 1\d/,
+    ],
+    [
+      'site/docs/install.html',
+      'A Mac running macOS 26 (Tahoe) or later',
+      /running macOS 1\d/,
+    ],
+    [
+      'tools/release/src/cask.ts',
+      'depends_on macos: :tahoe',
+      /:sequoia|:sonoma|:ventura/,
+    ],
+    [
+      'apps/mac/Resources/Info.plist',
+      '<string>26.0</string>',
+      /<string>1\d\.\d<\/string>/,
+    ],
+    ['packages/daemon/src/doctor.ts', '25 ->\n * 26 Tahoe', /(?!)/],
+  ];
+
+  it('each floor file states 26 and no older floor', () => {
+    for (const [file, floor, older] of FLOOR) {
+      const text = archRead(file);
+      expect([file, text.includes(floor)]).toEqual([file, true]);
+      expect([file, older.test(text)]).toEqual([file, false]);
+    }
+  });
+
+  it('PLANTED: the old README floor is caught', () => {
+    const planted = archRead('README.md').replace(
+      'Requires macOS 26 (Tahoe) or later',
+      'Requires macOS 15 (Sequoia) or later',
+    );
+    expect(planted.includes(FLOOR[0]?.[1] ?? '')).toBe(false);
+    expect(FLOOR[0]?.[2].test(planted)).toBe(true);
   });
 });

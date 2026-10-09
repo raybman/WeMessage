@@ -667,3 +667,20 @@ D-UI-178  (B4)      the dock is drawn over the open thread's transcript
 D-UI-179  (B4)      the reader insets by the dock's measured overlap plus
                     the gap, never a fixed height
 ```
+
+- Release copy and the disk image (v2 S5b). These are not app values, so
+  nothing in `ProvisionalUI.swift` holds them: the first-run copy lives in
+  `README.md`, `site/docs/install.html` and the cask caveats, and the image
+  is built by `tools/swift/dmg.sh`. D-UI-182 to 184 are kept spare for S5:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-180  103       first-run copy leads with Open Anyway in System Settings,
+                    Privacy & Security, then
+                    `xattr -dr com.apple.quarantine`; Homebrew's
+                    `--no-quarantine` is not offered (Homebrew removed it)
+D-UI-181  104       the disk image window is plain: the app and an
+                    Applications shortcut, no artwork, no icon layout, no
+                    Finder scripting
+```

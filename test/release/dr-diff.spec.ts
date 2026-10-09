@@ -236,33 +236,37 @@ describe('v2 S5b: dr-diff, the pure comparison', () => {
   });
 });
 
-describe('v2 S5b: dr-diff.mjs, the exit codes, against a fake gh', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'dr-diff-'));
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
-  const bin = join(repoRoot, 'tools/release/bin/dr-diff.mjs');
-  const distBuilt = (() => {
-    try {
-      readFileSync(join(repoRoot, 'tools/release/dist/dr-diff.js'));
-      return true;
-    } catch {
-      return false;
-    }
-  })();
+// Each row starts node and a fake gh several times; a loaded runner is slow.
+describe(
+  'v2 S5b: dr-diff.mjs, the exit codes, against a fake gh',
+  { timeout: 60_000 },
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dr-diff-'));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    const bin = join(repoRoot, 'tools/release/bin/dr-diff.mjs');
+    const distBuilt = (() => {
+      try {
+        readFileSync(join(repoRoot, 'tools/release/dist/dr-diff.js'));
+        return true;
+      } catch {
+        return false;
+      }
+    })();
 
-  /**
-   * A `gh` that answers the three calls the bin makes from files: the
-   * release list as JSON, each release's asset names, and the download of
-   * DESIGNATED_REQUIREMENT.txt into `-D <dir>`.
-   */
-  function fakeGh(
-    releases: { tagName: string; isDraft: boolean }[],
-    drs: Record<string, string>,
-  ): string {
-    const ghDir = mkdtempSync(join(dir, 'gh-'));
-    writeFileSync(join(ghDir, 'releases.json'), JSON.stringify(releases));
-    for (const [tag, text] of Object.entries(drs))
-      writeFileSync(join(ghDir, `${tag}.dr`), text);
-    const script = `#!/usr/bin/env bash
+    /**
+     * A `gh` that answers the three calls the bin makes from files: the
+     * release list as JSON, each release's asset names, and the download of
+     * DESIGNATED_REQUIREMENT.txt into `-D <dir>`.
+     */
+    function fakeGh(
+      releases: { tagName: string; isDraft: boolean }[],
+      drs: Record<string, string>,
+    ): string {
+      const ghDir = mkdtempSync(join(dir, 'gh-'));
+      writeFileSync(join(ghDir, 'releases.json'), JSON.stringify(releases));
+      for (const [tag, text] of Object.entries(drs))
+        writeFileSync(join(ghDir, `${tag}.dr`), text);
+      const script = `#!/usr/bin/env bash
 set -euo pipefail
 here="${ghDir}"
 printf '%s\\n' "$*" >> "$here/log"
@@ -278,113 +282,120 @@ case "$1 $2" in
   *) echo "fake gh: unexpected $*" >&2; exit 64 ;;
 esac
 `;
-    writeFileSync(join(ghDir, 'gh'), script);
-    chmodSync(join(ghDir, 'gh'), 0o755);
-    return ghDir;
-  }
+      writeFileSync(join(ghDir, 'gh'), script);
+      chmodSync(join(ghDir, 'gh'), 0o755);
+      return ghDir;
+    }
 
-  function run(
-    ghDir: string,
-    current: string,
-    log: string,
-    tag: string,
-  ): { status: number | null; stdout: string; stderr: string } {
-    const cur = join(ghDir, 'current.txt');
-    const cl = join(ghDir, 'CHANGELOG.md');
-    writeFileSync(cur, current);
-    writeFileSync(cl, log);
-    const r = spawnSync(
-      process.execPath,
-      [
-        bin,
-        '--repo',
-        'example/example',
-        '--tag',
-        tag,
-        '--current',
-        cur,
-        '--changelog',
-        cl,
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, PATH: `${ghDir}:${process.env['PATH'] ?? ''}` },
+    function run(
+      ghDir: string,
+      current: string,
+      log: string,
+      tag: string,
+    ): { status: number | null; stdout: string; stderr: string } {
+      const cur = join(ghDir, 'current.txt');
+      const cl = join(ghDir, 'CHANGELOG.md');
+      writeFileSync(cur, current);
+      writeFileSync(cl, log);
+      const r = spawnSync(
+        process.execPath,
+        [
+          bin,
+          '--repo',
+          'example/example',
+          '--tag',
+          tag,
+          '--current',
+          cur,
+          '--changelog',
+          cl,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${ghDir}:${process.env['PATH'] ?? ''}`,
+          },
+        },
+      );
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+    }
+
+    it.skipIf(!distBuilt)(
+      'exit 0 on first-release, same and justified; exit 6 on unjustified',
+      () => {
+        const none = fakeGh([], {});
+        expect(run(none, dr(X), '', 'v1.0.0')).toMatchObject({ status: 0 });
+        expect(run(none, dr(X), '', 'v1.0.0').stdout).toContain(
+          'first-release',
+        );
+
+        // An older release with no designated requirement (the Electron era)
+        // is skipped, not compared.
+        const legacy = fakeGh(
+          [
+            { tagName: 'v1.1.0', isDraft: false },
+            { tagName: 'v1.0.0', isDraft: false },
+          ],
+          { 'v1.1.0': dr(X) },
+        );
+        const same = run(legacy, dr(X), '', 'v1.2.0');
+        expect(same).toMatchObject({ status: 0 });
+        expect(same.stdout).toContain('same as v1.1.0');
+
+        const justified = run(
+          legacy,
+          dr(Y),
+          changelog({ '1.2.0': [rotated(X, Y)] }),
+          'v1.2.0',
+        );
+        expect(justified).toMatchObject({ status: 0 });
+        expect(justified.stdout).toContain('rotated, justified');
+
+        const unjustified = run(
+          legacy,
+          dr(Y),
+          changelog({ '1.2.0': ['- Nothing.'], '1.1.0': [rotated(X, Y)] }),
+          'v1.2.0',
+        );
+        expect(unjustified.status).toBe(6);
+        expect(unjustified.stderr).toContain('Signing identity rotated:');
+
+        // The bin asked only read questions of GitHub.
+        const calls = readFileSync(join(legacy, 'log'), 'utf8')
+          .split('\n')
+          .filter((l) => l.length > 0);
+        for (const c of calls)
+          expect([c, /^release (list|view|download) /.test(c)]).toEqual([
+            c,
+            true,
+          ]);
+        expect(
+          calls.some(
+            (c) =>
+              c.startsWith('release list') && c.includes('--exclude-drafts'),
+          ),
+        ).toBe(true);
       },
     );
-    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
-  }
 
-  it.skipIf(!distBuilt)(
-    'exit 0 on first-release, same and justified; exit 6 on unjustified',
-    () => {
-      const none = fakeGh([], {});
-      expect(run(none, dr(X), '', 'v1.0.0')).toMatchObject({ status: 0 });
-      expect(run(none, dr(X), '', 'v1.0.0').stdout).toContain('first-release');
+    it.skipIf(!distBuilt)(
+      'refuses with exit 2 on a missing argument or an unreadable requirement',
+      () => {
+        const none = fakeGh([], {});
+        expect(run(none, 'not a requirement', '', 'v1.0.0').status).toBe(2);
+        const r = spawnSync(process.execPath, [bin, '--tag', 'v1.0.0'], {
+          encoding: 'utf8',
+        });
+        expect(r.status).toBe(2);
+      },
+    );
 
-      // An older release with no designated requirement (the Electron era)
-      // is skipped, not compared.
-      const legacy = fakeGh(
-        [
-          { tagName: 'v1.1.0', isDraft: false },
-          { tagName: 'v1.0.0', isDraft: false },
-        ],
-        { 'v1.1.0': dr(X) },
-      );
-      const same = run(legacy, dr(X), '', 'v1.2.0');
-      expect(same).toMatchObject({ status: 0 });
-      expect(same.stdout).toContain('same as v1.1.0');
-
-      const justified = run(
-        legacy,
-        dr(Y),
-        changelog({ '1.2.0': [rotated(X, Y)] }),
-        'v1.2.0',
-      );
-      expect(justified).toMatchObject({ status: 0 });
-      expect(justified.stdout).toContain('rotated, justified');
-
-      const unjustified = run(
-        legacy,
-        dr(Y),
-        changelog({ '1.2.0': ['- Nothing.'], '1.1.0': [rotated(X, Y)] }),
-        'v1.2.0',
-      );
-      expect(unjustified.status).toBe(6);
-      expect(unjustified.stderr).toContain('Signing identity rotated:');
-
-      // The bin asked only read questions of GitHub.
-      const calls = readFileSync(join(legacy, 'log'), 'utf8')
-        .split('\n')
-        .filter((l) => l.length > 0);
-      for (const c of calls)
-        expect([c, /^release (list|view|download) /.test(c)]).toEqual([
-          c,
-          true,
-        ]);
-      expect(
-        calls.some(
-          (c) => c.startsWith('release list') && c.includes('--exclude-drafts'),
-        ),
-      ).toBe(true);
-    },
-  );
-
-  it.skipIf(!distBuilt)(
-    'refuses with exit 2 on a missing argument or an unreadable requirement',
-    () => {
-      const none = fakeGh([], {});
-      expect(run(none, 'not a requirement', '', 'v1.0.0').status).toBe(2);
-      const r = spawnSync(process.execPath, [bin, '--tag', 'v1.0.0'], {
-        encoding: 'utf8',
-      });
-      expect(r.status).toBe(2);
-    },
-  );
-
-  it('the dist module is present when the gate has built the workspace', () => {
-    // The gate runs `pnpm -r build` first, so the two rows above are not
-    // silently skipped in the gate. A bare `vitest` run without a build may
-    // skip them; this row says so out loud there instead of passing quietly.
-    expect(distBuilt).toBe(true);
-  });
-});
+    it('the dist module is present when the gate has built the workspace', () => {
+      // The gate runs `pnpm -r build` first, so the two rows above are not
+      // silently skipped in the gate. A bare `vitest` run without a build may
+      // skip them; this row says so out loud there instead of passing quietly.
+      expect(distBuilt).toBe(true);
+    });
+  },
+);

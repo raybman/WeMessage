@@ -248,10 +248,12 @@ artwork and no Finder scripting. A throwaway run builds the image too, named
 First-run copy (D-UI-180). The build is self-signed and not notarized, so
 on macOS 26 Gatekeeper refuses the first launch once. Every surface that
 tells a user what to do (`README.md`, `site/docs/install.html`, the cask
-caveats) gives the same three ways, in this order: Open Anyway in System
+caveats) gives the same two ways, in this order: Open Anyway in System
 Settings, Privacy & Security, first;
-`xattr -dr com.apple.quarantine /Applications/WeMessage.app` second;
-Homebrew's `--no-quarantine` third.
+`xattr -dr com.apple.quarantine /Applications/WeMessage.app` second. A
+Homebrew install is quarantined like any download, so the same two apply.
+There is no third: Homebrew deprecated `--no-quarantine` in 2025 and has
+since removed it, so no surface may tell a user to pass it.
 
 ### Before you start
 

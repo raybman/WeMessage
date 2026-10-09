@@ -41,7 +41,7 @@ cask "wemessage" do
         3. Open it again and confirm.
 
       Or, in a terminal:
-        xattr -d com.apple.quarantine /Applications/WeMessage.app
+        xattr -dr com.apple.quarantine /Applications/WeMessage.app
 
       WeMessage needs Full Disk Access and Automation permission for Messages
       to read and send messages. Grant both in System Settings > Privacy &

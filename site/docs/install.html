@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install WeMessage</title>
-<meta name="description" content="Install WeMessage on macOS with Homebrew or the DMG, get past Gatekeeper on an unsigned build, and verify the download against its published checksum.">
+<meta name="description" content="Install WeMessage on macOS with Homebrew or the DMG, get past Gatekeeper on a self-signed build, and verify the download against its published checksum.">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   /* One self-contained sheet, the same on all five docs pages, using the
@@ -127,7 +127,7 @@
 <main class="wrap">
   <p class="crumb"><a href="/">WeMessage</a> / docs / install</p>
   <h1>Install</h1>
-  <p class="lede">Two routes in, Homebrew or the disk image. Both land the same unsigned build, and this page says exactly what unsigned costs you before you find out on your own.</p>
+  <p class="lede">Two routes in, Homebrew or the disk image. Both land the same self-signed build, and this page says exactly what that costs you before you find out on your own.</p>
 
   <h2>What you need</h2>
   <ul>
@@ -145,21 +145,21 @@ brew install --cask wemessage</code></pre>
   <p>Download the DMG from the <a href="https://github.com/raybman/WeMessage/releases">releases page</a>, open it, and drag WeMessage to Applications.</p>
   <p>That link is the releases <em>list</em>, on purpose. It is right today, it is right after the next tag, and it still resolves while the newest thing published is a release candidate. A link to a file with a version in its name is wrong one release later and nobody ever edits it.</p>
 
-  <h2>The builds are unsigned, on purpose</h2>
-  <p><strong>Shipping a signed build requires a paid Apple Developer membership.</strong> Putting a yearly fee between you and a working copy of a program whose source you can already read would defeat the point. The cost is one extra step the first time you open it, and it is worth knowing exactly what that step is rather than being told to click through a warning.</p>
+  <h2>The builds are self-signed, not notarized</h2>
+  <p><strong>Every release is signed with the project's own certificate, the same one every time, but not with a paid Apple Developer ID, so Apple has not notarized it.</strong> Putting a yearly fee between you and a working copy of a program whose source you can already read would defeat the point. The cost is one extra step the first time you open it, and it is worth knowing exactly what that step is rather than being told to click through a warning.</p>
   <ol>
     <li>Open the DMG and drag WeMessage to Applications.</li>
-    <li>Launch it. macOS refuses, because it cannot check the app with Apple.</li>
-    <li>Open <strong>System Settings, Privacy and Security</strong>, scroll to the bottom, and click <strong>Open Anyway</strong> next to the message about WeMessage.</li>
+    <li>Launch it. macOS refuses once: on macOS 26 it says Apple could not verify WeMessage is free of malware.</li>
+    <li>Open <strong>System Settings, Privacy &amp; Security</strong>, scroll to the bottom, and click <strong>Open Anyway</strong> next to the message about WeMessage.</li>
     <li>Launch it again and confirm.</li>
   </ol>
-  <p>Right-clicking and choosing Open stopped working for unsigned apps in Sequoia, so <strong>Open Anyway</strong> in System Settings is the flow, not a fallback for it. If you prefer the command line, the same decision looks like this:</p>
-<pre><code>xattr -d com.apple.quarantine /Applications/WeMessage.app</code></pre>
-  <p>Either way you are vouching for this build yourself instead of asking Apple to vouch for it. So check what you actually downloaded. Every release publishes a <code>SHA256SUMS</code> file next to the artifacts:</p>
+  <p>Right-clicking the app and choosing Open no longer offers a way past the refusal, so <strong>Open Anyway</strong> in System Settings is the flow, not a fallback for it. If you prefer the command line, the same decision for the app and everything inside it looks like this:</p>
+<pre><code>xattr -dr com.apple.quarantine /Applications/WeMessage.app</code></pre>
+  <p>A Homebrew install is quarantined exactly like a download, so the same two routes apply to it. Either way you are vouching for this build yourself instead of asking Apple to vouch for it. So check what you actually downloaded. Every release publishes a <code>SHA256SUMS</code> file next to the artifacts:</p>
 <pre><code>shasum -a 256 -c SHA256SUMS</code></pre>
 
   <div class="callout">
-    <p><b>The cost you did not expect is the second one.</b> The Gatekeeper prompt happens once and announces itself. Full Disk Access quietly re-locks after every update, because macOS matches an unsigned app by a hash of its binary and that hash moves on every build. <a href="/docs/permissions.html">The permissions page</a> is where that is written down, and it is worth reading before your first update rather than after it.</p>
+    <p><b>Full Disk Access follows the signing certificate.</b> macOS remembers the grant by the certificate the app is signed with, and every release is signed with the same one, so an ordinary update keeps it. The first update onto a build signed some other way does not, and neither does a release that rotates the certificate, which the changelog announces on a line of its own. <a href="/docs/permissions.html">The permissions page</a> says how to re-grant it, and it is worth reading before that update rather than after it.</p>
   </div>
 
   <h2>Build it yourself instead</h2>

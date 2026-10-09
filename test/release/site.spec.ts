@@ -453,16 +453,30 @@ describe('s9 Sc13 rows 10 and 11: the site and its five docs pages', () => {
     );
   });
 
-  /* ── row 8: the unsigned lane, said on the page that sells the download */
+  /* ── row 8: the self-signed lane, said on the page that sells the download */
 
-  it('row 8: install.html documents Open Anyway and pins no version', () => {
+  it('row 8: install.html documents Open Anyway and the xattr route, and pins no version', () => {
     const text = read(INSTALL);
-    expect(text.toLowerCase()).toContain('unsigned');
-    // The macOS 15 flow by name. Right-click-Open stopped working for
-    // unsigned apps in Sequoia, so a page that only said "right click and
-    // choose Open" would send the reader in a circle.
-    expect(text).toContain('Open Anyway');
-    expect(text).toContain('com.apple.quarantine');
+    // v2 S5b (advisor overlay item 11): self-signed, not notarized, Open
+    // Anyway via Privacy & Security, then the xattr alternative.
+    expect(text).toContain('self-signed');
+    expect(text).toContain('not notarized');
+    expect(text).not.toMatch(/builds are unsigned/i);
+    expect(text).toContain('Apple could not verify');
+    // The macOS flow by name and place. Right-click-Open stopped working in
+    // Sequoia, so a page that only said "right click and choose Open" would
+    // send the reader in a circle. HTML, so the ampersand is an entity.
+    const settings = text.indexOf('Privacy &amp; Security');
+    const openAnyway = text.indexOf('Open Anyway');
+    expect(settings).toBeGreaterThan(-1);
+    expect(openAnyway).toBeGreaterThan(settings);
+    // D-UI-180: the command line second, recursive.
+    const xattr = text.indexOf(
+      'xattr -dr com.apple.quarantine /Applications/WeMessage.app',
+    );
+    expect(xattr).toBeGreaterThan(openAnyway);
+    expect(text).not.toMatch(/xattr -d com\.apple/);
+    expect(text).not.toContain('--no-quarantine');
     expect(text).toContain('SHA256SUMS');
     // The releases list, and no file with a version in its name. A hex
     // colour is not a version and neither is a CSS length, so the sweep is

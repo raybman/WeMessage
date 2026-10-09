@@ -254,8 +254,19 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
      * an app the operator cannot then open has not installed anything.
      */
     expect(caveatsBlock).toContain('UNSIGNED');
-    expect(caveatsBlock).toContain('Open Anyway');
-    expect(caveatsBlock).toContain('com.apple.quarantine');
+    // v2 S5b, D-UI-180: Open Anyway first, then the recursive xattr (the
+    // attribute sits on files inside the bundle too), and never Homebrew's
+    // `--no-quarantine`, which Homebrew has removed. The UNSIGNED wording
+    // and the URL change with the Swift cask in S5c.
+    const openAnyway = caveatsBlock.indexOf('Open Anyway');
+    expect(openAnyway).toBeGreaterThan(-1);
+    expect(
+      caveatsBlock.indexOf(
+        'xattr -dr com.apple.quarantine /Applications/WeMessage.app',
+      ),
+    ).toBeGreaterThan(openAnyway);
+    expect(caveatsBlock).not.toMatch(/xattr -d com\.apple/);
+    expect(rb).not.toContain('--no-quarantine');
 
     // No hex colour, checked across the WHOLE rendered string rather than
     // only inside caveats: a colour is exactly the kind of thing that

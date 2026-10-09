@@ -159,13 +159,16 @@ struct ContentPane: View {
     }
   }
 
-  /// The audit, the bulk card, the thread, board 03 (v2 B0), a zero screen
-  /// outside Recent, or the empty state, in that order.
+  /// The audit, the bulk card, board 05 (v2 B2), the thread, board 03
+  /// (v2 B0), a zero screen outside Recent, or the empty state, in that
+  /// order.
   @ViewBuilder private var pane: some View {
     if model.auditShown {
       AuditView(model: model, palette: palette)
     } else if model.bulkSheetShown {
       BulkConfirmCard(model: model, palette: palette)
+    } else if let board = model.emailBoard {
+      EmailBoardView(model: model, board: board, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {
         ThreadHeader(thread: thread, image: model.avatars.image(for: thread), asOf: model.thread.asOf, palette: palette) {

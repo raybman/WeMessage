@@ -358,6 +358,34 @@ enum ShellID {
   static let whatsAppBanner = "wemessage.board.whatsapp.banner"
   static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
   static let fixtureChip = "wemessage.board.chip"
+  // v2 B2, board 05: the Email board, its thread of cards, the verbs, the
+  // inline compose and the category chips.
+  static let emailBoard = "wemessage.board.email"
+  static let emailBanner = "wemessage.board.email.banner"
+  static let emailEmpty = "wemessage.board.email.empty"
+  static let emailThread = "wemessage.email.thread"
+  static let emailCardPrefix = "wemessage.email.card."
+  static let emailEarlier = "wemessage.email.earlier"
+  static let emailImagesPrefix = "wemessage.email.images."
+  static let emailLoadPrefix = "wemessage.email.load."
+  static let emailInvite = "wemessage.email.invite"
+  static let emailReply = "wemessage.email.reply"
+  static let emailReplyAll = "wemessage.email.replyall"
+  static let emailForward = "wemessage.email.forward"
+  static let emailCompose = "wemessage.email.compose"
+  static let emailComposeTo = "wemessage.email.compose.to"
+  static let emailComposeCc = "wemessage.email.compose.cc"
+  static let emailComposeBcc = "wemessage.email.compose.bcc"
+  static let emailComposeSubject = "wemessage.email.compose.subject"
+  static let emailComposeBody = "wemessage.email.compose.body"
+  static let emailComposeHold = "wemessage.email.compose.hold"
+  static let emailComposeWall = "wemessage.email.compose.wall"
+  static let emailComposeSend = "wemessage.email.compose.send"
+  static let emailComposeUndo = "wemessage.email.compose.undo"
+  static let emailComposeDiscard = "wemessage.email.compose.discard"
+  static let emailComposeState = "wemessage.email.compose.state"
+  static let emailChips = "wemessage.email.chips"
+  static let emailChipPrefix = "wemessage.email.chip."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
@@ -698,6 +726,7 @@ private struct SidebarView: View {
       // --t-caption) stays the wireframe size and is read with its chip.
       .accessibilityElement(children: .combine)
       Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
+      if model.emailBoard != nil { EmailCategoryChips(desk: model.email, palette: palette) }
       switch model.lens {
       case .triage: TriageBar(model: model, palette: palette)
       case .needsYou: BulkStrip(model: model, palette: palette)

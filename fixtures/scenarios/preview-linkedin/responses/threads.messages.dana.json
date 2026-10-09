@@ -1,0 +1,30 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;dana-whitfield",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0301",
+        "from": "them",
+        "kind": "text",
+        "text": "Hi Avery, your adapter work caught our eye. We are hiring a Staff Engineer for the booking platform team, hybrid Austin. Open to a conversation?",
+        "at": "2026-08-31T16:10:00.000Z",
+        "handle": "dana-whitfield",
+        "attachments": 0,
+        "meta": {
+          "inMail": {
+            "subject": "Staff Engineer, Booking Platform",
+            "credits": 1
+          },
+          "commercial": {
+            "kind": "recruiter"
+          }
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

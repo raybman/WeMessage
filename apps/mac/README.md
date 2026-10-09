@@ -434,12 +434,12 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.board.email.empty` (D-UI-152). The open thread
   `wemessage.email.thread` holds one `wemessage.email.card.<guid>` per
   message (D-UI-136), `wemessage.email.earlier` for the folded ones
-  (D-UI-153), `wemessage.email.images.<guid>` valued `blocked` or `loaded`
-  with its `wemessage.email.load.<guid>` button (D-UI-154, D-UI-159),
-  `wemessage.email.invite` (D-UI-155), and the verbs
+  (D-UI-153), `wemessage.email.images.<guid>` on the images line, valued
+  `blocked` or `loaded`, with its `wemessage.email.load.<guid>` button
+  (D-UI-154, D-UI-159), `wemessage.email.invite` (D-UI-155), and the verbs
   `wemessage.email.reply`, `wemessage.email.replyall` and
   `wemessage.email.forward` (D-UI-158). The inline compose
-  `wemessage.email.compose`, valued `reply`, `replyAll` or `forward`, holds
+  `wemessage.email.compose`, scrolled into view whole when it opens, holds
   `wemessage.email.compose.to`, `wemessage.email.compose.cc`,
   `wemessage.email.compose.bcc`, `wemessage.email.compose.subject`,
   `wemessage.email.compose.body`, the parked

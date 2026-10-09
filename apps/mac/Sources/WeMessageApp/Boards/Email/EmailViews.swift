@@ -112,32 +112,44 @@ struct EmailThreadView: View {
   var body: some View {
     let all = cards
     let fold = EmailCard.fold(all, expanded: desk.isExpanded(thread.chatGuid))
-    ScrollView {
-      VStack(alignment: .leading, spacing: ProvisionalUI.emailCardSpacing) {
-        Text(subject)
-          .font(.system(size: 15, weight: .semibold))
-          .foregroundStyle(Tokens.color(palette.ink))
-          .fixedSize(horizontal: false, vertical: true)
-          .accessibilityAddTraits(.isHeader)
-        if fold.folded > 0 {
-          earlier(fold.folded)
-        }
-        ForEach(fold.shown) { card in
-          EmailCardView(card: card, desk: desk, palette: palette)
-        }
-        if !all.isEmpty {
-          if let compose = desk.compose {
-            EmailComposeView(compose: compose, desk: desk, palette: palette)
-          } else {
-            verbs
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: ProvisionalUI.emailCardSpacing) {
+          Text(subject)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Tokens.color(palette.ink))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+          if fold.folded > 0 {
+            earlier(fold.folded)
+          }
+          ForEach(fold.shown) { card in
+            EmailCardView(card: card, desk: desk, palette: palette)
+          }
+          if !all.isEmpty {
+            if let compose = desk.compose {
+              EmailComposeView(compose: compose, desk: desk, palette: palette)
+                .id(ShellID.emailCompose)
+            } else {
+              verbs
+            }
           }
         }
+        .frame(width: EmailMeasure.cardWidth(), alignment: .leading)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
       }
-      .frame(width: EmailMeasure.cardWidth(), alignment: .leading)
-      .padding(.vertical, 16)
-      .frame(maxWidth: .infinity)
+      .scrollIndicators(.never)
+      // An opened compose sits under the last card, often below the fold:
+      // it is scrolled into view whole.
+      .onChange(of: desk.compose.map { ObjectIdentifier($0) }) { _, opened in
+        guard opened != nil else { return }
+        Task { @MainActor in
+          await Task.yield()
+          proxy.scrollTo(ShellID.emailCompose, anchor: .bottom)
+        }
+      }
     }
-    .scrollIndicators(.never)
     .background {
       if model.lens == .recent && desk.compose == nil && !all.isEmpty {
         EmailKeys(model: model, token: keysToken).frame(width: 0, height: 0).accessibilityHidden(true)
@@ -260,6 +272,8 @@ struct EmailCardView: View {
 }
 
 /// 05.E: the blocked line and Load images, or the images once revealed.
+/// The state rides on the line, valued blocked or loaded: a containing
+/// group drops its value on macOS.
 struct EmailImagesRow: View {
   let card: EmailCard
   let desk: EmailDesk
@@ -276,12 +290,16 @@ struct EmailImagesRow: View {
         Text(ProvisionalUI.emailImagesShown)
           .font(.system(size: 11))
           .foregroundStyle(Tokens.color(palette.inkDim))
+          .accessibilityValue("loaded")
+          .accessibilityIdentifier(ShellID.emailImagesPrefix + card.id)
       } else {
         HStack(spacing: 8) {
           Text(ProvisionalUI.emailImagesBlocked(card.meta.images.count, trackers: card.meta.trackers))
             .font(.system(size: 11))
             .foregroundStyle(Tokens.color(palette.inkDim))
             .fixedSize(horizontal: false, vertical: true)
+            .accessibilityValue("blocked")
+            .accessibilityIdentifier(ShellID.emailImagesPrefix + card.id)
           Spacer(minLength: 8)
           SettingsButton(title: ProvisionalUI.emailLoadImages, palette: palette, id: ShellID.emailLoadPrefix + card.id) {
             desk.reveal(card.id)
@@ -292,8 +310,6 @@ struct EmailImagesRow: View {
     .padding(10)
     .background(RoundedRectangle(cornerRadius: 8).fill(Tokens.color(palette.layer2)))
     .accessibilityElement(children: .contain)
-    .accessibilityValue(revealed ? "loaded" : "blocked")
-    .accessibilityIdentifier(ShellID.emailImagesPrefix + card.id)
   }
 }
 
@@ -467,7 +483,6 @@ struct EmailComposeView: View {
     .background(RoundedRectangle(cornerRadius: 10).fill(Tokens.color(palette.layer1)))
     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Tokens.color(Tokens.tint), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
     .accessibilityElement(children: .contain)
-    .accessibilityValue(compose.mode.rawValue)
     .accessibilityIdentifier(ShellID.emailCompose)
   }
 

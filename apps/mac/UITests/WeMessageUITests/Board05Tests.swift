@@ -34,6 +34,8 @@ final class Board05Tests: XCTestCase {
   static let weekly = "email;-;contoso-weekly"
   static let photos = "email;-;site-photos"
   static let statements = ["email;-;woodgrove-statement", "email;-;northwind-receipt"]
+  static let replyAllTo = ["nadia.brooks@example.com", "owen.hale@example.com"]
+  static let replyAllCc = "lucia.ferrer@example.com"
   static let reply = "Thanks, the revised schedule works. Signed copy by Friday."
 
   @MainActor
@@ -155,10 +157,11 @@ final class Board05Tests: XCTestCase {
     // stay blocked in a thread never revealed.
     open(app, Self.photos, last: "mail-0110")
     QueueUI.element(app, ID.emailForward).click()
+    XCTAssertTrue(QueueUI.element(app, ID.emailCompose).waitForExistence(timeout: UITestApp.timeout), "Forward opened nothing")
+    // Only a forward carries the files, so the wall line is the mode's proof.
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.emailCompose) == "forward" },
-      "Forward opened \(QueueUI.value(app, ID.emailCompose))")
-    XCTAssertEqual(QueueUI.value(app, ID.emailComposeWall), "warn", "22.4 MB does not warn")
+      QueueUI.waitUntil { QueueUI.value(app, ID.emailComposeWall) == "warn" },
+      "22.4 MB forwarded reads '\(QueueUI.value(app, ID.emailComposeWall))', not a warning")
     QueueUI.element(app, ID.emailComposeDiscard).click()
     XCTAssertTrue(QueueUI.waitUntil { !QueueUI.element(app, ID.emailCompose).exists }, "Discard left compose open")
 
@@ -177,16 +180,26 @@ final class Board05Tests: XCTestCase {
 
     // 05.B and 05.C: shift-R opens Reply all, the hold is parked.
     app.typeKey("r", modifierFlags: .shift)
+    XCTAssertTrue(QueueUI.element(app, ID.emailCompose).waitForExistence(timeout: UITestApp.timeout), "shift-R opened nothing")
+    // Reply all, not Reply: every other recipient is on To and the Cc kept.
+    let to = QueueUI.value(app, ID.emailComposeTo)
+    for address in Self.replyAllTo {
+      XCTAssertTrue(to.contains(address), "shift-R did not reply to all: To reads '\(to)'")
+    }
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.emailCompose) == "replyAll" },
-      "shift-R opened \(QueueUI.value(app, ID.emailCompose))")
+      QueueUI.value(app, ID.emailComposeCc).contains(Self.replyAllCc),
+      "shift-R dropped the Cc: '\(QueueUI.value(app, ID.emailComposeCc))'")
+    XCTAssertEqual(QueueUI.value(app, ID.emailComposeWall), "(missing)", "a reply carries the files")
     XCTAssertEqual(QueueUI.value(app, ID.emailComposeHold), ProvisionalUI.emailHoldParked, "Hold until is not parked")
     XCTAssertEqual(app.datePickers.count, 0, "a date picker is drawn")
-    XCTAssertFalse(QueueUI.value(app, ID.emailComposeTo).isEmpty, "Reply all left To empty")
     XCTAssertEqual(QueueUI.value(app, ID.emailComposeSend), "inert", "Send is live on an empty body")
     let body = QueueUI.element(app, ID.emailComposeBody)
+    XCTAssertTrue(QueueUI.waitUntil { body.isHittable }, "the compose was not scrolled into view: \(body.frame)")
     body.click()
-    body.typeText(Self.reply)
+    app.typeText(Self.reply)
+    XCTAssertTrue(
+      QueueUI.waitUntil { QueueUI.value(app, ID.emailComposeBody).contains(Self.reply) },
+      "typed into the body, it reads '\(QueueUI.value(app, ID.emailComposeBody))'")
     XCTAssertTrue(
       QueueUI.waitUntil { QueueUI.value(app, ID.emailComposeSend) == "enabled" },
       "Send stays inert with a body: \(QueueUI.value(app, ID.emailComposeSend))")

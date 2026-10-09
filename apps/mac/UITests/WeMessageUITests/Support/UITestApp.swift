@@ -304,9 +304,9 @@ enum ID {
   static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
   static let fixtureChip = "wemessage.board.chip"
   // v2 B2, board 05: the board, its banner, the open thread and a card per
-  // message (this prefix and the turn guid), the images row per message
+  // message (this prefix and the turn guid), the images line per message
   // (value "blocked" or "loaded") and its Load images, the invite, the
-  // verbs, the inline compose (value the mode) and its parts (Send's value
+  // verbs, the inline compose and its parts (Send's value
   // "enabled" or "inert", the state line's value the phase, the wall's
   // "warn" or "block"), and the category chips (value "on" or "off").
   static let emailBoard = "wemessage.board.email"
@@ -321,6 +321,7 @@ enum ID {
   static let emailForward = "wemessage.email.forward"
   static let emailCompose = "wemessage.email.compose"
   static let emailComposeTo = "wemessage.email.compose.to"
+  static let emailComposeCc = "wemessage.email.compose.cc"
   static let emailComposeBody = "wemessage.email.compose.body"
   static let emailComposeHold = "wemessage.email.compose.hold"
   static let emailComposeWall = "wemessage.email.compose.wall"

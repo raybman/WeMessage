@@ -283,7 +283,7 @@ enum WhatsAppThreadLayout {
   }
 
   /// A group member's name: the contact's when known, else the number with
-  /// a note that there is no name yet (03.G).
+  /// a note that the number is not yet named (03.G).
   static func memberName(_ handle: String, resolved: String?) -> String {
     resolved ?? handle + " \u{00B7} " + ProvisionalUI.whatsAppNoName
   }

@@ -66,7 +66,7 @@ extension ProvisionalUI {
 
   // D-UI-145: a voice note draws its transcript by default with its
   // duration (08.E's body); a sent note says its played state is unknown,
-  // never "Played" (03.D legend 2).
+  // never that it was heard (03.D legend 2).
   public static let whatsAppVoicePlayed = "played state unknown to this device"
   public static let whatsAppVoiceNoTranscript = "Voice note, transcript not made yet"
 
@@ -84,7 +84,7 @@ extension ProvisionalUI {
   // (03.F).
   public static let whatsAppDisappearingTitle = "Disappearing message"
   public static let whatsAppDisappearingDetail = "Disappearing messages are on. Read this chat on your phone."
-  public static let whatsAppViewOnceTitle = "View-once photo"
+  public static let whatsAppViewOnceTitle = "View-once photo, not shown"
   public static let whatsAppViewOnceDetail =
     "Opening it here would mark it viewed without your intent, and once viewed it is gone. Open on your phone."
   public static let whatsAppPollTitle = "Poll, not shown"

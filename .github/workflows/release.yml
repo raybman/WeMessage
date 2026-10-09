@@ -32,7 +32,14 @@ name: release
 # mode every run takes today, mints an identity that lives for this job only,
 # so the whole pipeline (sign, verify, pack twice, compare the designated
 # requirement) is exercised on every run with no credential at all. A
-# throwaway build is never uploaded anywhere.
+# throwaway build never reaches a release: its one upload is the disk image,
+# as a workflow artifact named `-throwaway`, so a dry run can be looked at.
+#
+# v2 S5b adds the disk image (`dmg-swift`, signed with the same leaf) and
+# `dr-diff`: in the selfsigned lane, after the second pack and before any
+# upload, the designated requirement is compared with the previous published
+# release's, and a change CHANGELOG.md does not justify fails the job with
+# nothing published.
 #
 # A DISPATCH CHECKS OUT THE TAG IT NAMES. Every checkout below reads
 # `inputs.tag || github.ref`: on a tag push the input is empty and the ref is
@@ -458,6 +465,26 @@ jobs:
           set -euo pipefail
           bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"
 
+      # The disk image: the app exactly as zipped, next to an Applications
+      # symlink, in a plain window (D-UI-181), signed with the same leaf and
+      # verified (tools/swift/dmg.sh). Named after the zip, so a throwaway
+      # image says so too.
+      - id: dmg-swift
+        name: dmg-swift
+        timeout-minutes: 10
+        env:
+          LEAF: ${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}
+        run: |
+          set -euo pipefail
+          zip="$(ls apps/mac/dist-pack/WeMessage-*.zip)"
+          src="$RUNNER_TEMP/dmg-src"
+          rm -rf "$src"
+          ditto -x -k "$zip" "$src"
+          dmg="${zip%.zip}.dmg"
+          bash tools/swift/dmg.sh --app "$src/WeMessage.app" --out "$dmg" --identity "$LEAF"
+          (cd apps/mac/dist-pack && shasum -a 256 "$(basename "$dmg")" >> SHA256SUMS)
+          cat apps/mac/dist-pack/SHA256SUMS
+
       - id: compare-leaf-with-releasing
         name: compare-leaf-with-releasing
         if: steps.swiftsign.outputs.mode == 'selfsigned'
@@ -466,8 +493,37 @@ jobs:
         run: |
           awk -v leaf="$LEAF" 'tolower($0) ~ /certificate leaf/ && index(tolower($0), tolower(leaf)) {ok = 1} END {exit !ok}' RELEASING.md
 
-      # Uploads: selfsigned only. A throwaway build is never uploaded, as an
-      # artifact or to a release, and a dry run uploads nothing to a release.
+      # THE DESIGNATED REQUIREMENT, DIFFED PER TAG. After the second pack and
+      # before any upload: the previous published release's requirement must
+      # equal this one, or CHANGELOG.md must carry, under this version's
+      # heading, `- Signing identity rotated: <old leaf> -> <new leaf>`.
+      # Anything else exits 6 and nothing is published. Read-only calls to
+      # GitHub (tools/release/bin/dr-diff.mjs); selfsigned only, because a
+      # throwaway leaf is new on every run by design.
+      - id: dr-diff
+        name: dr-diff
+        if: steps.swiftsign.outputs.mode == 'selfsigned'
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          node tools/release/bin/dr-diff.mjs --repo "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --current apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt --changelog CHANGELOG.md
+
+      # Uploads. A throwaway build never reaches a release: its disk image
+      # alone is kept as a workflow artifact named `-throwaway`, so a dry
+      # run can be opened and looked at. A dry run uploads nothing to a
+      # release.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.swiftsign.outputs.mode == 'throwaway'
+        with:
+          name: wemessage-swift-dmg-throwaway
+          path: apps/mac/dist-pack/*-throwaway.dmg
+          if-no-files-found: error
+          retention-days: 7
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: steps.swiftsign.outputs.mode == 'selfsigned'
         with:
@@ -484,6 +540,7 @@ jobs:
           prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
           files: |
             apps/mac/dist-pack/*.zip
+            apps/mac/dist-pack/*.dmg
             apps/mac/dist-pack/SHA256SUMS
             apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt
 

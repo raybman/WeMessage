@@ -906,14 +906,27 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(compare.run ?? '').toContain('certificate leaf');
   });
 
-  it('row 19: every upload is selfsigned only, and a throwaway build is never uploaded', () => {
+  it('row 19: a release upload is selfsigned only; a throwaway build uploads its disk image as an artifact and nothing else', () => {
     const uploads = swiftSteps().filter(isUploader);
-    // Non-vacuity: both uploaders are in the job.
+    // Non-vacuity: all three uploaders are in the job, in this order.
     expect(uploads.map((s) => (s.uses ?? '').split('@')[0])).toEqual([
+      'actions/upload-artifact',
       'actions/upload-artifact',
       'softprops/action-gh-release',
     ]);
-    for (const step of uploads) {
+    // v2 S5b: exactly one throwaway upload, a workflow artifact, never a
+    // release, holding the throwaway disk image only.
+    const throwaway = uploads.filter((s) => (s.if ?? '').includes('throwaway'));
+    expect(throwaway).toHaveLength(1);
+    const t = throwaway[0];
+    expect(t?.if).toBe(SWIFT_THROWAWAY_LANE);
+    expect((t?.uses ?? '').startsWith('actions/upload-artifact@')).toBe(true);
+    const tw = (t?.with ?? {}) as Record<string, unknown>;
+    expect(String(tw['name'] ?? '')).toMatch(/-throwaway$/);
+    expect(tw['path']).toBe('apps/mac/dist-pack/*-throwaway.dmg');
+    expect(tw['if-no-files-found']).toBe('error');
+    // Every other uploader is selfsigned only.
+    for (const step of uploads.filter((s) => s !== t)) {
       const cond = step.if ?? '';
       expect([step.uses, cond.includes(SWIFT_SIGNED_LANE)]).toEqual([
         step.uses,
@@ -930,7 +943,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       for (const banned of ['gh release', 'gh api', 'curl ', 'upload'])
         expect([banned, run.includes(banned)]).toEqual([banned, false]);
     // The release asset set, and the release is a draft named by the tag.
-    const rel = uploads[1];
+    const rel = uploads[2];
     const w = (rel?.with ?? {}) as Record<string, unknown>;
     expect(w['draft']).toBe(true);
     expect(w['tag_name']).toBe(RELEASE_TAG);
@@ -942,12 +955,14 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
         .filter((f) => f.length > 0),
     ).toEqual([
       'apps/mac/dist-pack/*.zip',
+      'apps/mac/dist-pack/*.dmg',
       'apps/mac/dist-pack/SHA256SUMS',
       'apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt',
     ]);
-    // Uploads come after verify; cleanup is the last step of all.
+    // Uploads come after verify and after the image; cleanup is last.
     const firstUpload = swiftSteps().findIndex(isUploader);
     expect(firstUpload).toBeGreaterThan(indexOfId('verify-swift-bundle'));
+    expect(firstUpload).toBeGreaterThan(indexOfId('dmg-swift'));
     expect(indexOfId('cleanup-swift-signing-identity')).toBe(
       swiftSteps().length - 1,
     );
@@ -1066,6 +1081,64 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       const limit = swiftStep(id)['timeout-minutes'] ?? 0;
       expect([id, limit > 0 && limit <= 10]).toEqual([id, true]);
     }
+  });
+
+  it('row 23: dr-diff runs after the second pack and before upload, selfsigned only', () => {
+    const step = swiftStep('dr-diff');
+    expect(step.if).toBe(SWIFT_SIGNED_LANE);
+    const at = indexOfId('dr-diff');
+    expect(at).toBeGreaterThan(indexOfId('pack-swift-twice'));
+    // Before EVERY uploader, so an unjustified change publishes nothing.
+    const uploaders = swiftSteps()
+      .map((s, i) => [s, i] as const)
+      .filter(([s]) => isUploader(s))
+      .map(([, i]) => i);
+    expect(uploaders.length).toBeGreaterThanOrEqual(2);
+    for (const i of uploaders) expect([i, at < i]).toEqual([i, true]);
+    // The comparison reads this build's requirement and this repo's
+    // CHANGELOG, for the tag passed through env (row 21: never `inputs.`
+    // in a shell line), and it names no secret but the job token.
+    const body = step.run ?? '';
+    expect(body).toContain('node tools/release/bin/dr-diff.mjs');
+    for (const arg of [
+      '--repo "$GITHUB_REPOSITORY"',
+      '--tag "$TAG"',
+      '--current apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt',
+      '--changelog CHANGELOG.md',
+    ])
+      expect([arg, body.includes(arg)]).toEqual([arg, true]);
+    const env = (step.env ?? {}) as Record<string, unknown>;
+    expect(env['TAG']).toBe(RELEASE_TAG);
+    expect(secretsNamedIn(stepText(step))).toEqual(['GITHUB_TOKEN']);
+    // A failure fails the job: nothing swallows the exit code.
+    expect(body).not.toMatch(/\|\|\s*true|continue-on-error/);
+    expect(stepText(step)).not.toContain('continue-on-error');
+    const limit = step['timeout-minutes'] ?? 0;
+    expect(limit > 0 && limit <= 10).toBe(true);
+  });
+
+  it('row 24: the disk image is built from the zipped app, signed with the same leaf, in both lanes', () => {
+    const step = swiftStep('dmg-swift');
+    // Both lanes: a dry run must produce the image too.
+    expect(step.if).toBeUndefined();
+    expect(indexOfId('dmg-swift')).toBeGreaterThan(
+      indexOfId('verify-swift-bundle'),
+    );
+    const env = (step.env ?? {}) as Record<string, unknown>;
+    expect(env['LEAF']).toBe(LEAF_EXPR);
+    const body = step.run ?? '';
+    for (const token of [
+      'set -euo pipefail',
+      'ditto -x -k "$zip"',
+      'dmg="${zip%.zip}.dmg"',
+      'bash tools/swift/dmg.sh --app "$src/WeMessage.app" --out "$dmg" --identity "$LEAF"',
+      'shasum -a 256',
+      '>> SHA256SUMS',
+    ])
+      expect([token, body.includes(token)]).toEqual([token, true]);
+    expect(secretsNamedIn(stepText(step))).toEqual([]);
+    const limit = step['timeout-minutes'] ?? 0;
+    expect(limit > 0 && limit <= 10).toBe(true);
   });
 
   /* ── row 12: actionlint, when the machine has one ───────────────────── */

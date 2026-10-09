@@ -788,18 +788,25 @@ describe('row 13 (v2 S5e): verify-bundle.sh, packed entitlements equal the sourc
   });
 
   it('the host and the app are held to WeMessage.entitlements, the node to node.entitlements', () => {
-    const rows = [...text().matchAll(/^\s*"([^"|]+)\|([^"|]+)\|([^"|]+)"\s*$/gm)].map(
-      (m) => [m[1]?.replace(/^.*\/(?=[^/]+\/[^/]+$)/, ''), m[3]],
-    );
-    expect(rows).toContainEqual(['MacOS/WeMessage', '$res/WeMessage.entitlements']);
+    const rows = [
+      ...text().matchAll(/^\s*"([^"|]+)\|([^"|]+)\|([^"|]+)"\s*$/gm),
+    ].map((m) => [m[1]?.replace(/^.*\/(?=[^/]+\/[^/]+$)/, ''), m[3]]);
+    expect(rows).toContainEqual([
+      'MacOS/WeMessage',
+      '$res/WeMessage.entitlements',
+    ]);
     expect(rows).toContainEqual(['$app', '$res/WeMessage.entitlements']);
     expect(rows).toContainEqual(['daemon/node', '$res/node.entitlements']);
   });
 
   it("the verifier's parser reads exactly the two app keys from the source file", () => {
-    const run = spawnSync('awk', [entPairsProgram(), join(repoRoot, APP_ENTITLEMENTS)], {
-      encoding: 'utf8',
-    });
+    const run = spawnSync(
+      'awk',
+      [entPairsProgram(), join(repoRoot, APP_ENTITLEMENTS)],
+      {
+        encoding: 'utf8',
+      },
+    );
     expect(run.status).toBe(0);
     expect(run.stdout.split('\n').filter(Boolean).sort()).toEqual([
       'com.apple.security.automation.apple-events=true',

@@ -90,6 +90,14 @@ missing rather than failing silently.
 remediation, and exits non-zero while anything is unresolved. The onboarding
 wizard runs the same checks with the same words.
 
+**Contacts** is optional, and WeMessage works the same without it. It is only
+used to show the names and photos from your Contacts on the avatars next to
+your conversations; nothing is uploaded. The app asks once, the first time you
+open a conversation, never at launch. If you say no, every conversation shows
+initials instead of a photo and nothing else changes: no error, no reminder,
+no second prompt. You can change your mind later in System Settings, Privacy
+and Security, Contacts.
+
 ## Keep it running
 
 The daemon can run one of two ways, and the wizard asks you to choose:

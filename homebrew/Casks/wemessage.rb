@@ -2,7 +2,7 @@ cask "wemessage" do
   version "1.0.0-rc.1"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64-UNSIGNED.dmg"
+  url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64.dmg"
   name "WeMessage"
   desc "Local gateway service that bridges iMessage to WeMessage clients"
   homepage "https://github.com/raybman/WeMessage"
@@ -12,7 +12,7 @@ cask "wemessage" do
     strategy :github_latest
   end
 
-  depends_on macos: :sequoia
+  depends_on macos: :tahoe
   depends_on arch: :arm64
 
   app "WeMessage.app"
@@ -32,8 +32,9 @@ cask "wemessage" do
 
   caveats do
     <<~EOS
-      This build is UNSIGNED and Homebrew quarantines what it downloads, so
-      macOS will refuse the first launch. To allow it:
+      This build is signed with WeMessage's own certificate, not an Apple
+      Developer ID, so Apple has not notarized it. Homebrew quarantines what
+      it downloads, so macOS will refuse the first launch. To allow it:
 
         1. Open WeMessage once and let macOS refuse it.
         2. Open System Settings > Privacy & Security, scroll to the bottom,
@@ -45,7 +46,8 @@ cask "wemessage" do
 
       WeMessage needs Full Disk Access and Automation permission for Messages
       to read and send messages. Grant both in System Settings > Privacy &
-      Security before starting the service.
+      Security before starting the service. The grants follow the signing
+      certificate, so an ordinary update keeps them.
 
       Start the gateway service with:
         wemessaged service install

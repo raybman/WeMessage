@@ -155,18 +155,27 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     // '#{version}' missing and fail, rather than passing by accident
     // because '1.0.0-rc.1' happens to appear somewhere else in the file.
     expect(rb).toContain(
-      'url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64-UNSIGNED.dmg"',
+      'url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64.dmg"',
     );
     expect(rb).not.toContain('/v1.0.0-rc.1/');
-    expect(rb).not.toContain('WeMessage-1.0.0-rc.1-arm64-UNSIGNED.dmg');
+    expect(rb).not.toContain('WeMessage-1.0.0-rc.1-arm64.dmg');
+    // v2 S5c: the Swift lane's image (`tools/swift/dmg.sh`, named after
+    // pack-swift's zip). Never the Electron lane's `-UNSIGNED` artefact,
+    // and never a `-throwaway` one, which no release carries.
+    expect(rb).not.toContain('-UNSIGNED');
+    expect(rb).not.toContain('-throwaway');
 
     expect(rb).toContain(`sha256 "${SHA_64}"`);
-    // Bare `:sequoia`, not a `">= :sequoia"` comparison string: Homebrew's
+    // Bare `:tahoe`, not a `">= :tahoe"` comparison string: Homebrew's
     // own `Homebrew/OSDependsOn` style cop (see row 7) treats the symbol
     // form of `depends_on macos:` as already meaning "this OS or later",
     // so a `>=` string is redundant, not more precise, and `brew style
     // --fix` rewrites it on sight.
-    expect(rb).toContain('depends_on macos: :sequoia');
+    // v2 S5c: macOS 26. The Swift app's deployment target is 26, so a
+    // cask that let Sequoia install it would install an app that cannot
+    // launch.
+    expect(rb).toContain('depends_on macos: :tahoe');
+    expect(rb).not.toContain(':sequoia');
     expect(rb).toContain('depends_on arch: :arm64');
   });
 
@@ -245,19 +254,26 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     expect(rb).not.toMatch(/\bwemessage service\b/);
 
     /*
-     * AND THE STEP BEFORE ANY OF THAT. This cask ships an unsigned build,
-     * Homebrew quarantines what it downloads exactly as a browser would,
-     * and macOS 15 removed the right-click-Open escape hatch for unsigned
-     * apps. So the very first thing that happens after a successful `brew
+     * AND THE STEP BEFORE ANY OF THAT. This cask ships a self-signed,
+     * un-notarized build, Homebrew quarantines what it downloads exactly as a browser would,
+     * and macOS 15 removed the right-click-Open escape hatch for apps
+     * Apple has not notarized. So the very first thing that happens after a successful `brew
      * install --cask` is a refusal, and the caveats block is the only text
      * the operator is shown between those two events. A cask that installs
      * an app the operator cannot then open has not installed anything.
      */
-    expect(caveatsBlock).toContain('UNSIGNED');
+    // v2 S5c, D-UI-182: the Swift build is self-signed, not unsigned, so
+    // the caveats say what it is (the project's own certificate, no Apple
+    // notarization) and never call it UNSIGNED. The route past the refusal
+    // is unchanged: Privacy & Security, then the app by its path.
+    expect(caveatsBlock).not.toContain('UNSIGNED');
+    expect(caveatsBlock).toContain("signed with WeMessage's own certificate");
+    expect(caveatsBlock).toContain('Privacy & Security');
+    expect(caveatsBlock).toContain('/Applications/WeMessage.app');
+    expect(caveatsBlock).toContain('follow the signing');
     // v2 S5b, D-UI-180: Open Anyway first, then the recursive xattr (the
     // attribute sits on files inside the bundle too), and never Homebrew's
-    // `--no-quarantine`, which Homebrew has removed. The UNSIGNED wording
-    // and the URL change with the Swift cask in S5c.
+    // `--no-quarantine`, which Homebrew has removed.
     const openAnyway = caveatsBlock.indexOf('Open Anyway');
     expect(openAnyway).toBeGreaterThan(-1);
     expect(
@@ -632,5 +648,44 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     expect(bundleSh).toContain(
       `ditto "$bundle/bin" "$app/Contents/Resources/${to}"`,
     );
+  });
+
+  /*
+   * v2 S5c: `pnpm release:cask --dmg` takes only the Swift lane's image.
+   * The Electron lane's `-UNSIGNED.dmg` would render a cask whose url names
+   * a file no Swift release carries, and a dry run's `-throwaway.dmg` is
+   * never published at all. Every case here is a refusal, which exits
+   * before anything is written, so this row never touches the committed
+   * cask. The last case proves the filter is not refusing everything: a
+   * well-named image that does not exist gets past the name check and is
+   * refused for being unreadable instead.
+   */
+  it('row 12: the CLI takes WeMessage-<version>-arm64.dmg and refuses the Electron and throwaway names', () => {
+    const before = readFileSync(CASK_RB_PATH, 'utf8');
+    const run = (name: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          join(REPO, 'tools', 'release', 'bin', 'cask.mjs'),
+          '--dmg',
+          join('/nonexistent-s5c', name),
+        ],
+        { encoding: 'utf8' },
+      );
+    for (const name of [
+      'WeMessage-1.0.0-arm64-UNSIGNED.dmg',
+      'WeMessage-1.0.0-arm64-throwaway.dmg',
+      'WeMessage-1.0.0-arm64.zip',
+    ]) {
+      const r = run(name);
+      expect([name, r.status]).toEqual([name, 2]);
+      expect(r.stderr).toContain(
+        '--dmg filename must look like WeMessage-<version>-arm64.dmg',
+      );
+    }
+    const ok = run('WeMessage-1.0.0-arm64.dmg');
+    expect(ok.status).toBe(2);
+    expect(ok.stderr).toContain('could not read --dmg');
+    expect(readFileSync(CASK_RB_PATH, 'utf8')).toBe(before);
   });
 });

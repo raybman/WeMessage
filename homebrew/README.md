@@ -39,13 +39,25 @@ With an explicit version and digest, no packed DMG required:
 pnpm release:cask --version 1.0.0-rc.1 --sha256 <64 lowercase hex characters>
 ```
 
-Or from a built, unsigned DMG named the way the release workflow produces one
-(`WeMessage-<version>-arm64-UNSIGNED.dmg`), which also derives `version` from
-the filename and computes `sha256` from the artefact's own bytes:
+Or from a built disk image named the way the Swift release lane produces one
+(`WeMessage-<version>-arm64.dmg`, written by `tools/swift/dmg.sh` next to
+pack-swift's zip), which also derives `version` from the filename and
+computes `sha256` from the artefact's own bytes:
 
 ```
-pnpm release:cask --dmg dist-pack/WeMessage-1.0.0-arm64-UNSIGNED.dmg
+pnpm release:cask --dmg apps/mac/dist-pack/WeMessage-1.0.0-arm64.dmg
 ```
+
+Since v2 S5c the cask installs the Swift app: the url names that image,
+`depends_on macos: :tahoe` matches the app's macOS 26 deployment target, and
+the caveats describe a self-signed build, not an unsigned one. The CLI
+refuses any other filename, the Electron lane's `-UNSIGNED.dmg` and a dry
+run's `-throwaway.dmg` included. The release workflow's tap step still sits
+in the Electron job, behind its Developer ID lane and `TAP_PUSH_TOKEN`; it
+moves to the Swift job, gated on the self-signed lane, once the tap
+repository exists (decision D-02). Until then it cannot publish anything,
+and if it ever ran it would refuse the Electron image rather than render a
+cask pointing at the wrong file.
 
 Both forms accept `--repo <owner/name>` to override the tracked GitHub repo;
 it defaults to `raybman/WeMessage`.

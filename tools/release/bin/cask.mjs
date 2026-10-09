@@ -15,7 +15,7 @@
  *     The shape `.github/workflows/release.yml` calls:
  *       pnpm release:cask --dmg "$(ls dist-pack/*.dmg)"
  *     `version` is parsed from the artefact's own filename
- *     (`WeMessage-<version>-arm64-UNSIGNED.dmg`, the same shape the
+ *     (`WeMessage-<version>-arm64.dmg`, the same shape the
  *     rendered `url` stanza expects to find on the GitHub release page)
  *     and `sha256` is computed from its bytes with node:crypto. See THE
  *     FENCE below for why no subprocess runs in this file at all.
@@ -106,10 +106,10 @@ function main() {
     }
 
     const base = dmgPath.split('/').pop() ?? dmgPath;
-    const match = /^WeMessage-(.+)-arm64-UNSIGNED\.dmg$/.exec(base);
+    const match = /^WeMessage-(.+)-arm64\.dmg$/.exec(base);
     if (match === null) {
       refuse(
-        `--dmg filename must look like WeMessage-<version>-arm64-UNSIGNED.dmg; got ${JSON.stringify(base)}`,
+        `--dmg filename must look like WeMessage-<version>-arm64.dmg; got ${JSON.stringify(base)}`,
       );
       return;
     }

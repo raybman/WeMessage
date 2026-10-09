@@ -51,9 +51,10 @@
  *     `packages/daemon/src/launchd/cli.ts`, and `wemessage service` is
  *     not a command at all. Referenced in `caveats`, which is the only
  *     text a first-time installer reliably reads before anything runs.
- *   - the download is UNSIGNED, and Homebrew quarantines what it fetches
- *     exactly like a browser would, so Gatekeeper will refuse the first
- *     launch. The caveats say how to get past it. A cask that installs an
+ *   - the download is the Swift lane's disk image (v2 S5c), self-signed
+ *     with the project's own certificate and not notarized, and Homebrew
+ *     quarantines what it fetches exactly like a browser would, so
+ *     Gatekeeper will refuse the first launch. The caveats say how to get past it. A cask that installs an
  *     app the operator then cannot open has not installed anything.
  */
 
@@ -171,7 +172,7 @@ export function renderCask(input: RenderCaskInput): string {
   version "${version}"
   sha256 "${sha256}"
 
-  url "https://github.com/${repo}/releases/download/v#{version}/WeMessage-#{version}-arm64-UNSIGNED.dmg"
+  url "https://github.com/${repo}/releases/download/v#{version}/WeMessage-#{version}-arm64.dmg"
   name "WeMessage"
   desc "Local gateway service that bridges iMessage to WeMessage clients"
   homepage "https://github.com/${repo}"
@@ -181,7 +182,7 @@ export function renderCask(input: RenderCaskInput): string {
     strategy :github_latest
   end
 
-  depends_on macos: :sequoia
+  depends_on macos: :tahoe
   depends_on arch: :arm64
 
   app "WeMessage.app"
@@ -201,8 +202,9 @@ export function renderCask(input: RenderCaskInput): string {
 
   caveats do
     <<~EOS
-      This build is UNSIGNED and Homebrew quarantines what it downloads, so
-      macOS will refuse the first launch. To allow it:
+      This build is signed with WeMessage's own certificate, not an Apple
+      Developer ID, so Apple has not notarized it. Homebrew quarantines what
+      it downloads, so macOS will refuse the first launch. To allow it:
 
         1. Open WeMessage once and let macOS refuse it.
         2. Open System Settings > Privacy & Security, scroll to the bottom,
@@ -214,7 +216,8 @@ export function renderCask(input: RenderCaskInput): string {
 
       WeMessage needs Full Disk Access and Automation permission for Messages
       to read and send messages. Grant both in System Settings > Privacy &
-      Security before starting the service.
+      Security before starting the service. The grants follow the signing
+      certificate, so an ordinary update keeps them.
 
       Start the gateway service with:
         wemessaged service install

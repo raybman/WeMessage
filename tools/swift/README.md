@@ -9,7 +9,8 @@ File                 What it does
 -------------------  ---------------------------------------------------------------
 swift.sh             Picks the swift.org Swift 6 toolchain and execs it
 bundle.sh            Assembles WeMessage.app from the release build
-verify-bundle.sh     Checks an assembled bundle
+sign.sh              Signs an assembled bundle, inside-out, with one identity
+verify-bundle.sh     Checks an assembled bundle, and with --expect-leaf its signature
 node-fetch.sh        Fetches the pinned Node runtime (node.lock.json)
 xcodegen-fetch.sh    Fetches the pinned XcodeGen release (xcodegen.lock.json); CI only
 fake-daemon.mjs      Serves the S0 contract goldens over loopback; CI UI lane only
@@ -20,6 +21,30 @@ fake-daemon.mjs      Serves the S0 contract goldens over loopback; CI UI lane on
 Uses `$WEMESSAGE_SWIFT` if set (a path to a swift binary), otherwise the
 newest swift.org 6.x release toolchain. It never selects a toolchain through
 the `TOOLCHAINS` variable. `pnpm swift:test` goes through it.
+
+## sign.sh (v2 S5a)
+
+```
+bash tools/swift/sign.sh --app <WeMessage.app> --identity <sha1>
+```
+
+`--identity` is the 40-hex SHA-1 of the signing certificate, never its
+name. The identity must already be a valid code-signing identity in a
+keychain on the search list; this script only names it and reads no
+secret. It signs, in this order, each with `--options runtime` and
+`--timestamp=none`: the better-sqlite3 addon, the bundled node (with
+`apps/mac/Resources/node.entitlements`), the host executable and then the
+app (both with `WeMessage.entitlements`). Exit 2 is usage or not an
+assembled app, 3 the identity is missing or untrusted, 4 codesign failed,
+5 a Mach-O under `Contents/` outside those three files.
+
+`verify-bundle.sh --app <path> --expect-leaf <sha1>|any` adds the identity
+half: `codesign --verify --deep --strict`, one certificate leaf across the
+four signed objects (and equal to `<sha1>` unless `any`), the hardened
+runtime flag on each, the entitlements each carries, and spctl's verdict
+recorded for the log but never fatal. `test/swift/sign.sh.spec.ts` runs
+both against `fixtures/swift/mini-app` with stub tools; the real signing
+run is the release workflow's `pack-swift` job.
 
 ## xcodegen-fetch.sh
 

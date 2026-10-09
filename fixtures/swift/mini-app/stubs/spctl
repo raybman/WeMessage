@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A stand-in for spctl(8), for test/swift/sign.sh.spec.ts only. It gives the
+# verdict a self-signed, unnotarized app gets on a real Mac, so the test can
+# prove verify-bundle.sh records it and does not fail on it.
+printf '%s: rejected\nsource=no usable signature\n' "${!#}" >&2
+exit 3

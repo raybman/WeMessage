@@ -1,13 +1,16 @@
 /**
  * v2 S2d: WeMessage.app assembled from the Swift host and the bundled Node,
- * without Xcode.
+ * without Xcode. v2 S5a: signed, with one self-signed identity.
  *
  * STATIC, LIKE pack.spec. Every row here reads a script, a plist or a config
  * file and asserts its shape. Nothing is executed: assembling the bundle
- * needs a release Swift build and a fetched Node, and signing it (S2e) needs
- * an identity, and neither belongs in a unit lane that also runs on Linux.
- * The end-to-end proof is the S2e `pack-swift` job, which runs the lane this
- * file pins, twice, on macos-26.
+ * needs a release Swift build and a fetched Node, and signing it needs an
+ * identity, and neither belongs in a unit lane that also runs on Linux.
+ * The end-to-end proof is the release.yml `pack-swift` job, which runs the
+ * lane this file pins, twice, on macos-26, with a throwaway identity it
+ * mints and deletes. test/swift/sign.sh.spec.ts runs sign.sh and the
+ * identity half of verify-bundle.sh against a miniature app with stubbed
+ * tools; the rows here pin the text those runs cannot see.
  *
  * WHAT THE ROWS ARE FOR. A bundle layout fails in two quiet ways. A file is
  * missing and the app dies on a user's Mac at first launch, or a file is
@@ -16,9 +19,9 @@
  * check both against the real tree; rows 2 and 3 keep the scripts that build
  * the tree from writing anywhere but their own output directories.
  *
- * Rows 10 and 11 of the plan's S2e section extend this file (sign.sh and the
- * identity half of verify-bundle.sh). Each row here is its own describe so
- * they can be added without touching these.
+ * Rows 11 and 12 (S5a) pin sign.sh and the identity half of
+ * verify-bundle.sh. Each row here is its own describe so they could be
+ * added without touching the others.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -43,6 +46,7 @@ const LOCK = 'tools/swift/node.lock.json';
 const NODE_FETCH = 'tools/swift/node-fetch.sh';
 const BUNDLE = 'tools/swift/bundle.sh';
 const VERIFY = 'tools/swift/verify-bundle.sh';
+const SIGN = 'tools/swift/sign.sh';
 const PACK_SWIFT = 'tools/release/bin/pack-swift.mjs';
 const INFO_PLIST = 'apps/mac/Resources/Info.plist';
 const APP_ENTITLEMENTS = 'apps/mac/Resources/WeMessage.entitlements';
@@ -446,9 +450,19 @@ describe('row 6: pack-swift.mjs drives the lane in order', () => {
     expect(code()).toContain('process.exit(2)');
   });
 
-  it('requires --identity and refuses, naming S2e, while sign.sh is absent', () => {
-    for (const needed of ['--identity', 'tools/swift/sign.sh', 'S2e'])
+  it('v2 S5a: sign.sh is present, so the lane signs, and verifies the leaf it signed with', () => {
+    // Flipped from S2d's "refuses, naming S2e, while sign.sh is absent".
+    expect(existsSync(join(repoRoot, SIGN))).toBe(true);
+    expect(indexMode(SIGN)).toBe('100755');
+    for (const needed of [
+      '--identity',
+      'tools/swift/sign.sh',
+      "'--expect-leaf',\n  identity,",
+      '--throwaway',
+      '-throwaway.zip',
+    ])
       expect([needed, body().includes(needed)]).toEqual([needed, true]);
+    expect(body()).not.toContain('S2e');
   });
 
   it('runs the ten steps in order', () => {
@@ -612,13 +626,138 @@ describe('row 9: verify-bundle.sh, the structure half', () => {
 });
 
 describe('row 10: shell hygiene', () => {
-  it('no grep in any of the three scripts, and awk reads the text', () => {
-    for (const rel of [NODE_FETCH, BUNDLE, VERIFY]) {
+  it('no grep in any of the four scripts, and awk reads the text', () => {
+    for (const rel of [NODE_FETCH, BUNDLE, VERIFY, SIGN]) {
       expect([rel, read(rel).includes('grep')]).toEqual([rel, false]);
     }
-    // bundle.sh only copies; the two scripts that read text do it with awk.
-    for (const rel of [NODE_FETCH, VERIFY]) {
+    // bundle.sh only copies; the scripts that read text do it with awk.
+    for (const rel of [NODE_FETCH, VERIFY, SIGN]) {
       expect([rel, /\bawk\b/.test(read(rel))]).toEqual([rel, true]);
     }
+  });
+});
+
+describe('row 11 (v2 S5a): sign.sh signs inside-out, hardened, by SHA-1', () => {
+  const text = (): string => read(SIGN);
+  /** The script without comment lines, so a comment cannot satisfy a row. */
+  const code = (): string =>
+    text()
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+
+  it('exists, is bash under set -euo pipefail, and is executable', () => {
+    expect(text().startsWith('#!/usr/bin/env bash\n')).toBe(true);
+    expect(code()).toContain('set -euo pipefail');
+    expect(indexMode(SIGN)).toBe('100755');
+  });
+
+  it('every codesign call carries --options runtime and --timestamp=none (tooth 1)', () => {
+    const calls = code()
+      .split('\n')
+      .filter((l) => /^\s*codesign\b/.test(l));
+    expect(calls).toEqual([
+      '  codesign --force --options runtime --timestamp=none --sign "$identity" "$@" "$target" || {',
+    ]);
+  });
+
+  it('signs the addon, node, the host, then the app, in that order (tooth 2)', () => {
+    const order = code()
+      .split('\n')
+      .filter((l) => /^sign "\$/.test(l));
+    expect(order).toEqual([
+      'sign "$addon" --identifier sh.wemessage.gateway.better-sqlite3',
+      'sign "$node" --identifier sh.wemessage.gateway.node --entitlements "$res/node.entitlements"',
+      'sign "$exe" --identifier sh.wemessage.gateway --entitlements "$res/WeMessage.entitlements"',
+      'sign "$app" --identifier sh.wemessage.gateway --entitlements "$res/WeMessage.entitlements"',
+    ]);
+  });
+
+  it('the identity is a 40-hex SHA-1, never a name, and must be a valid code-signing identity', () => {
+    expect(code()).toContain(
+      "awk 'length($0) != 40 || $0 ~ /[^0-9A-Fa-f]/ {exit 1}'",
+    );
+    expect(code()).toContain('security find-identity -v -p codesigning');
+    // One read-only question of the keychain, and no other security verb.
+    const verbs = [...code().matchAll(/\bsecurity\s+([a-z-]+)/g)].map(
+      (m) => m[1],
+    );
+    expect(verbs).toEqual(['find-identity']);
+  });
+
+  it('exits 2 usage, 3 identity, 4 codesign, 5 a stray Mach-O', () => {
+    for (const n of ['exit 2', 'exit 3', 'exit 4', 'exit 5'])
+      expect([n, code().includes(n)]).toEqual([n, true]);
+    expect(
+      // `{exit 1}` inside an awk program is awk's, not the script's.
+      code()
+        .match(/(?<!\{)\bexit [0-9]+/g)
+        ?.sort(),
+    ).toEqual(['exit 2', 'exit 3', 'exit 4', 'exit 5']);
+  });
+
+  it('the Mach-O sweep reads magic numbers, every byte order and fat', () => {
+    expect(code()).toContain('od -An -tx1 -N4');
+    for (const magic of [
+      'cffaedfe',
+      'cefaedfe',
+      'feedfacf',
+      'feedface',
+      'cafebabe',
+      'bebafeca',
+    ])
+      expect([magic, code().includes(magic)]).toEqual([magic, true]);
+    expect(code()).toContain('find "$app/Contents" -type f -print0');
+  });
+
+  it('reads no secret, unlocks no keychain, and writes nothing but signatures', () => {
+    for (const banned of [
+      'secrets',
+      'p12',
+      'unlock-keychain',
+      'security import',
+      'login.keychain',
+      '--deep',
+    ])
+      expect([banned, code().includes(banned)]).toEqual([banned, false]);
+    expect(escapes(text(), [])).toEqual([]);
+  });
+});
+
+describe('row 12 (v2 S5a): verify-bundle.sh, the identity half', () => {
+  const text = (): string => read(VERIFY);
+
+  it('the S2d refusal of --expect-leaf is lifted: 40-hex or any', () => {
+    expect(text()).toContain('--expect-leaf) expect_leaf=');
+    expect(text()).toContain('[ "$expect_leaf" != "any" ]');
+    expect(text()).toContain(
+      "awk 'length($0) != 40 || $0 ~ /[^0-9A-Fa-f]/ {exit 1}'",
+    );
+    expect(text()).not.toContain('S2e');
+  });
+
+  it('codesign verifies deep and strict, and the four signed objects are listed', () => {
+    expect(text()).toContain('codesign --verify --deep --strict --verbose=2');
+    for (const row of [
+      'better-sqlite3/prebuilds/darwin-arm64.node|sh.wemessage.gateway.better-sqlite3|-"',
+      'daemon/node|sh.wemessage.gateway.node|$res/node.entitlements"',
+      'MacOS/WeMessage|sh.wemessage.gateway|$res/WeMessage.entitlements"',
+      '"$app|sh.wemessage.gateway|$res/WeMessage.entitlements"',
+    ])
+      expect([row, text().includes(row)]).toEqual([row, true]);
+  });
+
+  it('one leaf, the runtime flag, the entitlements, and spctl recorded but never fatal', () => {
+    for (const needed of [
+      'codesign -d -r-',
+      'certificate ',
+      'codesign -dvv',
+      'runtime',
+      'codesign -d --entitlements - --xml',
+      'plutil -convert xml1',
+      'do not share one certificate leaf',
+      'spctl -a -t exec -vv "$app" 2>&1 || true',
+    ])
+      expect([needed, text().includes(needed)]).toEqual([needed, true]);
   });
 });

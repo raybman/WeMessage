@@ -14581,7 +14581,7 @@ describe("v2 S2f: Eric's first-install runbook for the Swift build", () => {
    * what each outcome means for the doctor copy, the double-click check the
    * S3 advisor review asked for (P2-11), the residual risks the S2 advisor
    * review asked to be written down before any FDA grant, the post-run
-   * checklist, and an honest mark on everything that waits for S2e.
+   * checklist, and an honest mark on everything that waits for custody (S5d).
    */
   const RELEASING = 'RELEASING.md';
   const MAC_README = 'apps/mac/README.md';
@@ -14652,15 +14652,20 @@ describe("v2 S2f: Eric's first-install runbook for the Swift build", () => {
     expect(steps).not.toMatch(/wemessage send\b/);
   });
 
-  it('the runbook is honest that it waits for S2e while sign.sh does not exist', () => {
+  it('the runbook is honest that it waits for custody (S5d) once sign.sh exists (S5a)', () => {
     const body = runbook();
-    if (!existsSync(join(repoRoot, 'tools/swift/sign.sh'))) {
-      expect(sub('### Before you start')).toMatch(/Blocked on S2e/);
-      const tagged = sub('### The steps')
-        .split('\n')
-        .filter((l) => /^\d+\. /.test(l) && l.includes('[blocked on S2e]'));
-      expect(tagged.length).toBeGreaterThanOrEqual(1);
-    }
+    // v2 S5a: sign.sh landed, so the wait is no longer for the script but
+    // for the real identity. The runbook says so, and says the throwaway
+    // run uploads nothing, so no reader goes looking for its zip.
+    expect(existsSync(join(repoRoot, 'tools/swift/sign.sh'))).toBe(true);
+    const before = sub('### Before you start');
+    expect(before).toMatch(/Blocked on S5d/);
+    expect(before).toMatch(/throwaway identity[\s\S]{0,200}uploads nothing/);
+    expect(body).not.toContain('S2e');
+    const tagged = sub('### The steps')
+      .split('\n')
+      .filter((l) => /^\d+\. /.test(l) && l.includes('[blocked on S5d]'));
+    expect(tagged.length).toBeGreaterThanOrEqual(1);
     for (const needed of ['tools/swift/sign.sh', 'pack-swift', 'exit 2'])
       expect([needed, body.includes(needed)]).toEqual([needed, true]);
   });
@@ -14847,5 +14852,58 @@ describe('v2 S6a: the Swift pack lane reads nothing under the Electron app', () 
     // A devDependency, not a runtime one: the release library itself loads
     // no esbuild, only this build-time script does.
     expect(pkg.dependencies?.esbuild).toBeUndefined();
+  });
+});
+
+describe('v2 S5a: signing lives in release.yml and nowhere else in .github', () => {
+  /**
+   * S5a gives the release workflow a signing identity: a throwaway one it
+   * mints, or (from S5d) the real one imported from two secrets. The words
+   * that come with it must not leak into a CI workflow, where they would run
+   * on every pull request: ci-swift and ci-macos already ban a longer list
+   * (the Sc17 and S1 rows), and this row holds the signing words across
+   * EVERY workflow git tracks, keyed off the directory rather than a list,
+   * so a sixth workflow cannot be added without being swept.
+   */
+  const RELEASE = '.github/workflows/release.yml';
+  const SIGNING_WORDS: readonly string[] = [
+    'codesign',
+    'keychain',
+    'p12',
+    'WEMESSAGE_SIGN',
+    'security import',
+    'add-trusted-cert',
+  ];
+  const workflows = (): string[] =>
+    execFileSync('git', ['ls-files', '--', '.github/workflows'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => /\.ya?ml$/.test(f));
+
+  it('release.yml carries every signing word (the row is not vacuous)', () => {
+    const text = archRead(RELEASE);
+    for (const w of SIGNING_WORDS)
+      expect([w, text.includes(w)]).toEqual([w, true]);
+  });
+
+  it('no other workflow carries any of them', () => {
+    const others = workflows().filter((f) => f !== RELEASE);
+    // The four CI workflows at least; a fifth is swept the day it lands.
+    for (const ci of [
+      'ci-swift.yml',
+      'ci-macos.yml',
+      'ci-linux.yml',
+      'ci-python.yml',
+    ])
+      expect(others).toContain(`.github/workflows/${ci}`);
+    const offenders: string[] = [];
+    for (const f of others) {
+      const text = archRead(f);
+      for (const w of SIGNING_WORDS)
+        if (text.includes(w)) offenders.push(`${f}: ${w}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });

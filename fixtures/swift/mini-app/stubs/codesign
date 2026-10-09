@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# A stand-in for codesign(1), for test/swift/sign.sh.spec.ts only. It signs
+# nothing and opens no keychain. It records every call in
+# $FAKE_CODESIGN_STATE/log, keeps a little state per target, and answers the
+# four questions tools/swift/verify-bundle.sh asks from that state:
+#
+#   --verify --deep --strict --verbose=2 <app>
+#   -d -r- <path>                       the designated requirement
+#   -dvv <path>                         the CodeDirectory line and its flags
+#   -d --entitlements - --xml <path>    the entitlements it was signed with
+#
+# Signing a file appends one byte to it, the way a real signature changes
+# the file it is embedded in. Signing the app records a seal over every file
+# under Contents/. So nested code signed AFTER the app breaks the seal, and
+# --verify says so, as the real tool would.
+#
+# FAKE_CODESIGN_FAIL=<basename> makes signing that one target fail.
+set -euo pipefail
+
+state="${FAKE_CODESIGN_STATE:?}"
+mkdir -p "$state"
+printf '%s\n' "$*" >>"$state/log"
+
+target="${!#}"
+key_of() { printf '%s' "$1" | shasum | awk '{print $1}'; }
+sum_of() { shasum <"$1" | awk '{print $1}'; }
+seal_of() {
+  (cd "$1/Contents" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+    printf '%s %s\n' "$f" "$(sum_of "$f")"
+  done) | shasum | awk '{print $1}'
+}
+is_macho() {
+  case "$(od -An -tx1 -N4 "$1" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) s = s $i} END {print s}')" in
+    cffaedfe | cefaedfe | feedfacf | feedface | cafebabe | bebafeca) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+d="$state/$(key_of "$target")"
+
+case " $* " in
+  *" --sign "*)
+    options="none"
+    timestamp="apple"
+    identity=""
+    identifier=""
+    ents=""
+    while [ "$#" -gt 1 ]; do
+      case "$1" in
+        --force) shift ;;
+        --timestamp=none) timestamp="none"; shift ;;
+        --options) options="$2"; shift 2 ;;
+        --sign) identity="$2"; shift 2 ;;
+        --identifier) identifier="$2"; shift 2 ;;
+        --entitlements) ents="$2"; shift 2 ;;
+        *) printf 'fake codesign: unexpected argument %s\n' "$1" >&2; exit 64 ;;
+      esac
+    done
+    if [ "${FAKE_CODESIGN_FAIL:-}" = "$(basename "$target")" ]; then
+      printf '%s: errSecInternalComponent\n' "$target" >&2
+      exit 1
+    fi
+    rm -rf "$d"
+    mkdir -p "$d"
+    printf '%s\n' "$identity" >"$d/identity"
+    printf '%s\n' "$identifier" >"$d/identifier"
+    printf '%s\n' "$options" >"$d/options"
+    printf '%s\n' "$timestamp" >"$d/timestamp"
+    # A copy, not plutil: the entitlements files are XML plists already, and
+    # a copy keeps the signing rows running on the Linux lane too.
+    [ -z "$ents" ] || cp "$ents" "$d/ents.plist"
+    if [ -d "$target" ]; then
+      seal_of "$target" >"$d/seal"
+    else
+      printf 'S' >>"$target"
+      sum_of "$target" >"$d/sum"
+    fi
+    ;;
+  " --verify "*)
+    if [ ! -f "$d/seal" ]; then
+      printf '%s: code object is not signed at all\n' "$target" >&2
+      exit 1
+    fi
+    if [ "$(seal_of "$target")" != "$(cat "$d/seal")" ]; then
+      printf '%s: a sealed resource is missing or invalid\n' "$target" >&2
+      exit 1
+    fi
+    while IFS= read -r -d '' f; do
+      is_macho "$f" || continue
+      fd="$state/$(key_of "$f")"
+      if [ ! -f "$fd/sum" ]; then
+        printf '%s: code object is not signed at all\n' "$f" >&2
+        exit 1
+      fi
+      if [ "$(sum_of "$f")" != "$(cat "$fd/sum")" ]; then
+        printf '%s: invalid signature (code or signature have been modified)\n' "$f" >&2
+        exit 1
+      fi
+    done < <(find "$target/Contents" -type f -print0)
+    printf '%s: valid on disk\n%s: satisfies its Designated Requirement\n' "$target" "$target" >&2
+    ;;
+  " -d -r- "*)
+    if [ ! -d "$d" ]; then
+      printf '%s: code object is not signed at all\n' "$target" >&2
+      exit 1
+    fi
+    printf 'Executable=%s\n' "$target" >&2
+    printf 'designated => identifier "%s" and certificate root = H"%s"\n' \
+      "$(cat "$d/identifier")" "$(awk '{print toupper($0)}' "$d/identity")"
+    ;;
+  " -dvv "*)
+    if [ ! -d "$d" ]; then
+      printf '%s: code object is not signed at all\n' "$target" >&2
+      exit 1
+    fi
+    case ",$(cat "$d/options")," in
+      *,runtime,*) flags='0x10000(runtime)' ;;
+      *) flags='0x0(none)' ;;
+    esac
+    printf 'Executable=%s\nIdentifier=%s\nCodeDirectory v=20500 size=1 flags=%s hashes=1+0 location=embedded\n' \
+      "$target" "$(cat "$d/identifier")" "$flags" >&2
+    ;;
+  " -d --entitlements - --xml "*)
+    if [ ! -d "$d" ]; then
+      printf '%s: code object is not signed at all\n' "$target" >&2
+      exit 1
+    fi
+    [ ! -f "$d/ents.plist" ] || cat "$d/ents.plist"
+    ;;
+  *)
+    printf 'fake codesign: unexpected call: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac

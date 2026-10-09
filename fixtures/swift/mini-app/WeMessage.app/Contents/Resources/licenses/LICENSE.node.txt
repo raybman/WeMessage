@@ -1,0 +1,1 @@
+Fixture license text. test/swift/sign.sh.spec.ts only.

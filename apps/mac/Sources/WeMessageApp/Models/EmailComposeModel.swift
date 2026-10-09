@@ -135,7 +135,7 @@ final class EmailComposeModel {
   /// The small print under the buttons for the phase.
   var phaseLine: String {
     switch phase {
-    case .composing: ""
+    case .composing: ProvisionalUI.emailComposingLine
     case .undo(let left): ProvisionalUI.emailUndoLine(left)
     case .drafting: ProvisionalUI.emailDraftingLine
     case .drafted: ProvisionalUI.emailDraftedLine

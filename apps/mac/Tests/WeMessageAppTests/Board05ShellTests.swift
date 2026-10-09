@@ -256,6 +256,9 @@ struct Board05ShellTests {
     desk.startCompose(.reply, chatGuid: Self.terms, card: card, account: Self.me, subject: nil)
     let compose = try #require(desk.compose)
     compose.body = "Holding this one."
+    // The state line is never empty: an empty Text has no element, so the
+    // compose's state would read as missing.
+    #expect(compose.phaseLine == ProvisionalUI.emailComposingLine)
     compose.send()
     #expect(compose.busy)
     #expect(!compose.canSend)
@@ -263,6 +266,7 @@ struct Board05ShellTests {
     compose.undo()
     await compose.settle()
     #expect(compose.phase == .composing)
+    #expect(compose.phaseLine == ProvisionalUI.emailComposingLine)
     #expect(compose.body == "Holding this one.")
     #expect(Self.writes(transport).isEmpty)
 

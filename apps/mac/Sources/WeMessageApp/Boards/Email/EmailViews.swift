@@ -512,7 +512,8 @@ struct EmailComposeView: View {
   }
 
   /// D-UI-139: drawn and disabled, its reason beside it at full contrast;
-  /// it never opens a picker.
+  /// it never opens a picker. It is read as text, not as a button: a button
+  /// with nothing to press fails the audit's "Action is missing".
   private var hold: some View {
     HStack(spacing: 8) {
       Text(ProvisionalUI.emailHoldLabel)
@@ -527,7 +528,6 @@ struct EmailComposeView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityAddTraits(.isButton)
     .accessibilityLabel(ProvisionalUI.emailHoldLabel)
     .accessibilityValue(ProvisionalUI.emailHoldParked)
     .accessibilityIdentifier(ShellID.emailComposeHold)

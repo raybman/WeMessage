@@ -98,6 +98,7 @@ extension ProvisionalUI {
   public static func emailUndoLine(_ seconds: Int) -> String {
     "Becomes a draft in \(seconds)s. Nothing has left this Mac."
   }
+  public static let emailComposingLine = "Send opens an undo window, then makes a draft. Nothing is mailed."
   public static let emailDraftingLine = "Making the draft."
   public static let emailDraftedLine = "Waiting in Needs You as a draft. Nothing was mailed."
   public static let emailDraftFailed = "The daemon did not take the draft. Nothing was mailed; the text is still here."

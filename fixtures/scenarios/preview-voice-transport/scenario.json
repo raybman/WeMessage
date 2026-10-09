@@ -1,0 +1,4 @@
+{
+  "summary": "Board 07, failure: the voice link died while the card was armed. The card is disarmed, the draft is kept and nothing was sent. Fake daemon only.",
+  "extends": "preview-voice"
+}

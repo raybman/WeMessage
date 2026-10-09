@@ -72,11 +72,14 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
+        "dockState": "speaking",
+        "caption": "Reading back: sure, I will ring you at 3:15. Say approve to arm it.",
+        "readbackToken": "Priya",
         "micMuted": false,
-        "chip": "idle"
+        "chip": "speaking",
+        "failure": "selfheard",
+        "draftId": "drf-0102",
+        "armed": false
       }
     }
   }

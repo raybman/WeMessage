@@ -113,6 +113,10 @@ struct AppHygieneTests {
     // v2 B0, board 03.
     "wemessage.board.whatsapp", "wemessage.board.whatsapp.banner", "wemessage.board.whatsapp.empty",
     "wemessage.board.chip",
+    // v2 B4, board 07.
+    "wemessage.voicedock", "wemessage.voicedock.chip", "wemessage.voicedock.caption", "wemessage.voicedock.mic",
+    "wemessage.voicedock.card", "wemessage.voicedock.card.send", "wemessage.voicedock.card.cancel",
+    "wemessage.voicedock.failure",
   ]
 
   static let nsApp = "NS" + "App"

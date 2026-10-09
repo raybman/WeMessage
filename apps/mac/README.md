@@ -420,6 +420,14 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.board.whatsapp.banner` (D-UI-135), the fixture chip
   `wemessage.board.chip` at the banner's trailing edge (D-UI-132), and the
   New here empty state `wemessage.board.whatsapp.empty` (D-UI-135)
+- Board 07's voice dock `wemessage.voicedock`, drawn over the open thread's
+  transcript only under the UI-test flag, from the fake daemon's
+  `status.meta.voice` (v2 B4, D-UI-138 and 170..179): its one chip
+  `wemessage.voicedock.chip`, the always-on caption
+  `wemessage.voicedock.caption`, the mic indicator `wemessage.voicedock.mic`,
+  the failure line `wemessage.voicedock.failure`, and the confirm card
+  `wemessage.voicedock.card` with `wemessage.voicedock.card.send` (cmd-Return)
+  and `wemessage.voicedock.card.cancel`
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

@@ -1,0 +1,4 @@
+{
+  "summary": "Board 07, failure: nothing heard. Nothing was done. Fake daemon only.",
+  "extends": "preview-voice"
+}

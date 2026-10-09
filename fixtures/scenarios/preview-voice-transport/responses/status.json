@@ -72,11 +72,14 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
+        "dockState": "confirm",
+        "caption": "The voice link dropped.",
+        "readbackToken": "Priya",
         "micMuted": false,
-        "chip": "idle"
+        "chip": "idle",
+        "failure": "transport",
+        "draftId": "drf-0102",
+        "armed": true
       }
     }
   }

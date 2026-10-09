@@ -54,6 +54,7 @@ targets:
       # The provisional D-UI values (pending Eric's decisions) are compiled
       # into the UI tests too, so the tests read them instead of restating them.
       - path: Sources/WeMessageApp/ProvisionalUI.swift
+      - path: Sources/WeMessageApp/ProvisionalUI+Board07.swift
       # The frost probe patches (S4a), so the backdrop and FrostEvidence agree.
       - path: Sources/WeMessageApp/Glass/FrostProbe.swift
     dependencies:

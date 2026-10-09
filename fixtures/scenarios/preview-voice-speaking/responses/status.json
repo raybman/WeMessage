@@ -72,11 +72,11 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
-        "micMuted": false,
-        "chip": "idle"
+        "dockState": "speaking",
+        "caption": "Priya asked if you are free at three. I drafted: sure, I will ring you at 3:15.",
+        "readbackToken": "Priya",
+        "micMuted": true,
+        "chip": "speaking"
       }
     }
   }

@@ -72,11 +72,13 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
+        "dockState": "confirm",
+        "caption": "You said approve. The card is armed; cmd-Return sends it.",
+        "readbackToken": "Priya",
         "micMuted": false,
-        "chip": "idle"
+        "chip": "confirm",
+        "draftId": "drf-0102",
+        "armed": true
       }
     }
   }

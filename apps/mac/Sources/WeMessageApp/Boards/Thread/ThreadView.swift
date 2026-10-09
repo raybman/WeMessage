@@ -9,6 +9,13 @@ struct ThreadView: View {
   let thread: ThreadSummary
   let palette: Tokens.Palette
 
+  /// Board 07 (D-UI-179): the reader's height and the dock's measured top
+  /// edge, both in the reader's own space; the transcript insets by their
+  /// difference plus the gap, so nothing is drawn under the dock.
+  @State private var readerHeight: CGFloat = 0
+  @State private var dockMinY: CGFloat?
+  private static let readerSpace = "voiceDockReader"
+
   private var loadValue: String {
     switch model.thread.load {
     case .idle: "idle"
@@ -19,17 +26,38 @@ struct ThreadView: View {
     }
   }
 
+  /// The transcript's bottom padding under the dock: measured, never a
+  /// fixed height, and zero with no dock.
+  private var readerInset: CGFloat {
+    VoiceDockLayout.readerInset(
+      readerHeight: readerHeight, dockMinY: model.voiceDock == nil ? nil : dockMinY.map(Double.init))
+  }
+
   var body: some View {
     VStack(spacing: 0) {
       if thread.isGroup { Inv5Strip(palette: palette) }
       if model.find.shown { FindBar(model: model, find: model.find, palette: palette) }
       HStack(spacing: 0) {
-        TranscriptView(model: model, thread: thread, palette: palette)
+        TranscriptView(model: model, thread: thread, palette: palette, bottomInset: readerInset)
         if model.scrubberShown {
           Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.25)).frame(width: 0.5)
           YearScrubberView(model: model, palette: palette)
         }
       }
+      // Board 07: the voice dock, bottom-centre over the reader in all three
+      // sizes (D-UI-138), over the transcript only (D-UI-178).
+      .overlay(alignment: .bottom) {
+        if let dock = model.voiceDock {
+          VoiceDockView(model: model, dock: dock, thread: thread, palette: palette)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.readerSpace)).minY } action: {
+              dockMinY = $0
+            }
+            .onDisappear { dockMinY = nil }
+            .padding(.bottom, ProvisionalUI.voiceDockGap)
+        }
+      }
+      .coordinateSpace(.named(Self.readerSpace))
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { readerHeight = $0 }
       ChannelBanner(thread: thread, palette: palette)
       if model.lens == .triage {
         VerbRow(model: model, thread: thread, palette: palette)

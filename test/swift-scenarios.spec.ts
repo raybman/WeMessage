@@ -66,6 +66,14 @@ const EXPECTED_SCENARIOS = [
   'preview-email',
   'preview-linkedin',
   'preview-voice',
+  'preview-voice-confirm',
+  'preview-voice-interrupted',
+  'preview-voice-misheard',
+  'preview-voice-muted',
+  'preview-voice-selfheard',
+  'preview-voice-speaking',
+  'preview-voice-transport',
+  'preview-voice-unheard',
   'preview-whatsapp',
   'quiet',
   'rich',
@@ -136,7 +144,7 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twelve shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
@@ -1233,5 +1241,121 @@ describe('v2 S4f SC13: the kill switch toggle, only with --control', () => {
     const bad = toggle(switchTo('kill'), 'yes');
     expect(bad.out.status).toBe(400);
     expect(bad.state.killSwitch).toBeNull();
+  });
+});
+
+/**
+ * v2 B4: board 07's voice dock is driven only by status.meta.voice in the
+ * preview-voice* scenarios. Each one inherits the rich queue (so Priya's
+ * pending draft drf-0102 exists), names one of the three dock sizes and one
+ * of the nine chips, and always carries a caption: the dock has no off
+ * switch for it. A card is only ever armed for a draft the queue holds
+ * pending, and no fixture says a draft was approved or sent by voice.
+ */
+describe('v2 B4: the voice scenarios', () => {
+  const SIZES = ['idle', 'speaking', 'confirm'];
+  const CHIPS = [
+    'idle',
+    'listening',
+    'speaking',
+    'thinking',
+    'driving',
+    'interrupted',
+    'unheard',
+    'confirm',
+    'muted',
+  ];
+  const FAILURES = [
+    'unheard',
+    'misheard',
+    'selfheard',
+    'interrupted',
+    'transport',
+    'muted',
+  ];
+  const KEYS = new Set([
+    'dockState',
+    'caption',
+    'readbackToken',
+    'micMuted',
+    'chip',
+    'failure',
+    'heard',
+    'meant',
+    'draftId',
+    'armed',
+  ]);
+  const voiceScenarios = EXPECTED_SCENARIOS.filter((n) =>
+    n.startsWith('preview-voice'),
+  );
+  const get = (state: State, path: string) =>
+    step(state, { method: 'GET', path }).out;
+  const file = (rel: string) => readJson<Golden>(join(scenariosDir, rel));
+  const voiceOf = (status: Record<string, Json>): Record<string, Json> =>
+    (status.meta as { voice: Record<string, Json> }).voice;
+
+  it('nine scenarios, the three sizes and all six failure modes', () => {
+    expect(voiceScenarios).toHaveLength(9);
+    const sizes = new Set<string>();
+    const failures = new Set<string>();
+    for (const name of voiceScenarios) {
+      const voice = voiceOf(body(get(switchTo(name), '/v1/status')));
+      sizes.add(voice.dockState as string);
+      if (voice.failure) failures.add(voice.failure as string);
+    }
+    expect([...sizes].sort()).toEqual([...SIZES].sort());
+    expect([...failures].sort()).toEqual([...FAILURES].sort());
+  });
+
+  it('every voice state is well formed, captioned, and arms only a pending draft', () => {
+    for (const name of voiceScenarios) {
+      const state = switchTo(name);
+      const status = body(get(state, '/v1/status'));
+      expect(Object.keys(status.meta as object), name).toEqual(['voice']);
+      const voice = voiceOf(status);
+      for (const k of Object.keys(voice))
+        expect(KEYS.has(k), `${name}: key ${k}`).toBe(true);
+      expect(SIZES, name).toContain(voice.dockState);
+      expect(CHIPS, name).toContain(voice.chip);
+      expect(typeof voice.caption, name).toBe('string');
+      expect((voice.caption as string).trim().length, name).toBeGreaterThan(0);
+      expect(typeof voice.micMuted, name).toBe('boolean');
+      expect(
+        voice.readbackToken === null || typeof voice.readbackToken === 'string',
+        name,
+      ).toBe(true);
+      if (voice.failure !== undefined)
+        expect(FAILURES, name).toContain(voice.failure);
+      if (voice.armed !== undefined) {
+        expect(typeof voice.armed, name).toBe('boolean');
+        const drafts = body(get(state, '/v1/drafts')).drafts as {
+          id: string;
+          state: string;
+        }[];
+        const armedFor = drafts.find((d) => d.id === voice.draftId);
+        expect(armedFor?.state, `${name}: ${String(voice.draftId)}`).toBe(
+          'pending',
+        );
+      }
+      // The rest of status is rich's: the voice dock adds meta, nothing else.
+      const rich = file('rich/responses/status.json').body as Record<
+        string,
+        Json
+      >;
+      const { meta: _meta, ...rest } = status;
+      expect(rest, name).toEqual(rich);
+    }
+  });
+
+  it('only the confirm scenario is armed and clean; selfheard and transport are not', () => {
+    const armed = voiceScenarios.filter((name) => {
+      const voice = (
+        file(`${name}/responses/status.json`).body as {
+          meta: { voice: Record<string, Json> };
+        }
+      ).meta.voice;
+      return voice.armed === true && voice.failure === undefined;
+    });
+    expect(armed).toEqual(['preview-voice-confirm']);
   });
 });

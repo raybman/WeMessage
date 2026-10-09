@@ -172,6 +172,49 @@ public final class ShellModel {
     return WhatsAppBoardModel.make(availability(.whatsapp), chipText: TestHooks.previewChipText)
   }
 
+  // MARK: v2 B4, board 07
+
+  /// The voice state the confirm card's Cancel disarmed: the card stays
+  /// disarmed until the voice state changes (D-UI-173).
+  public internal(set) var voiceCancelled: JSONValue?
+
+  /// Board 07's dock over the open thread (v2 B4), from status.meta.voice.
+  /// Nil unless the fixture gate is open (only the UI-test flag opens it,
+  /// H-B-1), a thread is open and the status carries a voice state: the
+  /// real daemon never sends one, so the released app never draws a dock.
+  var voiceDock: VoiceDockModel? {
+    guard state.previewGate != .closed, let thread = selected else { return nil }
+    let voice = status?.meta?["voice"]
+    guard
+      let dock = VoiceDockModel.make(
+        voice, threadTitle: thread.title, pendingDraftId: pendingDraft(for: thread.chatGuid)?.id)
+    else { return nil }
+    guard dock.armed, voice == voiceCancelled else { return dock }
+    return VoiceDockModel(
+      size: dock.size, chip: dock.chip, caption: dock.caption, micMuted: dock.micMuted,
+      readbackToken: dock.readbackToken, failure: dock.failure, failureLine: dock.failureLine,
+      draftId: dock.draftId, armed: false)
+  }
+
+  /// The confirm card's Cancel (a click, D-UI-177): disarms this voice
+  /// state's card. The draft stays pending; nothing reaches the daemon.
+  public func voiceCancel() {
+    voiceCancelled = status?.meta?["voice"]
+  }
+
+  /// cmd-Return (or Send) on board 07's armed confirm card: the thread's
+  /// pending draft, approved through approvePending, the same gates, the
+  /// same funnel and the same undo window as A. A spoken approve only arms
+  /// the card; this is the one way it proceeds. False, and nothing done,
+  /// unless the card is armed for this thread's pending draft.
+  @discardableResult
+  public func voiceCommit(in chatGuid: String) -> Bool {
+    guard selectedThread == chatGuid, let dock = voiceDock, dock.armed,
+      let draft = pendingDraft(for: chatGuid), draft.id == dock.draftId
+    else { return false }
+    return approvePending(in: chatGuid)
+  }
+
   /// Board 10.A: the trust banner's line, nil while no connected channel
   /// is stale.
   public var trustLine: String? { TrustBanner.line(board: board) }

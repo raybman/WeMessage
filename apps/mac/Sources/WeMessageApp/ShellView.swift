@@ -358,6 +358,16 @@ enum ShellID {
   static let whatsAppBanner = "wemessage.board.whatsapp.banner"
   static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
   static let fixtureChip = "wemessage.board.chip"
+  // v2 B4, board 07: the voice dock over the open thread, its one chip,
+  // the caption, the mic indicator, the confirm card and the failure line.
+  static let voiceDockBoard07 = "wemessage.voicedock"
+  static let voiceDockChip = "wemessage.voicedock.chip"
+  static let voiceDockCaption = "wemessage.voicedock.caption"
+  static let voiceDockMic = "wemessage.voicedock.mic"
+  static let voiceDockCard = "wemessage.voicedock.card"
+  static let voiceDockSend = "wemessage.voicedock.card.send"
+  static let voiceDockCancel = "wemessage.voicedock.card.cancel"
+  static let voiceDockFailure = "wemessage.voicedock.failure"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

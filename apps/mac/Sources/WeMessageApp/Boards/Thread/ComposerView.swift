@@ -149,6 +149,9 @@ struct ComposerView: View {
         // itself. Anything without cmd falls through to the editor: a newline.
         .onKeyPress(.return, phases: .down) { press in
           guard press.modifiers.contains(.command) else { return .ignored }
+          // Board 07: an armed voice card takes cmd-Return first, through
+          // approvePending; anywhere else it is the typed send.
+          if model.voiceCommit(in: guid) { return .handled }
           send(gesture: .commandReturn)
           return .handled
         }

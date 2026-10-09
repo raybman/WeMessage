@@ -90,9 +90,9 @@ struct VoiceChip: View {
         }
       }
       .fixedSize()
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel(chip.label)
-      .accessibilityValue(chip.rawValue)
+      // The Text stays the element, so it keeps the static-text role and
+      // its words: an element of its own (children ignored) audits as
+      // "Unknown role" (run 37933684286).
       .accessibilityIdentifier(ShellID.voiceDockChip)
   }
 }
@@ -200,5 +200,8 @@ struct VoiceConfirmCard: View {
         .foregroundStyle(Tokens.color(palette.ink))
         .lineLimit(1)
     }
+    // One element per row ("To, Priya"): a key alone is too small for the
+    // audit's contrast check to measure (run 37933684286).
+    .accessibilityElement(children: .combine)
   }
 }

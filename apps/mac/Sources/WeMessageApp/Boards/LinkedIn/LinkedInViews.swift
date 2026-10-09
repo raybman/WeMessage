@@ -535,7 +535,7 @@ struct LinkedInFoot: View {
         }
         Text(line(reason))
           .font(.system(size: 11, weight: reason == .paused ? .semibold : .regular))
-          .foregroundStyle(Tokens.color(reason == .paused ? Tokens.danger : palette.inkDim))
+          .foregroundStyle(Tokens.color(reason == .paused ? palette.ink : palette.inkDim))
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityLabel(line(reason))

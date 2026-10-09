@@ -1,0 +1,21 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;riya-kapoor",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0501",
+        "from": "them",
+        "kind": "text",
+        "text": "Saw your post about the adapter rollout. Would love to hear how it went.",
+        "at": "2026-08-20T10:00:00.000Z",
+        "handle": "riya-kapoor",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

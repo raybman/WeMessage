@@ -1,0 +1,30 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;tomas-kral",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0601",
+        "from": "them",
+        "kind": "text",
+        "text": "Yes, interested. Thursday afternoon works for a first call.",
+        "at": "2026-08-31T15:00:00.000Z",
+        "handle": "tomas-kral",
+        "attachments": 0,
+        "meta": {
+          "commercial": {
+            "kind": "job",
+            "title": "Applied: Staff Engineer, Booking Platform",
+            "detail": "Sep 14 · 8 years · Currently at Fabrikam · Austin",
+            "file": "tomas-kral-resume.pdf",
+            "fileBytes": 188416
+          }
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;marcus-tan",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0101",
+        "from": "them",
+        "kind": "text",
+        "text": "Thanks for connecting! Saw your talk on booking-engine adapters, would love to compare notes sometime.",
+        "at": "2026-09-01T11:04:00.000Z",
+        "handle": "marcus-tan",
+        "attachments": 0
+      },
+      {
+        "guid": "li-0102",
+        "from": "me",
+        "kind": "text",
+        "text": "Likewise. Free Thursday?",
+        "at": "2026-09-01T11:20:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "li-0103",
+        "from": "them",
+        "kind": "text",
+        "text": "Actually Friday is better for me, does that still work?",
+        "at": "2026-09-01T11:38:00.000Z",
+        "handle": "marcus-tan",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

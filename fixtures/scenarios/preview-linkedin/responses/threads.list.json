@@ -1,0 +1,139 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "chatGuid": "linkedin;-;marcus-tan",
+        "channel": "linkedin",
+        "title": "Marcus Tan",
+        "isGroup": false,
+        "lastLine": "Actually Friday is better for me, does that still work?",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:38:00.000Z",
+        "meta": {
+          "inbox": "personal",
+          "category": "focused",
+          "eligibility": 0,
+          "degree": "1st",
+          "headline": "Principal Engineer, Fabrikam",
+          "location": "Austin",
+          "alsoReachable": "m.tan@example.com",
+          "history": {
+            "email": "1 thread, last Aug 2026"
+          }
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;priya-raman",
+        "channel": "linkedin",
+        "title": "Priya Raman",
+        "isGroup": false,
+        "lastLine": "Quick question about your API and whether you would be open to a short call. We are evaluating adapters for a 40-property group.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:28:00.000Z",
+        "meta": {
+          "inbox": "personal",
+          "category": "other",
+          "eligibility": 3,
+          "requestState": "pending",
+          "degree": "2nd",
+          "headline": "Staff Engineer, Northwind",
+          "location": "San Francisco",
+          "shared": "Both in Hotel Tech Founders",
+          "alsoReachable": "p.raman@example.com",
+          "history": {
+            "email": "2 threads, last Mar 2025"
+          }
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;grace-moreno",
+        "channel": "linkedin",
+        "title": "Grace Moreno",
+        "isGroup": false,
+        "lastLine": "Sure, send the one-pager and I will loop in our IT lead.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:20:00.000Z",
+        "meta": {
+          "inbox": "salesNav",
+          "category": "focused",
+          "eligibility": 1,
+          "degree": "2nd",
+          "headline": "VP Ops, Woodgrove Hotels",
+          "location": "Denver"
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;dana-whitfield",
+        "channel": "linkedin",
+        "title": "Dana Whitfield",
+        "isGroup": false,
+        "lastLine": "Hi Avery, your adapter work caught our eye. We are hiring a Staff Engineer for the booking platform team, hybrid Austin. Open to a conversation?",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T16:10:00.000Z",
+        "meta": {
+          "inbox": "personal",
+          "category": "focused",
+          "eligibility": 2,
+          "degree": "2nd",
+          "headline": "Technical Recruiter, Contoso",
+          "location": "Austin"
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;tomas-kral",
+        "channel": "linkedin",
+        "title": "Tomas Kral",
+        "isGroup": false,
+        "lastLine": "Yes, interested. Thursday afternoon works for a first call.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T15:00:00.000Z",
+        "meta": {
+          "inbox": "recruiter",
+          "category": "focused",
+          "eligibility": 2,
+          "degree": "2nd",
+          "headline": "Senior Engineer, Fabrikam",
+          "location": "Austin",
+          "project": "Staff Eng Q4"
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;contoso-talent",
+        "channel": "linkedin",
+        "title": "Contoso Talent",
+        "isGroup": false,
+        "lastLine": "Join engineers who are building the future of hospitality software. Contoso is hiring across platform and payments.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T09:00:00.000Z",
+        "meta": {
+          "inbox": "personal",
+          "category": "other",
+          "eligibility": 4,
+          "headline": "Company page, not a person"
+        }
+      },
+      {
+        "chatGuid": "linkedin;-;riya-kapoor",
+        "channel": "linkedin",
+        "title": "Riya Kapoor",
+        "isGroup": false,
+        "lastLine": "Saw your post about the adapter rollout. Would love to hear how it went.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-20T10:00:00.000Z",
+        "meta": {
+          "inbox": "personal",
+          "category": "other",
+          "eligibility": 4,
+          "degree": "3rd",
+          "headline": "Product Lead, Litware",
+          "location": "Toronto"
+        }
+      }
+    ],
+    "nextCursor": null,
+    "total": 7,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;priya-raman",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0401",
+        "from": "them",
+        "kind": "text",
+        "text": "Quick question about your API and whether you would be open to a short call. We are evaluating adapters for a 40-property group.",
+        "at": "2026-09-01T11:28:00.000Z",
+        "handle": "priya-raman",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

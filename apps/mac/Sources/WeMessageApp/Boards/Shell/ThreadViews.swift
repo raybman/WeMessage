@@ -18,6 +18,23 @@ struct ChannelTag: View {
   }
 }
 
+/// A LinkedIn row's origin tag (D-UI-161): the channel tag's shape in the
+/// dim ink, so it reads as softer than the channel.
+struct OriginTag: View {
+  let text: String
+  let palette: Tokens.Palette
+
+  var body: some View {
+    Text(text)
+      .font(.system(size: 8, weight: .bold, design: .monospaced))
+      .foregroundStyle(Tokens.color(palette.inkDim))
+      .fixedSize()
+      .padding(.vertical, 2)
+      .padding(.horizontal, 3)
+      .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Tokens.color(palette.inkDim, opacity: 0.6), lineWidth: 1))
+  }
+}
+
 /// One conversation in the list (wireframe .conv). One accessibility
 /// element; never a Tab stop (the rows are reached with the arrows in S4d).
 struct ListRow: View {
@@ -36,6 +53,9 @@ struct ListRow: View {
   var checked = false
   /// The contact's photo, or nil for the initials disc (S4g).
   var image: NSImage? = nil
+  /// Board 04: the LinkedIn inbox a row came from (MSG, SN, REC), drawn as
+  /// a soft tag while the LinkedIn tile shows every inbox (D-UI-161).
+  var originTag: String? = nil
   let action: () -> Void
 
   private var spoken: String {
@@ -58,6 +78,21 @@ struct ListRow: View {
     }
   }
 
+  /// The channel tag, and on board 04 the origin tag (v2 B3).
+  @ViewBuilder private var tags: some View {
+    if showsChannel { ChannelTag(channel: thread.channel, palette: palette) }
+    if let originTag { OriginTag(text: originTag, palette: palette) }
+  }
+
+  /// Under the UI-test flag: the avatar's kind, an untagged row, and board
+  /// 04's origin tag when one is drawn.
+  private var axValue: String {
+    guard TestHooks.isUITest else { return "" }
+    let kind = image == nil ? "initials" : "photo"
+    let untagged = showsChannel ? "" : " untagged"
+    return kind + untagged + (originTag.map { " " + $0 } ?? "")
+  }
+
   var body: some View {
     Button(action: action) {
       HStack(alignment: .top, spacing: 8) {
@@ -71,7 +106,7 @@ struct ListRow: View {
         AvatarView(thread: thread, image: image, size: 36)
         VStack(alignment: .leading, spacing: 2) {
           HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if showsChannel { ChannelTag(channel: thread.channel, palette: palette) }
+            tags
             Text(thread.title)
               .font(.system(size: 12, weight: .semibold))
               .foregroundStyle(Tokens.color(palette.ink))
@@ -121,7 +156,7 @@ struct ListRow: View {
     // Under the UI-test flag only: which avatar the row draws, so board 01
     // can hold both a photo and an initials disc on screen (S4g).
     // Board 03 (v2 B1) adds whether the row drew its channel tag.
-    .accessibilityValue(TestHooks.isUITest ? (image == nil ? "initials" : "photo") + (showsChannel ? "" : " untagged") : "")
+    .accessibilityValue(axValue)
     // Ignoring children drops the Button's press; give it back so
     // VoiceOver and the audit see an action on the row.
     .accessibilityAction { action() }
@@ -160,9 +195,10 @@ struct ContentPane: View {
     }
   }
 
-  /// The audit, the bulk card, a WhatsApp chat in board 03 (v2 B1),
-  /// board 05 (v2 B2), the thread, board 03 (v2 B0), a zero screen
-  /// outside Recent, or the empty state, in that order.
+  /// The audit, the bulk card, a WhatsApp chat in board 03 (v2 B1), a
+  /// LinkedIn thread in board 04 (v2 B3), board 05 (v2 B2), board 04 with
+  /// no thread open, the thread, board 03 (v2 B0), a zero screen outside
+  /// Recent, or the empty state, in that order.
   @ViewBuilder private var pane: some View {
     if model.auditShown {
       AuditView(model: model, palette: palette)
@@ -171,8 +207,13 @@ struct ContentPane: View {
     } else if let thread = model.selected, let board = model.whatsAppBoard(for: thread) {
       // v2 B1: a WhatsApp chat opens inside board 03, read only.
       WhatsAppThreadPane(model: model, thread: thread, board: board, palette: palette)
+    } else if let thread = model.selected, let board = model.linkedInBoard(for: thread) {
+      // v2 B3: a LinkedIn thread opens inside board 04.
+      LinkedInPane(model: model, board: board, thread: thread, palette: palette)
     } else if let board = model.emailBoard {
       EmailBoardView(model: model, board: board, palette: palette)
+    } else if let board = model.linkedInBoard {
+      LinkedInPane(model: model, board: board, thread: nil, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {
         ThreadHeader(thread: thread, image: model.avatars.image(for: thread), asOf: model.thread.asOf, palette: palette) {

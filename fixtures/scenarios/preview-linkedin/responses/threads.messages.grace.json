@@ -1,0 +1,35 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;grace-moreno",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0201",
+        "from": "me",
+        "kind": "text",
+        "text": "Grace, we integrate directly with the booking engine you already run. Happy to send a one-pager if it helps.",
+        "at": "2026-08-28T15:00:00.000Z",
+        "attachments": 0,
+        "meta": {
+          "inMail": {
+            "subject": "Adapters for the Woodgrove portfolio",
+            "credits": 0
+          }
+        }
+      },
+      {
+        "guid": "li-0202",
+        "from": "them",
+        "kind": "text",
+        "text": "Sure, send the one-pager and I will loop in our IT lead.",
+        "at": "2026-09-01T11:20:00.000Z",
+        "handle": "grace-moreno",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

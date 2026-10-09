@@ -1,0 +1,4 @@
+{
+  "summary": "Board 04, LinkedIn pushed back: the preview-linkedin threads, with status.meta.linkedin saying all LinkedIn activity is paused until a stated time. Reading still works; nothing can become a draft. Fake daemon only.",
+  "extends": "preview-linkedin"
+}

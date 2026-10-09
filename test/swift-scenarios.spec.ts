@@ -822,9 +822,9 @@ function merge(shape: Shape | null, v: Json): Shape {
  */
 const SUPPLEMENT: Record<string, Record<string, string[]>> = {
   'GET /v1/threads/:guid/messages': {
-    'turns[]': ['editedAt', 'unsentAt', 'handle'],
+    'turns[]': ['editedAt', 'unsentAt', 'handle', 'meta'],
   },
-  'GET /v1/threads': { 'threads[]': ['displayName', 'title'] },
+  'GET /v1/threads': { 'threads[]': ['displayName', 'title', 'meta'] },
   'GET /v1/drafts': {
     'drafts[]': ['ruleId', 'sendNotBefore', 'proactiveReason', 'error'],
   },
@@ -864,6 +864,9 @@ const NULLABLE: Record<string, string[]> = {
  */
 const OPEN: Record<string, string[]> = {
   'GET /v1/adapters': ['adapters[].config'],
+  // v2 Phase B: per-board fixture detail, preview-* scenarios only (row below).
+  'GET /v1/threads': ['threads[].meta'],
+  'GET /v1/threads/:guid/messages': ['turns[].meta'],
   'GET /v1/settings': ['settings'],
   'PATCH /v1/settings': ['settings'],
   'GET /v1/status': ['adapters'],
@@ -1118,7 +1121,7 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
     }
   });
 
-  it('synthetic only: no public-string offenders, emails only at example.com, the fixture state only under preview-*', () => {
+  it('synthetic only: no public-string offenders, emails only at example.com, the fixture state and meta only under preview-*', () => {
     const offenders: string[] = [];
     let phones = 0;
     let fixtureStates = 0;
@@ -1137,6 +1140,10 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
       // mirrors the real daemon can never carry it by accident.
       if (FIXTURE_WORD_RE.test(text) && !rel.startsWith('preview-'))
         offenders.push(`${rel}: the fixture word outside preview-*`);
+      // v2 Phase B: per-board `meta` is fixture detail the real daemon never
+      // sends, so it rides only in the preview-* scenarios.
+      if (/"meta"\s*:/.test(text) && !rel.startsWith('preview-'))
+        offenders.push(`${rel}: meta outside preview-*`);
       fixtureStates += text.split(FIXTURE_STATE).length - 1;
     }
     expect(phones).toBeGreaterThan(20);

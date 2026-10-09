@@ -1,0 +1,4 @@
+{
+  "summary": "Board 03 over fixtures with zero threads: WhatsApp in the fixture state, iMessage connected and scanned, zero threads and zero drafts, so the WhatsApp board renders its New here empty state. Fake daemon only; the real daemon cannot say this state.",
+  "extends": "preview-whatsapp"
+}

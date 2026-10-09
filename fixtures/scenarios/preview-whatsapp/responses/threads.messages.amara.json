@@ -1,0 +1,29 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;-;+15550142003",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0301",
+        "from": "me",
+        "kind": "text",
+        "text": "Same time next week?",
+        "at": "2026-08-31T15:40:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "wa-0302",
+        "from": "them",
+        "kind": "text",
+        "text": "Same time next week works.",
+        "at": "2026-08-31T16:00:00.000Z",
+        "handle": "+15550142003",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

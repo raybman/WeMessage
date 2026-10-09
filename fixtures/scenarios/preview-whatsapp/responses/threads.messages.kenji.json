@@ -1,0 +1,49 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;-;+15550142005",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0501",
+        "from": "them",
+        "kind": "text",
+        "text": "Pictures from the coast, the light was unreal.",
+        "at": "2026-09-01T08:40:00.000Z",
+        "handle": "+15550142005",
+        "attachments": 0
+      },
+      {
+        "guid": "wa-0502",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T08:41:00.000Z",
+        "handle": "+15550142005",
+        "attachments": 1,
+        "meta": {
+          "mediaState": "onDemand",
+          "mediaKind": "photo",
+          "mediaBytes": 1240000
+        }
+      },
+      {
+        "guid": "wa-0503",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T08:41:30.000Z",
+        "handle": "+15550142005",
+        "attachments": 1,
+        "meta": {
+          "mediaState": "onDemand",
+          "mediaKind": "video",
+          "mediaBytes": 8400000
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

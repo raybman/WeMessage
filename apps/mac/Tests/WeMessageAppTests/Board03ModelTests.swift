@@ -286,4 +286,50 @@ struct Board03ModelTests {
     #expect(WhatsAppLook.reactionFill.rgb == Tokens.tint)
     #expect(WhatsAppLook.reactionFill.alpha == 0.12)
   }
+
+  // MARK: the fixture board
+
+  @Test("B1 03: the fixture board's six threads read into every state the board draws")
+  func fixtureBoard() throws {
+    let threads = try JSONDecoder().decode(
+      ThreadsPage.self, from: Reply.scenario("preview-whatsapp", "threads.list.json").body
+    ).threads
+    #expect(threads.count == 6)
+    #expect(threads.allSatisfy { $0.channel == "whatsapp" })
+    let metas = threads.map { WhatsAppThreadMeta.parse($0.meta) }
+    #expect(Set(metas.map(\.linkedDevice)) == [.linked, .expired, .relinking])
+    #expect(Set(metas.map(\.phonePanel)) == [.online, .offline])
+    #expect(metas.allSatisfy { $0.historyHorizon != nil })
+    #expect(threads.filter(\.isGroup).count == 1)
+    #expect(WhatsAppDevicePanel.make(metas[0], asOf: Self.asOf) == .linked(days: 18, warnDaysLeft: 2))
+
+    var displays: [WhatsAppTurn.Display] = []
+    var voice: MessageTurn.Kind?
+    var reactions = 0
+    for name in ["ines", "tomas", "rowing", "kenji", "lucia", "amara"] {
+      let page = try JSONDecoder().decode(
+        ThreadMessagesPage.self, from: Reply.scenario("preview-whatsapp", "threads.messages.\(name).json").body)
+      let turns = WhatsAppTurn.turns(page)
+      #expect(turns.count == page.turns.count, "\(name) drops a turn")
+      displays += turns.map(\.display)
+      reactions += turns.map(\.meta.reactions.count).reduce(0, +)
+      if let note = turns.first(where: { if case .voice = $0.turn.kind { true } else { false } }) { voice = note.turn.kind }
+    }
+    #expect(displays.contains(.notShown(.disappearing)))
+    #expect(displays.contains(.notShown(.viewOnce)))
+    #expect(displays.contains(.notShown(.poll)))
+    #expect(displays.contains(.onDemand(.photo, bytes: 1_240_000)))
+    #expect(displays.contains(.onDemand(.video, bytes: 8_400_000)))
+    #expect(reactions == 3)
+    if case .voice(let transcript, let seconds) = voice {
+      #expect(seconds == 15)
+      #expect(transcript?.isEmpty == false)
+    } else {
+      Issue.record("no voice note in the fixture board")
+    }
+
+    let empty = try JSONDecoder().decode(
+      ThreadsPage.self, from: Reply.scenario("preview-whatsapp-empty", "threads.list.json").body)
+    #expect(empty.threads.isEmpty)
+  }
 }

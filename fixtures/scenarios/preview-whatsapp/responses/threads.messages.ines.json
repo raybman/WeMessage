@@ -1,0 +1,58 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;-;+15550142001",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0101",
+        "from": "them",
+        "kind": "text",
+        "text": "Are we still on for the gallery opening?",
+        "at": "2026-08-31T18:20:00.000Z",
+        "handle": "+15550142001",
+        "attachments": 0
+      },
+      {
+        "guid": "wa-0102",
+        "from": "me",
+        "kind": "text",
+        "text": "Yes, I will meet you at the door at seven.",
+        "at": "2026-08-31T18:24:00.000Z",
+        "attachments": 0,
+        "meta": {
+          "reactions": [
+            {
+              "emoji": "❤",
+              "from": "+15550142001"
+            }
+          ]
+        }
+      },
+      {
+        "guid": "wa-0103",
+        "from": "them",
+        "kind": "audio",
+        "text": null,
+        "at": "2026-09-01T11:52:00.000Z",
+        "handle": "+15550142001",
+        "attachments": 0,
+        "meta": {
+          "voiceNote": {
+            "durationMs": 14600,
+            "transcript": "Running a little late, the train is held at the bridge. Save me a spot near the front."
+          },
+          "reactions": [
+            {
+              "emoji": "👍",
+              "from": "me"
+            }
+          ]
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

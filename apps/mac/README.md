@@ -86,6 +86,14 @@ Board05Tests        board 05 from the preview-email scenario: the Email rail
                     the list, shift-R opening Reply all, Undo writing nothing,
                     and Send writing exactly one POST /v1/drafts after the
                     30 s window
+Board07Tests        board 07, the voice dock, from the preview-voice
+                    scenarios in one launch per appearance: three sizes
+                    bottom-centre over the reader with the draft never under
+                    the dock, the caption always drawn and no switch in the
+                    dock, the six failure lines, a disarmed card that ignores
+                    cmd-Return, and an armed card whose cmd-Return starts the
+                    approve window and ends in one POST
+                    /v1/drafts/drf-0102/approve, never /v1/send
 ```
 
 Every UI test class resets the fake daemon in `setUp` (S0 goldens, empty
@@ -468,6 +476,14 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.board.whatsapp.notshown.<guid>` (D-UI-147). In a single
   scope list rows carry the value suffix ` untagged` under the UI-test
   flag (wireframe 03 legend 4)
+- Board 07's voice dock `wemessage.voicedock`, drawn over the open thread's
+  transcript only under the UI-test flag, from the fake daemon's
+  `status.meta.voice` (v2 B4, D-UI-138 and 170..179): its one chip
+  `wemessage.voicedock.chip`, the always-on caption
+  `wemessage.voicedock.caption`, the mic indicator `wemessage.voicedock.mic`,
+  the failure line `wemessage.voicedock.failure`, and the confirm card
+  `wemessage.voicedock.card` with `wemessage.voicedock.card.send` (cmd-Return)
+  and `wemessage.voicedock.card.cancel`
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the
@@ -609,4 +625,45 @@ D-UI-148  118       the head's line: one to one, the channel, the number, when
 D-UI-149  119       media the phone has not sent is a dashed tile with a down
                     arrow, its kind and size; pressing it says download on
                     demand is not built and nothing was fetched
+```
+
+- Board 07 (v2 B4) is a shell over fixtures. There is no microphone, no
+  audio and no speech engine: every dock state is `status.meta.voice` from a
+  preview-voice scenario, read only behind the fixture gate, and
+  `VoiceDockHygieneTests` (H-B-5) fails if an audio or speech framework, a
+  microphone entitlement or a usage string reaches the app. A spoken
+  approve only arms the confirm card; cmd-Return is the one way forward,
+  through `approvePending` and the same window as A. Its provisional
+  values live in `Sources/WeMessageApp/ProvisionalUI+Board07.swift`:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-138  108       the dock is anchored bottom-centre over the reader, 12 pt
+                    above its bottom edge, in three widths: idle 320,
+                    speaking 420, confirm 520 pt
+D-UI-170  (B4)      nine chips, one at a time, each a glyph and a word:
+                    Idle, Listening, Speaking, Thinking, Driving,
+                    Interrupted, Did not catch that, Confirm, Muted by you
+D-UI-171  (B4)      chip shapes: a 1 pt ink outline; Confirm 3 pt; the
+                    unheard chip dashed; Muted by you inverted; the active
+                    chips bold. Never a colour
+D-UI-172  (B4)      the caption is always drawn, 13 pt ink, at most three
+                    lines, with no switch; a state with no words of its own
+                    reads its chip's word
+D-UI-173  (B4)      the confirm card names the recipient, the channel, the
+                    readback token and the draft verbatim; armed by voice,
+                    it proceeds only on cmd-Return (or a click on Send);
+                    Cancel disarms it
+D-UI-174  (B4)      the six failure lines (07.F), one under the caption
+D-UI-175  (B4)      the mic indicator, in words: muted or open
+D-UI-176  (B4)      the dock is opaque layer1 with a 1 pt inkDim rule and a
+                    14 pt corner; glass waits for a real engine
+D-UI-177  (B4)      Cancel is a click, never Escape, so Escape keeps its
+                    ladder
+D-UI-178  (B4)      the dock is drawn over the open thread's transcript
+                    only, never over the banner or the composer, and only
+                    while the fixture gate is open
+D-UI-179  (B4)      the reader insets by the dock's measured overlap plus
+                    the gap, never a fixed height
 ```

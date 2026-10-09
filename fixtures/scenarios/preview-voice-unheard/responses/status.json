@@ -72,11 +72,12 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
+        "dockState": "speaking",
+        "caption": "Nothing heard for eight seconds.",
         "readbackToken": null,
         "micMuted": false,
-        "chip": "idle"
+        "chip": "unheard",
+        "failure": "unheard"
       }
     }
   }

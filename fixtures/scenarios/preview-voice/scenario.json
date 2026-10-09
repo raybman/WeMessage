@@ -1,4 +1,4 @@
 {
-  "summary": "The voice dock over fixtures: every channel as the real daemon reports it, zero threads and zero drafts. A later slice adds the dock state to status. Fake daemon only.",
-  "extends": "quiet"
+  "summary": "Board 07, the voice dock over fixtures: the rich queue and threads, with status.meta.voice saying the dock is idle. No speech engine exists in this version; the dock state comes only from these files. Fake daemon only.",
+  "extends": "rich"
 }

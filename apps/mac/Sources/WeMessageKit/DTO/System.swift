@@ -150,9 +150,13 @@ public struct StatusPayload: Codable, Equatable, Sendable {
   /// v2 B0: required. Which message channels this version reads, one entry
   /// per channel in rail order.
   public var channels: [ChannelStatusPayload]
+  /// v2 Phase B: board-level fixture detail (board 07's voice dock reads
+  /// meta.voice). Only the fake daemon's preview-* scenarios send it; the
+  /// real daemon never does. Absent means none.
+  public var meta: [String: JSONValue]?
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case connectionState, cursor, counts, adapters, killSwitch, armed, channels
+    case connectionState, cursor, counts, adapters, killSwitch, armed, channels, meta
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -164,6 +168,7 @@ public struct StatusPayload: Codable, Equatable, Sendable {
     try c.encode(killSwitch, forKey: .killSwitch)
     try c.encode(armed, forKey: .armed)
     try c.encode(channels, forKey: .channels)
+    try c.encodeIfPresent(meta, forKey: .meta)
   }
 }
 
@@ -177,6 +182,7 @@ extension StatusPayload {
     killSwitch = try c.decode(Bool?.self, forKey: .killSwitch)
     armed = try c.decode(ArmingStatePayload?.self, forKey: .armed)
     channels = try c.decode([ChannelStatusPayload].self, forKey: .channels)
+    meta = try c.decodeIfPresent([String: JSONValue].self, forKey: .meta)
   }
 }
 

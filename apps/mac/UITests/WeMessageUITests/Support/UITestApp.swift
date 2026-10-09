@@ -318,6 +318,15 @@ enum ID {
   static let whatsAppVoicePrefix = "wemessage.board.whatsapp.voice."
   static let whatsAppMediaPrefix = "wemessage.board.whatsapp.media."
   static let whatsAppNotShownPrefix = "wemessage.board.whatsapp.notshown."
+  // v2 B4, board 07.
+  static let voiceDockBoard07 = "wemessage.voicedock"
+  static let voiceDockChip = "wemessage.voicedock.chip"
+  static let voiceDockCaption = "wemessage.voicedock.caption"
+  static let voiceDockMic = "wemessage.voicedock.mic"
+  static let voiceDockCard = "wemessage.voicedock.card"
+  static let voiceDockSend = "wemessage.voicedock.card.send"
+  static let voiceDockCancel = "wemessage.voicedock.card.cancel"
+  static let voiceDockFailure = "wemessage.voicedock.failure"
   // v2 B2, board 05: the board, its banner, the open thread and a card per
   // message (this prefix and the turn guid), the images line per message
   // (value "blocked" or "loaded") and its Load images, the invite, the

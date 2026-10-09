@@ -1,0 +1,4 @@
+{
+  "summary": "Board 07, failure: barge-in. Playout stopped mid-word and the view stays where it was. Fake daemon only.",
+  "extends": "preview-voice"
+}

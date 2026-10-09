@@ -204,6 +204,12 @@ export interface StatusPayload {
    * so this mirror does not name it.
    */
   channels: ChannelStatusPayload[];
+  /**
+   * v2 B4: board-level fixture detail (board 07's voice dock reads
+   * meta.voice), sent only by the fake daemon's preview-* scenarios. The
+   * real daemon never emits it.
+   */
+  meta?: Record<string, unknown>;
 }
 
 /** v2 B0: one channel's availability, as `GET /v1/status` carries it. */

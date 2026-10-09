@@ -373,6 +373,16 @@ enum ShellID {
   static let whatsAppVoicePrefix = "wemessage.board.whatsapp.voice."
   static let whatsAppMediaPrefix = "wemessage.board.whatsapp.media."
   static let whatsAppNotShownPrefix = "wemessage.board.whatsapp.notshown."
+  // v2 B4, board 07: the voice dock over the open thread, its one chip,
+  // the caption, the mic indicator, the confirm card and the failure line.
+  static let voiceDockBoard07 = "wemessage.voicedock"
+  static let voiceDockChip = "wemessage.voicedock.chip"
+  static let voiceDockCaption = "wemessage.voicedock.caption"
+  static let voiceDockMic = "wemessage.voicedock.mic"
+  static let voiceDockCard = "wemessage.voicedock.card"
+  static let voiceDockSend = "wemessage.voicedock.card.send"
+  static let voiceDockCancel = "wemessage.voicedock.card.cancel"
+  static let voiceDockFailure = "wemessage.voicedock.failure"
   // v2 B2, board 05: the Email board, its thread of cards, the verbs, the
   // inline compose and the category chips.
   static let emailBoard = "wemessage.board.email"

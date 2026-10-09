@@ -117,6 +117,10 @@ struct AppHygieneTests {
     "wemessage.board.whatsapp.linked", "wemessage.board.whatsapp.admins", "wemessage.board.whatsapp.relink",
     "wemessage.board.whatsapp.qr", "wemessage.board.whatsapp.encrypted", "wemessage.board.whatsapp.horizon",
     "wemessage.board.whatsapp.phone", "wemessage.board.whatsapp.fetchnote",
+    // v2 B4, board 07.
+    "wemessage.voicedock", "wemessage.voicedock.chip", "wemessage.voicedock.caption", "wemessage.voicedock.mic",
+    "wemessage.voicedock.card", "wemessage.voicedock.card.send", "wemessage.voicedock.card.cancel",
+    "wemessage.voicedock.failure",
   ]
 
   static let nsApp = "NS" + "App"

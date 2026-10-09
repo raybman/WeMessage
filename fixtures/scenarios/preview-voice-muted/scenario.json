@@ -1,0 +1,4 @@
+{
+  "summary": "Board 07, failure mode by choice: muted by you. Readback is suppressed; drafts are shown, never spoken. Fake daemon only.",
+  "extends": "preview-voice"
+}

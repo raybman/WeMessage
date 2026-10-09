@@ -56,6 +56,7 @@ targets:
       - path: Sources/WeMessageApp/ProvisionalUI.swift
       # v2 B1: board 03's provisional values (D-UI-141..149).
       - path: Sources/WeMessageApp/ProvisionalUI+Board03.swift
+      - path: Sources/WeMessageApp/ProvisionalUI+Board07.swift
       # The frost probe patches (S4a), so the backdrop and FrostEvidence agree.
       - path: Sources/WeMessageApp/Glass/FrostProbe.swift
       # Board 05's provisional values (v2 B2), read by Board05Tests.

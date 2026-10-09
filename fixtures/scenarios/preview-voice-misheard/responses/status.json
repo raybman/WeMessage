@@ -72,11 +72,14 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
+        "dockState": "speaking",
+        "caption": "Opening the thread with Priya.",
+        "readbackToken": "Priya",
         "micMuted": false,
-        "chip": "idle"
+        "chip": "driving",
+        "failure": "misheard",
+        "heard": "Priya",
+        "meant": "Maya"
       }
     }
   }

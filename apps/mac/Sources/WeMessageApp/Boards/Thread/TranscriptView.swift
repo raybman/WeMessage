@@ -9,6 +9,9 @@ struct TranscriptView: View {
   @Bindable var model: ShellModel
   let thread: ThreadSummary
   let palette: Tokens.Palette
+  /// Board 07: the room the voice dock takes at the reader's bottom
+  /// (D-UI-179), so the last line is never drawn under it.
+  var bottomInset: CGFloat = 0
 
   private var rows: [TranscriptLayout.Row] {
     guard let asOf = model.thread.asOf, model.thread.guid == thread.chatGuid else { return [] }
@@ -71,6 +74,7 @@ struct TranscriptView: View {
           }
           .padding(.vertical, TranscriptLayout.verticalPadding)
           .padding(.horizontal, TranscriptLayout.horizontalPadding)
+          .padding(.bottom, bottomInset)
           .frame(maxWidth: .infinity)
         }
         .defaultScrollAnchor(.bottom, for: .alignment)

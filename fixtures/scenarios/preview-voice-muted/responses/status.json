@@ -72,11 +72,12 @@
     ],
     "meta": {
       "voice": {
-        "dockState": "idle",
-        "caption": "Ready. Nothing heard yet.",
-        "readbackToken": null,
-        "micMuted": false,
-        "chip": "idle"
+        "dockState": "speaking",
+        "caption": "Readback is off. Priya's draft is on screen.",
+        "readbackToken": "Priya",
+        "micMuted": true,
+        "chip": "muted",
+        "failure": "muted"
       }
     }
   }

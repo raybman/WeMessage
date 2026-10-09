@@ -1,0 +1,4 @@
+{
+  "summary": "Board 07, failure: it heard itself. An approve arrived during its own playout and was discarded; the card is not armed. Fake daemon only.",
+  "extends": "preview-voice"
+}

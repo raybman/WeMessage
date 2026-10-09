@@ -37,7 +37,7 @@
  *     the "wemessaged" gateway daemon and the "wemessage" control CLI.
  *     Both live at Contents/Resources/bin/, NOT Contents/MacOS/. The
  *     bundle has exactly ONE Mach-O (arch F-121) and these two are
- *     `/bin/sh` shims written by `apps/desktop/scripts/bundle-daemon.mjs`;
+ *     `/bin/sh` shims written by `tools/release/bin/bundle-daemon.mjs`;
  *     `apps/desktop/electron-builder.yml` copies `dist-bundle/bin` to
  *     `bin` under Resources. This renderer named Contents/MacOS/ for two
  *     releases and every path it emitted pointed at nothing, which

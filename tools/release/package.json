@@ -8,5 +8,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

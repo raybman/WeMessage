@@ -5,9 +5,9 @@
   file into Contents/ and patches both version keys from the root
   package.json, so the 0.0.0 below is a placeholder and never ships.
 
-  The Automation prompt, the copyright and the category are the same strings
-  apps/desktop/electron-builder.yml gives the Electron app, and
-  test/release/pack-swift.spec.ts holds them equal.
+  The Automation prompt, the copyright and the category are the strings the
+  Electron app shipped. Since v2 S6a test/release/pack-swift.spec.ts pins
+  them as literals, so this lane reads nothing under the Electron app.
 
   No LSUIElement: the host has no UI in this slice and is launched by launchd
   in daemon mode, so there is no Dock icon to hide. No CFBundleURLTypes: the

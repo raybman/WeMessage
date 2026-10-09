@@ -150,6 +150,14 @@ const RASTER_EXTENSIONS = [
 export const RASTER_ALLOWLIST: readonly string[] = [
   'apps/desktop/build/dmg-background.png',
   'apps/desktop/build/icon.icns',
+  // v2 S6a. A byte copy of `apps/desktop/build/icon.icns`, so the Swift
+  // pack lane (`tools/swift/bundle.sh`) reads its icon from the tree of the
+  // Swift app and survives the deletion of the Electron one. Same bytes, so
+  // the same decode and pixel sweep (row 3b) passes for the same reason.
+  // Listed in sorted order because row 3a compares this list to sorted `git
+  // ls-files` output by equality. No apostrophes in these comments: s9-e2e
+  // Sc15 row 4 reads every single-quoted span here as a path.
+  'apps/mac/Resources/icon.icns',
   // s9 Sc 13. The third and last of the rasters this era admits, and the
   // only one a stranger sees before downloading anything. Being on this list
   // is a PROMOTION and not an exemption: `rasterGreenOffenders` decodes all

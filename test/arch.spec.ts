@@ -4605,6 +4605,11 @@ const ARCH_SKIP = new Set([
   // can flip is not a guard. The row below pins this set against .gitignore so
   // the entry cannot quietly become a place to hide a real file.
   'dist-bundle',
+  // v2 S6a. The plain-Node flavour of the same bundle, which pack-swift step 3
+  // now writes to `apps/mac/dist-bundle-node`. Same argument, and the row 5
+  // conviction is the same one: after a local `pack:swift`, its inlined
+  // `daemon/main.mjs` reached `node:child_process` and failed the gate.
+  'dist-bundle-node',
   // s9 Sc6. The pack's outputs, same argument. `dist-pack` holds a COPIED
   // ELECTRON: ~14 Mach-O binaries and a few thousand files of Chromium's
   // resources, none of it written here and all of it visible to a sweep that
@@ -10607,6 +10612,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       'coverage',
       'dist',
       'dist-bundle',
+      'dist-bundle-node',
       'dist-pack',
       'dist-pack-next',
       'node_modules',
@@ -14429,7 +14435,7 @@ describe('v2 S2c.1: host hardening before a signed build gets Full Disk Access',
   const HOST_LAYOUT = `${HOST}/HostLayout.swift`;
   const PACKAGE = 'apps/mac/Package.swift';
   const CI_SWIFT = '.github/workflows/ci-swift.yml';
-  const BUNDLER = 'apps/desktop/scripts/bundle-daemon.mjs';
+  const BUNDLER = 'tools/release/bin/bundle-daemon.mjs';
   const FLAG = 'WEMESSAGE_HOST_OVERRIDES';
   const NODE_KEY = 'WEMESSAGE_HOST_NODE';
   const MAIN_KEY = 'WEMESSAGE_HOST_MAIN';
@@ -14741,5 +14747,105 @@ describe("v2 S2f: Eric's first-install runbook for the Swift build", () => {
     expect(/\/Users\//.test(text)).toBe(false);
     // Every table is fenced: no markdown pipe table anywhere in the file.
     expect(text.split('\n').filter((l) => /^\s*\|/.test(l))).toEqual([]);
+  });
+});
+
+describe('v2 S6a: the Swift pack lane reads nothing under the Electron app', () => {
+  /**
+   * S6c deletes `apps/desktop`. Before it can, every input the Swift pack
+   * lane reads has to live somewhere that survives: the bundler moved to
+   * `tools/release/bin/bundle-daemon.mjs` with `esbuild` as a devDependency
+   * of `@wemessage/release`, and the icon was copied to
+   * `apps/mac/Resources/icon.icns`. These rows hold that line as text, so a
+   * path that quietly reaches back into the Electron app goes red here
+   * rather than the day the directory is gone.
+   *
+   * `bundle-daemon.mjs` itself still names the Electron app on purpose (its
+   * Electron flavour writes there and measures the Electron installed
+   * there), so it is held by its IMPORTS, not its text: no import may
+   * resolve through the Electron app's tree.
+   */
+  const SWIFT_LANE_EXTRA = 'tools/release/bin/pack-swift.mjs';
+  const BUNDLER = 'tools/release/bin/bundle-daemon.mjs';
+  const RELEASE_PKG = 'tools/release/package.json';
+  /** `apps/desktop`, `$repo/apps/desktop`, and `join(REPO, 'apps', 'desktop')`. */
+  const DESKTOP_PATH = /apps['"]?\s*[,/]\s*['"]?desktop\b/;
+
+  const swiftLaneFiles = (): string[] => [
+    ...execFileSync('git', ['ls-files', '--', 'tools/swift'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => f.length > 0),
+    SWIFT_LANE_EXTRA,
+  ];
+
+  /** Every module specifier: static `from`, side-effect `import`, dynamic `import()`. */
+  const specifiers = (text: string): string[] =>
+    [
+      ...text.matchAll(/\bfrom\s*(['"])([^'"\n]+)\1/g),
+      ...text.matchAll(/^\s*import\s*(['"])([^'"\n]+)\1/gm),
+      ...text.matchAll(/\bimport\(\s*(['"])([^'"\n]+)\1\s*\)/g),
+    ].map((m) => m[2] ?? '');
+
+  it('the path pattern is not vacuous: it catches each spelling and passes the new homes', () => {
+    for (const hit of [
+      'apps/desktop/build/icon.icns',
+      'icon="$repo/apps/desktop/build/icon.icns"',
+      "join(REPO, 'apps', 'desktop', 'dist-bundle-node')",
+      "join(REPO, 'apps','desktop')",
+    ])
+      expect([hit, DESKTOP_PATH.test(hit)]).toEqual([hit, true]);
+    for (const miss of [
+      'apps/mac/Resources/icon.icns',
+      "join(REPO, 'apps', 'mac', 'dist-bundle-node')",
+      "join(REPO, 'tools', 'release', 'bin', 'bundle-daemon.mjs')",
+    ])
+      expect([miss, DESKTOP_PATH.test(miss)]).toEqual([miss, false]);
+    expect(
+      specifiers("import { a } from 'x';\nimport 'y';\nawait import('z');"),
+    ).toEqual(['x', 'y', 'z']);
+  });
+
+  it('tools/swift and tools/release/bin/pack-swift.mjs contain no apps/desktop path', () => {
+    const files = swiftLaneFiles();
+    // The sweep reaches the two files the lane actually runs.
+    expect(files).toContain('tools/swift/bundle.sh');
+    expect(files).toContain(SWIFT_LANE_EXTRA);
+    expect(files.length).toBeGreaterThanOrEqual(5);
+    const offenders: string[] = [];
+    for (const rel of files)
+      archRead(rel)
+        .split('\n')
+        .forEach((line, i) => {
+          if (DESKTOP_PATH.test(line))
+            offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        });
+    expect(offenders).toEqual([]);
+  });
+
+  it("bundle-daemon.mjs imports nothing through the Electron app, and esbuild is its own package's devDependency", () => {
+    const specs = specifiers(archRead(BUNDLER));
+    expect(specs.length).toBeGreaterThan(0);
+    expect(
+      specs.filter((s) => DESKTOP_PATH.test(s) || /(^|\/)desktop\//.test(s)),
+    ).toEqual([]);
+    // Bare or node: only. A relative or absolute specifier is a path into
+    // some other tree, and the only tree this file may load from is its own.
+    expect(specs.filter((s) => s.startsWith('.') || s.startsWith('/'))).toEqual(
+      [],
+    );
+    // And esbuild is loaded by its bare name, so it resolves from this
+    // file's own package and nowhere else.
+    expect(specs).toContain('esbuild');
+    const pkg = JSON.parse(archRead(RELEASE_PKG)) as {
+      devDependencies?: Record<string, string>;
+      dependencies?: Record<string, string>;
+    };
+    expect(typeof pkg.devDependencies?.esbuild).toBe('string');
+    // A devDependency, not a runtime one: the release library itself loads
+    // no esbuild, only this build-time script does.
+    expect(pkg.dependencies?.esbuild).toBeUndefined();
   });
 });

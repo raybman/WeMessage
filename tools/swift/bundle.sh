@@ -6,8 +6,9 @@
 #
 # --exe     the `swift build -c release` product (the host).
 # --node    the directory node-fetch.sh extracted: bin/node and LICENSE.
-# --bundle  apps/desktop/dist-bundle-node, written by
-#           `bundle-daemon.mjs --runtime node` (bin/, daemon/, migrations/).
+# --bundle  apps/mac/dist-bundle-node, written by
+#           `tools/release/bin/bundle-daemon.mjs --runtime node`
+#           (bin/, daemon/, migrations/).
 # --out     an empty or absent directory; the app is $out/WeMessage.app.
 #
 # Every path must be absolute. Copies only: nothing here runs anything it
@@ -49,7 +50,7 @@ done
 here="$(cd "$(dirname "$0")" && pwd -P)"
 repo="$(cd "$here/../.." && pwd -P)"
 template="$repo/apps/mac/Resources/Info.plist"
-icon="$repo/apps/desktop/build/icon.icns"
+icon="$repo/apps/mac/Resources/icon.icns"
 
 [ -f "$exe" ] && [ -x "$exe" ] || die "--exe is not an executable file: $exe"
 [ -f "$node/bin/node" ] || die "--node has no bin/node: $node"
@@ -84,8 +85,9 @@ printf 'APPL????' > "$app/Contents/PkgInfo"
 cp "$exe" "$app/Contents/MacOS/WeMessage"
 chmod 755 "$app/Contents/MacOS/WeMessage"
 
-# Icon: the Electron app's mark, copied as is. Rendering it from the brand
-# source with iconutil is deferred to S7 polish.
+# Icon: apps/mac/Resources/icon.icns, a byte copy of the Electron app's mark
+# (v2 S6a), so this script reads nothing under the Electron app. Rendering
+# it from the brand source with iconutil is deferred to S7 polish.
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 
 ditto "$bundle/bin" "$app/Contents/Resources/bin"

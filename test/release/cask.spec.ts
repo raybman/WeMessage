@@ -535,9 +535,12 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * `Contents/MacOS/wemessage`. Neither file has ever existed. The bundle
    * carries exactly ONE Mach-O (arch F-121: `Contents/MacOS/` holds only
    * `WeMessage`), and the two things the cask wants on PATH are `/bin/sh`
-   * shims that `apps/desktop/scripts/bundle-daemon.mjs` writes into
+   * shims that `tools/release/bin/bundle-daemon.mjs` writes into
    * `dist-bundle/bin`, which `electron-builder.yml` then copies to `bin`
-   * under `Contents/Resources`. Homebrew does not shrug at a `binary`
+   * under `Contents/Resources`. (v2 S6a moved the bundler there from
+   * `apps/desktop/scripts/`, and the Swift lane's `tools/swift/bundle.sh`
+   * places the same `bin/` at the same spot, so the last assertion below
+   * holds the two packers to one prefix until S6c retires the Electron one.) Homebrew does not shrug at a `binary`
    * stanza whose source is missing, it raises "source is not there" and
    * the install fails, so the committed cask was UNINSTALLABLE and the
    * whole of this file was green.
@@ -608,5 +611,15 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     // cask links onto PATH may live in `Contents/MacOS`, which holds the
     // single Mach-O and nothing else.
     expect(rb).not.toContain('Contents/MacOS');
+
+    // v2 S6a: the Swift lane lands the shims at the same prefix, so the
+    // cask's stanzas resolve whichever packer built the app.
+    const bundleSh = readFileSync(
+      join(REPO, 'tools', 'swift', 'bundle.sh'),
+      'utf8',
+    );
+    expect(bundleSh).toContain(
+      `ditto "$bundle/bin" "$app/Contents/Resources/${to}"`,
+    );
   });
 });

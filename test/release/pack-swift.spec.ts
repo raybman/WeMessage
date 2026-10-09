@@ -26,7 +26,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
 
 import {
   ASSOCIATED_BUNDLE_IDENTIFIER,
@@ -48,7 +47,8 @@ const PACK_SWIFT = 'tools/release/bin/pack-swift.mjs';
 const INFO_PLIST = 'apps/mac/Resources/Info.plist';
 const APP_ENTITLEMENTS = 'apps/mac/Resources/WeMessage.entitlements';
 const NODE_ENTITLEMENTS = 'apps/mac/Resources/node.entitlements';
-const ELECTRON_BUILDER = 'apps/desktop/electron-builder.yml';
+const BUNDLER = 'tools/release/bin/bundle-daemon.mjs';
+const ICON = 'apps/mac/Resources/icon.icns';
 
 /**
  * The bundle tree, relative to WeMessage.app (plan section 4.4 as redrawn by
@@ -247,7 +247,7 @@ describe('row 3: bundle.sh lays out the tree and writes only under --out', () =>
       'Set :CFBundleVersion',
       'package.json',
       'LICENSE.node.txt',
-      'apps/desktop/build/icon.icns',
+      ICON,
       'apps/mac/Resources/Info.plist',
     ])
       expect([needed, text.includes(needed)]).toEqual([needed, true]);
@@ -287,14 +287,6 @@ describe('row 3: bundle.sh lays out the tree and writes only under --out', () =>
 
 describe('row 4: Info.plist', () => {
   const plist = (): PlistDict => parseLaunchAgentPlist(read(INFO_PLIST));
-  const yaml = (): {
-    copyright: string;
-    mac: { category: string; extendInfo: Record<string, unknown> };
-  } =>
-    parse(read(ELECTRON_BUILDER)) as {
-      copyright: string;
-      mac: { category: string; extendInfo: Record<string, unknown> };
-    };
 
   const KEYS = [
     'CFBundleDevelopmentRegion',
@@ -329,17 +321,20 @@ describe('row 4: Info.plist', () => {
     expect(p['CFBundleIconFile']).toBe('AppIcon');
   });
 
-  it("the Automation prompt, copyright and category are electron-builder.yml's, not retyped", () => {
+  it('the Automation prompt, copyright and category are pinned literals', () => {
+    // v2 S6a: these were held equal to apps/desktop/electron-builder.yml,
+    // which S6c deletes. They are the strings the Electron app shipped, now
+    // pinned here so the Swift lane reads nothing under the Electron app.
     const p = plist();
-    const y = yaml();
     expect(p['NSAppleEventsUsageDescription']).toBe(
-      y.mac.extendInfo['NSAppleEventsUsageDescription'],
+      'WeMessage sends replies through Messages on your behalf, and only ones you have approved.',
     );
-    expect(String(p['NSAppleEventsUsageDescription']).length).toBeGreaterThan(
-      0,
+    expect(p['NSHumanReadableCopyright']).toBe(
+      'Copyright © 2026 the WeMessage authors',
     );
-    expect(p['NSHumanReadableCopyright']).toBe(y.copyright);
-    expect(p['LSApplicationCategoryType']).toBe(y.mac.category);
+    expect(p['LSApplicationCategoryType']).toBe(
+      'public.app-category.productivity',
+    );
   });
 
   it('carries placeholder versions that bundle.sh patches, never a real one', () => {
@@ -494,6 +489,36 @@ describe('row 6: pack-swift.mjs drives the lane in order', () => {
   });
 });
 
+describe('v2 S6a: the lane reads its inputs from outside the Electron app', () => {
+  it('step 3 invokes tools/release/bin/bundle-daemon.mjs', () => {
+    expect(existsSync(join(repoRoot, BUNDLER))).toBe(true);
+    const text = read(PACK_SWIFT);
+    expect(text).toContain(
+      "join(REPO, 'tools', 'release', 'bin', 'bundle-daemon.mjs')",
+    );
+    // The bundle step writes where bundle.sh is then told to read.
+    expect(text).toContain(
+      "const DIST_BUNDLE_NODE = join(REPO, 'apps', 'mac', 'dist-bundle-node');",
+    );
+    // The moved bundler still carries the node flavour step 3 asks for.
+    for (const needed of ["'--runtime'", "'node'", "'--out'", "'--node'"])
+      expect([needed, text.includes(needed)]).toEqual([needed, true]);
+    expect(read(BUNDLER)).toContain("opts.runtime === 'node'");
+  });
+
+  it('bundle.sh reads apps/mac/Resources/icon.icns, and it is a whole icns file', () => {
+    expect(read(BUNDLE)).toContain(`icon="$repo/${ICON}"`);
+    const abs = join(repoRoot, ICON);
+    expect(existsSync(abs)).toBe(true);
+    const bytes = readFileSync(abs);
+    // An icns file opens with the 'icns' magic and a big-endian length that
+    // is the whole file, so a truncated or substituted copy fails here.
+    expect(bytes.subarray(0, 4).toString('latin1')).toBe('icns');
+    expect(bytes.readUInt32BE(4)).toBe(bytes.length);
+    expect(bytes.length).toBeGreaterThan(1024);
+  });
+});
+
 describe('row 7: the root script', () => {
   it("pack:swift is 'node tools/release/bin/pack-swift.mjs'", () => {
     const pkg = JSON.parse(read('package.json')) as {
@@ -527,7 +552,7 @@ describe('row 8: build outputs are ignored', () => {
       'apps/mac/dist-app/WeMessage.app/Contents/Info.plist',
       'apps/mac/dist-pack/SHA256SUMS',
       'apps/mac/dist-pack-2/SHA256SUMS',
-      'apps/desktop/dist-bundle-node/daemon/main.mjs',
+      'apps/mac/dist-bundle-node/daemon/main.mjs',
     ])
       expect([rel, ignored(rel)]).toEqual([rel, 0]);
     for (const rel of [INFO_PLIST, BUNDLE, PACK_SWIFT])

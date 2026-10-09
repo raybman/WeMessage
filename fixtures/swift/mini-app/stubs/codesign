@@ -65,7 +65,9 @@ case " $* " in
     printf '%s\n' "$identifier" >"$d/identifier"
     printf '%s\n' "$options" >"$d/options"
     printf '%s\n' "$timestamp" >"$d/timestamp"
-    [ -z "$ents" ] || plutil -convert xml1 -o "$d/ents.plist" "$ents"
+    # A copy, not plutil: the entitlements files are XML plists already, and
+    # a copy keeps the signing rows running on the Linux lane too.
+    [ -z "$ents" ] || cp "$ents" "$d/ents.plist"
     if [ -d "$target" ]; then
       seal_of "$target" >"$d/seal"
     else

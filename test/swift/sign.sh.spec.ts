@@ -47,6 +47,8 @@ const VERIFY = join(repoRoot, 'tools/swift/verify-bundle.sh');
 const FIXTURE = join(repoRoot, 'fixtures/swift/mini-app');
 const RES = join(repoRoot, 'apps/mac/Resources');
 
+const DARWIN = process.platform === 'darwin';
+
 /** Each row starts bash two to five times; a loaded runner is slow. */
 const SLOW = { timeout: 60_000 };
 
@@ -306,7 +308,10 @@ describe('v2 S5a sign.sh: inside-out, hardened, one identity', SLOW, () => {
   });
 });
 
-describe(
+// verify-bundle.sh reads every plist and JSON value through plutil, a macOS
+// binary, so this block runs on the macOS lane (ci-macos runs `pnpm test`)
+// and stands down on Linux. The sign.sh rows above run on both.
+describe.skipIf(!DARWIN)(
   'v2 S5a verify-bundle.sh: the identity half reads the signature back',
   SLOW,
   () => {

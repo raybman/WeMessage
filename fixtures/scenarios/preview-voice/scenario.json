@@ -1,0 +1,4 @@
+{
+  "summary": "The voice dock over fixtures: every channel as the real daemon reports it, zero threads and zero drafts. A later slice adds the dock state to status. Fake daemon only.",
+  "extends": "quiet"
+}

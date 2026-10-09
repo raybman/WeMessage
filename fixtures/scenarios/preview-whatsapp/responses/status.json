@@ -1,0 +1,42 @@
+{
+  "route": "GET /v1/status",
+  "status": 200,
+  "body": {
+    "connectionState": "fully-connected",
+    "cursor": {
+      "lastRowid": 48213,
+      "lastScanAt": "2026-09-01T12:00:42.000Z"
+    },
+    "counts": {
+      "messagesToday": 0
+    },
+    "adapters": [],
+    "killSwitch": false,
+    "armed": {
+      "armed": true,
+      "until": null,
+      "reason": "armed"
+    },
+    "channels": [
+      {
+        "channel": "imessage",
+        "state": "connected"
+      },
+      {
+        "channel": "whatsapp",
+        "state": "preview",
+        "reason": "preview-whatsapp"
+      },
+      {
+        "channel": "linkedin",
+        "state": "not_connected",
+        "reason": "not_in_this_version"
+      },
+      {
+        "channel": "email",
+        "state": "not_connected",
+        "reason": "not_in_this_version"
+      }
+    ]
+  }
+}

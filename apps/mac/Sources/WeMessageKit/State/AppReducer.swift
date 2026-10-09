@@ -22,6 +22,9 @@ public enum AppReducer {
       next.replaceDrafts(list)
       next.stale = false
       return (next, [])
+    case .response(.status(let payload)):
+      next.channels = ChannelAvailability.table(payload.channels, gate: next.previewGate)
+      return (next, [])
     case .frame(.snapshot(let seq, let at, let missed, let drafts)):
       next.replaceDrafts(drafts)
       next.missed = missed

@@ -68,6 +68,30 @@ final class Board05Tests: XCTestCase {
     return (Double(zero.width) * ProvisionalUI.emailMeasureChars).rounded() + 2 * ProvisionalUI.emailCardPadding
   }
 
+  /// The compose body's text view: the tagged element, or the text view
+  /// inside it when the tag lands on the scroll view.
+  @MainActor
+  private func bodyField(_ app: XCUIApplication) -> XCUIElement {
+    let tagged = QueueUI.element(app, ID.emailComposeBody)
+    XCTAssertTrue(tagged.waitForExistence(timeout: UITestApp.timeout), "no compose body")
+    if tagged.elementType == .textView { return tagged }
+    let inner = tagged.descendants(matching: .textView).firstMatch
+    return inner.exists ? inner : tagged
+  }
+
+  /// True once `field` holds the keyboard, within `seconds` (KeyboardClaim
+  /// gives up after about 2 s).
+  @MainActor
+  private func holdsKeyboard(_ field: XCUIElement, within seconds: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    var held = (field.value(forKey: "hasKeyboardFocus") as? Bool) == true
+    while !held && Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.25)
+      held = (field.value(forKey: "hasKeyboardFocus") as? Bool) == true
+    }
+    return held
+  }
+
   /// Clicks the list row for `guid` and waits for its last message's card.
   @MainActor
   private func open(_ app: XCUIApplication, _ guid: String, last: String) {
@@ -193,13 +217,24 @@ final class Board05Tests: XCTestCase {
     XCTAssertEqual(QueueUI.value(app, ID.emailComposeHold), ProvisionalUI.emailHoldParked, "Hold until is not parked")
     XCTAssertEqual(app.datePickers.count, 0, "a date picker is drawn")
     XCTAssertEqual(QueueUI.value(app, ID.emailComposeSend), "inert", "Send is live on an empty body")
-    let body = QueueUI.element(app, ID.emailComposeBody)
+    // The body takes the keyboard as the compose opens (D-UI-156); a click
+    // is the fallback, never the proof.
+    let body = bodyField(app)
     XCTAssertTrue(QueueUI.waitUntil { body.isHittable }, "the compose was not scrolled into view: \(body.frame)")
-    body.click()
+    var focused = holdsKeyboard(body)
+    if !focused {
+      body.click()
+      focused = holdsKeyboard(body)
+    }
+    if !focused {
+      let holder = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+      print("BOARD05| body has no focus; keyboard is on: \(holder.exists ? holder.debugDescription : "nothing")")
+    }
+    XCTAssertTrue(focused, "the body never took the keyboard")
     app.typeText(Self.reply)
     XCTAssertTrue(
-      QueueUI.waitUntil { QueueUI.value(app, ID.emailComposeBody).contains(Self.reply) },
-      "typed into the body, it reads '\(QueueUI.value(app, ID.emailComposeBody))'")
+      QueueUI.waitUntil { ((body.value as? String) ?? "").contains(Self.reply) },
+      "typed into the body, it reads '\((body.value as? String) ?? "")'")
     XCTAssertTrue(
       QueueUI.waitUntil { QueueUI.value(app, ID.emailComposeSend) == "enabled" },
       "Send stays inert with a body: \(QueueUI.value(app, ID.emailComposeSend))")

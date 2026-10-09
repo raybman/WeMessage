@@ -81,6 +81,8 @@ extension ProvisionalUI {
   // window: To, Cc, Bcc, Subject and the body, then the parked Hold until,
   // then Send. Send opens the message's undo window (the fixture's 30 s);
   // when it runs out, a draft is created for Needs You. Nothing is mailed.
+  // The body takes the keyboard as the compose opens, so shift-R then
+  // typing writes the reply.
   public enum EmailComposePlacement: Sendable {
     case inlineUnderLastCard
   }

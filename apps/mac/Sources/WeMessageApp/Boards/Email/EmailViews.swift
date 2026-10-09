@@ -419,6 +419,11 @@ struct EmailComposeView: View {
           .scrollContentBackground(.hidden)
           .padding(6)
           .disabled(compose.busy)
+          // The body takes the keyboard when the compose opens (D-UI-156).
+          // A first-mount click or FocusState does not reach a SwiftUI text
+          // view on macOS (KeyboardClaim's measured note), so the claim is
+          // made in AppKit, once the text view is in the window.
+          .background(KeyboardClaim(token: "email-" + compose.mode.rawValue + "-" + compose.chatGuid))
           .accessibilityLabel(ProvisionalUI.emailBodyPrompt)
           .accessibilityIdentifier(ShellID.emailComposeBody)
       }

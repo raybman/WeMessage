@@ -442,7 +442,8 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.email.compose`, scrolled into view whole when it opens, holds
   `wemessage.email.compose.to`, `wemessage.email.compose.cc`,
   `wemessage.email.compose.bcc`, `wemessage.email.compose.subject`,
-  `wemessage.email.compose.body`, the parked
+  `wemessage.email.compose.body` (which takes the keyboard as the compose
+  opens, through KeyboardClaim), the parked
   `wemessage.email.compose.hold` (D-UI-139), the wall line
   `wemessage.email.compose.wall` valued `warn` or `block` (D-UI-157),
   `wemessage.email.compose.send` valued `enabled` or `inert`,

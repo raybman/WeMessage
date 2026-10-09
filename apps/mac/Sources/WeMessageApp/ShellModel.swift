@@ -171,7 +171,16 @@ public final class ShellModel {
   /// which keeps the not-connected zero.
   var whatsAppBoard: WhatsAppBoardModel? {
     guard scope == .whatsapp else { return nil }
-    return WhatsAppBoardModel.make(availability(.whatsapp), chipText: TestHooks.previewChipText)
+    return WhatsAppBoardModel.make(
+      availability(.whatsapp), listed: !rows.isEmpty, chipText: TestHooks.previewChipText)
+  }
+
+  /// Board 03 around an open WhatsApp chat, in any scope (v2 B1): the same
+  /// banner and chip, nil for any other channel's chat and for a channel
+  /// not connected.
+  func whatsAppBoard(for thread: ThreadSummary) -> WhatsAppBoardModel? {
+    guard thread.channel == Scope.whatsapp.rawValue else { return nil }
+    return WhatsAppBoardModel.make(availability(.whatsapp), listed: true, chipText: TestHooks.previewChipText)
   }
 
   // MARK: v2 B4, board 07

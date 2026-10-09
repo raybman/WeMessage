@@ -1,0 +1,102 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "chatGuid": "whatsapp;-;+15550142001",
+        "channel": "whatsapp",
+        "title": "Ines Navarro",
+        "isGroup": false,
+        "lastLine": null,
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:52:00.000Z",
+        "meta": {
+          "linkedDevice": "linked",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "online",
+          "linkedAt": "2026-08-14T09:00:00.000Z"
+        }
+      },
+      {
+        "chatGuid": "whatsapp;-;+15550142002",
+        "channel": "whatsapp",
+        "title": "Tomas Ferreira",
+        "isGroup": false,
+        "lastLine": "Perfect, thanks. I will mark it up tomorrow.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T10:05:00.000Z",
+        "meta": {
+          "linkedDevice": "expired",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "online"
+        }
+      },
+      {
+        "chatGuid": "whatsapp;+;chat5550142900",
+        "channel": "whatsapp",
+        "title": "Harbor Rowing Club",
+        "isGroup": true,
+        "lastLine": "Covered. See everyone at the boathouse.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T09:15:00.000Z",
+        "meta": {
+          "linkedDevice": "linked",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "online",
+          "linkedAt": "2026-08-14T09:00:00.000Z",
+          "members": 6,
+          "admins": 2,
+          "adminOnly": true
+        }
+      },
+      {
+        "chatGuid": "whatsapp;-;+15550142005",
+        "channel": "whatsapp",
+        "title": "Kenji Mori",
+        "isGroup": false,
+        "lastLine": null,
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T08:41:30.000Z",
+        "meta": {
+          "linkedDevice": "linked",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "online",
+          "linkedAt": "2026-08-29T12:00:00.000Z"
+        }
+      },
+      {
+        "chatGuid": "whatsapp;-;+15550142006",
+        "channel": "whatsapp",
+        "title": "Lucia Brandt",
+        "isGroup": false,
+        "lastLine": "I will answer the poll from my phone.",
+        "lastFromMe": true,
+        "lastAt": "2026-09-01T07:30:00.000Z",
+        "meta": {
+          "linkedDevice": "linked",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "offline",
+          "linkedAt": "2026-08-20T12:00:00.000Z"
+        }
+      },
+      {
+        "chatGuid": "whatsapp;-;+15550142003",
+        "channel": "whatsapp",
+        "title": "Amara Lindqvist",
+        "isGroup": false,
+        "lastLine": "Same time next week works.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T16:00:00.000Z",
+        "meta": {
+          "linkedDevice": "relinking",
+          "historyHorizon": "2026-08-14T00:00:00.000Z",
+          "phonePanel": "online"
+        }
+      }
+    ],
+    "nextCursor": null,
+    "total": 6,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

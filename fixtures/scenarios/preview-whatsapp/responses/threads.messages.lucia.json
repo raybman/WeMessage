@@ -1,0 +1,57 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;-;+15550142006",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0601",
+        "from": "them",
+        "kind": "text",
+        "text": null,
+        "at": "2026-08-31T21:00:00.000Z",
+        "handle": "+15550142006",
+        "attachments": 0,
+        "meta": {
+          "notShown": "disappearing"
+        }
+      },
+      {
+        "guid": "wa-0602",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T07:10:00.000Z",
+        "handle": "+15550142006",
+        "attachments": 1,
+        "meta": {
+          "notShown": "viewOnce",
+          "mediaState": "onDemand"
+        }
+      },
+      {
+        "guid": "wa-0603",
+        "from": "them",
+        "kind": "text",
+        "text": null,
+        "at": "2026-09-01T07:12:00.000Z",
+        "handle": "+15550142006",
+        "attachments": 0,
+        "meta": {
+          "notShown": "poll"
+        }
+      },
+      {
+        "guid": "wa-0604",
+        "from": "me",
+        "kind": "text",
+        "text": "I will answer the poll from my phone.",
+        "at": "2026-09-01T07:30:00.000Z",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

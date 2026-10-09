@@ -460,6 +460,22 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `drafted` or `failed` (D-UI-156). The sidebar's `wemessage.email.chips`
   holds one `wemessage.email.chip.<category>` per category, valued `on` or
   `off` (D-UI-151).
+- An open WhatsApp chat (v2 B1) keeps `wemessage.content` and
+  `wemessage.thread` and adds: the linked device's line
+  `wemessage.board.whatsapp.linked` (D-UI-141), who may send in an
+  admin-only group `wemessage.board.whatsapp.admins`, the re-link card
+  `wemessage.board.whatsapp.relink` with its QR placeholder
+  `wemessage.board.whatsapp.qr` (an image, D-UI-142), the end-to-end line
+  `wemessage.board.whatsapp.encrypted`, the history horizon
+  `wemessage.board.whatsapp.horizon` (D-UI-143), the phone panel
+  `wemessage.board.whatsapp.phone` (D-UI-144), a voice note
+  `wemessage.board.whatsapp.voice.<guid>` labelled
+  `<duration>, <transcript>` (D-UI-145), a media tile never fetched
+  `wemessage.board.whatsapp.media.<guid>` and, once pressed, its note
+  `wemessage.board.whatsapp.fetchnote` (D-UI-149), and a not-shown card
+  `wemessage.board.whatsapp.notshown.<guid>` (D-UI-147). In a single
+  scope list rows carry the value suffix ` untagged` under the UI-test
+  flag (wireframe 03 legend 4)
 - Board 07's voice dock `wemessage.voicedock`, drawn over the open thread's
   transcript only under the UI-test flag, from the fake daemon's
   `status.meta.voice` (v2 B4, D-UI-138 and 170..179): its one chip
@@ -570,6 +586,46 @@ D-UI-159  -         a reveal is per message and for this window only;
   count requests; the fake daemon answers 404 and the card keeps the image's
   placeholder. The fixture's `remoteImages` value is read but never lifts
   the block: only a reveal does.
+
+- B1's nine, board 03 drawn over fixtures, live in
+  `Sources/WeMessageApp/ProvisionalUI+Board03.swift`, pending the
+  D-UI-141..149 decisions (plan row plus 30), held by
+  `AppHygieneBoard03Tests` (H-B-2):
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-141  111       with chats listed and none open the board keeps its
+                    banner over "Pick a chat."; a linked session is drawn as
+                    20 days, and from day 17 the line under the head warns
+                    to re-link before expiry
+D-UI-142  112       an expired or re-linking session replaces the transcript,
+                    not the window, with the re-link card: a 132 pt QR frame
+                    holding a drawn placeholder (never a code, never a
+                    fetch), the wireframe's steps, and the device-slot line
+                    with no slot count
+D-UI-143  113       the history horizon is a centred line above the first
+                    message at or after it, with the partial-history caveat;
+                    the end-to-end line sits above it, once per chat
+D-UI-144  114       the phone panel is a bordered card where a composer would
+                    be: the phone's state, WhatsApp's own sentence quoted,
+                    and that nothing sends from this board
+D-UI-145  115       a voice note draws its transcript and duration in board
+                    08's voice body; a sent note says its played state is
+                    unknown to this device
+D-UI-146  116       reactions sit under their bubble, one chip per emoji with
+                    its count, the glyph drawn grey (a colour emoji too), on
+                    the tint at .12 alpha; one per person, a later one
+                    replacing theirs
+D-UI-147  117       disappearing, view-once and poll messages are dashed
+                    not-shown cards with a title and a reason, and no control
+D-UI-148  118       the head's line: one to one, the channel, the number, when
+                    it was opened here and that no receipt was sent; a group,
+                    its size and who may send; unnamed members by number
+D-UI-149  119       media the phone has not sent is a dashed tile with a down
+                    arrow, its kind and size; pressing it says download on
+                    demand is not built and nothing was fetched
+```
 
 - Board 07 (v2 B4) is a shell over fixtures. There is no microphone, no
   audio and no speech engine: every dock state is `status.meta.voice` from a

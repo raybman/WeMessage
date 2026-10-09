@@ -831,6 +831,8 @@ const SUPPLEMENT: Record<string, Record<string, string[]>> = {
   'GET /v1/contacts': { 'contacts[]': ['displayName'] },
   'GET /v1/adapters': { 'adapters[]': ['lastSeenAt'] },
   'GET /v1/doctor': { 'checks[]': ['detail', 'remediation'] },
+  // v2 B4: board 07's voice dock reads status.meta.voice (preview-* only).
+  'GET /v1/status': { '': ['meta'] },
   'event message.received': { message: ['displayName'] },
   'event draft.created': { draft: ['displayName', 'ruleId'] },
 };
@@ -866,7 +868,7 @@ const OPEN: Record<string, string[]> = {
   'GET /v1/adapters': ['adapters[].config'],
   'GET /v1/settings': ['settings'],
   'PATCH /v1/settings': ['settings'],
-  'GET /v1/status': ['adapters'],
+  'GET /v1/status': ['adapters', 'meta'],
 };
 const isOpen = (route: string, path: string) =>
   (OPEN[route] ?? []).includes(path);
@@ -1118,7 +1120,7 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
     }
   });
 
-  it('synthetic only: no public-string offenders, emails only at example.com, the fixture state only under preview-*', () => {
+  it('synthetic only: no public-string offenders, emails only at example.com, the fixture state and meta only under preview-*', () => {
     const offenders: string[] = [];
     let phones = 0;
     let fixtureStates = 0;
@@ -1137,6 +1139,10 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
       // mirrors the real daemon can never carry it by accident.
       if (FIXTURE_WORD_RE.test(text) && !rel.startsWith('preview-'))
         offenders.push(`${rel}: the fixture word outside preview-*`);
+      // v2 Phase B: per-board `meta` is fixture detail the real daemon never
+      // sends, so it rides only in the preview-* scenarios.
+      if (/"meta"\s*:/.test(text) && !rel.startsWith('preview-'))
+        offenders.push(`${rel}: meta outside preview-*`);
       fixtureStates += text.split(FIXTURE_STATE).length - 1;
     }
     expect(phones).toBeGreaterThan(20);

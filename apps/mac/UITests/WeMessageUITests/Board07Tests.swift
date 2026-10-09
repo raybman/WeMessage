@@ -20,9 +20,10 @@ import XCTest
 ///   disarmed: cmd-Return there does nothing;
 /// - confirm: a spoken approve armed the card and that is all it did: the
 ///   journal holds no draft action. cmd-Return then starts the same 10 s
-///   window as A (the meta line reads APPROVED), nothing reaches the
-///   daemon inside it, and when it elapses the one request is
+///   window as A (the outbox counts down, as on board 02), nothing reaches
+///   the daemon inside it, and when it elapses the one request is
 ///   POST /v1/drafts/drf-0102/approve. Never /v1/send.
+/// The chip is read by its words: a value set on it never reaches XCUI.
 /// Shots are board-07-<state>-<appearance>.png. The idle dock is held to
 /// the frost evidence (the thread layout's patches are clear of it); the
 /// larger, opaque states are glanced (attached and swept for green).
@@ -109,7 +110,7 @@ final class Board07Tests: XCTestCase {
     QueueUI.open(app, QueueUI.priya)
     XCTAssertTrue(QueueUI.waitUntil { size() == "Voice dock, idle" }, "idle: the dock reads '\(size())'")
     checkDock("idle", width: ProvisionalUI.voiceDockWidthIdle)
-    XCTAssertEqual(QueueUI.value(app, ID.voiceDockChip), "idle", "idle: chip")
+    XCTAssertEqual(QueueUI.label(app, ID.voiceDockChip), ProvisionalUI.voiceChipIdle, "idle: chip")
     XCTAssertFalse(QueueUI.element(app, ID.voiceDockFailure).exists, "idle: a failure line")
     XCTAssertFalse(QueueUI.element(app, ID.voiceDockCard).exists, "idle: a confirm card")
     XCTAssertTrue(meta().hasPrefix("DRAFT"), "idle: meta reads \(meta())")
@@ -123,7 +124,7 @@ final class Board07Tests: XCTestCase {
     // speaking: the middle size.
     try await switchTo("preview-voice-speaking", size: "speaking")
     checkDock("speaking", width: ProvisionalUI.voiceDockWidthSpeaking)
-    XCTAssertEqual(QueueUI.value(app, ID.voiceDockChip), "speaking", "speaking: chip")
+    XCTAssertEqual(QueueUI.label(app, ID.voiceDockChip), ProvisionalUI.voiceChipSpeaking, "speaking: chip")
     XCTAssertFalse(QueueUI.element(app, ID.voiceDockFailure).exists, "speaking: a failure line")
     glanceAt("speaking")
 
@@ -159,24 +160,27 @@ final class Board07Tests: XCTestCase {
     app.typeKey(.return, modifierFlags: .command)
     try await Task.sleep(nanoseconds: 1_000_000_000)
     XCTAssertTrue(meta().hasPrefix("DRAFT"), "transport: cmd-Return approved: meta reads \(meta())")
+    XCTAssertFalse(QueueUI.element(app, ID.composerOutbox).exists, "transport: cmd-Return started a window")
     try await QueueUI.assertJournal("transport, after cmd-Return")
 
     // confirm: a spoken approve armed the card. Armed is all it did.
     try await switchTo("preview-voice-confirm", size: "confirm")
     checkDock("confirm", width: ProvisionalUI.voiceDockWidthConfirm)
-    XCTAssertEqual(QueueUI.value(app, ID.voiceDockChip), "confirm", "confirm: chip")
+    XCTAssertEqual(QueueUI.label(app, ID.voiceDockChip), ProvisionalUI.voiceChipConfirm, "confirm: chip")
     XCTAssertTrue(QueueUI.waitUntil { card.exists && card.label == ProvisionalUI.voiceCardArmedLine }, "confirm: card reads \(card.label)")
     XCTAssertTrue(QueueUI.element(app, ID.voiceDockSend).exists, "confirm: no Send on the armed card")
     XCTAssertTrue(QueueUI.element(app, ID.voiceDockCancel).exists, "confirm: no Cancel on the armed card")
     XCTAssertTrue(card.frame.minY >= dock.frame.minY && card.frame.maxY <= dock.frame.maxY, "confirm: the card is outside the dock")
     XCTAssertTrue(meta().hasPrefix("DRAFT"), "confirm: the spoken approve did more than arm: meta reads \(meta())")
+    XCTAssertFalse(QueueUI.element(app, ID.composerOutbox).exists, "confirm: the spoken approve started a window")
     glanceAt("confirm-armed")
     if appearance == "light" { try audit(app, window: "audit-board-07-confirm") }
     try await QueueUI.assertJournal("armed by voice")
 
     // cmd-Return: the existing approve path, its window first.
     app.typeKey(.return, modifierFlags: .command)
-    XCTAssertTrue(QueueUI.waitUntil { meta().hasPrefix("APPROVED by you ") }, "cmd-Return: meta reads \(meta())")
+    func outbox() -> String { QueueUI.label(app, ID.composerOutbox) }
+    XCTAssertTrue(QueueUI.waitUntil(5) { outbox().hasPrefix("SENDING in ") }, "cmd-Return: the outbox reads \(outbox())")
     try await QueueUI.assertJournal("inside the approve window")
     let approve = "POST /v1/drafts/\(priya)/approve"
     let journal = try await FakeDaemon.waitForRequests([approve], timeout: 45)

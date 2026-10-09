@@ -13,6 +13,27 @@
       "armed": true,
       "until": null,
       "reason": "armed"
-    }
+    },
+    "channels": [
+      {
+        "channel": "imessage",
+        "state": "connected"
+      },
+      {
+        "channel": "whatsapp",
+        "state": "not_connected",
+        "reason": "not_in_this_version"
+      },
+      {
+        "channel": "linkedin",
+        "state": "not_connected",
+        "reason": "not_in_this_version"
+      },
+      {
+        "channel": "email",
+        "state": "not_connected",
+        "reason": "not_in_this_version"
+      }
+    ]
   }
 }

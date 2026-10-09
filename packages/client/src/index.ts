@@ -196,6 +196,25 @@ export interface StatusPayload {
    */
   killSwitch: boolean | null;
   armed: ArmingStatePayload | null;
+  /**
+   * v2 B0: which message channels this version reads, one entry per channel
+   * in rail order. Mirrors packages/daemon/src/channels.ts, whose union is
+   * `connected | not_connected` and nothing else. The Swift fake daemon
+   * serves one more state from CI fixtures; this client never talks to it,
+   * so this mirror does not name it.
+   */
+  channels: ChannelStatusPayload[];
+}
+
+/** v2 B0: one channel's availability, as `GET /v1/status` carries it. */
+export type ChannelState = 'connected' | 'not_connected';
+
+/** v2 B0: one entry of `StatusPayload.channels`. */
+export interface ChannelStatusPayload {
+  channel: ThreadChannel;
+  state: ChannelState;
+  /** Why the channel is not connected; absent when it is. */
+  reason?: string;
 }
 
 /**
@@ -946,8 +965,11 @@ export interface AdapterCredential {
  * by the same "no @wemessage/core dep" convention as every DTO above.
  */
 
-/** The channels a thread can arrive on. Phase B widens this, nothing else. */
-export type ThreadChannel = 'imessage';
+/**
+ * The channels a thread can arrive on. v2 B0 widened it to the four the rail
+ * names; the real daemon's threads still arrive on 'imessage' only.
+ */
+export type ThreadChannel = 'imessage' | 'whatsapp' | 'linkedin' | 'email';
 
 /** One conversation, newest message first in the list it came in. */
 export interface ThreadSummary {

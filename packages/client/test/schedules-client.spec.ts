@@ -256,6 +256,7 @@ describe('StatusPayload carries the S6 fields (Sc 11) the CLI renders (Sc 12)', 
         until: '2026-09-03T17:00:00.000Z',
         reason: 'armed',
       },
+      channels: [{ channel: 'imessage', state: 'connected' }],
     };
     alwaysJson(200, payload);
     const out = await client().status();

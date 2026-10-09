@@ -66,6 +66,7 @@ import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
 import { closeReasonFor, parseEventFilter } from './events-filter.js';
 import { readConnectionState, type DoctorProbes } from './doctor.js';
 import { resolveArming } from './arming.js';
+import { channelStatuses } from './channels.js';
 
 export interface DaemonOptions {
   /** Injected config dir (tests use temp dirs; never the real App Support). */
@@ -351,6 +352,10 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // still the honest answer there, because there is nothing to derive them
     // from, and inventing `armed: false` would report a hold that does not
     // exist. Derived on every request, never cached (§1.7).
+    //
+    // v2 B0: `channels` says which message channels this version reads. It
+    // is the same on every branch because it is a fact about the build, not
+    // about the store (channels.ts).
     return (
       opts.getStatus?.() ??
       (sinkSource
@@ -366,6 +371,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
               clock: sinkSource.clock,
               autonomy,
             }),
+            channels: channelStatuses(),
           }
         : {
             connectionState: 'disconnected',
@@ -374,6 +380,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
             adapters: opts.adapters?.store.listAdapters() ?? [],
             killSwitch: null,
             armed: null,
+            channels: channelStatuses(),
           })
     );
   });

@@ -756,4 +756,8 @@ D-UI-169  (B3)      LinkedIn pushing back is a blocking danger banner under
   The ladder is never edited from the board. Shots are
   `board-04-<state>-<appearance>.png` for `list`, `request`, `sponsored`,
   `salesnav`, `inmail`, `job`, `inspector`, `compose`, `drafted`, `paused`
-  and `paused-thread`.
+  and `paused-thread`. Under a pause the foot's line is ink, not the danger
+  colour: danger text on the light frost read 2.7:1 and failed the
+  accessibility audit, so danger stays on the banner's bar and wash. The
+  thread pane keeps its open thread when the tab or the inbox scope narrows
+  the list past it; its head still names the inbox a reply goes through.

@@ -556,7 +556,7 @@ struct LinkedInFoot: View {
     switch reason {
     case .sponsored: ProvisionalUI.linkedInSponsoredLine
     case .paused: ProvisionalUI.linkedInPausedComposer
-    case .requestPending: ProvisionalUI.linkedInRequestInert
+    case .requestPending: ProvisionalUI.linkedInRequestNoComposer
     case .requestDeclined: ProvisionalUI.linkedInDeclinedLine
     case .noRung: ProvisionalUI.linkedInNoRungLine
     }

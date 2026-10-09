@@ -98,6 +98,7 @@ extension ProvisionalUI {
   public static let linkedInAcceptLabel = "Accept"
   public static let linkedInDeclineLabel = "Decline privately"
   public static let linkedInRequestInert = "Accepting and declining happen on LinkedIn in this version."
+  public static let linkedInRequestNoComposer = "No composer until their request is accepted."
   public static let linkedInDeclinedLine = "Declined privately. Kept read only."
 
   // D-UI-166: the commercial payloads (04.F). A sponsored message has no

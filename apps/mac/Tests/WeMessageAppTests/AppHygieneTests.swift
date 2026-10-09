@@ -121,6 +121,14 @@ struct AppHygieneTests {
     "wemessage.voicedock", "wemessage.voicedock.chip", "wemessage.voicedock.caption", "wemessage.voicedock.mic",
     "wemessage.voicedock.card", "wemessage.voicedock.card.send", "wemessage.voicedock.card.cancel",
     "wemessage.voicedock.failure",
+    // v2 B3, board 04.
+    "wemessage.board.linkedin", "wemessage.board.linkedin.banner", "wemessage.board.linkedin.empty",
+    "wemessage.linkedin.switch", "wemessage.linkedin.inbox.", "wemessage.linkedin.tabs", "wemessage.linkedin.tab.",
+    "wemessage.linkedin.paused", "wemessage.linkedin.thread", "wemessage.linkedin.inmail.",
+    "wemessage.linkedin.commercial.", "wemessage.linkedin.request", "wemessage.linkedin.nocomposer",
+    "wemessage.linkedin.compose", "wemessage.linkedin.compose.subject", "wemessage.linkedin.compose.body",
+    "wemessage.linkedin.compose.hold", "wemessage.linkedin.compose.pacing", "wemessage.linkedin.compose.draft",
+    "wemessage.linkedin.compose.state", "wemessage.linkedin.inspector", "wemessage.linkedin.ladder",
   ]
 
   static let nsApp = "NS" + "App"

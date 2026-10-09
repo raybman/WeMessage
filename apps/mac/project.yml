@@ -61,6 +61,7 @@ targets:
       - path: Sources/WeMessageApp/Glass/FrostProbe.swift
       # Board 05's provisional values (v2 B2), read by Board05Tests.
       - path: Sources/WeMessageApp/ProvisionalUI+Board05.swift
+      - path: Sources/WeMessageApp/ProvisionalUI+Board04.swift
     dependencies:
       - target: WeMessageMac
     settings:

@@ -218,9 +218,33 @@ module.exports = {
     {
       severity: 'error',
       name: 'tools-import-runtime-nothing',
-      from: { path: '^tools/' },
+      from: {
+        path: '^tools/',
+        pathNot: '^tools/release/bin/bundle-daemon\\.mjs$',
+      },
       to: {
         pathNot: ['^tools/', '^node_modules/yaml/'],
+        path: ['^(packages|apps|fixtures)/', '^@wemessage/', '^node_modules/'],
+      },
+    },
+
+    // v2 S6a. The ONE file the rule above exempts, and the one thing it may
+    // import that the rule above forbids: `esbuild`, a devDependency of
+    // `@wemessage/release` and of nothing else in `tools/`. The daemon
+    // bundler moved here from `apps/desktop/scripts` so the Swift pack lane
+    // survives the Electron app's deletion (S6c), and bundling is its whole
+    // job. It is a build step that READS `dist/` output as data, never a
+    // workspace import, so every other reach stays an error exactly as it is
+    // for every other tool.
+    {
+      severity: 'error',
+      name: 'bundle-daemon-esbuild-only',
+      from: { path: '^tools/release/bin/bundle-daemon\\.mjs$' },
+      to: {
+        pathNot: [
+          '^tools/',
+          '^node_modules/\\.pnpm/esbuild@[^/]+/node_modules/esbuild/',
+        ],
         path: ['^(packages|apps|fixtures)/', '^@wemessage/', '^node_modules/'],
       },
     },

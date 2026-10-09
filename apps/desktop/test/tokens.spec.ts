@@ -496,6 +496,7 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
       expect([...RASTER_ALLOWLIST]).toEqual([
         'apps/desktop/build/dmg-background.png',
         'apps/desktop/build/icon.icns',
+        'apps/mac/Resources/icon.icns',
         'site/media/launch.gif',
       ]);
     });
@@ -561,7 +562,8 @@ describe('s9 Sc1: the ship-era colour sweep (rows 2 and 3)', () => {
       // COMMITTED. A drift between the two is exactly what row 7's drift
       // check exists to report, and until it does, the committed file is the
       // one a reader downloads.
-      expect(RASTER_ALLOWLIST.length).toBe(3);
+      // v2 S6a adds the Swift app's copy of the icon.
+      expect(RASTER_ALLOWLIST.length).toBe(4);
 
       // teeth: TN-green-in-the-gif (row 3b): applied, bit, reverted.
       //

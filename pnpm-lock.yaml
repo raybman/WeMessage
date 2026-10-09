@@ -296,7 +296,11 @@ importers:
         specifier: ^7.6.0
         version: 7.6.13
 
-  tools/release: {}
+  tools/release:
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
 packages:
 

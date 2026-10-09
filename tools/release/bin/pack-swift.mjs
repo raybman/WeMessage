@@ -8,7 +8,7 @@
  * THE STEPS, IN ORDER, AND WHY THE ORDER IS THE CONTRACT:
  *   1. tools/swift/node-fetch.sh      the pinned Node, verified twice
  *   2. pnpm -w build                  the workspace the daemon bundle reads
- *   3. bundle-daemon.mjs --runtime node   apps/desktop/dist-bundle-node
+ *   3. bundle-daemon.mjs --runtime node   apps/mac/dist-bundle-node
  *   4. tools/swift/swift.sh build -c release   the host
  *   5. tools/swift/bundle.sh          apps/mac/dist-app/WeMessage.app
  *   6. tools/swift/sign.sh            inside-out, one identity (S2e)
@@ -29,6 +29,11 @@
  * than packing something that cannot be launched under TCC.
  *
  * THE FENCE (`tools-import-runtime-nothing`): node builtins only.
+ *
+ * NOTHING HERE NAMES THE ELECTRON APP'S DIRECTORY (v2 S6a, and an arch row
+ * holds it). The bundler is this directory's bundle-daemon.mjs and its output
+ * is apps/mac/dist-bundle-node, so this lane keeps working the day the
+ * Electron app is deleted (S6c).
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -43,7 +48,7 @@ import { dirname, join, resolve } from 'node:path';
 const REPO = resolve(import.meta.dirname, '..', '..', '..');
 const SWIFT = join(REPO, 'tools', 'swift');
 const SIGN = join(SWIFT, 'sign.sh');
-const DIST_BUNDLE_NODE = join(REPO, 'apps', 'desktop', 'dist-bundle-node');
+const DIST_BUNDLE_NODE = join(REPO, 'apps', 'mac', 'dist-bundle-node');
 const DIST_APP = join(REPO, 'apps', 'mac', 'dist-app');
 const APP = join(DIST_APP, 'WeMessage.app');
 
@@ -114,7 +119,7 @@ if (!existsSync(nodeBin))
 if (!skipBuild) {
   run('build the workspace', 'pnpm', ['-w', 'build']);
   run('bundle the daemon for plain Node', process.execPath, [
-    join(REPO, 'apps', 'desktop', 'scripts', 'bundle-daemon.mjs'),
+    join(REPO, 'tools', 'release', 'bin', 'bundle-daemon.mjs'),
     '--runtime',
     'node',
     '--out',

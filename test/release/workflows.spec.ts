@@ -106,57 +106,24 @@ const load = (rel: string): Workflow => parse(read(rel)) as Workflow;
  * The one path in this file that is DERIVED rather than typed, and the
  * reason it had to be.
  *
- * Every `dist-pack/...` in both workflow files was written relative to the
- * repository root, and electron-builder does not write there. It resolves
- * `directories.output` against the PROJECT directory, and `pack.mjs` invokes
- * it as `pnpm --filter @wemessage/desktop exec electron-builder`, which runs
- * in that package's own directory. So the artefacts land in
- * `apps/desktop/dist-pack` and the workflows were all looking one level too
- * high, at a directory that has never existed in this repo.
+ * Every `dist-pack/...` in the workflow files was once written relative to
+ * the repository root while the packer wrote somewhere else, and the
+ * workflows were all looking at a directory that had never existed in this
+ * repo. Nothing caught it: the job that read it `needs`ed a red gate, and a
+ * needed job that never runs is reported as `skipped`, a green-looking tick
+ * on a step that would have exited 2 on its first line.
  *
- * Nothing caught it. `pack-adhoc` in `ci-macos.yml` `needs` the gate job, the
- * gate job has been red, and a needed job that never runs is reported as
- * `skipped` rather than as failed — a green-looking tick attached to a step
- * that would have exited 2 on its first line ("verify-bundle: no such app
- * bundle"). The release workflow has the same fault in nine more places and
- * is triggered by a tag nobody has pushed yet, so its first run would have
- * been the release itself.
- *
- * Hence a derivation and not a constant. Both halves are read:
- *
- *   `apps/desktop/package.json` name === the filter `pack.mjs` passes, which
- *   is what makes `apps/desktop` the project directory rather than a guess;
- *   `apps/desktop/electron-builder.yml` `directories.output`, which is the
- *   only place the leaf name is decided.
- *
- * Change either one and row 9c fails naming the workflow line that drifted,
- * which is the failure this whole comment exists to make impossible to have
- * silently again.
+ * v2 S6c. One packer remains, `pack-swift.mjs`, and it decides its own
+ * default `--out`. So the prefix is read from that file, not typed here, and
+ * row 9c fails naming the workflow line that drifted from it.
  */
-const DESKTOP_DIR = 'apps/desktop';
+const SWIFT_PACK_DIR = 'apps/mac/dist-pack';
 
 const packDir = (): string => {
-  const pkg = JSON.parse(read(`${DESKTOP_DIR}/package.json`)) as {
-    readonly name?: string;
-  };
-  // The link between the filter in `pack.mjs` and this directory. If the
-  // package were renamed, `--filter @wemessage/desktop` would resolve
-  // somewhere else (or nowhere) and the whole derivation below would be
-  // about the wrong tree.
-  expect(pkg.name).toBe('@wemessage/desktop');
-  const packer = read('tools/release/bin/pack.mjs');
-  for (const token of ['--filter', '@wemessage/desktop', 'electron-builder'])
-    expect([token, packer.includes(token)]).toEqual([token, true]);
-  const builder = parse(read(`${DESKTOP_DIR}/electron-builder.yml`)) as {
-    readonly directories?: { readonly output?: unknown };
-  };
-  const out = builder.directories?.output;
-  expect(typeof out).toBe('string');
-  const leaf = String(out);
-  // A relative output. An absolute one would not be under the project dir at
-  // all and this derivation would be a lie rather than a mistake.
-  expect(leaf.startsWith('/')).toBe(false);
-  return `${DESKTOP_DIR}/${leaf}`;
+  expect(read('tools/release/bin/pack-swift.mjs')).toContain(
+    "join(REPO, 'apps', 'mac', 'dist-pack')",
+  );
+  return SWIFT_PACK_DIR;
 };
 
 /**
@@ -307,13 +274,10 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   it('row 3: build-test runs the five-command gate, suite last', () => {
     const wf = load(RELEASE);
-    // Linux has no window server, so the suite runs under `xvfb-run -a`.
-    // That is the one legitimate difference between this job and the macOS
-    // lane, and it is normalised away here rather than asserted around, so
-    // that the rest of the row can talk about commands instead of wrappers.
-    const runs = runsOf(wf, 'build-test').map((r) =>
-      r.replace('xvfb-run -a pnpm test', 'pnpm test'),
-    );
+    // v2 S6c. No window server is needed any more: nothing in the suite
+    // opens one, so the suite line is the bare command and no wrapper is
+    // normalised away.
+    const runs = runsOf(wf, 'build-test');
     expect(
       isSubsequence(
         [
@@ -333,7 +297,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     // possible for the tagged tree to have never had the suite run on it.
     expect(runs[runs.length - 1]).toBe('pnpm test');
     // And the job is not allowed to grow steps nobody asserted.
-    expect(stepsOf(wf, 'build-test')).toHaveLength(11);
+    expect(stepsOf(wf, 'build-test')).toHaveLength(9);
   });
 
   /* ── row 4: every step declares its lane ────────────────────────────── */
@@ -598,36 +562,31 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       expect([gone, text.includes(gone)]).toEqual([gone, false]);
   });
 
-  it('row 9b: the macOS gate is the Linux gate minus Electron, read from the YAML', () => {
+  it('row 9b: the macOS gate is the Linux gate, step for step, read from the YAML', () => {
     // A second reader for the claim `test/arch.spec.ts` makes with a text
-    // splitter. The one Electron run step Linux still needs (until S6c) is
-    // dropped, and the suite line is the node projects here.
+    // splitter. v2 S6c: with nothing left that needs a window server or a
+    // second runtime, the two lanes run the same commands and differ only in
+    // `runs-on`.
     const linux = load(CI_LINUX);
     const macos = load(CI_MACOS);
     const linuxGate = Object.keys(jobsOf(linux))[0] ?? '';
-    const expected = runsOf(linux, linuxGate)
-      .filter((r) => !r.includes('install-electron'))
-      .map((r) => r.replace('xvfb-run -a pnpm test', 'pnpm test:node'));
-    expect(runsOf(macos, 'build-and-test')).toEqual(expected);
-    expect(runsOf(macos, 'build-and-test')).toContain('pnpm test:node');
-    expect(runsOf(macos, 'build-and-test')).not.toContain('pnpm test');
+    expect(runsOf(macos, 'build-and-test')).toEqual(runsOf(linux, linuxGate));
+    expect(runsOf(macos, 'build-and-test')).toContain('pnpm test');
+    for (const rel of SWEPT)
+      for (const gone of ['xvfb', 'test:node', 'install-electron'])
+        expect([rel, gone, read(rel).includes(gone)]).toEqual([
+          rel,
+          gone,
+          false,
+        ]);
   });
 
-  it('row 9c: every workflow reads the pack where electron-builder writes it', () => {
+  it('row 9c: every workflow reads the pack where pack-swift.mjs writes it', () => {
     const dir = packDir();
-    // The derivation must actually have moved somewhere. If `directories.output`
-    // were ever set to a path that already began with `apps/desktop`, the
-    // sweep below would pass by tautology.
-    expect(dir).toBe('apps/desktop/dist-pack');
-    const leaf = dir.slice(DESKTOP_DIR.length + 1);
-    // v2 S5a: the Swift lane packs to its own directory, which pack-swift.mjs
-    // decides (its default `--out`); the workflow passes the same path, and
-    // `dist-pack-2` beside it for the second pack.
-    const swiftDir = 'apps/mac/dist-pack';
-    expect(read('tools/release/bin/pack-swift.mjs')).toContain(
-      "join(REPO, 'apps', 'mac', 'dist-pack')",
-    );
-    const prefixes = [dir, swiftDir];
+    const leaf = 'dist-pack';
+    // `dist-pack-2` sits beside the first pack for the reproducibility
+    // compare, so it shares the prefix.
+    const prefixes = [dir];
 
     /*
      * Every line of both workflows, not just `run:` and not just `with:`.
@@ -647,7 +606,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
           for (const m of line.matchAll(new RegExp(`\\S*${leaf}\\S*`, 'g'))) {
             const ref = m[0];
             seen += 1;
-            // `apps/desktop/dist-pack…` is right. A bare `dist-pack…`, or one
+            // `apps/mac/dist-pack…` is right. A bare `dist-pack…`, or one
             // reached through any other prefix, is a path that does not exist
             // on the runner and would fail at the first command to touch it.
             if (!prefixes.some((p) => ref.startsWith(p)))

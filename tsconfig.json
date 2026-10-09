@@ -15,7 +15,6 @@
     { "path": "packages/adapters/luna" },
     { "path": "packages/adapters/openclaw" },
     { "path": "packages/adapters/echo" },
-    { "path": "apps/desktop" },
     { "path": "fixtures" },
     { "path": "tools/release" }
   ]

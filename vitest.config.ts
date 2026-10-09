@@ -14,34 +14,10 @@ export default defineConfig({
       // changing how any other daemon spec runs.
       'packages/daemon/vitest.lifecycle.config.ts',
       'packages/adapters/*/vitest.config.ts',
-      // s8 Sc1: `apps/desktop` grows its first tests. The glob is `apps/*`
-      // rather than the one path, for the same reason the enumerations in
-      // test/arch.spec.ts key off structure: the next app must not be able
-      // to be invisible to `pnpm test` by omission.
+      // `apps/*`, not one path: the next app with a Node test project must
+      // not be invisible to `pnpm test` by omission. Today `apps/mac` is the
+      // only app and its tests are Swift (ci-swift), so the glob matches none.
       'apps/*/vitest.config.ts',
-      // The tray project. A SECOND config inside `apps/desktop`, so the glob
-      // above structurally cannot see it; listed by hand for the same reason
-      // the lifecycle project is, its `sequence.groupOrder` being the point.
-      'apps/desktop/vitest.tray.config.ts',
-      // The a11y project. A THIRD config inside `apps/desktop`, invisible to
-      // the glob for the same reason, listed by hand for the same reason: its
-      // `sequence.groupOrder` is the point.
-      'apps/desktop/vitest.a11y.config.ts',
-      // The pack project. A FOURTH config inside `apps/desktop`, invisible to
-      // the glob for the same reason, listed by hand for the same reason. It
-      // runs LAST (`groupOrder` 4) because it is the only project in the repo
-      // that shells out to `electron-builder`, and a DMG being written is not
-      // something to do while eleven other files are each holding an Electron.
-      'apps/desktop/vitest.pack.config.ts',
-      // The release smoke project. A FIFTH config inside `apps/desktop`,
-      // invisible to the glob for the same reason and listed by hand for a
-      // sharper version of the same reason: it runs at `groupOrder` 5, after
-      // BOTH the pack project that builds the artefact it opens and the
-      // daemon's launchd lifecycle project at 1. That second ordering is a
-      // safety property, not a convenience. Both projects sweep every
-      // test-scoped launch agent the service manager reports, and two sweeps
-      // running at once would each read the other's live job as an orphan.
-      'apps/desktop/vitest.smoke.config.ts',
       'fixtures/vitest.config.ts',
       {
         test: {

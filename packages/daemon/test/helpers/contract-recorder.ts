@@ -320,33 +320,45 @@ function match1(text: string, re: RegExp, what: string): string {
 }
 
 function readWire(): ContractWire {
-  // apps/desktop is never imported from a daemon test (it would pull
-  // electron into this project); its constants are read as text instead.
-  const stream = sourceText('apps/desktop/src/main/event-stream.ts');
+  // The reconnect ladder is a CLIENT policy, so it is read from the client
+  // that implements it. Until v2 S6c that was the Electron main process; S6c
+  // deleted it (D-06 (b)), and the Swift app's `Backoff` is the only home
+  // left. It is read as text, because a daemon test cannot import Swift, and
+  // that is what makes this bite on Linux: the Swift tests pin `Backoff` to
+  // wire.json, but they run on macOS only, and this ratchet runs everywhere.
+  const ladder = sourceText(
+    'apps/mac/Sources/WeMessageKit/Events/Backoff.swift',
+  );
   const steps = match1(
-    stream,
-    /export const BACKOFF_MS\s*=\s*\[([^\]]*)\](?:\s*as const)?\s*;/,
-    'BACKOFF_MS',
+    ladder,
+    /static let steps:\s*\[Int\]\s*=\s*\[([^\]]*)\]/,
+    'Backoff.steps',
   )
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0)
     .map((s) => Number(s.replace(/_/g, '')));
   const jitter = Number(
-    match1(stream, /export const JITTER\s*=\s*([\d._]+)\s*;/, 'JITTER'),
+    match1(
+      ladder,
+      /static let jitter:\s*Double\s*=\s*([\d._]+)/,
+      'Backoff.jitter',
+    ),
   );
   const auditGapLimit = Number(
     match1(
-      stream,
-      /export const AUDIT_GAP_LIMIT\s*=\s*([\d_]+)\s*;/,
-      'AUDIT_GAP_LIMIT',
+      ladder,
+      /static let auditGapLimit\s*=\s*([\d_]+)/,
+      'Backoff.auditGapLimit',
     ).replace(/_/g, ''),
   );
+  // The port is the daemon's own default, from the env schema it boots with:
+  // the server decides where it listens, and every client follows.
   const port = Number(
     match1(
-      sourceText('apps/desktop/src/main/auth.ts'),
-      /const DEFAULT_PORT\s*=\s*(\d+)\s*;/,
-      'DEFAULT_PORT',
+      sourceText('packages/daemon/src/main.ts'),
+      /WEMESSAGE_PORT:[^\n]*\.default\((\d+)\)/,
+      'WEMESSAGE_PORT default',
     ),
   );
   if (Object.keys(DRAFT_STATES_EXHAUSTIVE).length !== DRAFT_STATES.length)

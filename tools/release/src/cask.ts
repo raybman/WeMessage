@@ -38,12 +38,12 @@
  *     Both live at Contents/Resources/bin/, NOT Contents/MacOS/. The
  *     bundle has exactly ONE Mach-O (arch F-121) and these two are
  *     `/bin/sh` shims written by `tools/release/bin/bundle-daemon.mjs`;
- *     `apps/desktop/electron-builder.yml` copies `dist-bundle/bin` to
- *     `bin` under Resources. This renderer named Contents/MacOS/ for two
- *     releases and every path it emitted pointed at nothing, which
- *     Homebrew reports as "source is not there" and refuses to install.
- *     Row 11 now pins these paths to the builder config so the two files
- *     cannot disagree again in silence.
+ *     `tools/swift/bundle.sh` copies the bundle's `bin` to `bin` under
+ *     Resources. This renderer named Contents/MacOS/ for two releases and
+ *     every path it emitted pointed at nothing, which Homebrew reports as
+ *     "source is not there" and refuses to install. Row 11 now pins these
+ *     paths to bundle.sh so the two files cannot disagree again in
+ *     silence.
  *   - the daemon runs as a launchd agent labelled "sh.wemessage.gateway",
  *     installed at ~/Library/LaunchAgents/sh.wemessage.gateway.plist
  *   - "wemessaged service install" is the operator's on-ramp to that

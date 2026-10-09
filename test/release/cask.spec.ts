@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
 
 import {
   CASK_STANZA_ORDER,
@@ -56,7 +55,7 @@ const REPO = fileURLToPath(new URL('../..', import.meta.url));
 const CASK_RB_PATH = join(REPO, 'homebrew', 'Casks', 'wemessage.rb');
 const LOCK_PATH = join(REPO, 'homebrew', 'cask.lock.json');
 const README_PATH = join(REPO, 'homebrew', 'README.md');
-const BUILDER_YML_PATH = join(REPO, 'apps', 'desktop', 'electron-builder.yml');
+const BUNDLE_SH_PATH = join(REPO, 'tools', 'swift', 'bundle.sh');
 
 // FACTS (s9 Sc10): the repo this cask tracks releases from. Fixed, not an
 // input the lock file carries, because it does not change release to
@@ -160,7 +159,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     expect(rb).not.toContain('/v1.0.0-rc.1/');
     expect(rb).not.toContain('WeMessage-1.0.0-rc.1-arm64.dmg');
     // v2 S5c: the Swift lane's image (`tools/swift/dmg.sh`, named after
-    // pack-swift's zip). Never the Electron lane's `-UNSIGNED` artefact,
+    // pack-swift's zip). Never the previous desktop lane's `-UNSIGNED` artefact,
     // and never a `-throwaway` one, which no release carries.
     expect(rb).not.toContain('-UNSIGNED');
     expect(rb).not.toContain('-throwaway');
@@ -562,12 +561,9 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * `Contents/MacOS/wemessage`. Neither file has ever existed. The bundle
    * carries exactly ONE Mach-O (arch F-121: `Contents/MacOS/` holds only
    * `WeMessage`), and the two things the cask wants on PATH are `/bin/sh`
-   * shims that `tools/release/bin/bundle-daemon.mjs` writes into
-   * `dist-bundle/bin`, which `electron-builder.yml` then copies to `bin`
-   * under `Contents/Resources`. (v2 S6a moved the bundler there from
-   * `apps/desktop/scripts/`, and the Swift lane's `tools/swift/bundle.sh`
-   * places the same `bin/` at the same spot, so the last assertion below
-   * holds the two packers to one prefix until S6c retires the Electron one.) Homebrew does not shrug at a `binary`
+   * shims that `tools/release/bin/bundle-daemon.mjs` writes into the
+   * bundle's `bin`, which `tools/swift/bundle.sh` then copies to `bin`
+   * under `Contents/Resources`. Homebrew does not shrug at a `binary`
    * stanza whose source is missing, it raises "source is not there" and
    * the install fails, so the committed cask was UNINSTALLABLE and the
    * whole of this file was green.
@@ -581,35 +577,35 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * owned by a different tool, and insists the two agree.
    *
    * So this row derives the expected prefix rather than restating it. If
-   * someone moves the shims by editing `extraResources`, this row fails
+   * someone moves the shims by editing bundle.sh's copy, this row fails
    * and names the new location; it does not quietly keep asserting the old
-   * one. That is the difference between a coupling test and a copy.
+   * one. That is the difference between a coupling test and a copy. (v2
+   * S6c: until then the prefix was read from the previous desktop app's
+   * packer config, and bundle.sh was held to it.)
    *
    * What it deliberately does NOT do is check that the files exist on
    * disk. They only exist after a bundle, which is minutes of work and
-   * darwin/arm64-only; `apps/desktop/test/pack.spec.ts` already asserts
-   * both are present under `Contents/Resources/bin` in a real packed app,
-   * and `apps/desktop/test/bundle.spec.ts` asserts a shim survives being
-   * invoked through a symlink, which is the form a `binary` stanza
-   * actually installs it in. This row is the cheap, always-on link
-   * between those two and the string this renderer writes.
+   * darwin/arm64-only; `test/release/bundle-daemon.spec.ts` asserts both
+   * shims are in the bundle and resolve themselves through `readlink -f`,
+   * which is how a `binary` stanza's symlink reaches them. This row is the
+   * cheap, always-on link between that and the string this renderer
+   * writes.
    */
-  it('row 11: binary stanza paths are derived from electron-builder extraResources', () => {
-    const builder = parse(readFileSync(BUILDER_YML_PATH, 'utf8')) as {
-      extraResources?: readonly { from?: unknown; to?: unknown }[];
-    };
-    const resources = builder.extraResources ?? [];
-    // Not vacuous: a parse that silently produced nothing would make every
-    // assertion below unreachable and this row would pass having read air.
-    expect(resources.length).toBeGreaterThanOrEqual(2);
-
-    const binEntry = resources.find((e) => e.from === 'dist-bundle/bin');
+  it('row 11: binary stanza paths are derived from where bundle.sh copies the shims', () => {
+    const bundleSh = readFileSync(BUNDLE_SH_PATH, 'utf8');
+    const copies = [
+      ...bundleSh.matchAll(
+        /^ditto "\$bundle\/bin" "\$app\/Contents\/Resources\/([^"]+)"$/gm,
+      ),
+    ].map(([, to]) => String(to));
+    // Exactly one copy of the shims. None would make every assertion below
+    // unreachable; two would leave the cask free to point at either.
     expect(
-      binEntry,
-      'electron-builder.yml no longer copies dist-bundle/bin; the cask ' +
-        'binary stanzas below point at wherever it went, so say where',
-    ).toBeDefined();
-    const to = String(binEntry?.to ?? '');
+      copies,
+      'bundle.sh no longer copies $bundle/bin under Contents/Resources; ' +
+        'the cask binary stanzas below point at wherever it went, so say where',
+    ).toHaveLength(1);
+    const to = copies[0] ?? '';
     expect(to).not.toBe('');
 
     const rb = renderCask({
@@ -638,21 +634,11 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     // cask links onto PATH may live in `Contents/MacOS`, which holds the
     // single Mach-O and nothing else.
     expect(rb).not.toContain('Contents/MacOS');
-
-    // v2 S6a: the Swift lane lands the shims at the same prefix, so the
-    // cask's stanzas resolve whichever packer built the app.
-    const bundleSh = readFileSync(
-      join(REPO, 'tools', 'swift', 'bundle.sh'),
-      'utf8',
-    );
-    expect(bundleSh).toContain(
-      `ditto "$bundle/bin" "$app/Contents/Resources/${to}"`,
-    );
   });
 
   /*
    * v2 S5c: `pnpm release:cask --dmg` takes only the Swift lane's image.
-   * The Electron lane's `-UNSIGNED.dmg` would render a cask whose url names
+   * The previous desktop lane's `-UNSIGNED.dmg` would render a cask whose url names
    * a file no Swift release carries, and a dry run's `-throwaway.dmg` is
    * never published at all. Every case here is a refusal, which exits
    * before anything is written, so this row never touches the committed
@@ -660,7 +646,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * well-named image that does not exist gets past the name check and is
    * refused for being unreadable instead.
    */
-  it('row 12: the CLI takes WeMessage-<version>-arm64.dmg and refuses the Electron and throwaway names', () => {
+  it('row 12: the CLI takes WeMessage-<version>-arm64.dmg and refuses the old desktop and throwaway names', () => {
     const before = readFileSync(CASK_RB_PATH, 'utf8');
     const run = (name: string) =>
       spawnSync(

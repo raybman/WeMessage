@@ -1,19 +1,13 @@
 name: ci-macos
 
-# v2 S6b. The macOS node gate. Until S6b this lane ran the Electron app's
-# whole suite on a real window server and packed an ad-hoc Electron bundle
-# beside it. The app that ships is now the Swift one (`apps/mac`), and it has
-# its own lane, `ci-swift.yml`, which builds, tests and snapshots it on the
-# same macOS release it targets. What stays here is everything in this repo
-# that runs on Node and has a reason to run on macOS: the daemon and its real
-# `launchctl` lifecycle project, the CLI, the adapters, the release tooling,
-# and the repo-level guards in `test/`.
+# v2 S6b and S6c. The macOS node gate. The app that ships is the Swift one
+# (`apps/mac`), and it has its own lane, `ci-swift.yml`, which builds, tests
+# and snapshots it on the same macOS release it targets. What runs here is
+# everything in this repo that runs on Node and has a reason to run on macOS:
+# the daemon and its real `launchctl` lifecycle project, the CLI, the
+# adapters, the release tooling, and the repo-level guards in `test/`.
 #
-# It runs the Linux gate step for step, minus the two Electron provisioning
-# steps, with the suite narrowed to the node projects (`pnpm test:node`, an
-# explicit project list that `test/arch.spec.ts` holds equal to every vitest
-# project minus the Electron ones). Linux still runs the Electron projects
-# until S6c deletes them; nothing here is untested on both lanes at once.
+# It runs the Linux gate step for step. The only difference is `runs-on`.
 #
 # What this lane deliberately does NOT do: ask for a secret, or sign, or
 # notarize. The release build is self-signed and not notarized, and only
@@ -51,6 +45,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm dep:check
       - run: pnpm licenses:check
-      # The ONE step that runs the suite. The project list is closed and an
-      # arch row holds it, so a new package cannot be missing from it.
-      - run: pnpm test:node
+      # This is the ONE step that runs the suite, so nothing is excluded from
+      # it: an excluded file is an untested file.
+      - run: pnpm test

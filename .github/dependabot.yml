@@ -23,14 +23,6 @@ updates:
         dependency-type: production
         update-types:
           - patch
-    ignore:
-      # Electron's major line pins the bundled Node ABI and the Chromium that
-      # renders the launch animation. A major bump is a slice, not a chore:
-      # it moves the native prebuild target and it moves every rasterised
-      # pixel the desktop tests compare. Minor and patch still flow.
-      - dependency-name: electron
-        update-types:
-          - version-update:semver-major
 
   # Actions are pinned to commit SHAs and checked by test/release/workflows.spec.ts.
   - package-ecosystem: github-actions

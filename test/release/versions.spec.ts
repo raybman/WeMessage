@@ -72,7 +72,7 @@ function tempDir(prefix: string): string {
 }
 
 interface SeedOptions {
-  /** Applied to all 18 manifests, root included. */
+  /** Applied to all 17 manifests, root included. */
   readonly version: string;
   /** Per-relative-path overrides, applied after `version`, before the seed commit. */
   readonly manifestOverrides?: Readonly<Record<string, string>>;
@@ -187,11 +187,12 @@ afterAll(() => {
 });
 
 describe('s9 Sc14: CHANGELOG, lockstep versions, cut-tag, v1.0.0-rc.1', () => {
-  /* ── row 1: eighteen manifests in lockstep, drift named when it happens ── */
+  /* ── row 1: seventeen manifests in lockstep, drift named when it happens ── */
   describe('row 1: check-versions.mjs, tested not rewritten', () => {
-    it('manifestPaths() finds the root plus all 17 workspace members', () => {
+    it('manifestPaths() finds the root plus all 16 workspace members', () => {
+      // v2 S6c: eighteen until the previous desktop app was deleted.
       const paths = manifestPaths();
-      expect(paths.length).toBe(18);
+      expect(paths.length).toBe(17);
       expect(paths).toContain('package.json');
       expect(paths).toContain('tools/release/package.json');
       expect(paths).toContain('packages/core/package.json');
@@ -199,7 +200,7 @@ describe('s9 Sc14: CHANGELOG, lockstep versions, cut-tag, v1.0.0-rc.1', () => {
 
     it('this repository, right now, is in lockstep at the target version', () => {
       // Not a synthetic tree: the real one, as it stands at this commit. The
-      // eighteen manifests and the one source constant all agree, which is
+      // seventeen manifests and the one source constant all agree, which is
       // the whole claim `release:cut-tag` refuses without.
       expect(versionDrift(TARGET_VERSION)).toEqual([]);
       expect(declaredAppVersion()).toBe(TARGET_VERSION);

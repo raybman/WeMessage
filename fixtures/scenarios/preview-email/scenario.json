@@ -1,4 +1,4 @@
 {
-  "summary": "Board 05 over fixtures: Email in the fixture state, iMessage connected and scanned, zero threads and zero drafts. A later slice fills the threads. Fake daemon only; the real daemon cannot say this state.",
+  "summary": "Board 05 over fixtures: Email in the fixture state, iMessage connected and scanned, eight email threads (cards, an invite, a newsletter with remote images, statements, a new sender, a batch near the attachment wall) and zero drafts. Fake daemon only; the real daemon cannot say this state.",
   "extends": "quiet"
 }

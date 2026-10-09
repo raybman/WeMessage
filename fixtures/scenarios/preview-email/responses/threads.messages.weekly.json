@@ -1,0 +1,55 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;contoso-weekly",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0106",
+        "from": "them",
+        "kind": "text",
+        "text": "This month: three workshops worth the trip, a reading list for long flights, and the gear we kept using all summer.",
+        "at": "2026-09-01T08:00:00.000Z",
+        "handle": "news@example.com",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Contoso Weekly",
+              "address": "news@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000,
+          "images": [
+            {
+              "url": "https://img.example.com/contoso-hero.png",
+              "width": 640,
+              "height": 200
+            },
+            {
+              "url": "https://img.example.com/contoso-card-1.png",
+              "width": 300,
+              "height": 160
+            },
+            {
+              "url": "https://img.example.com/contoso-card-2.png",
+              "width": 300,
+              "height": 160
+            }
+          ],
+          "trackers": 3
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

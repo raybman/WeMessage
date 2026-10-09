@@ -160,9 +160,9 @@ struct ContentPane: View {
     }
   }
 
-  /// The audit, the bulk card, a WhatsApp chat in board 03 (v2 B1), the
-  /// thread, board 03 (v2 B0), a zero screen outside Recent, or the empty
-  /// state, in that order.
+  /// The audit, the bulk card, a WhatsApp chat in board 03 (v2 B1),
+  /// board 05 (v2 B2), the thread, board 03 (v2 B0), a zero screen
+  /// outside Recent, or the empty state, in that order.
   @ViewBuilder private var pane: some View {
     if model.auditShown {
       AuditView(model: model, palette: palette)
@@ -171,6 +171,8 @@ struct ContentPane: View {
     } else if let thread = model.selected, let board = model.whatsAppBoard(for: thread) {
       // v2 B1: a WhatsApp chat opens inside board 03, read only.
       WhatsAppThreadPane(model: model, thread: thread, board: board, palette: palette)
+    } else if let board = model.emailBoard {
+      EmailBoardView(model: model, board: board, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {
         ThreadHeader(thread: thread, image: model.avatars.image(for: thread), asOf: model.thread.asOf, palette: palette) {

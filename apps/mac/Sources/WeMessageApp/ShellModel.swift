@@ -90,6 +90,8 @@ public final class ShellModel {
 
   /// The selected thread's transcript (board 02).
   public let thread: ThreadModel
+  /// Board 05's chip, reveals and inline compose (v2 B2).
+  let email: EmailDesk
   /// The one send funnel: every send and approval goes through it.
   public let outbound: Outbound
   /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
@@ -181,6 +183,17 @@ public final class ShellModel {
     return WhatsAppBoardModel.make(availability(.whatsapp), listed: true, chipText: TestHooks.previewChipText)
   }
 
+  /// Board 05 while the Email tile is selected and its channel draws a
+  /// board (v2 B2); nil otherwise, as board 03's. The banner names the
+  /// mailbox of the open thread, or of the first email thread listed.
+  var emailBoard: EmailBoardModel? {
+    guard scope == .email else { return nil }
+    let mail = (threads?.threads ?? []).filter { $0.channel == Channel.email.rawValue }
+    let shown = mail.first { $0.chatGuid == selectedThread } ?? mail.first
+    return EmailBoardModel.make(
+      availability(.email), account: shown.flatMap { EmailThreadMeta($0).account }, chipText: TestHooks.previewChipText)
+  }
+
   /// Board 10.A: the trust banner's line, nil while no connected channel
   /// is stale.
   public var trustLine: String? { TrustBanner.line(board: board) }
@@ -264,6 +277,7 @@ public final class ShellModel {
   /// The threads the list shows for the current scope and lens.
   public var rows: [ThreadSummary] {
     board.rows(threads?.threads ?? [], scope: scope, lens: lens, including: Set(snoozedThreads.keys))
+      .filter { email.admits($0, scope: scope) }
   }
 
   /// The queue items in the selected scope, in list order.
@@ -487,6 +501,7 @@ public final class ShellModel {
     self.client = client
     self.avatars = avatars
     self.thread = ThreadModel(client: client)
+    self.email = EmailDesk(client: client)
     self.search = SearchModel(source: DaemonSearchSource(client: client))
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()

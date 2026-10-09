@@ -1,0 +1,61 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;offsite-dates",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0112",
+        "from": "them",
+        "kind": "text",
+        "text": "Do the 14th and 15th of October still work for the offsite?",
+        "at": "2026-08-29T17:45:00.000Z",
+        "handle": "lucia.ferrer@example.com",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Lucia Ferrer",
+              "address": "lucia.ferrer@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000
+        }
+      },
+      {
+        "guid": "mail-0113",
+        "from": "me",
+        "kind": "text",
+        "text": "Both work. I will hold the 14th and 15th.",
+        "at": "2026-08-30T09:20:00.000Z",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Me",
+              "address": "me@example.com"
+            },
+            "to": [
+              {
+                "name": "Lucia Ferrer",
+                "address": "lucia.ferrer@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

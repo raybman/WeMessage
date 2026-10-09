@@ -58,6 +58,8 @@ targets:
       - path: Sources/WeMessageApp/ProvisionalUI+Board03.swift
       # The frost probe patches (S4a), so the backdrop and FrostEvidence agree.
       - path: Sources/WeMessageApp/Glass/FrostProbe.swift
+      # Board 05's provisional values (v2 B2), read by Board05Tests.
+      - path: Sources/WeMessageApp/ProvisionalUI+Board05.swift
     dependencies:
       - target: WeMessageMac
     settings:

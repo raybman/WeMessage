@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- doctor: runtime kind `electron` removed; launchd plist no longer sets
+  `ELECTRON_RUN_AS_NODE`. The `kind` tag stays on the wire with `node` as its
+  only value, so a future host is a loud change rather than a silent one.
+
 ## [1.0.0-rc.1] - 2026-09-09
 
 First release candidate. WeMessage is a macOS gateway that lets an AI agent

@@ -3438,8 +3438,8 @@ describe('v2 S6c: the desktop app is deleted, not dormant', () => {
    * may. EXACT, both ways: a file that starts naming it fails (the prose of
    * a deleted app creeping back in), and a file listed here that stops
    * naming it fails too, so the list can only shrink by an edit that says
-   * so. S6d is expected to shrink it: the rows marked S6d go when the
-   * doctor's runtime union and the bundle plist variable go.
+   * so. S6d shrank it by seven: the doctor's runtime union, its client and
+   * Swift mirrors, the fixture file and the bundle plist variable went.
    *
    * "electronic" is not a mention: the Apache LICENSE files say "any form
    * of electronic ... communication", and a guard that convicts a licence
@@ -3471,16 +3471,11 @@ describe('v2 S6c: the desktop app is deleted, not dormant', () => {
     'packages/daemon/src/launchd/paths.ts':
       'migration: the bundle pair an installed pre-Swift app resolves to',
     'packages/daemon/test/launchd-paths.spec.ts': 'migration rows',
-    // S6d: the doctor runtime union and the bundle plist variable
-    'packages/daemon/src/doctor.ts': 'S6d',
-    'packages/daemon/test/doctor.spec.ts': 'S6d',
-    'packages/client/src/index.ts': 'S6d',
-    'packages/client/test/client-s3.spec.ts': 'S6d',
-    'fixtures/doctor-runtime/electron.json': 'S6d',
-    'apps/mac/Sources/WeMessageKit/DTO/System.swift': 'S6d',
-    'apps/mac/Tests/WeMessageKitTests/SystemDTOTests.swift': 'S6d',
-    'packages/daemon/src/launchd/plist.ts': 'S6d',
-    'packages/daemon/test/launchd-plist.spec.ts': 'S6d',
+    // S6d's own guards: what the runtime union and the plist variable left
+    'packages/daemon/test/doctor.spec.ts':
+      'guard: doctor copy never names it; a stray versions key changes nothing',
+    'packages/daemon/test/launchd-plist.spec.ts':
+      'guard: no shape sets ELECTRON_RUN_AS_NODE',
   };
   function electronWordFiles(): string[] {
     // The file NAME counts as a mention too: a tracked `electron.json`
@@ -3518,6 +3513,30 @@ describe('v2 S6c: the desktop app is deleted, not dormant', () => {
     // The allowlist is not a wildcard: README is the first surface a user
     // reads, and it is not on it.
     expect(Object.keys(ELECTRON_WORD_ALLOWLIST)).not.toContain('README.md');
+  });
+
+  /* ── v2 S6d: the runtime union and the plist variable ─────────────── */
+
+  it('v2 S6d: ELECTRON_RUN_AS_NODE is absent from every package source', () => {
+    // Tests may name it to assert its absence; no shipped source may set,
+    // read or declare it. `packages/*/src` is what the daemon bundle and
+    // the client are built from.
+    const offenders = lsFiles().filter(
+      (f) =>
+        /^packages\/[^/]+(?:\/[^/]+)?\/src\//.test(f) &&
+        readFileSync(join(repoRoot, f), 'utf8').includes(
+          'ELECTRON_RUN_AS_NODE',
+        ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('v2 S6d: fixtures/doctor-runtime holds the node variant and nothing else', () => {
+    expect(
+      lsFiles()
+        .filter((f) => f.startsWith('fixtures/doctor-runtime/'))
+        .sort(),
+    ).toEqual(['fixtures/doctor-runtime/node.json']);
   });
 
   /* ── S8 Sc1 row 12, re-planted: the capability scan reaches apps/ ──── */

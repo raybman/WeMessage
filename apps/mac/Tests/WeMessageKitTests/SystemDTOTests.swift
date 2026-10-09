@@ -2,13 +2,14 @@ import Foundation
 import Testing
 @testable import WeMessageKit
 
-/// v2 S2b row 14: the doctor's `runtime` is a tagged union on `kind`. Both
-/// variants are read from fixtures/doctor-runtime, the same hand-written files
-/// the daemon's and the client's tests read, so the three mirrors are held to
-/// one set of bytes. Nothing here restates a fixture's values.
+/// v2 S2b row 14: the doctor's `runtime` is tagged on `kind`, one kind since
+/// v2 S6d. Every variant is read from fixtures/doctor-runtime, the same
+/// hand-written files the daemon's and the client's tests read, so the three
+/// mirrors are held to one set of bytes. Nothing here restates a fixture's
+/// values.
 @Suite("System DTOs")
 struct SystemDTOTests {
-  static let variants = ["electron", "node"]
+  static let variants = ["node"]
 
   static func fixture(_ name: String) throws -> JSONValue {
     try Repo.json("fixtures/doctor-runtime/\(name).json")
@@ -18,16 +19,18 @@ struct SystemDTOTests {
     try JSONDecoder().decode(DoctorRuntimePayload.self, from: try value.canonicalData())
   }
 
-  @Test("DoctorRuntimePayload decodes both variants from fixtures/doctor-runtime")
-  func decodesBothVariants() throws {
-    let electron = try Self.fixture("electron")
-    let electronVersion = try #require(electron["electron"]?.stringValue)
-    let electronNode = try #require(electron["node"]?.stringValue)
-    let electronAbi = try #require(electron["abi"]?.intValue)
-    #expect(
-      try Self.decode(electron)
-        == .electron(electron: electronVersion, node: electronNode, abi: electronAbi))
+  @Test("fixtures/doctor-runtime holds exactly the variants this suite reads")
+  func fixtureSetIsExact() throws {
+    let dir = try Repo.root().appendingPathComponent("fixtures/doctor-runtime")
+    let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+      .filter { $0.hasSuffix(".json") }
+      .map { String($0.dropLast(".json".count)) }
+      .sorted()
+    #expect(names == Self.variants)
+  }
 
+  @Test("DoctorRuntimePayload decodes the node variant from fixtures/doctor-runtime")
+  func decodesNodeVariant() throws {
     let node = try Self.fixture("node")
     let host = try #require(node["host"]?.stringValue)
     let nodeVersion = try #require(node["node"]?.stringValue)
@@ -57,7 +60,7 @@ struct SystemDTOTests {
 
   @Test("the flat shape from before the union, with no kind, is refused")
   func flatShapeRefused() throws {
-    var fields = try #require(try Self.fixture("electron").objectValue)
+    var fields = try #require(try Self.fixture("node").objectValue)
     fields["kind"] = nil
     do {
       _ = try Self.decode(.object(fields))
@@ -67,17 +70,12 @@ struct SystemDTOTests {
     }
   }
 
-  @Test("each variant refuses the other variant's member and any unknown key")
+  @Test("the node variant refuses any member it does not name")
   func strictPerKind() throws {
-    let electron = try Self.fixture("electron")
     let node = try Self.fixture("node")
-    let host = try #require(node["host"])
-    let electronVersion = try #require(electron["electron"])
     let foreign: [(String, JSONValue, String, JSONValue)] = [
-      ("electron", electron, "host", host),
-      ("node", node, "electron", electronVersion),
-      ("electron", electron, "zzUnknown", 1),
       ("node", node, "zzUnknown", 1),
+      ("node", node, "version", "1"),
     ]
     for (name, fixture, key, value) in foreign {
       do {
@@ -91,7 +89,7 @@ struct SystemDTOTests {
     }
   }
 
-  @Test("the doctor golden carries no runtime, and either variant spliced in round-trips")
+  @Test("the doctor golden carries no runtime, and each variant spliced in round-trips")
   func reportWithRuntime() throws {
     let golden = try Fixtures.response("doctor").body
     let goldenFields = try #require(golden.objectValue)

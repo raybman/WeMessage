@@ -142,7 +142,6 @@ describe('s9 Sc3 row 1: the plist round-trips, and plutil agrees', () => {
     const obj = launchAgentPlistObject(s);
     const env = obj['EnvironmentVariables'] as Record<string, string>;
     expect(Object.keys(env).sort()).toEqual([
-      'ELECTRON_RUN_AS_NODE',
       'WEMESSAGE_LAUNCHD_LABEL',
       'WEMESSAGE_SUPERVISOR',
     ]);
@@ -212,7 +211,8 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     expect(args[0]?.endsWith('/Contents/MacOS/WeMessage')).toBe(true);
     expect(args[1]?.endsWith('/Contents/Resources/daemon/main.mjs')).toBe(true);
     const env = p['EnvironmentVariables'] as Record<string, string>;
-    expect(env['ELECTRON_RUN_AS_NODE']).toBe('1');
+    // v2 S6d: the bundle vector no longer carries the v1 host's variable.
+    expect('ELECTRON_RUN_AS_NODE' in env).toBe(false);
     expect(env['WEMESSAGE_SUPERVISOR']).toBe('launchd');
     expect(env['WEMESSAGE_LAUNCHD_LABEL']).toBe(s.label);
     expect(env['WEMESSAGE_DIR']).toBe('/tmp/wm');
@@ -276,13 +276,10 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     expect(t['ThrottleInterval']).toBe(1);
   });
 
-  it('the dev shape is the SECOND legal shape, and it drops the electron flag', () => {
+  it('the dev shape is the SECOND legal shape', () => {
     // Stage 2 needs this: there is no packaged app until Sc 6, so the
     // lifecycle rows point the agent at the built entrypoint under the
-    // repository's own node. `ELECTRON_RUN_AS_NODE` is tied to the shape
-    // rather than passed in, because that variable set for a plain `node`
-    // is a variable that means nothing, and a variable that means nothing
-    // in a plist is a variable somebody copies into one where it does.
+    // repository's own node.
     expect(programArgumentsShape([...BUNDLE_ARGS])).toBe('bundle');
     expect(programArgumentsShape([...DEV_ARGS])).toBe('dev');
     const p = parseLaunchAgentPlist(
@@ -295,6 +292,23 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     // the host shape adds one (S2a row 6b).
     expect(Object.keys(p).sort()).toEqual(keysFor('dev'));
     expect(keysFor('dev')).toEqual([...TEN_KEYS]);
+  });
+
+  it('v2 S6d: every shape renders the same two env keys, exactly', () => {
+    // Before S6d the bundle shape added the v1 host's run-as-node variable.
+    // The Swift host reads a bundle vector as --daemon and scrubs that
+    // variable from its child anyway, so it meant nothing; now no shape
+    // sets anything the other two do not.
+    for (const programArguments of [BUNDLE_ARGS, DEV_ARGS, HOST_ARGS]) {
+      const p = parseLaunchAgentPlist(
+        renderLaunchAgentPlist(spec({ programArguments })),
+      );
+      const env = p['EnvironmentVariables'] as Record<string, string>;
+      expect(Object.keys(env).sort(), programArguments[1]).toEqual([
+        'WEMESSAGE_LAUNCHD_LABEL',
+        'WEMESSAGE_SUPERVISOR',
+      ]);
+    }
   });
 });
 
@@ -478,7 +492,6 @@ describe('S2a rows 1-6: the host shape, and the one key only it carries', () => 
   });
 
   it('row 4: the host env is the supervisor and the label, and nothing else', () => {
-    // No ELECTRON_RUN_AS_NODE: there is no Electron binary in this vector.
     // No WEMESSAGE_HOST: the app sets that on the child it spawns, so the
     // plist cannot vouch for a host it does not start.
     const p = parseLaunchAgentPlist(renderLaunchAgentPlist(host()));

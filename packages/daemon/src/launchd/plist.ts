@@ -115,7 +115,10 @@ export const ASSOCIATED_BUNDLE_IDENTIFIER = 'sh.wemessage.gateway' as const;
 /**
  * The three argument vectors this project will supervise, and no fourth.
  *
- * `bundle` is what ships. `dev` exists because the packaged app does not
+ * `bundle` is the v1 packaged vector: the app executable, then the daemon
+ * script. A plist written by v1 still names it, and the Swift host reads that
+ * vector as `--daemon` (HostArguments), so it stays legal; since v2 S6d it
+ * carries no environment of its own. `dev` exists because the packaged app does not
  * exist until Sc 6 and the lifecycle rows have to point launchd at something
  * real before then; making it a NAMED shape rather than "anything goes when
  * testing" is the difference between two supported layouts and a plist that
@@ -196,12 +199,6 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
     WEMESSAGE_SUPERVISOR: 'launchd',
     WEMESSAGE_LAUNCHD_LABEL: spec.label,
   };
-  // Only under the Electron bundle: the variable tells Electron's binary to
-  // behave as node. Set for a plain `node`, or for the native host, which
-  // has no Electron binary at all, it means nothing, and a variable that
-  // means nothing in a plist is a variable somebody copies into one where
-  // it does.
-  if (shape === 'bundle') env['ELECTRON_RUN_AS_NODE'] = '1';
   if (spec.dir !== undefined) env['WEMESSAGE_DIR'] = spec.dir;
   if (spec.port !== undefined) env['WEMESSAGE_PORT'] = String(spec.port);
   if (spec.chatDb !== undefined) env['WEMESSAGE_CHATDB'] = spec.chatDb;

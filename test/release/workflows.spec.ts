@@ -838,7 +838,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
         body.includes('security find-identity -v -p codesigning'),
       ]).toEqual([id, true]);
     }
-    for (const id of ['pack-swift-twice', 'verify-swift-untrusted'])
+    for (const id of ['pack-swift-twice', 'verify-swift-bundle'])
       expect([id, swiftStep(id).env?.['LEAF']]).toEqual([id, LEAF_EXPR]);
     // The leaf is passed to the packer as the identity, never a name.
     expect(swiftStep('pack-swift-twice').run ?? '').not.toMatch(
@@ -880,19 +880,22 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(lines.indexOf(cmps[0] ?? '')).toBeGreaterThan(lines.indexOf(second));
   });
 
-  it('row 18: verify runs with the leaf untrusted, after the packs', () => {
-    const verify = swiftStep('verify-swift-untrusted');
+  it('row 18: verify pins the leaf, after the packs, and touches no trust setting', () => {
+    const verify = swiftStep('verify-swift-bundle');
     const body = verify.run ?? '';
     expect(body).toContain(
       'bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"',
     );
-    // Trust is removed BEFORE the verifier runs: that is the user's posture.
-    expect(body.indexOf('remove-trusted-cert')).toBeGreaterThan(-1);
-    expect(body.indexOf('remove-trusted-cert')).toBeLessThan(
-      body.indexOf('verify-bundle.sh'),
-    );
+    // No trust or certificate change before the verifier: a removal waits
+    // on an authorization dialog on a headless runner (row 22).
+    for (const banned of [
+      'trusted-cert',
+      'delete-certificate',
+      'trust-settings',
+    ])
+      expect([banned, body.includes(banned)]).toEqual([banned, false]);
     expect(verify.if).toBeUndefined();
-    expect(indexOfId('verify-swift-untrusted')).toBeGreaterThan(
+    expect(indexOfId('verify-swift-bundle')).toBeGreaterThan(
       indexOfId('pack-swift-twice'),
     );
     // The RELEASING.md comparison is selfsigned only: a throwaway leaf is
@@ -944,20 +947,21 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     ]);
     // Uploads come after verify; cleanup is the last step of all.
     const firstUpload = swiftSteps().findIndex(isUploader);
-    expect(firstUpload).toBeGreaterThan(indexOfId('verify-swift-untrusted'));
+    expect(firstUpload).toBeGreaterThan(indexOfId('verify-swift-bundle'));
     expect(indexOfId('cleanup-swift-signing-identity')).toBe(
       swiftSteps().length - 1,
     );
   });
 
-  it('row 20: the Swift keychain and trust are removed on every path', () => {
+  it('row 20: the Swift keychain and key files are removed on every path', () => {
     const cleanup = swiftStep('cleanup-swift-signing-identity');
     expect(cleanup.if).toBe('always()');
     const body = cleanup.run ?? '';
     expect(body).toContain('security delete-keychain');
     expect(body).toContain('$RUNNER_TEMP/wemessage-sign.keychain-db');
-    expect(body).toContain('remove-trusted-cert');
     expect(body).toContain('rm -f');
+    for (const f of ['identity.p12', 'cert.pem', 'key.pem', 'mint.cnf'])
+      expect([f, body.includes(`"$RUNNER_TEMP/${f}"`)]).toEqual([f, true]);
     expect(secretsNamedIn(stepText(cleanup))).toEqual([]);
     // Both identity steps use the keychain cleanup removes, never the login
     // keychain, and never one in the workspace.
@@ -1024,41 +1028,39 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     ]);
   });
 
-  // A live dispatch hung in verify-swift-untrusted until the job limit. The
-  // likely cause: a trust change in the USER domain asks for authorization
-  // in a dialog, and a headless runner has no one to answer it. So every
-  // trust change in the
-  // Swift job is the admin domain through sudo, and the steps that undo
-  // trust carry their own limit, so a hang fails fast with its log.
-  it('row 22: Swift trust changes are admin-domain only, and the undo steps are time-boxed', () => {
+  // Two live dispatches hung on trust removal: 37943894910 to the job
+  // limit, then 37950305539, whose step limits kept the log. That log shows
+  // verify and cleanup each stuck on `sudo security remove-trusted-cert -d`
+  // with no output for their whole limit, while the same verifier had run
+  // in seconds inside the pack. Removing a trust setting waits on an
+  // authorization dialog even under sudo; adding one through sudo does not.
+  // So trust is added in the admin domain through sudo and never removed
+  // (the hosted VM is discarded), and the steps after the packs carry their
+  // own limits, so any other hang fails fast with its log.
+  it('row 22: Swift trust is only added, admin-domain through sudo, and the late steps are time-boxed', () => {
     const changes = swiftSteps().flatMap((s) =>
       (s.run ?? '')
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => /security (add|remove)-trusted-cert/.test(l))
+        .filter((l) => /trusted-cert|trust-settings/.test(l))
         .map((l) => [s.id, l] as const),
     );
-    // Non-vacuity: both identity steps add trust, verify and cleanup remove it.
+    // Non-vacuity: both identity steps add trust, and nothing else touches it.
     expect([...new Set(changes.map(([id]) => id))]).toEqual([
       'import-release-signing-identity',
       'mint-throwaway-signing-identity',
-      'verify-swift-untrusted',
-      'cleanup-swift-signing-identity',
     ]);
-    for (const [id, line] of changes) {
-      expect([id, line, line.startsWith('sudo security ')]).toEqual([
+    for (const [id, line] of changes)
+      expect([
         id,
-        line,
-        true,
-      ]);
-      expect([id, line, /-trusted-cert -d /.test(line)]).toEqual([
-        id,
-        line,
-        true,
-      ]);
-    }
+        line.startsWith('sudo security add-trusted-cert -d '),
+      ]).toEqual([id, true]);
+    // Anywhere in the file, so a step added later cannot bring it back.
+    expect(read(RELEASE)).not.toMatch(
+      /remove-trusted-cert|trust-settings-(import|export)/,
+    );
     for (const id of [
-      'verify-swift-untrusted',
+      'verify-swift-bundle',
       'cleanup-swift-signing-identity',
     ]) {
       const limit = swiftStep(id)['timeout-minutes'] ?? 0;

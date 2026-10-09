@@ -347,8 +347,8 @@ jobs:
           # A self-signed leaf is refused by codesign until it is trusted for
           # code signing. The admin domain only, through the passwordless sudo
           # hosted runners have: a user-domain trust change asks for
-          # authorization in a dialog, and a headless runner waits on it
-          # until the job times out.
+          # authorization in a dialog. Trust is only ever ADDED: a removal
+          # waits on a dialog even under sudo.
           sudo security add-trusted-cert -d -r trustRoot -p codeSign \
             -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" || {
             echo "the signing certificate could not be trusted for code signing" >&2
@@ -405,8 +405,8 @@ jobs:
           # A self-signed leaf is refused by codesign until it is trusted for
           # code signing. The admin domain only, through the passwordless sudo
           # hosted runners have: a user-domain trust change asks for
-          # authorization in a dialog, and a headless runner waits on it
-          # until the job times out.
+          # authorization in a dialog. Trust is only ever ADDED: a removal
+          # waits on a dialog even under sudo.
           sudo security add-trusted-cert -d -r trustRoot -p codeSign \
             -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" || {
             echo "the signing certificate could not be trusted for code signing" >&2
@@ -438,11 +438,17 @@ jobs:
           cmp apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt apps/mac/dist-pack-2/DESIGNATED_REQUIREMENT.txt
           cat apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt
 
-      # The posture of a user's Mac: the leaf is not trusted there, and the
-      # bundle must still verify, carry one leaf throughout, and say what
-      # Gatekeeper makes of it (recorded, never fatal).
-      - id: verify-swift-untrusted
-        name: verify-swift-untrusted
+      # The bundle verifies, carries one leaf throughout, and records what
+      # Gatekeeper makes of it (never fatal). The leaf stays trusted here:
+      # removing a trust setting waits on an authorization dialog even
+      # under sudo (dispatch 37950305539 hung on it in this step and in
+      # cleanup), and nothing here needs it gone. The designated requirement
+      # pins `certificate leaf = H"..."`, which codesign checks without
+      # consulting trust, and spctl already rejects the app with trust in
+      # place. The runner VM, trust setting and all, is discarded after the
+      # job.
+      - id: verify-swift-bundle
+        name: verify-swift-bundle
         # A step limit, so a hang fails this step with its log intact rather
         # than eating the job's 40 minutes.
         timeout-minutes: 10
@@ -450,10 +456,6 @@ jobs:
           LEAF: ${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}
         run: |
           set -euo pipefail
-          # Through sudo only, the domain the trust was added in: a
-          # user-domain removal would wait on an authorization dialog.
-          sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
-          sudo security delete-certificate -Z "$LEAF" /Library/Keychains/System.keychain 2> /dev/null || true
           bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"
 
       - id: compare-leaf-with-releasing
@@ -487,14 +489,13 @@ jobs:
 
       - id: cleanup-swift-signing-identity
         name: cleanup-swift-signing-identity
-        # `always()`: a job that dies mid-pack must not leave a private key,
-        # or a trust setting, on a runner about to be recycled.
+        # `always()`: a job that dies mid-pack must not leave a private key
+        # behind. The keychain holding it is deleted; the admin-domain trust
+        # setting is left for the VM's disposal, because removing one waits
+        # on an authorization dialog a headless runner cannot answer.
         if: always()
         timeout-minutes: 5
         run: |
           kc="$RUNNER_TEMP/wemessage-sign.keychain-db"
           if [ -f "$kc" ]; then security delete-keychain "$kc" || true; fi
-          if [ -f "$RUNNER_TEMP/cert.pem" ]; then
-            sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
-          fi
           rm -f "$RUNNER_TEMP/identity.p12" "$RUNNER_TEMP/cert.pem" "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/mint.cnf" || true

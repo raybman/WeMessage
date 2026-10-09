@@ -12183,6 +12183,25 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
     /** Not `/g`: `.test` on a global regex advances `lastIndex`. */
     const HEX40_PINNED =
       /^\s*(?:-\s*)?uses:\s*[\w.-]+\/[\w.-]+@[0-9a-f]{40}\s*#\s*v\d+\.\d+\.\d+\s*$/;
+    /**
+     * v2 S5b: THE SIGNING IDENTITY, admitted by line like the pins above.
+     *
+     * A self-signed release is known by its certificate leaf's SHA-1, and
+     * two documents have to name it in full: RELEASING.md, on the one
+     * `certificate leaf` line release.yml's `compare-leaf-with-releasing`
+     * reads, and CHANGELOG.md, on the exact lines `dr-diff` reads (the leaf
+     * established, and every rotation from one leaf to the next). Anywhere
+     * else in those two files, a 40-hex run is still an offender.
+     */
+    const HEX40_LINE_CARRIERS: Readonly<Record<string, RegExp>> = {
+      'RELEASING.md':
+        /^Signing identity, certificate leaf SHA-1: `[0-9a-f]{40}`$/,
+      'CHANGELOG.md':
+        /^- Signing identity (?:established: [0-9a-f]{40}|rotated: [0-9a-f]{40} -> [0-9a-f]{40})$/,
+    };
+    const isLineCarrier = (rel: string): boolean =>
+      Object.keys(HEX40_LINE_CARRIERS).includes(rel);
+
     /** `Buffer.from('..' + '..', 'hex')` — the chunks, re-joined. */
     function hexBlobs(text: string): string[] {
       const out: string[] = [];
@@ -12212,9 +12231,23 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
         )
         .sort();
-      expect(carriers.filter((f) => !isWorkflowFile(f))).toEqual(
-        [...HEX40_CARRIERS].sort(),
-      );
+      expect(
+        carriers.filter((f) => !isWorkflowFile(f) && !isLineCarrier(f)),
+      ).toEqual([...HEX40_CARRIERS].sort());
+      // The identity arm, line by line: RELEASING.md holds exactly one
+      // leaf line (non-vacuous: the placeholder until S5d, the real leaf
+      // after), CHANGELOG.md only the identity lines dr-diff reads.
+      const strays: string[] = [];
+      for (const [rel, shape] of Object.entries(HEX40_LINE_CARRIERS)) {
+        const lines = readFileSync(join(repoRoot, rel), 'utf8').split('\n');
+        const hits = [...lines.entries()].filter(([, l]) =>
+          /[0-9a-fA-F]{40}/.test(l),
+        );
+        for (const [n, line] of hits)
+          if (!shape.test(line)) strays.push(`${rel}:${n + 1}: ${line.trim()}`);
+        if (rel === 'RELEASING.md') expect(hits.length, rel).toBe(1);
+      }
+      expect(strays).toEqual([]);
       // The workflow arm, line by line, so a failure names the offender.
       const loose: string[] = [];
       for (const rel of carriers.filter(isWorkflowFile))
@@ -12273,8 +12306,51 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
           .filter((f) =>
             /\b[0-9a-f]{40}\b/.test(readFileSync(join(repoRoot, f), 'utf8')),
           )
-          .filter((f) => !HEX40_CARRIERS.includes(f) && !isWorkflowFile(f)),
+          .filter(
+            (f) =>
+              !HEX40_CARRIERS.includes(f) &&
+              !isWorkflowFile(f) &&
+              !isLineCarrier(f),
+          ),
       ).toEqual([rel]);
+    });
+
+    it('PLANTED: the identity arm admits the leaf lines and nothing else', () => {
+      const a = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
+      const b = 'ab12'.repeat(10);
+      const releasing = HEX40_LINE_CARRIERS['RELEASING.md'];
+      const changelog = HEX40_LINE_CARRIERS['CHANGELOG.md'];
+      expect(
+        releasing?.test(`Signing identity, certificate leaf SHA-1: \`${a}\``),
+      ).toBe(true);
+      // A checksum or a second hash on the leaf line is not the leaf.
+      expect(releasing?.test(`${a}  WeMessage-1.0.0-arm64.dmg`)).toBe(false);
+      expect(
+        releasing?.test(
+          `Signing identity, certificate leaf SHA-1: \`${a}\` (was ${b})`,
+        ),
+      ).toBe(false);
+      expect(changelog?.test(`- Signing identity established: ${a}`)).toBe(
+        true,
+      );
+      expect(changelog?.test(`- Signing identity rotated: ${a} -> ${b}`)).toBe(
+        true,
+      );
+      expect(changelog?.test(`- Fixed the build at ${a}`)).toBe(false);
+      expect(
+        changelog?.test(`- Signing identity rotated: ${a} -> ${b} (oops)`),
+      ).toBe(false);
+      // And the line shapes are the ones dr-diff and release.yml read.
+      const rel = readFileSync(
+        join(repoRoot, '.github/workflows/release.yml'),
+        'utf8',
+      );
+      expect(rel).toContain('/certificate leaf/');
+      const drDiff = readFileSync(
+        join(repoRoot, 'tools/release/src/dr-diff.ts'),
+        'utf8',
+      );
+      expect(drDiff).toContain('^- Signing identity rotated: ');
     });
 
     it('PLANTED: the workflow arm admits a PIN and nothing else', () => {
@@ -14905,5 +14981,50 @@ describe('v2 S5a: signing lives in release.yml and nowhere else in .github', () 
         if (text.includes(w)) offenders.push(`${f}: ${w}`);
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('v2 S5b: the disk image is built without Finder scripting', () => {
+  /**
+   * D-UI-181: the DMG window is plain, no artwork and no icon layout, so
+   * hdiutil is the only tool it needs. Laying a window out takes Finder
+   * scripting, and osascript is banned across the project. Held as text over
+   * every tracked file under tools/swift and the stubs that stand in for its
+   * tools, comments included: a line that names it is either a call or an
+   * instruction to add one.
+   */
+  const BANNED = /osascript|applescript/i;
+  const swiftToolFiles = (): string[] =>
+    execFileSync('git', ['ls-files', '--', 'tools/swift', 'fixtures/swift'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((f) => f.length > 0);
+
+  it('osascript absent from tools/swift', () => {
+    const files = swiftToolFiles();
+    // Non-vacuity: the sweep reaches the image builder and its stub.
+    expect(files).toContain('tools/swift/dmg.sh');
+    expect(files).toContain('fixtures/swift/mini-app/stubs/hdiutil');
+    const offenders = files.filter((rel) => BANNED.test(archRead(rel)));
+    expect(offenders).toEqual([]);
+    // The image builder really is hdiutil-only: create and verify, plain.
+    const dmg = archRead('tools/swift/dmg.sh');
+    expect(dmg).toContain('hdiutil create -volname WeMessage');
+    expect(dmg).toContain('ln -s /Applications');
+    expect(
+      /\.DS_Store|-fs HFS|background/i.test(dmg.replace(/^#.*$/gm, '')),
+    ).toBe(false);
+  });
+
+  it('PLANTED: each spelling is caught', () => {
+    for (const hit of [
+      'osascript -e \'tell application "Finder"\'',
+      '/usr/bin/osascript layout.scpt',
+      '# set the window with AppleScript',
+    ])
+      expect([hit, BANNED.test(hit)]).toEqual([hit, true]);
+    expect(BANNED.test('hdiutil create -volname WeMessage')).toBe(false);
   });
 });

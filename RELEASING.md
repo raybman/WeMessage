@@ -191,6 +191,68 @@ identity and ships through GitHub Releases and the project's own Homebrew
 tap (see `homebrew/README.md`). A cask install keeps the quarantine
 attribute, so the Gatekeeper steps below are the same for a tap install.
 
+### Identity
+
+Signing identity, certificate leaf SHA-1: `0000000000000000000000000000000000000000`
+
+That line names the one self-signed identity every Swift release is signed
+with, by the 40-hex SHA-1 of its certificate leaf, never by its common name.
+It is a placeholder of zeros until S5d writes the real leaf in its place.
+The release workflow's `compare-leaf-with-releasing` step reads this line,
+in the selfsigned lane only, so the placeholder never fails a throwaway run.
+
+Why it matters: macOS keys every privacy grant (Full Disk Access,
+Automation, Contacts) on the app's designated requirement, and for a
+self-signed build that requirement names this leaf. A release signed with
+another leaf resets every user's grants.
+
+So the `pack-swift` job runs `dr-diff` (`tools/release/bin/dr-diff.mjs`) in
+the selfsigned lane, after the second pack and before any upload. It
+compares this build's `DESIGNATED_REQUIREMENT.txt` with the one attached to
+the newest published release before it (drafts are skipped, prereleases
+count):
+
+```
+Result               When                                                Job
+-------------------  --------------------------------------------------  -------------------------
+first-release        no earlier published release carries a requirement  continues
+same                 the requirement is unchanged                        continues
+rotated, justified   CHANGELOG.md carries the rotation line below,       continues
+                     under this version's heading
+rotated, unjustified anything else                                       fails, exit 6, before
+                                                                         anything is uploaded
+```
+
+Rotating the identity is a deliberate act. Replace the leaf above with the
+new one, and add exactly this line under the new version's heading in
+`CHANGELOG.md`, both hashes lowercase, the old leaf first:
+
+```
+- Signing identity rotated: <old leaf> -> <new leaf>
+```
+
+A line under an older heading or under `[Unreleased]`, or one naming any
+other leaf, justifies nothing. The release notes then have to tell every
+user to grant Full Disk Access, Automation and Contacts again. S5d, the
+first real identity, needs no rotation line: it records
+`- Signing identity established: <leaf>` instead.
+
+The disk image. `pack-swift` also builds `WeMessage-<version>-arm64.dmg`
+with `tools/swift/dmg.sh`, from the app exactly as zipped, signs the image
+with the same leaf and verifies it, and lists it in `SHA256SUMS` next to the
+zip. The window is plain (D-UI-181): the app, an Applications shortcut, no
+artwork and no Finder scripting. A throwaway run builds the image too, named
+`-throwaway`, and keeps it only as the workflow artifact
+`wemessage-swift-dmg-throwaway` for seven days, never on a release.
+
+First-run copy (D-UI-180). The build is self-signed and not notarized, so
+on macOS 26 Gatekeeper refuses the first launch once. Every surface that
+tells a user what to do (`README.md`, `site/docs/install.html`, the cask
+caveats) gives the same three ways, in this order: Open Anyway in System
+Settings, Privacy & Security, first;
+`xattr -dr com.apple.quarantine /Applications/WeMessage.app` second;
+Homebrew's `--no-quarantine` third.
+
 ### Before you start
 
 **Blocked on S5d.** The signing lane exists (S5a): `tools/swift/sign.sh`
@@ -199,8 +261,9 @@ self-signed identity named by its SHA-1, and the release workflow's
 `pack-swift` job packs twice, compares the designated requirements and
 verifies the result. Until the maintainer's go on signing custody, that
 job runs with a throwaway identity it mints on the runner and deletes at
-the end, and it uploads nothing: the throwaway zip proves the lane, it is
-not a build anyone installs. `pnpm pack:swift` without `--identity` still
+the end, and it uploads nothing to a release: the throwaway zip proves the
+lane, it is not a build anyone installs, and its disk image is kept only as
+a workflow artifact named `-throwaway`. `pnpm pack:swift` without `--identity` still
 refuses with exit 2 before it builds anything. S5d is the custody step:
 the real identity lives in a password manager and two repository secrets
 (`WEMESSAGE_SIGN_P12`, `WEMESSAGE_SIGN_P12_PASSWORD`), and with them set

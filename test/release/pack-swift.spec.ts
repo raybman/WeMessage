@@ -389,9 +389,14 @@ describe('row 5: entitlements', () => {
     return Object.keys(p).sort();
   };
 
-  it('the app has exactly automation.apple-events', () => {
+  it('the app has exactly automation.apple-events and personal-information.addressbook', () => {
+    // v2 S5e (plan 3.4, default A): the released app is hardened (sign.sh
+    // passes --options runtime), and a hardened app is denied Contacts
+    // without the resource-access entitlement, whatever Info.plist says. The
+    // CI ui build is not hardened, so only this row can see the defect.
     expect(keysOf(APP_ENTITLEMENTS)).toEqual([
       'com.apple.security.automation.apple-events',
+      'com.apple.security.personal-information.addressbook',
     ]);
   });
 
@@ -759,5 +764,51 @@ describe('row 12 (v2 S5a): verify-bundle.sh, the identity half', () => {
       'spctl -a -t exec -vv "$app" 2>&1 || true',
     ])
       expect([needed, text().includes(needed)]).toEqual([needed, true]);
+  });
+});
+
+describe('row 13 (v2 S5e): verify-bundle.sh, packed entitlements equal the source file', () => {
+  const text = (): string => read(VERIFY);
+
+  // The ent_pairs awk program, lifted out of verify-bundle.sh so this row
+  // runs the verifier's own parser and not a copy that could drift.
+  const entPairsProgram = (): string => {
+    const fn = text().match(/ent_pairs\(\) \{[\s\S]*?\n {2}\}/)?.[0] ?? '';
+    const program = fn.match(/\| awk '([\s\S]*?)'\s*\| sort/)?.[1];
+    expect(program, 'ent_pairs awk program').toBeTruthy();
+    return program ?? '';
+  };
+
+  it('compares the whole set for equality, never a subset', () => {
+    expect(text()).toContain('want_ents="$(ent_pairs "$ents")"');
+    expect(text()).toContain('got_ents="$(ent_pairs "$scratch/ents.plist")"');
+    expect(text()).toContain('[ "$got_ents" = "$want_ents" ]');
+    // A subset or grep test would let an extra or a missing key through.
+    expect(text()).not.toMatch(/grep[^\n]*want_ents|grep[^\n]*got_ents/);
+  });
+
+  it('the host and the app are held to WeMessage.entitlements, the node to node.entitlements', () => {
+    const rows = [...text().matchAll(/^\s*"([^"|]+)\|([^"|]+)\|([^"|]+)"\s*$/gm)].map(
+      (m) => [m[1]?.replace(/^.*\/(?=[^/]+\/[^/]+$)/, ''), m[3]],
+    );
+    expect(rows).toContainEqual(['MacOS/WeMessage', '$res/WeMessage.entitlements']);
+    expect(rows).toContainEqual(['$app', '$res/WeMessage.entitlements']);
+    expect(rows).toContainEqual(['daemon/node', '$res/node.entitlements']);
+  });
+
+  it("the verifier's parser reads exactly the two app keys from the source file", () => {
+    const run = spawnSync('awk', [entPairsProgram(), join(repoRoot, APP_ENTITLEMENTS)], {
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout.split('\n').filter(Boolean).sort()).toEqual([
+      'com.apple.security.automation.apple-events=true',
+      'com.apple.security.personal-information.addressbook=true',
+    ]);
+  });
+
+  it('no comment in the entitlements file can be mistaken for a key', () => {
+    const comments = read(APP_ENTITLEMENTS).match(/<!--[\s\S]*?-->/g) ?? [];
+    for (const c of comments) expect(c).not.toMatch(/<key>|<true\/>|<false\/>/);
   });
 });

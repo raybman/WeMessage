@@ -830,9 +830,9 @@ function merge(shape: Shape | null, v: Json): Shape {
  */
 const SUPPLEMENT: Record<string, Record<string, string[]>> = {
   'GET /v1/threads/:guid/messages': {
-    'turns[]': ['editedAt', 'unsentAt', 'handle'],
+    'turns[]': ['editedAt', 'unsentAt', 'handle', 'meta'],
   },
-  'GET /v1/threads': { 'threads[]': ['displayName', 'title'] },
+  'GET /v1/threads': { 'threads[]': ['displayName', 'title', 'meta'] },
   'GET /v1/drafts': {
     'drafts[]': ['ruleId', 'sendNotBefore', 'proactiveReason', 'error'],
   },
@@ -874,6 +874,9 @@ const NULLABLE: Record<string, string[]> = {
  */
 const OPEN: Record<string, string[]> = {
   'GET /v1/adapters': ['adapters[].config'],
+  // v2 Phase B: per-board fixture detail, preview-* scenarios only (row below).
+  'GET /v1/threads': ['threads[].meta'],
+  'GET /v1/threads/:guid/messages': ['turns[].meta'],
   'GET /v1/settings': ['settings'],
   'PATCH /v1/settings': ['settings'],
   'GET /v1/status': ['adapters', 'meta'],

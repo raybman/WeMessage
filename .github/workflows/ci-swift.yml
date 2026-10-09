@@ -154,7 +154,7 @@ jobs:
           - shard: a
             classes: AccessibilityTests Board02Tests Board03Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
           - shard: b
-            classes: Board01Tests Board06Tests Board07Tests Board09Tests Board10Tests Board11Tests Board12Tests Board14Tests Board16Tests FakeDaemonControlTests SnapshotTests
+            classes: Board01Tests Board05Tests Board06Tests Board07Tests Board09Tests Board10Tests Board11Tests Board12Tests Board14Tests Board16Tests FakeDaemonControlTests SnapshotTests
     env:
       TZ: UTC
       WEMESSAGE_PORT: '47191'

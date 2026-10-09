@@ -312,6 +312,33 @@ enum ID {
   static let voiceDockSend = "wemessage.voicedock.card.send"
   static let voiceDockCancel = "wemessage.voicedock.card.cancel"
   static let voiceDockFailure = "wemessage.voicedock.failure"
+  // v2 B2, board 05: the board, its banner, the open thread and a card per
+  // message (this prefix and the turn guid), the images line per message
+  // (value "blocked" or "loaded") and its Load images, the invite, the
+  // verbs, the inline compose and its parts (Send's value
+  // "enabled" or "inert", the state line's value the phase, the wall's
+  // "warn" or "block"), and the category chips (value "on" or "off").
+  static let emailBoard = "wemessage.board.email"
+  static let emailBanner = "wemessage.board.email.banner"
+  static let emailEmpty = "wemessage.board.email.empty"
+  static let emailThread = "wemessage.email.thread"
+  static let emailCardPrefix = "wemessage.email.card."
+  static let emailImagesPrefix = "wemessage.email.images."
+  static let emailLoadPrefix = "wemessage.email.load."
+  static let emailInvite = "wemessage.email.invite"
+  static let emailReplyAll = "wemessage.email.replyall"
+  static let emailForward = "wemessage.email.forward"
+  static let emailCompose = "wemessage.email.compose"
+  static let emailComposeTo = "wemessage.email.compose.to"
+  static let emailComposeCc = "wemessage.email.compose.cc"
+  static let emailComposeBody = "wemessage.email.compose.body"
+  static let emailComposeHold = "wemessage.email.compose.hold"
+  static let emailComposeWall = "wemessage.email.compose.wall"
+  static let emailComposeSend = "wemessage.email.compose.send"
+  static let emailComposeUndo = "wemessage.email.compose.undo"
+  static let emailComposeDiscard = "wemessage.email.compose.discard"
+  static let emailComposeState = "wemessage.email.compose.state"
+  static let emailChipPrefix = "wemessage.email.chip."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

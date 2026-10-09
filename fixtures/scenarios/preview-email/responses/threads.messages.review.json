@@ -1,0 +1,73 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;design-review",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0105",
+        "from": "them",
+        "kind": "text",
+        "text": "Thirty minutes on the rail and the email cards. Bring the open questions.",
+        "at": "2026-09-01T10:30:00.000Z",
+        "handle": "felix.grant@example.com",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Felix Grant",
+              "address": "felix.grant@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              },
+              {
+                "name": "Owen Hale",
+                "address": "owen.hale@example.com"
+              },
+              {
+                "name": "Lucia Ferrer",
+                "address": "lucia.ferrer@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000,
+          "inviteObject": {
+            "title": "Design review: rail and cards",
+            "when": "Thursday, September 24 · 2:00 to 2:30 PM PDT",
+            "startsAt": "2026-09-24T21:00:00.000Z",
+            "endsAt": "2026-09-24T21:30:00.000Z",
+            "place": "Video call",
+            "organizer": {
+              "name": "Felix Grant",
+              "address": "felix.grant@example.com"
+            },
+            "guests": [
+              {
+                "name": "Owen Hale",
+                "address": "owen.hale@example.com",
+                "response": "accepted"
+              },
+              {
+                "name": "Lucia Ferrer",
+                "address": "lucia.ferrer@example.com",
+                "response": "awaiting"
+              },
+              {
+                "name": "Me",
+                "address": "me@example.com",
+                "response": "awaiting"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

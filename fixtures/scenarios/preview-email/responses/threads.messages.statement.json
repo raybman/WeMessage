@@ -1,0 +1,44 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;woodgrove-statement",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0107",
+        "from": "them",
+        "kind": "text",
+        "text": "Your statement for August is attached. No action is needed.",
+        "at": "2026-09-01T06:15:00.000Z",
+        "handle": "statements@example.com",
+        "attachments": 1,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Woodgrove Bank",
+              "address": "statements@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000,
+          "attachments": [
+            {
+              "name": "statement-2026-08.pdf",
+              "mime": "application/pdf",
+              "bytes": 380000
+            }
+          ]
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

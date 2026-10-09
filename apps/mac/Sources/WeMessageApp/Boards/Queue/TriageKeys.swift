@@ -137,6 +137,8 @@ struct TriageKeys: NSViewRepresentable {
         }
       case "a":
         if let target { model.approvePending(in: target) }
+      case "r" where shift && model.openEmail != nil:
+        model.replyAllEmail()
       case "r":
         if let target { model.replyOrEdit(in: target) }
       case "e":

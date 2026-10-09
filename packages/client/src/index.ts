@@ -990,6 +990,11 @@ export interface ThreadSummary {
   lastFromMe: boolean;
   /** ISO-8601 UTC: when that newest message was sent. */
   lastAt: string;
+  /**
+   * v2 Phase B: per-board fixture detail, sent only by the fake daemon's
+   * preview-* scenarios. The real daemon never emits it.
+   */
+  meta?: Record<string, unknown>;
 }
 
 /** One page of the list, dated by the daemon's clock. */
@@ -1028,6 +1033,8 @@ export interface ThreadTurn {
   unsentAt?: string;
   /** How many attachments it carries. Counted, never opened. */
   attachments: number;
+  /** v2 Phase B: per-board fixture detail; fake daemon preview-* only. */
+  meta?: Record<string, unknown>;
 }
 
 /** One page, oldest turn first, dated by the daemon's clock. */

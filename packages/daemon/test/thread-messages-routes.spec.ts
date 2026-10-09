@@ -372,6 +372,8 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
             attachments: 0,
             rowid: 42,
             attributedBody: 'secret',
+            // v2 Phase B: per-board meta is fake-daemon-only, never real wire.
+            meta: { reactions: [{ emoji: 'x', from: 'them' }] },
           } as TurnsPage['turns'][number],
         ],
         nextBefore: null,

@@ -152,7 +152,7 @@ jobs:
       matrix:
         include:
           - shard: a
-            classes: AccessibilityTests Board02Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
+            classes: AccessibilityTests Board02Tests Board03Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
           - shard: b
             classes: Board01Tests Board06Tests Board09Tests Board10Tests Board11Tests Board12Tests Board14Tests Board16Tests FakeDaemonControlTests SnapshotTests
     env:

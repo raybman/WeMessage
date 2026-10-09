@@ -38,24 +38,18 @@ public struct ShellBoard: Equatable, Sendable {
     asOf: nil, queue: [])
 
   /// The channel each scope reads. ALL is the fold of the others.
-  static func channel(of scope: ShellModel.Scope) -> String? {
-    switch scope {
-    case .all: nil
-    case .imessage: "imessage"
-    case .whatsapp: "whatsapp"
-    case .linkedin: "linkedin"
-    case .email: "email"
-    }
-  }
+  static func channel(of scope: ShellModel.Scope) -> Channel? { scope.channel }
 
-  /// The fold. Only iMessage has a daemon today: it is connected unless
-  /// status is missing or says "disconnected", and fresh only when the
-  /// daemon is fully connected and has scanned at least once (a read-only
-  /// daemon cannot vouch for what it has not read). WhatsApp, LinkedIn and
-  /// Email are not connected, so they say nothing.
+  /// The fold. iMessage has a daemon today: it is connected unless status
+  /// is missing or says "disconnected", and fresh only when the daemon is
+  /// fully connected and has scanned at least once (a read-only daemon
+  /// cannot vouch for what it has not read). Another channel draws a mark
+  /// only when `channels` says it is connected or a fixture board (v2 B0,
+  /// D-UI-140), on the same freshness; not connected says nothing. With no
+  /// `channels` every other channel is not connected, as in this version.
   public static func fold(
     status: StatusPayload?, threads: ThreadsPage?, drafts: [DraftPayload], window: QueueWindow,
-    excluding: Set<String> = []
+    excluding: Set<String> = [], channels: [Channel: ChannelAvailability] = [:]
   ) -> ShellBoard {
     let lastScan = status?.cursor.flatMap { WireDate.parse($0.lastScanAt) }
     let asOf = clock(status: status, threads: threads, drafts: drafts)
@@ -67,17 +61,27 @@ public struct ShellBoard: Equatable, Sendable {
     } ?? []
 
     var marks: [ShellModel.Scope: RailMark] = [:]
-    for scope in ShellModel.Scope.allCases where scope != .all {
-      guard scope == .imessage else {
+    for scope in ShellModel.Scope.allCases {
+      guard let channel = scope.channel else { continue }
+      guard channel == .imessage || drawsMark(channels[channel]) else {
         marks[scope] = RailMark.none
         continue
       }
-      let count = queue.filter { $0.channel == "imessage" }.count
+      let count = queue.filter { $0.channel == channel.rawValue }.count
       marks[scope] = QueueRules.railMark(count: count, fresh: fresh, connected: connected)
     }
     let channels = ShellModel.Scope.allCases.filter { $0 != .all }.map { marks[$0] ?? RailMark.none }
     marks[.all] = QueueRules.allMark(channels)
     return ShellBoard(marks: marks, lastScan: lastScan, asOf: asOf, queue: queue)
+  }
+
+  /// Whether a channel other than iMessage gets a rail mark: connected
+  /// and a fixture board do (D-UI-140: the same mark, the board's chip
+  /// carries the difference); not connected, or not named, does not.
+  static func drawsMark(_ availability: ChannelAvailability?) -> Bool {
+    switch ProvisionalUI.fixtureRailMark {
+    case .connectedMark: availability?.drawsMark ?? false
+    }
   }
 
   /// The queue's clock: the last scan, else the thread list's asOf, moved
@@ -122,7 +126,7 @@ public struct ShellBoard: Equatable, Sendable {
   public func rows(
     _ threads: [ThreadSummary], scope: ShellModel.Scope, lens: ShellModel.Lens, including: Set<String> = []
   ) -> [ThreadSummary] {
-    let scoped = threads.filter { thread in Self.channel(of: scope).map { $0 == thread.channel } ?? true }
+    let scoped = threads.filter { thread in Self.channel(of: scope).map { $0.rawValue == thread.channel } ?? true }
     guard lens != .recent else { return scoped }
     let waiting = Set(queue.map(\.threadGuid)).union(lens == .triage ? including : [])
     return scoped.filter { waiting.contains($0.chatGuid) }

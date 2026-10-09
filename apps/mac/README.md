@@ -73,6 +73,11 @@ FakeDaemonControlTests
                     a scenario served through the control routes reaches the
                     window (its connection line), the journal sees the status
                     read, the stream and the resync, and nothing was sent
+Board03Tests        board 03 from the preview-whatsapp scenario: the WhatsApp
+                    rail mark drawn as a connected channel's, the banner with
+                    the fixture chip over the New here empty state, no
+                    not-connected zero or connect card, and no write in the
+                    journal
 ```
 
 Every UI test class resets the fake daemon in `setUp` (S0 goldens, empty
@@ -409,6 +414,12 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   Save a temporary folder); the zero screen's `wemessage.zero.kind`,
   labelled `<earned|still clear|nothing arrived>: <heading>`,
   `wemessage.zero.progress` and `wemessage.zero.streak` (17.H, D-UI-128)
+- `wemessage.board.whatsapp`: board 03, drawn while the WhatsApp tile is
+  selected and the channel is connected or, under the UI-test flag only,
+  in the fake daemon's fixture state (v2 B0, H-B-1); its banner
+  `wemessage.board.whatsapp.banner` (D-UI-135), the fixture chip
+  `wemessage.board.chip` at the banner's trailing edge (D-UI-132), and the
+  New here empty state `wemessage.board.whatsapp.empty` (D-UI-135)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the
@@ -448,4 +459,19 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..53 decisions.
+  provisional, pending the D-UI-1..131, 132, 135 and 140 decisions. B0's
+  three, with the plan's row each renumbers (plan row plus 30):
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-132  102       a board drawn over fixtures carries a chip at the
+                    trailing edge of its channel banner: 11 pt semibold ink
+                    on the tint at .16 alpha, a capsule, never a watermark
+D-UI-135  105       WhatsApp's banner names the channel, then the linked
+                    device once a thread's meta carries it (B1); the empty
+                    state reads New here, with one line on the phone's sync
+D-UI-140  110       a fixture channel's rail tile draws the mark a connected
+                    channel would, on the same freshness; the chip, not the
+                    rail, carries the difference
+```

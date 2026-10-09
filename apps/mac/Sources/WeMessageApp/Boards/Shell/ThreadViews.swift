@@ -159,8 +159,8 @@ struct ContentPane: View {
     }
   }
 
-  /// The audit, the bulk card, the thread, a zero screen outside Recent, or
-  /// the empty state, in that order.
+  /// The audit, the bulk card, the thread, board 03 (v2 B0), a zero screen
+  /// outside Recent, or the empty state, in that order.
   @ViewBuilder private var pane: some View {
     if model.auditShown {
       AuditView(model: model, palette: palette)
@@ -179,6 +179,8 @@ struct ContentPane: View {
       .accessibilityElement(children: .contain)
       .accessibilityLabel(thread.title)
       .accessibilityIdentifier(ShellID.content)
+    } else if let board = model.whatsAppBoard {
+      WhatsAppBoardView(board: board, palette: palette)
     } else if model.lens != .recent && model.scopedQueue.isEmpty {
       ZeroScreen(model: model, palette: palette)
     } else {

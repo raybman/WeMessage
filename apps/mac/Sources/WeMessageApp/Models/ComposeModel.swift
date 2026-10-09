@@ -30,10 +30,11 @@ struct ComposePerson: Equatable, Sendable, Identifiable {
   var firstName: String { name?.components(separatedBy: " ").first ?? title }
 }
 
-/// The four channels, in the rail's order.
-enum ComposeChannel: String, CaseIterable, Sendable {
-  case imessage, whatsapp, linkedin, email
+/// The four channels, in the rail's order: the kit's `Channel` (v2 B0), with
+/// the compose cards' words on it.
+typealias ComposeChannel = Channel
 
+extension Channel {
   var title: String {
     switch self {
     case .imessage: "iMessage"

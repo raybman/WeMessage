@@ -1,6 +1,6 @@
 import Foundation
 
-// PROVISIONAL pending Eric's D-UI-1..131 decisions (D-UI-1..6:
+// PROVISIONAL pending Eric's D-UI-1..131, 132, 135 and 140 decisions (D-UI-1..6:
 // docs/plans/v2-swift-S3.md §7.2; D-UI-7..21: docs/plans/v2-swift-S4.md
 // section 5 and the S4a.0 spike results; D-UI-22..26: the S4c build, where
 // the board 01 wireframe left a choice open; D-UI-27..38: the S4d build,
@@ -19,7 +19,9 @@ import Foundation
 // version can stage but not yet send, open or probe; D-UI-112..120: the
 // S4l build, where board 16 and its table disagree or the OS layer asks
 // for what this version cannot do; D-UI-121..131: the S4m build, where
-// board 17 leaves a choice open or this version keeps no history to draw).
+// board 17 leaves a choice open or this version keeps no history to draw;
+// D-UI-132, 135 and 140: the B0 build, plan rows 102, 105 and 110 plus 30,
+// the fixture boards' chip, the WhatsApp board's words and their rail).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1164,4 +1166,30 @@ public enum ProvisionalUI {
   // compare the two renders.
   public static let cardTestPasteboard = "com.wemessage.uitest.sharecard"
   public static let cardTestExportFolder = "wemessage-uitest-export"
+
+  // v2 B0. Plan rows 102, 105 and 110, renumbered +30 past the tree's
+  // D-UI-131.
+
+  // D-UI-132: a board drawn over fixtures carries a chip at the trailing
+  // edge of its channel banner: 11 pt semibold ink on Tokens.tint at .16
+  // alpha. Not a watermark, never absent. Its word is TestHooks'
+  // (H-B-1); only an open gate makes a board that draws it.
+  public static let fixtureChipSize: CGFloat = 11
+  public static let fixtureChipTintAlpha: Double = 0.16
+
+  // D-UI-135: the WhatsApp board's banner and its New here empty state.
+  // The banner names the channel, then the linked device once a thread's
+  // meta carries it (B1): WhatsApp. Linked device: linked.
+  public static let whatsAppBannerName = "WhatsApp."
+  public static let whatsAppLinkedDeviceLabel = "Linked device"
+  public static let whatsAppEmptyHeadline = "New here."
+  public static let whatsAppEmptyDetail = "Messages appear once the linked phone syncs."
+
+  // D-UI-140: a fixture board's rail tile draws the same mark a connected
+  // channel would, on the same freshness. The chip carries the
+  // difference; the rail does not (no dotted variant).
+  public enum RailMarkRule: Sendable {
+    case connectedMark
+  }
+  public static let fixtureRailMark: RailMarkRule = .connectedMark
 }

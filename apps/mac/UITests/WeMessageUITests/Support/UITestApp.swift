@@ -298,6 +298,11 @@ enum ID {
   static let zeroKind = "wemessage.zero.kind"
   static let zeroProgress = "wemessage.zero.progress"
   static let zeroStreak = "wemessage.zero.streak"
+  // v2 B0, board 03.
+  static let whatsAppBoard = "wemessage.board.whatsapp"
+  static let whatsAppBanner = "wemessage.board.whatsapp.banner"
+  static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
+  static let fixtureChip = "wemessage.board.chip"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

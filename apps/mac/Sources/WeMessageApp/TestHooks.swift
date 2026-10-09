@@ -132,6 +132,20 @@ enum TestHooks {
     return SystemFullDiskAccess()
   }
 
+  /// The one door to the fixture boards (v2 B0, H-B-1): under the UI-test
+  /// flag the gate reads the fake daemon's fixture state as a board over
+  /// fixtures; otherwise it stays closed, and a channel in that state is not
+  /// connected. The flag returns first. The word is spelled here and nowhere
+  /// else under Sources.
+  static func previewGate() -> PreviewGate {
+    if isUITest { return PreviewGate(state: "preview") }
+    return .closed
+  }
+
+  /// The chip a board over fixtures carries (D-UI-132). Reached only from a
+  /// board whose channel the open gate made a fixture board.
+  static let previewChipText = "Preview"
+
   /// Where the window's avatars come from: the fixture photos under the
   /// UI-test flag, the user's contacts otherwise. The flag returns first,
   /// so the contact store is never built on the CI runner (H-S4-5).

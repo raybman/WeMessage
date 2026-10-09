@@ -352,6 +352,12 @@ enum ShellID {
   static let switcher = "wemessage.switcher"
   static let switcherField = "wemessage.switcher.field"
   static let switcherRowPrefix = "wemessage.switcher.row."
+  // v2 B0, board 03: the WhatsApp board, its banner and empty state, and
+  // the chip a board drawn over fixtures carries (D-UI-132).
+  static let whatsAppBoard = "wemessage.board.whatsapp"
+  static let whatsAppBanner = "wemessage.board.whatsapp.banner"
+  static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
+  static let fixtureChip = "wemessage.board.chip"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

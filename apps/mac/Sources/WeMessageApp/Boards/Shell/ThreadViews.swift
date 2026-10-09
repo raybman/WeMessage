@@ -167,7 +167,7 @@ struct ContentPane: View {
       AuditView(model: model, palette: palette)
     } else if model.bulkSheetShown {
       BulkConfirmCard(model: model, palette: palette)
-    } else if let board = model.emailBoard {
+    } else if let board = model.emailBoard, model.selected == nil {
       EmailBoardView(model: model, board: board, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {

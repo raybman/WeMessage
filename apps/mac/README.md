@@ -491,6 +491,7 @@ D-UI-140  110       a fixture channel's rail tile draws the mark a connected
                     channel would, on the same freshness; the chip, not the
                     rail, carries the difference
 ```
+
 - B1's nine, board 03 drawn over fixtures, live in
   `Sources/WeMessageApp/ProvisionalUI+Board03.swift`, pending the
   D-UI-141..149 decisions (plan row plus 30), held by

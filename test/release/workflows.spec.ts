@@ -85,6 +85,8 @@ interface Step {
 
 interface Job {
   readonly 'runs-on'?: string;
+  readonly if?: string;
+  readonly 'timeout-minutes'?: number;
   readonly needs?: readonly string[] | string;
   readonly steps?: readonly Step[];
 }
@@ -212,6 +214,24 @@ const stepText = (s: Step): string => JSON.stringify(s);
 const SIGNED_LANE = "steps.signing.outputs.mode == 'release'";
 const ADHOC_LANE = "steps.signing.outputs.mode == 'adhoc'";
 
+/**
+ * v2 S5a: the Swift job's own lane, decided by its own step. `selfsigned`
+ * reads the two WEMESSAGE_SIGN_* secrets and is dormant until they exist;
+ * `throwaway` mints an identity for the run and names no secret at all.
+ */
+const SWIFT_JOB = 'pack-swift';
+const SWIFT_SIGNED_LANE = "steps.swiftsign.outputs.mode == 'selfsigned'";
+const SWIFT_THROWAWAY_LANE = "steps.swiftsign.outputs.mode == 'throwaway'";
+const LEAF_EXPR =
+  '${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}';
+const CHECKOUT_REF = '${{ inputs.tag || github.ref }}';
+const RELEASE_TAG = '${{ inputs.tag || github.ref_name }}';
+const NOT_DRY_RUN = 'inputs.dry_run != true';
+
+const isUploader = (s: Step): boolean =>
+  (s.uses ?? '').startsWith('actions/upload-artifact@') ||
+  (s.uses ?? '').startsWith('softprops/action-gh-release@');
+
 /** The closed set of secrets this repository's release is allowed to name. */
 const ALLOWED_SECRETS = [
   'APPLE_DEVELOPER_ID_P12_BASE64',
@@ -222,6 +242,8 @@ const ALLOWED_SECRETS = [
   'ASC_KEY_P8_BASE64',
   'GITHUB_TOKEN',
   'TAP_PUSH_TOKEN',
+  'WEMESSAGE_SIGN_P12',
+  'WEMESSAGE_SIGN_P12_PASSWORD',
 ] as const;
 
 const secretsNamedIn = (text: string): string[] =>
@@ -248,7 +270,12 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(triggersOf(load(RELEASE))).toEqual({
       push: { tags: ['v*'] },
       workflow_dispatch: {
-        inputs: { tag: { required: true, type: 'string' } },
+        inputs: {
+          tag: { required: true, type: 'string' },
+          // v2 S5a: a dispatch can prove the lanes without a release. Off
+          // unless asked for, and a tag push has no inputs at all.
+          dry_run: { required: false, type: 'boolean', default: false },
+        },
       },
     });
     // The S1 stub was a single `echo`. If that string survives, the file was
@@ -259,15 +286,22 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 2: two jobs, one dependency, one permission ────────────────── */
 
-  it('row 2: exactly two jobs, and `contents: write` is the whole grant', () => {
+  it('row 2: exactly three jobs, and `contents: write` is the whole grant', () => {
     const wf = load(RELEASE);
+    // v2 S5a adds `pack-swift`; S6b drops `pack-macos`, and this row with it.
     expect(Object.keys(jobsOf(wf)).sort()).toEqual([
       'build-test',
       'pack-macos',
+      'pack-swift',
     ]);
     expect(jobsOf(wf)['pack-macos']?.needs).toEqual(['build-test']);
     expect(jobsOf(wf)['pack-macos']?.['runs-on']).toBe('macos-15');
     expect(jobsOf(wf)['build-test']?.['runs-on']).toBe('ubuntu-24.04');
+    // The Swift job needs the gate and nothing else, on the one image the
+    // Swift package declares (ci-swift.yml runs on the same label).
+    expect(jobsOf(wf)[SWIFT_JOB]?.needs).toEqual(['build-test']);
+    expect(jobsOf(wf)[SWIFT_JOB]?.['runs-on']).toBe('macos-26');
+    expect(jobsOf(wf)[SWIFT_JOB]?.['timeout-minutes']).toBe(40);
     // Deep equality, not a `toContain`. `id-token: write` is how a workflow
     // grows the ability to mint an OIDC credential against a cloud account,
     // and `packages: write` is how it grows the ability to publish. Neither
@@ -363,7 +397,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 5: the secret set is closed, and none of it is echoed ──────── */
 
-  it('row 5: names exactly the eight allowed secrets, and leaks none', () => {
+  it('row 5: names exactly the ten allowed secrets, and leaks none', () => {
     // The PARSED workflow, not the raw file. The header of THIS spec
     // documents the `if: secrets.X != ''` trap by writing the trap out, and a
     // reader sweeping raw text counts that comment's `X` as a ninth secret.
@@ -408,8 +442,8 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   it('row 5c: the CI lanes name no secret at all, in any job', () => {
     /*
-     * The release lane is allowed eight secrets and row 5 pins exactly which
-     * eight. The CI lanes are allowed NONE, and until this row the only
+     * The release lane is allowed ten secrets and row 5 pins exactly which
+     * ten. The CI lanes are allowed NONE, and until this row the only
      * thing that said so was a text sweep in `test/arch.spec.ts`.
      *
      * That gap was measured rather than guessed. The Sc9 teeth mutation
@@ -493,7 +527,12 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     // them guaranteed a dead button. Asserting the tag shape instead means a
     // GA tag produces a GA release on the unsigned lane, which is the whole
     // point of the unsigned lane.
-    expect(w['prerelease']).toBe(`\${{ contains(github.ref_name, '-') }}`);
+    // v2 S5a: read through `inputs.tag`, so a dispatch is judged by the tag
+    // it names and not by the branch it was dispatched from.
+    expect(w['prerelease']).toBe(
+      `\${{ contains(inputs.tag || github.ref_name, '-') }}`,
+    );
+    expect(w['tag_name']).toBe(RELEASE_TAG);
     // Not vacuous in the direction that matters: the expression must actually
     // discriminate, so pin both answers it is required to give.
     const isPre = (tag: string): boolean => tag.includes('-');
@@ -594,6 +633,14 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     // sweep below would pass by tautology.
     expect(dir).toBe('apps/desktop/dist-pack');
     const leaf = dir.slice(DESKTOP_DIR.length + 1);
+    // v2 S5a: the Swift lane packs to its own directory, which pack-swift.mjs
+    // decides (its default `--out`); the workflow passes the same path, and
+    // `dist-pack-2` beside it for the second pack.
+    const swiftDir = 'apps/mac/dist-pack';
+    expect(read('tools/release/bin/pack-swift.mjs')).toContain(
+      "join(REPO, 'apps', 'mac', 'dist-pack')",
+    );
+    const prefixes = [dir, swiftDir];
 
     /*
      * Every line of both workflows, not just `run:` and not just `with:`.
@@ -616,7 +663,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
             // `apps/desktop/dist-pack…` is right. A bare `dist-pack…`, or one
             // reached through any other prefix, is a path that does not exist
             // on the runner and would fail at the first command to touch it.
-            if (!ref.startsWith(dir))
+            if (!prefixes.some((p) => ref.startsWith(p)))
               offenders.push(`${rel}:${String(i + 1)}: ${ref}`);
           }
         });
@@ -669,6 +716,311 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       ]);
       expect([rel, /#[0-9a-fA-F]{6}\b/.test(text)]).toEqual([rel, false]);
     }
+  });
+
+  /* ── rows 13-21: the Swift job (v2 S5a) ─────────────────────────────── */
+
+  const swiftSteps = (): readonly Step[] => stepsOf(load(RELEASE), SWIFT_JOB);
+  const swiftStep = (id: string): Step => {
+    const found = swiftSteps().filter((s) => s.id === id);
+    expect([id, found.length]).toEqual([id, 1]);
+    return found[0] ?? {};
+  };
+  const indexOfId = (id: string): number =>
+    swiftSteps().findIndex((s) => s.id === id);
+
+  it('row 13: the Swift lane is decided by one step, and it is an output', () => {
+    const decider = swiftStep('swiftsign');
+    const body = decider.run ?? '';
+    expect(body).toContain('GITHUB_OUTPUT');
+    expect(body).toContain('mode=selfsigned');
+    expect(body).toContain('mode=throwaway');
+    // The decider reads the secret in `env:`/`run:`, never in an `if:`, and
+    // carries no `if:` of its own: it is the step every guard depends on.
+    expect(decider.if).toBeUndefined();
+    expect(secretsNamedIn(stepText(decider))).toEqual(['WEMESSAGE_SIGN_P12']);
+    for (const step of swiftSteps())
+      expect([
+        step.id ?? step.uses ?? step.run,
+        /secrets\./.test(step.if ?? ''),
+      ]).toEqual([step.id ?? step.uses ?? step.run, false]);
+    // It runs before anything that depends on it.
+    expect(indexOfId('swiftsign')).toBeLessThan(
+      indexOfId('import-release-signing-identity'),
+    );
+    expect(indexOfId('swiftsign')).toBeLessThan(
+      indexOfId('mint-throwaway-signing-identity'),
+    );
+  });
+
+  it('row 14: only the selfsigned importer touches a WEMESSAGE_SIGN secret', () => {
+    const offenders: string[] = [];
+    for (const step of swiftSteps()) {
+      if (step.id === 'swiftsign') continue;
+      const named = secretsNamedIn(stepText(step)).filter((n) =>
+        n.startsWith('WEMESSAGE_SIGN_'),
+      );
+      if (named.length === 0) continue;
+      if (step.id !== 'import-release-signing-identity')
+        offenders.push(
+          `${step.id ?? step.uses ?? '?'} names ${named.join(', ')}`,
+        );
+      if (!(step.if ?? '').includes(SWIFT_SIGNED_LANE))
+        offenders.push(
+          `${step.id ?? '?'} reads a signing secret without ${SWIFT_SIGNED_LANE}`,
+        );
+    }
+    expect(offenders).toEqual([]);
+    const importer = swiftStep('import-release-signing-identity');
+    expect(importer.if).toBe(SWIFT_SIGNED_LANE);
+    expect(secretsNamedIn(stepText(importer))).toEqual([
+      'WEMESSAGE_SIGN_P12',
+      'WEMESSAGE_SIGN_P12_PASSWORD',
+    ]);
+    // ...and no other job may name them: the Electron lane has its own.
+    for (const job of ['build-test', 'pack-macos'])
+      expect([
+        job,
+        secretsNamedIn(JSON.stringify(jobsOf(load(RELEASE))[job])).filter((n) =>
+          n.startsWith('WEMESSAGE_SIGN_'),
+        ),
+      ]).toEqual([job, []]);
+  });
+
+  // teeth: S5a tooth 3 (a secrets. reference inside the mint step) turns this row red.
+  it('row 15: the throwaway path names no secret', () => {
+    const mint = swiftStep('mint-throwaway-signing-identity');
+    expect(mint.if).toBe(SWIFT_THROWAWAY_LANE);
+    // Every step that runs only in the throwaway lane, read as one document:
+    // a fork, a pull request and a dry run all take this lane, and none of
+    // them has a credential to give it.
+    const throwawayOnly = swiftSteps().filter((s) =>
+      (s.if ?? '').includes(SWIFT_THROWAWAY_LANE),
+    );
+    expect(throwawayOnly.length).toBeGreaterThanOrEqual(1);
+    for (const step of throwawayOnly)
+      expect([step.id, secretsNamedIn(stepText(step))]).toEqual([step.id, []]);
+    // Minted for this run: a one-day self-signed leaf with the code-signing
+    // usage, in its own keychain under RUNNER_TEMP, trusted so codesign will
+    // use it, and its SHA-1 handed on as an output, never typed anywhere.
+    const body = mint.run ?? '';
+    for (const token of [
+      '/usr/bin/openssl req -x509',
+      '-days 1',
+      'extendedKeyUsage = critical,codeSigning',
+      'CN = WeMessage Throwaway',
+      '$RUNNER_TEMP/wemessage-sign.keychain-db',
+      'security import',
+      '-T /usr/bin/codesign',
+      'security set-key-partition-list',
+      'add-trusted-cert',
+      '-fingerprint -sha1',
+      "printf 'leaf=%s\\n'",
+      'GITHUB_OUTPUT',
+    ])
+      expect([token, body.includes(token)]).toEqual([token, true]);
+    // The private key does not outlive the import.
+    expect(body).toContain('rm -f "$RUNNER_TEMP/key.pem"');
+    expect(body).toContain('rm -f "$RUNNER_TEMP/identity.p12"');
+  });
+
+  it('row 16: both identity steps emit the leaf, and every user reads it the same way', () => {
+    for (const id of [
+      'import-release-signing-identity',
+      'mint-throwaway-signing-identity',
+    ]) {
+      const body = swiftStep(id).run ?? '';
+      expect([id, body.includes("printf 'leaf=%s\\n'")]).toEqual([id, true]);
+      expect([id, body.includes('GITHUB_OUTPUT')]).toEqual([id, true]);
+      expect([
+        id,
+        body.includes('security find-identity -v -p codesigning'),
+      ]).toEqual([id, true]);
+    }
+    for (const id of ['pack-swift-twice', 'verify-swift-untrusted'])
+      expect([id, swiftStep(id).env?.['LEAF']]).toEqual([id, LEAF_EXPR]);
+    // The leaf is passed to the packer as the identity, never a name.
+    expect(swiftStep('pack-swift-twice').run ?? '').not.toMatch(
+      /--identity\s+"?WeMessage/,
+    );
+  });
+
+  // teeth: S5a tooth 4 (cmp a file with itself) turns this row red.
+  it('row 17: two packs, the second with --skip-build, and cmp compares the two', () => {
+    const lines = (swiftStep('pack-swift-twice').run ?? '')
+      .split('\n')
+      .map((l) => l.trim());
+    const packs = lines.filter((l) => l.startsWith('pnpm pack:swift '));
+    expect(packs).toHaveLength(2);
+    const outOf = (l: string): string => /--out (\S+)/.exec(l)?.[1] ?? '';
+    const [first, second] = [packs[0] ?? '', packs[1] ?? ''];
+    expect(outOf(first)).toBe('apps/mac/dist-pack');
+    expect(outOf(second)).toBe('apps/mac/dist-pack-2');
+    expect(first).not.toContain('--skip-build');
+    expect(second).toContain('--skip-build');
+    for (const p of packs) {
+      expect(p).toContain('--identity "$LEAF"');
+      // The throwaway flag rides on both, so both zips are named so.
+      expect(p).toContain('${extra:+"$extra"}');
+    }
+    expect(lines).toContain(
+      'if [ "$MODE" = "throwaway" ]; then extra="--throwaway"; fi',
+    );
+    const cmps = lines.filter((l) => l.startsWith('cmp '));
+    expect(cmps).toHaveLength(1);
+    const args = (cmps[0] ?? '').split(/\s+/).slice(1);
+    expect(args).toEqual([
+      `${outOf(first)}/DESIGNATED_REQUIREMENT.txt`,
+      `${outOf(second)}/DESIGNATED_REQUIREMENT.txt`,
+    ]);
+    // Two DIFFERENT files: a cmp of one file with itself always passes.
+    expect(new Set(args).size).toBe(2);
+    // The compare runs after both packs.
+    expect(lines.indexOf(cmps[0] ?? '')).toBeGreaterThan(lines.indexOf(second));
+  });
+
+  it('row 18: verify runs with the leaf untrusted, after the packs', () => {
+    const verify = swiftStep('verify-swift-untrusted');
+    const body = verify.run ?? '';
+    expect(body).toContain(
+      'bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"',
+    );
+    // Trust is removed BEFORE the verifier runs: that is the user's posture.
+    expect(body.indexOf('remove-trusted-cert')).toBeGreaterThan(-1);
+    expect(body.indexOf('remove-trusted-cert')).toBeLessThan(
+      body.indexOf('verify-bundle.sh'),
+    );
+    expect(verify.if).toBeUndefined();
+    expect(indexOfId('verify-swift-untrusted')).toBeGreaterThan(
+      indexOfId('pack-swift-twice'),
+    );
+    // The RELEASING.md comparison is selfsigned only: a throwaway leaf is
+    // never published, so there is nothing to compare it with.
+    const compare = swiftStep('compare-leaf-with-releasing');
+    expect(compare.if).toBe(SWIFT_SIGNED_LANE);
+    expect(compare.run ?? '').toContain('RELEASING.md');
+    expect(compare.run ?? '').toContain('certificate leaf');
+  });
+
+  it('row 19: every upload is selfsigned only, and a throwaway build is never uploaded', () => {
+    const uploads = swiftSteps().filter(isUploader);
+    // Non-vacuity: both uploaders are in the job.
+    expect(uploads.map((s) => (s.uses ?? '').split('@')[0])).toEqual([
+      'actions/upload-artifact',
+      'softprops/action-gh-release',
+    ]);
+    for (const step of uploads) {
+      const cond = step.if ?? '';
+      expect([step.uses, cond.includes(SWIFT_SIGNED_LANE)]).toEqual([
+        step.uses,
+        true,
+      ]);
+      expect([step.uses, cond.includes('throwaway')]).toEqual([
+        step.uses,
+        false,
+      ]);
+      expect([step.uses, /\|\|/.test(cond)]).toEqual([step.uses, false]);
+    }
+    // ...and no `run:` uploads behind the uploaders' backs.
+    for (const run of runsOf(load(RELEASE), SWIFT_JOB))
+      for (const banned of ['gh release', 'gh api', 'curl ', 'upload'])
+        expect([banned, run.includes(banned)]).toEqual([banned, false]);
+    // The release asset set, and the release is a draft named by the tag.
+    const rel = uploads[1];
+    const w = (rel?.with ?? {}) as Record<string, unknown>;
+    expect(w['draft']).toBe(true);
+    expect(w['tag_name']).toBe(RELEASE_TAG);
+    expect(rel?.if ?? '').toContain(NOT_DRY_RUN);
+    expect(
+      String(w['files'] ?? '')
+        .split('\n')
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0),
+    ).toEqual([
+      'apps/mac/dist-pack/*.zip',
+      'apps/mac/dist-pack/SHA256SUMS',
+      'apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt',
+    ]);
+    // Uploads come after verify; cleanup is the last step of all.
+    const firstUpload = swiftSteps().findIndex(isUploader);
+    expect(firstUpload).toBeGreaterThan(indexOfId('verify-swift-untrusted'));
+    expect(indexOfId('cleanup-swift-signing-identity')).toBe(
+      swiftSteps().length - 1,
+    );
+  });
+
+  it('row 20: the Swift keychain and trust are removed on every path', () => {
+    const cleanup = swiftStep('cleanup-swift-signing-identity');
+    expect(cleanup.if).toBe('always()');
+    const body = cleanup.run ?? '';
+    expect(body).toContain('security delete-keychain');
+    expect(body).toContain('$RUNNER_TEMP/wemessage-sign.keychain-db');
+    expect(body).toContain('remove-trusted-cert');
+    expect(body).toContain('rm -f');
+    expect(secretsNamedIn(stepText(cleanup))).toEqual([]);
+    // Both identity steps use the keychain cleanup removes, never the login
+    // keychain, and never one in the workspace.
+    for (const id of [
+      'import-release-signing-identity',
+      'mint-throwaway-signing-identity',
+    ]) {
+      const run = swiftStep(id).run ?? '';
+      expect([
+        id,
+        run.includes('kc="$RUNNER_TEMP/wemessage-sign.keychain-db"'),
+      ]).toEqual([id, true]);
+      expect([id, /delete-keychain|default-keychain/.test(run)]).toEqual([
+        id,
+        false,
+      ]);
+    }
+  });
+
+  it('row 21: a dispatch builds the tag it names, and a dry run releases nothing', () => {
+    const wf = load(RELEASE);
+    // Every checkout in every job, so build-test gates the same tree the
+    // packers pack.
+    const checkouts = Object.entries(jobsOf(wf)).flatMap(([job, def]) =>
+      (def.steps ?? [])
+        .filter((s) => (s.uses ?? '').startsWith('actions/checkout@'))
+        .map((s) => [job, (s.with ?? {})['ref']] as const),
+    );
+    expect(checkouts).toEqual([
+      ['build-test', CHECKOUT_REF],
+      ['pack-macos', CHECKOUT_REF],
+      [SWIFT_JOB, CHECKOUT_REF],
+    ]);
+    // The old spelling reads a string where the input is a boolean, and
+    // `inputs.tag` is never interpolated into a shell line (it is a string
+    // a dispatcher types).
+    const text = read(RELEASE);
+    expect(text).not.toContain('github.event.inputs');
+    for (const [job, def] of Object.entries(jobsOf(wf)))
+      for (const step of def.steps ?? [])
+        expect([
+          job,
+          step.id ?? step.name,
+          (step.run ?? '').includes('inputs.'),
+        ]).toEqual([job, step.id ?? step.name, false]);
+    // A dry run: the Electron job does not run (its uploader always makes a
+    // draft), and every release-creating step anywhere is behind the input.
+    expect(jobsOf(wf)['pack-macos']?.if).toBe(`\${{ ${NOT_DRY_RUN} }}`);
+    for (const [job, def] of Object.entries(jobsOf(wf)))
+      for (const step of def.steps ?? [])
+        if ((step.uses ?? '').startsWith('softprops/action-gh-release@'))
+          expect([
+            job,
+            (def.if ?? '').includes(NOT_DRY_RUN) ||
+              (step.if ?? '').includes(NOT_DRY_RUN),
+          ]).toEqual([job, true]);
+    // Non-vacuity of the expression itself, as GitHub evaluates it: a tag
+    // push has no inputs (null), and null != true.
+    const notDry = (v: boolean | null): boolean => v !== true;
+    expect([notDry(null), notDry(false), notDry(true)]).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 
   /* ── row 12: actionlint, when the machine has one ───────────────────── */

@@ -193,14 +193,21 @@ attribute, so the Gatekeeper steps below are the same for a tap install.
 
 ### Before you start
 
-**Blocked on S2e.** `tools/swift/sign.sh` does not exist yet, so
-`pnpm pack:swift` (`tools/release/bin/pack-swift.mjs`) refuses with exit 2
-before it builds anything, and no signed zip exists to install. S2e is held
-for the maintainer's go on signing custody: the identity lives in a password
-manager and two repository secrets, and the release lane produces a draft
-release. Every step tagged `[blocked on S2e]` needs that draft release; the
-steps after them need the app those steps install, so in practice the whole
-run starts after S2e lands.
+**Blocked on S5d.** The signing lane exists (S5a): `tools/swift/sign.sh`
+signs the addon, the bundled node, the host and the app with one
+self-signed identity named by its SHA-1, and the release workflow's
+`pack-swift` job packs twice, compares the designated requirements and
+verifies the result. Until the maintainer's go on signing custody, that
+job runs with a throwaway identity it mints on the runner and deletes at
+the end, and it uploads nothing: the throwaway zip proves the lane, it is
+not a build anyone installs. `pnpm pack:swift` without `--identity` still
+refuses with exit 2 before it builds anything. S5d is the custody step:
+the real identity lives in a password manager and two repository secrets
+(`WEMESSAGE_SIGN_P12`, `WEMESSAGE_SIGN_P12_PASSWORD`), and with them set
+the same job signs with it and produces a draft release. Every step
+tagged `[blocked on S5d]` needs that draft release; the steps after them
+need the app those steps install, so in practice the whole run starts
+after S5d lands.
 
 What else has to be true first:
 
@@ -219,13 +226,13 @@ What else has to be true first:
 `<version>` is the release version. The commands assume the app sits at
 `~/Applications/WeMessage.app`, which needs no administrator password.
 
-1. [blocked on S2e] Download `WeMessage-<version>-arm64.zip`, `SHA256SUMS` and `DESIGNATED_REQUIREMENT.txt` from the draft release at https://github.com/raybman/WeMessage/releases and check the zip.
+1. [blocked on S5d] Download `WeMessage-<version>-arm64.zip`, `SHA256SUMS` and `DESIGNATED_REQUIREMENT.txt` from the draft release at https://github.com/raybman/WeMessage/releases and check the zip.
 
    ```sh
    shasum -a 256 -c SHA256SUMS
    ```
 
-2. [blocked on S2e] Unzip into `~/Applications` with ditto, and confirm the quarantine attribute survived, as it would for any download.
+2. [blocked on S5d] Unzip into `~/Applications` with ditto, and confirm the quarantine attribute survived, as it would for any download.
 
    ```sh
    ditto -x -k WeMessage-<version>-arm64.zip ~/Applications/
@@ -235,7 +242,7 @@ What else has to be true first:
    Expect: one line of quarantine data. No output means the attribute was
    lost and the Gatekeeper step proves nothing.
 
-3. [blocked on S2e] Check the installed app carries the designated requirement the release lane recorded.
+3. [blocked on S5d] Check the installed app carries the designated requirement the release lane recorded.
 
    ```sh
    codesign -d -r- ~/Applications/WeMessage.app
@@ -428,7 +435,7 @@ your own number and Apple ID from anything you paste.
 Claim                                                         Proven by                         Needs this run
 ------------------------------------------------------------  --------------------------------  --------------
 The host spawns, forwards signals, mirrors exit status        swift test (local) and ci-swift   no
-The bundle layout, one identity, stable designated            release lane pack-swift (S2e)     no
+The bundle layout, one identity, stable designated            release lane pack-swift (S5a)     no
 requirement across two packs
 The plist host shape renders, parses, migrates, reports       vitest daemon project             no
 The host forwards an allowlist and compiles no overrides      ci-swift and arch rows (S2c.1)    no

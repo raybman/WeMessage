@@ -1286,8 +1286,8 @@ describe('s9 Sc15 row 10: the five workflows exist and the guard over them has t
     for (const w of WORKFLOWS)
       expect(guard, w).toContain(w.split('/').pop() ?? '');
     for (const marker of [
-      'row 2: exactly two jobs',
-      'row 5: names exactly the eight allowed secrets',
+      'row 2: exactly three jobs',
+      'row 5: names exactly the ten allowed secrets',
       'row 8: every `uses:` is a 40-hex SHA',
       'row 9: ci-macos gains a pack-adhoc job',
     ])

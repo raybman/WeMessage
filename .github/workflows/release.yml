@@ -23,6 +23,25 @@ name: release
 # Every third-party action is pinned to a 40-hex commit SHA with its human
 # version in a trailing comment. A tag is mutable, and this job holds
 # `contents: write`.
+#
+# v2 S5a adds the third job, `pack-swift`: the Swift app, SELF-SIGNED with
+# one long-lived identity so that macOS privacy grants survive an update. Its
+# lane is decided by its own step (`swiftsign`), separately from the Electron
+# lane above, and it has two modes. `selfsigned` imports the real identity
+# from two secrets and is dormant until they exist (S5d). `throwaway`, the
+# mode every run takes today, mints an identity that lives for this job only,
+# so the whole pipeline (sign, verify, pack twice, compare the designated
+# requirement) is exercised on every run with no credential at all. A
+# throwaway build is never uploaded anywhere.
+#
+# A DISPATCH CHECKS OUT THE TAG IT NAMES. Every checkout below reads
+# `inputs.tag || github.ref`: on a tag push the input is empty and the ref is
+# the tag; on a dispatch the input is the tag (or branch) to build, so a
+# dispatch can never pack the branch head and name it after a tag.
+#
+# `dry_run` is for proving the lanes without a release: it skips the
+# Electron job (whose uploader always creates a draft release) and every
+# step that uploads, and nothing else.
 
 on:
   push:
@@ -32,6 +51,10 @@ on:
       tag:
         required: true
         type: string
+      dry_run:
+        required: false
+        type: boolean
+        default: false
 
 # The whole grant. Attaching a DMG to a release needs `contents: write` and
 # nothing else. No `id-token` (no cloud identity to mint), no `packages` (this
@@ -60,6 +83,7 @@ jobs:
           # gets: fetching it is narrowing the environment, whereas teaching
           # the rows to skip on a shallow clone would be widening the guard.
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.5
@@ -81,12 +105,17 @@ jobs:
 
   pack-macos:
     needs: [build-test]
+    # A dry run creates no release, and this job's uploader always creates a
+    # draft, so in a dry run the job does not run at all.
+    if: ${{ inputs.dry_run != true }}
     runs-on: macos-15
     env:
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       electron_config_cache: ${{ github.workspace }}/.cache/electron
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.34.5
@@ -208,6 +237,8 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # The tag the tree was checked out at, on a dispatch as on a push.
+          tag_name: ${{ inputs.tag || github.ref_name }}
           # A draft, because the last check on a release is a human looking at
           # it. Nothing in this file publishes on its own.
           draft: true
@@ -221,7 +252,7 @@ jobs:
           # button is a strange thing to guarantee in a workflow file.
           # A semver prerelease is exactly a version with a hyphen after the
           # core: `v1.0.0-rc.1` is one, `v1.0.0` is not.
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
           body_path: apps/desktop/dist-pack/RELEASE_NOTES.md
           files: |
             apps/desktop/dist-pack/*.dmg
@@ -254,3 +285,216 @@ jobs:
         run: |
           security delete-keychain build.keychain-db || true
           rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/asc.p8" || true
+
+  # v2 S5a. The Swift app, packed and self-signed. Independent of the
+  # Electron job: it needs the gate and nothing else.
+  pack-swift:
+    needs: [build-test]
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: swift --version
+
+      # THE ONE STEP THAT DECIDES THE SWIFT LANE, for the same reason and in
+      # the same shape as `signing` above: the secret is read in `run:`, and
+      # every later step reads this output.
+      - id: swiftsign
+        name: decide-swift-signing-mode
+        env:
+          WEMESSAGE_SIGN_P12: ${{ secrets.WEMESSAGE_SIGN_P12 }}
+        run: |
+          if [ -n "$WEMESSAGE_SIGN_P12" ]; then
+            printf 'mode=selfsigned\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'mode=throwaway\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      # The real identity, from the two secrets S5d sets. Dormant until then.
+      - id: import-release-signing-identity
+        name: import-release-signing-identity
+        if: steps.swiftsign.outputs.mode == 'selfsigned'
+        env:
+          WEMESSAGE_SIGN_P12: ${{ secrets.WEMESSAGE_SIGN_P12 }}
+          WEMESSAGE_SIGN_P12_PASSWORD: ${{ secrets.WEMESSAGE_SIGN_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/wemessage-sign.keychain-db"
+          kcpw="$(openssl rand -hex 24)"
+          # Key material under RUNNER_TEMP only, never in the workspace.
+          printf '%s' "$WEMESSAGE_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/identity.p12"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 1800 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$RUNNER_TEMP/identity.p12" -k "$kc" -P "$WEMESSAGE_SIGN_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          # The certificate is read back out of the keychain, not out of the
+          # p12, so the p12's encryption suite never matters to openssl.
+          security find-certificate -a -p "$kc" > "$RUNNER_TEMP/cert.pem"
+          # A self-signed leaf is refused by codesign until it is trusted for
+          # code signing. The admin domain first (passwordless sudo on hosted
+          # runners), the user domain as the fallback; the log says which.
+          if sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"; then
+            echo "trust: admin domain"
+          elif security add-trusted-cert -r trustRoot -p codeSign -k "$kc" "$RUNNER_TEMP/cert.pem"; then
+            echo "trust: user domain"
+          else
+            echo "the signing certificate could not be trusted for code signing" >&2
+            exit 1
+          fi
+          leaf="$(openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -fingerprint -sha1 |
+            awk -F= '{gsub(":", "", $2); print tolower($2)}')"
+          security find-identity -v -p codesigning "$kc" |
+            awk -v want="$leaf" 'tolower($2) == want {found = 1} END {exit !found}' || {
+            echo "the imported identity is not a valid code-signing identity" >&2
+            exit 1
+          }
+          printf 'leaf=%s\n' "$leaf" >> "$GITHUB_OUTPUT"
+
+      # The identity every run without the secrets uses: minted here, for
+      # this job, and deleted by the cleanup step. It names no secret, which
+      # is what lets a fork or a dry run exercise the whole lane.
+      - id: mint-throwaway-signing-identity
+        name: mint-throwaway-signing-identity
+        if: steps.swiftsign.outputs.mode == 'throwaway'
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/wemessage-sign.keychain-db"
+          kcpw="$(/usr/bin/openssl rand -hex 24)"
+          p12pw="$(/usr/bin/openssl rand -hex 24)"
+          cat > "$RUNNER_TEMP/mint.cnf" <<'EOF'
+          [req]
+          distinguished_name = dn
+          x509_extensions = ext
+          prompt = no
+          [dn]
+          CN = WeMessage Throwaway
+          [ext]
+          basicConstraints = critical,CA:false
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          EOF
+          # /usr/bin/openssl (LibreSSL) on purpose: its default p12 suite is
+          # one `security import` reads, which OpenSSL 3's default is not.
+          /usr/bin/openssl req -x509 -newkey rsa:3072 -nodes -days 1 \
+            -config "$RUNNER_TEMP/mint.cnf" \
+            -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem"
+          /usr/bin/openssl pkcs12 -export -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+            -out "$RUNNER_TEMP/identity.p12" -passout "pass:$p12pw"
+          rm -f "$RUNNER_TEMP/key.pem"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 1800 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$RUNNER_TEMP/identity.p12" -k "$kc" -P "$p12pw" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          # A self-signed leaf is refused by codesign until it is trusted for
+          # code signing. The admin domain first (passwordless sudo on hosted
+          # runners), the user domain as the fallback; the log says which.
+          if sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"; then
+            echo "trust: admin domain"
+          elif security add-trusted-cert -r trustRoot -p codeSign -k "$kc" "$RUNNER_TEMP/cert.pem"; then
+            echo "trust: user domain"
+          else
+            echo "the signing certificate could not be trusted for code signing" >&2
+            exit 1
+          fi
+          leaf="$(/usr/bin/openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -fingerprint -sha1 |
+            awk -F= '{gsub(":", "", $2); print tolower($2)}')"
+          security find-identity -v -p codesigning "$kc" |
+            awk -v want="$leaf" 'tolower($2) == want {found = 1} END {exit !found}' || {
+            echo "the imported identity is not a valid code-signing identity" >&2
+            exit 1
+          }
+          printf 'leaf=%s\n' "$leaf" >> "$GITHUB_OUTPUT"
+
+      # THE PROOF THE SIGNATURE IS STABLE. Two packs from one build, and the
+      # designated requirement (the string macOS keys every privacy grant
+      # on) must come out byte-identical. A throwaway build is named so.
+      - id: pack-swift-twice
+        name: pack-swift-twice
+        env:
+          LEAF: ${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}
+          MODE: ${{ steps.swiftsign.outputs.mode }}
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "$MODE" = "throwaway" ]; then extra="--throwaway"; fi
+          pnpm pack:swift --identity "$LEAF" --out apps/mac/dist-pack ${extra:+"$extra"}
+          pnpm pack:swift --identity "$LEAF" --out apps/mac/dist-pack-2 --skip-build ${extra:+"$extra"}
+          cmp apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt apps/mac/dist-pack-2/DESIGNATED_REQUIREMENT.txt
+          cat apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt
+
+      # The posture of a user's Mac: the leaf is not trusted there, and the
+      # bundle must still verify, carry one leaf throughout, and say what
+      # Gatekeeper makes of it (recorded, never fatal).
+      - id: verify-swift-untrusted
+        name: verify-swift-untrusted
+        env:
+          LEAF: ${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}
+        run: |
+          set -euo pipefail
+          sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
+          security remove-trusted-cert "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
+          sudo security delete-certificate -Z "$LEAF" /Library/Keychains/System.keychain 2> /dev/null || true
+          bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"
+
+      - id: compare-leaf-with-releasing
+        name: compare-leaf-with-releasing
+        if: steps.swiftsign.outputs.mode == 'selfsigned'
+        env:
+          LEAF: ${{ steps.import-release-signing-identity.outputs.leaf }}
+        run: |
+          awk -v leaf="$LEAF" 'tolower($0) ~ /certificate leaf/ && index(tolower($0), tolower(leaf)) {ok = 1} END {exit !ok}' RELEASING.md
+
+      # Uploads: selfsigned only. A throwaway build is never uploaded, as an
+      # artifact or to a release, and a dry run uploads nothing to a release.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.swiftsign.outputs.mode == 'selfsigned'
+        with:
+          name: wemessage-swift-selfsigned
+          path: apps/mac/dist-pack/
+          retention-days: 7
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        if: steps.swiftsign.outputs.mode == 'selfsigned' && inputs.dry_run != true
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
+          files: |
+            apps/mac/dist-pack/*.zip
+            apps/mac/dist-pack/SHA256SUMS
+            apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt
+
+      - id: cleanup-swift-signing-identity
+        name: cleanup-swift-signing-identity
+        # `always()`: a job that dies mid-pack must not leave a private key,
+        # or a trust setting, on a runner about to be recycled.
+        if: always()
+        run: |
+          kc="$RUNNER_TEMP/wemessage-sign.keychain-db"
+          if [ -f "$kc" ]; then security delete-keychain "$kc" || true; fi
+          if [ -f "$RUNNER_TEMP/cert.pem" ]; then
+            sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
+            security remove-trusted-cert "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
+          fi
+          rm -f "$RUNNER_TEMP/identity.p12" "$RUNNER_TEMP/cert.pem" "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/mint.cnf" || true

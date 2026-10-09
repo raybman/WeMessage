@@ -1,0 +1,28 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "linkedin;-;contoso-talent",
+    "channel": "linkedin",
+    "turns": [
+      {
+        "guid": "li-0701",
+        "from": "them",
+        "kind": "text",
+        "text": "Join engineers who are building the future of hospitality software. Contoso is hiring across platform and payments.",
+        "at": "2026-08-31T09:00:00.000Z",
+        "handle": "contoso-talent",
+        "attachments": 0,
+        "meta": {
+          "commercial": {
+            "kind": "sponsored",
+            "title": "See open roles at Contoso",
+            "detail": "contoso.example.com/careers"
+          }
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

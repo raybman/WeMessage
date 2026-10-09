@@ -65,6 +65,7 @@ const EXPECTED_SCENARIOS = [
   'pending',
   'preview-email',
   'preview-linkedin',
+  'preview-linkedin-ratelimited',
   'preview-voice',
   'preview-voice-confirm',
   'preview-voice-interrupted',
@@ -145,7 +146,7 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twenty shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty-two shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
@@ -1100,7 +1101,13 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
 
   it('threads agree with their transcripts, and every draft points at a thread', () => {
     const state = (name: string) => switchTo(name);
-    for (const name of ['rich', 'search', 'pending', 'preview-whatsapp']) {
+    for (const name of [
+      'rich',
+      'search',
+      'pending',
+      'preview-whatsapp',
+      'preview-linkedin',
+    ]) {
       const s = state(name);
       const threads = body(step(s, { method: 'GET', path: '/v1/threads' }).out)
         .threads as Array<Record<string, Json>>;
@@ -1158,8 +1165,10 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
       fixtureStates += text.split(FIXTURE_STATE).length - 1;
     }
     expect(phones).toBeGreaterThan(20);
-    // Three boards open over fixtures; preview-voice opens none.
-    expect(fixtureStates).toBe(3);
+    // Three boards open over fixtures; preview-voice opens none. Board 04's
+    // pushed-back scenario (v2 B3) restates LinkedIn's state, so it counts
+    // twice.
+    expect(fixtureStates).toBe(4);
     expect(offenders).toEqual([]);
   });
 
@@ -1362,5 +1371,83 @@ describe('v2 B4: the voice scenarios', () => {
       return voice.armed === true && voice.failure === undefined;
     });
     expect(armed).toEqual(['preview-voice-confirm']);
+  });
+});
+
+/**
+ * v2 B3: board 04 is driven by thread.meta, turn.meta and status.meta.linkedin
+ * in preview-linkedin, and preview-linkedin-ratelimited differs from it only
+ * by the pause. The seven threads cover the three inboxes, both categories,
+ * every eligibility step, a request, an InMail with its subject and credits,
+ * and a commercial payload of each kind.
+ */
+describe('v2 B3: the LinkedIn scenarios', () => {
+  const get = (state: State, path: string) =>
+    step(state, { method: 'GET', path }).out;
+  type Linked = { linkedin: Record<string, Json> };
+
+  it('seven threads over three inboxes, two categories and steps 0..4', () => {
+    const s = switchTo('preview-linkedin');
+    const threads = body(get(s, '/v1/threads')).threads as Array<
+      Record<string, Json>
+    >;
+    expect(threads).toHaveLength(7);
+    const metas = threads.map((t) => t.meta as Record<string, Json>);
+    for (const t of threads) expect(t.channel).toBe('linkedin');
+    expect([...new Set(metas.map((m) => m.inbox))].sort()).toEqual([
+      'personal',
+      'recruiter',
+      'salesNav',
+    ]);
+    expect([...new Set(metas.map((m) => m.category))].sort()).toEqual([
+      'focused',
+      'other',
+    ]);
+    expect(
+      [...new Set(metas.map((m) => m.eligibility as number))].sort(),
+    ).toEqual([0, 1, 2, 3, 4]);
+    expect(metas.filter((m) => m.requestState === 'pending')).toHaveLength(1);
+    const turns = threads.flatMap(
+      (t) =>
+        body(
+          get(
+            s,
+            `/v1/threads/${encodeURIComponent(String(t.chatGuid))}/messages`,
+          ),
+        ).turns as Array<Record<string, Json>>,
+    );
+    const metasOfTurns = turns
+      .map((x) => x.meta as Record<string, Record<string, Json>> | undefined)
+      .filter((m) => m !== undefined);
+    const inMail = metasOfTurns.filter((m) => m.inMail);
+    expect(inMail.length).toBeGreaterThan(0);
+    for (const m of inMail) {
+      expect(typeof m.inMail!.subject).toBe('string');
+      expect(typeof m.inMail!.credits).toBe('number');
+    }
+    expect(inMail.some((m) => (m.inMail!.credits as number) > 0)).toBe(true);
+    expect(
+      metasOfTurns
+        .filter((m) => m.commercial)
+        .map((m) => m.commercial!.kind)
+        .sort(),
+    ).toEqual(['job', 'recruiter', 'sponsored']);
+  });
+
+  it('the pushed-back scenario is preview-linkedin plus a pause, and nothing else', () => {
+    const calm = body(get(switchTo('preview-linkedin'), '/v1/status'));
+    const paused = body(
+      get(switchTo('preview-linkedin-ratelimited'), '/v1/status'),
+    );
+    expect((calm.meta as Linked).linkedin.pausedUntil).toBeUndefined();
+    const pause = (paused.meta as Linked).linkedin;
+    expect(typeof pause.pausedUntil).toBe('string');
+    const rest = { ...pause };
+    delete rest.pausedUntil;
+    expect(rest).toEqual((calm.meta as Linked).linkedin);
+    expect({ ...paused, meta: null }).toEqual({ ...calm, meta: null });
+    expect(
+      body(get(switchTo('preview-linkedin-ratelimited'), '/v1/threads')),
+    ).toEqual(body(get(switchTo('preview-linkedin'), '/v1/threads')));
   });
 });

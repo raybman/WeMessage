@@ -490,6 +490,35 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   confirm card.
 - No typing indicator is ever drawn, so no identifier exists for one, and
   no react affordance is placed on an iMessage bubble.
+- `wemessage.board.linkedin`: board 04, drawn while the LinkedIn tile is
+  selected, or a LinkedIn thread is open, and the channel is connected or in
+  the fixture state (v2 B3); its banner `wemessage.board.linkedin.banner`,
+  valued with the inbox scope, which opens the inbox switch
+  `wemessage.linkedin.switch` holding `wemessage.linkedin.inbox.<scope>`
+  rows, `all` first and then one per inbox (`personal`, `salesNav`,
+  `recruiter`), valued `on` or `off` (D-UI-160, D-UI-161); the empty state
+  `wemessage.board.linkedin.empty`; the tabs `wemessage.linkedin.tabs`
+  holding `wemessage.linkedin.tab.<category>`, `focused` and `other`,
+  valued `on` or `off` (D-UI-137); and, while LinkedIn pushes back, the
+  blocking banner `wemessage.linkedin.paused`, valued `paused` (D-UI-169).
+  The open thread `wemessage.linkedin.thread` draws a bubble per message, or
+  `wemessage.linkedin.inmail.<guid>` valued with its cost (D-UI-164), or
+  `wemessage.linkedin.commercial.<guid>` valued `sponsored`, `recruiter` or
+  `job` (D-UI-166). Its foot is either the composer
+  `wemessage.linkedin.compose` with `wemessage.linkedin.compose.subject` on
+  the InMail steps, `wemessage.linkedin.compose.body`,
+  `wemessage.linkedin.compose.hold`, `wemessage.linkedin.compose.pacing`,
+  `wemessage.linkedin.compose.draft` valued `enabled` or `inert`, and
+  `wemessage.linkedin.compose.state` valued `composing`, `drafting`,
+  `drafted` or `failed` (D-UI-168); or the line
+  `wemessage.linkedin.nocomposer`, valued `sponsored`, `paused`,
+  `requestPending`, `requestDeclined` or `noRung`, under the request card
+  `wemessage.linkedin.request` when a request waits (D-UI-165). The
+  inspector `wemessage.linkedin.inspector` holds the ladder
+  `wemessage.linkedin.ladder`, valued with the step that reaches this person
+  (D-UI-163, D-UI-167). Under the UI-test flag a LinkedIn list row's value
+  ends with its origin tag (` MSG`, ` SN` or ` REC`) while all three inboxes
+  show (D-UI-161).
 
 ### Reading a run
 
@@ -667,3 +696,68 @@ D-UI-178  (B4)      the dock is drawn over the open thread's transcript
 D-UI-179  (B4)      the reader insets by the dock's measured overlap plus
                     the gap, never a fixed height
 ```
+
+- Board 04 (v2 B3) is LinkedIn over fixtures: `preview-linkedin` and
+  `preview-linkedin-ratelimited`, read only behind the fixture gate. There
+  is no LinkedIn client, host, web view or automation, and its one write is
+  POST /v1/drafts behind the composer's gate, resolved again at the press;
+  `Board04HygieneTests` (H-B-4) holds both. Its provisional values live in
+  `Sources/WeMessageApp/ProvisionalUI+Board04.swift`:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-137  107       Focused and Other are a two-capsule segmented control,
+                    left-aligned under the banner on the LinkedIn tile;
+                    Focused is on at launch; no unread dot on either side
+D-UI-160  (B3)      the banner reads LinkedIn, the account, then the inbox
+                    scope (All 3 inboxes, or one inbox) with a down mark;
+                    pressing it opens the inbox switch as a popover; the
+                    fixture chip sits at its trailing edge
+D-UI-161  (B3)      the switch lists All 3 inboxes, then each inbox with
+                    its thread count, every inbox kept at zero; under All
+                    each row carries its origin tag (MSG, SN, REC),
+                    narrowed to one inbox the tag is dropped
+D-UI-162  (B3)      the thread head's line: Replying on LinkedIn via the
+                    inbox the thread was born in, the degree, the headline
+D-UI-163  (B3)      the ladder is read only: the inspector's Reach section
+                    lists the five steps with a tint bar on the one that
+                    reaches this person; the composer's meta line names it
+D-UI-164  (B3)      an InMail is a card on its sender's side: an INMAIL
+                    tag, the subject over the body, its cost under them
+D-UI-165  (B3)      a pending request replaces the composer with a card:
+                    who wrote through what, what waits on accept; Accept
+                    and Decline privately are drawn inert, and say so
+D-UI-166  (B3)      an ad has no composer and says why, with Delete ad and
+                    Report ad inert; a recruiter InMail shows the two
+                    templated answers inert; a job application is a card
+                    with its title, detail and file, never fetched
+D-UI-167  (B3)      the inspector opens with the thread head's toggle, as
+                    board 02's, at 270 pt: who this is, the ladder, history
+                    on every channel, an address from their own profile,
+                    and dated unread and credit counts per inbox
+D-UI-168  (B3)      the composer sits at the thread's foot, per step; the
+                    InMail steps add a subject; both fields stop at the cap
+                    and count down; Make draft makes a pending draft at
+                    once (no undo window, nothing leaves before an
+                    approve); Hold until is not offered, with the reason;
+                    the pacing budget is printed with its time
+D-UI-169  (B3)      LinkedIn pushing back is a blocking danger banner under
+                    the channel banner; no composer on any thread, no send
+                    queue; reading still works
+```
+
+- Board 04 deviations. The draft carries the body only: POST /v1/drafts
+  takes a chatGuid and a body, so an InMail's subject stays in the composer
+  and is not written. No unread dot sits on the Focused or Other tab, since
+  the thread list carries no unread field. Accept, Decline privately, Delete
+  ad, Report ad, the recruiter's templated answers and Reply by email
+  instead are drawn inert with a line saying so; none has a daemon route.
+  The ladder is never edited from the board. Shots are
+  `board-04-<state>-<appearance>.png` for `list`, `request`, `sponsored`,
+  `salesnav`, `inmail`, `job`, `inspector`, `compose`, `drafted`, `paused`
+  and `paused-thread`. Under a pause the foot's line is ink, not the danger
+  colour: danger text on the light frost read 2.7:1 and failed the
+  accessibility audit, so danger stays on the banner's bar and wash. The
+  thread pane keeps its open thread when the tab or the inbox scope narrows
+  the list past it; its head still names the inbox a reply goes through.

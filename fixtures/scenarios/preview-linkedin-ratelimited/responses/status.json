@@ -54,7 +54,8 @@
           "personal": 3,
           "salesNav": 1,
           "recruiter": 1
-        }
+        },
+        "pausedUntil": "2026-09-01T13:01:00.000Z"
       }
     }
   }

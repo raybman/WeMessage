@@ -92,6 +92,8 @@ public final class ShellModel {
   public let thread: ThreadModel
   /// Board 05's chip, reveals and inline compose (v2 B2).
   let email: EmailDesk
+  /// Board 04's tab, inbox scope and composers' phases (v2 B3).
+  let linkedIn: LinkedInDesk
   /// The one send funnel: every send and approval goes through it.
   public let outbound: Outbound
   /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
@@ -237,6 +239,25 @@ public final class ShellModel {
       availability(.email), account: shown.flatMap { EmailThreadMeta($0).account }, chipText: TestHooks.previewChipText)
   }
 
+  // MARK: v2 B3, board 04
+
+  /// Board 04 while the LinkedIn tile is selected and its channel draws a
+  /// board (v2 B3); nil otherwise, as boards 03 and 05.
+  var linkedInBoard: LinkedInBoardModel? {
+    guard scope == .linkedin else { return nil }
+    return LinkedInBoardModel.make(
+      availability(.linkedin), account: linkedInStatus.account, inbox: linkedIn.filter.inbox,
+      chipText: TestHooks.previewChipText)
+  }
+
+  /// Board 04 around an open LinkedIn thread, in any scope.
+  func linkedInBoard(for thread: ThreadSummary) -> LinkedInBoardModel? {
+    guard thread.channel == Channel.linkedin.rawValue else { return nil }
+    let inbox = scope == .linkedin ? linkedIn.filter.inbox : nil
+    return LinkedInBoardModel.make(
+      availability(.linkedin), account: linkedInStatus.account, inbox: inbox, chipText: TestHooks.previewChipText)
+  }
+
   /// Board 10.A: the trust banner's line, nil while no connected channel
   /// is stale.
   public var trustLine: String? { TrustBanner.line(board: board) }
@@ -321,6 +342,7 @@ public final class ShellModel {
   public var rows: [ThreadSummary] {
     board.rows(threads?.threads ?? [], scope: scope, lens: lens, including: Set(snoozedThreads.keys))
       .filter { email.admits($0, scope: scope) }
+      .filter { linkedIn.admits($0, scope: scope) }
   }
 
   /// The queue items in the selected scope, in list order.
@@ -545,6 +567,7 @@ public final class ShellModel {
     self.avatars = avatars
     self.thread = ThreadModel(client: client)
     self.email = EmailDesk(client: client)
+    self.linkedIn = LinkedInDesk(client: client)
     self.search = SearchModel(source: DaemonSearchSource(client: client))
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()

@@ -1,4 +1,4 @@
 {
-  "summary": "Board 04 over fixtures: LinkedIn in the fixture state, iMessage connected and scanned, zero threads and zero drafts. A later slice fills the threads. Fake daemon only; the real daemon cannot say this state.",
+  "summary": "Board 04 over fixtures: LinkedIn in the fixture state, iMessage connected and scanned, seven LinkedIn threads with thread and turn meta across the three inboxes (Messaging, Sales Navigator, Recruiter), both categories (Focused, Other) and every eligibility step from a 1st-degree message to no way to message: an Open Profile InMail, a recruiter InMail with its subject and credit, a pending message request, a job application and a sponsored message. status.meta.linkedin carries the account, the dated pacing budget and the per-inbox credits. Fake daemon only; the real daemon cannot say this state.",
   "extends": "quiet"
 }

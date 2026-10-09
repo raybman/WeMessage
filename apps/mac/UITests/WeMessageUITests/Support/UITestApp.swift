@@ -354,6 +354,35 @@ enum ID {
   static let emailComposeDiscard = "wemessage.email.compose.discard"
   static let emailComposeState = "wemessage.email.compose.state"
   static let emailChipPrefix = "wemessage.email.chip."
+  // v2 B3, board 04: the LinkedIn board, its banner and inbox switch (the
+  // popover's rows: this prefix and all, personal, salesNav or recruiter),
+  // the Focused and Other tabs (value "on" or "off"), the pause banner, the
+  // open thread, an InMail or commercial card per message (prefix and the
+  // turn guid), the request card, the absent composer's line (value the
+  // reason), the composer and its parts (value the step; the state line's
+  // value the phase), and the inspector with its ladder (value the step).
+  static let linkedInBoard = "wemessage.board.linkedin"
+  static let linkedInBanner = "wemessage.board.linkedin.banner"
+  static let linkedInEmpty = "wemessage.board.linkedin.empty"
+  static let linkedInSwitch = "wemessage.linkedin.switch"
+  static let linkedInInboxPrefix = "wemessage.linkedin.inbox."
+  static let linkedInTabs = "wemessage.linkedin.tabs"
+  static let linkedInTabPrefix = "wemessage.linkedin.tab."
+  static let linkedInPaused = "wemessage.linkedin.paused"
+  static let linkedInThread = "wemessage.linkedin.thread"
+  static let linkedInInMailPrefix = "wemessage.linkedin.inmail."
+  static let linkedInCommercialPrefix = "wemessage.linkedin.commercial."
+  static let linkedInRequest = "wemessage.linkedin.request"
+  static let linkedInNoComposer = "wemessage.linkedin.nocomposer"
+  static let linkedInCompose = "wemessage.linkedin.compose"
+  static let linkedInComposeSubject = "wemessage.linkedin.compose.subject"
+  static let linkedInComposeBody = "wemessage.linkedin.compose.body"
+  static let linkedInComposeHold = "wemessage.linkedin.compose.hold"
+  static let linkedInComposePacing = "wemessage.linkedin.compose.pacing"
+  static let linkedInComposeDraft = "wemessage.linkedin.compose.draft"
+  static let linkedInComposeState = "wemessage.linkedin.compose.state"
+  static let linkedInInspector = "wemessage.linkedin.inspector"
+  static let linkedInLadder = "wemessage.linkedin.ladder"
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 

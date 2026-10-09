@@ -143,7 +143,11 @@ struct Board07ModelTests {
     let text = try String(
       contentsOf: Repo.url(AppHygieneTests.appDir + "/Boards/Thread/ThreadView.swift"), encoding: .utf8)
     #expect(text.contains("VoiceDockLayout.readerInset("))
-    #expect(text.contains("bottomInset:"))
+    // The transcript takes the measured inset, and no number stands in for it.
+    #expect(text.contains("TranscriptView(model: model, thread: thread, palette: palette, bottomInset: readerInset)"))
+    let fixed = try NSRegularExpression(pattern: #"bottomInset:\s*[0-9]"#)
+    #expect(fixed.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) == 0)
+    #expect(text.contains("dockMinY: model.voiceDock == nil ? nil : dockMinY.map(Double.init)"))
     let transcript = try String(
       contentsOf: Repo.url(AppHygieneTests.appDir + "/Boards/Thread/TranscriptView.swift"), encoding: .utf8)
     #expect(transcript.contains(".padding(.bottom, bottomInset)"))

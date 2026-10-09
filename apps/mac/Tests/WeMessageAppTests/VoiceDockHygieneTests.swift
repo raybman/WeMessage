@@ -119,6 +119,30 @@ struct VoiceDockHygieneTests {
     #expect(try Self.dockLeaks([(Self.shellModelFile, shell)]).filter { $0.contains("caption") } == [])
     // voiceCommit's one way forward is approvePending.
     #expect(shell.contains("    return approvePending(in: chatGuid)\n  }"))
+    // A spoken approve only arms: voiceCommit is reached from two keyed
+    // places and nowhere else, never from an appear, a change or a timer.
+    #expect(try Self.voiceCommitSites() == Self.voiceCommitAllowed)
+  }
+
+  /// Where voiceCommit may be named: its definition, the card's Send (a
+  /// button, so a click or cmd-Return), and the composer's cmd-Return.
+  static let voiceCommitAllowed = [
+    "Boards/Shell/VoiceDock/VoiceDockView.swift": "          Button { model.voiceCommit(in: thread.chatGuid) } label: {",
+    "Boards/Thread/ComposerView.swift": "          if model.voiceCommit(in: guid) { return .handled }",
+    "ShellModel.swift": "  public func voiceCommit(in chatGuid: String) -> Bool {",
+  ]
+
+  /// Every app source line naming voiceCommit, keyed by its path under
+  /// the app directory.
+  static func voiceCommitSites() throws -> [String: String] {
+    var sites: [String: String] = [:]
+    for (path, text) in try AppHygieneTests.sources(AppHygieneTests.appDir) {
+      let lines = text.split(separator: "\n", omittingEmptySubsequences: false).filter { $0.contains("voiceCommit(") }
+      guard !lines.isEmpty else { continue }
+      let key = String(path.dropFirst(AppHygieneTests.appDir.count + 1))
+      sites[key] = lines.count == 1 ? String(lines[0]) : lines.joined(separator: "\n")
+    }
+    return sites
   }
 
   @Test("H-B-5 teeth: a send, a caption switch and a colour planted in the dock are each seen")

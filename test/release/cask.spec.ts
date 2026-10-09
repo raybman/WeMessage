@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -368,7 +368,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
 
   it.skipIf(!HAS_BREW)(
     'row 7: brew style and brew audit --strict accept the committed cask',
-    () => {
+    async () => {
       const env = {
         ...process.env,
         HOMEBREW_NO_AUTO_UPDATE: '1',
@@ -385,20 +385,40 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
       // and tears the tap down again whether the checks pass or not.
       const tapQualified = 'sc10-cask-spec-scratch/wemessage';
 
+      // Every brew call here is AWAITED, never `spawnSync`. Four cold Ruby
+      // boots add up to 82s on a hosted macos-26 runner, and a synchronous
+      // child blocks the vitest worker's event loop for its whole life. A
+      // worker that cannot turn its loop for more than 60s misses its own
+      // RPC deadline ("Timeout calling onTaskUpdate") and fails the RUN even
+      // though every test passed, which is how v2 S6b's macOS lane went red
+      // four times in a row. Awaiting keeps the loop turning between and
+      // during the calls; the assertions are unchanged.
+      const brew = (
+        args: readonly string[],
+      ): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+        new Promise((resolve, reject) => {
+          const child = spawn('brew', [...args], {
+            env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let stdout = '';
+          let stderr = '';
+          child.stdout.setEncoding('utf8');
+          child.stderr.setEncoding('utf8');
+          child.stdout.on('data', (d: string) => (stdout += d));
+          child.stderr.on('data', (d: string) => (stderr += d));
+          child.on('error', reject);
+          child.on('close', (status) => resolve({ status, stdout, stderr }));
+        });
+
       // Defensive: a previous run crashing between tap-new and untap would
       // otherwise make THIS run's tap-new fail on "already exists".
-      spawnSync('brew', ['untap', tapQualified], { encoding: 'utf8', env });
+      await brew(['untap', tapQualified]);
 
-      const tapNew = spawnSync('brew', ['tap-new', tapQualified, '--no-git'], {
-        encoding: 'utf8',
-        env,
-      });
+      const tapNew = await brew(['tap-new', tapQualified, '--no-git']);
       expect(tapNew.status, tapNew.stdout + tapNew.stderr).toBe(0);
 
-      const tapDirResult = spawnSync('brew', ['--repository', tapQualified], {
-        encoding: 'utf8',
-        env,
-      });
+      const tapDirResult = await brew(['--repository', tapQualified]);
       const tapDir = tapDirResult.stdout.trim();
       expect(
         tapDir.length,
@@ -411,10 +431,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
         mkdirSync(dirname(tapCaskPath), { recursive: true });
         writeFileSync(tapCaskPath, readFileSync(CASK_RB_PATH, 'utf8'));
 
-        const style = spawnSync('brew', ['style', '--cask', tapCaskPath], {
-          encoding: 'utf8',
-          env,
-        });
+        const style = await brew(['style', '--cask', tapCaskPath]);
         expect(style.status, style.stdout + style.stderr).toBe(0);
 
         // `brew audit [path ...]` is disabled on this Homebrew version
@@ -424,14 +441,15 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
         // WITHOUT tripping the separate "untrusted tap" gate a bare token
         // name hits: qualifying the name removes the ambiguity that gate
         // exists to guard against.
-        const audit = spawnSync(
-          'brew',
-          ['audit', '--cask', '--strict', `${tapQualified}/wemessage`],
-          { encoding: 'utf8', env },
-        );
+        const audit = await brew([
+          'audit',
+          '--cask',
+          '--strict',
+          `${tapQualified}/wemessage`,
+        ]);
         expect(audit.status, audit.stdout + audit.stderr).toBe(0);
       } finally {
-        spawnSync('brew', ['untap', tapQualified], { encoding: 'utf8', env });
+        await brew(['untap', tapQualified]);
       }
     },
     /*

@@ -77,7 +77,12 @@ struct OnboardingModelTests {
     model.continueFromChannels()
     model.openSettings()
     #expect(model.polling)
-    let deadline = Date().addingTimeInterval(5)
+    // The deadline is generous on purpose: every suite here is @MainActor and
+    // Swift Testing runs them in parallel, so a heavy sibling (the T5 contrast
+    // sweep takes 8 s on a CI runner) can hold the main actor past a short
+    // wall-clock deadline before the poll task ever wakes. The loop exits the
+    // moment the grant lands, so a long deadline costs nothing when green.
+    let deadline = Date().addingTimeInterval(60)
     while model.step == .fdaWaiting && Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
     #expect(model.step == .fdaSized)
     #expect(seam.probes == 2)

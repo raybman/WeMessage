@@ -67,6 +67,7 @@ const EXPECTED_SCENARIOS = [
   'preview-linkedin',
   'preview-voice',
   'preview-whatsapp',
+  'preview-whatsapp-empty',
   'quiet',
   'rich',
   'search',
@@ -1089,7 +1090,7 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
 
   it('threads agree with their transcripts, and every draft points at a thread', () => {
     const state = (name: string) => switchTo(name);
-    for (const name of ['rich', 'search', 'pending']) {
+    for (const name of ['rich', 'search', 'pending', 'preview-whatsapp']) {
       const s = state(name);
       const threads = body(step(s, { method: 'GET', path: '/v1/threads' }).out)
         .threads as Array<Record<string, Json>>;

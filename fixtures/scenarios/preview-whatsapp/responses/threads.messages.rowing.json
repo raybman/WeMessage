@@ -1,0 +1,51 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;+;chat5550142900",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0401",
+        "from": "them",
+        "kind": "text",
+        "text": "Practice moves to 6:30 on Saturday, the tide is early.",
+        "at": "2026-08-31T07:30:00.000Z",
+        "handle": "+15550142001",
+        "attachments": 0
+      },
+      {
+        "guid": "wa-0402",
+        "from": "them",
+        "kind": "text",
+        "text": "Can someone bring the spare oarlocks?",
+        "at": "2026-08-31T08:02:00.000Z",
+        "handle": "+15550142903",
+        "attachments": 0,
+        "meta": {
+          "reactions": [
+            {
+              "emoji": "👍",
+              "from": "+15550142001"
+            },
+            {
+              "emoji": "👍",
+              "from": "+15550142904"
+            }
+          ]
+        }
+      },
+      {
+        "guid": "wa-0403",
+        "from": "them",
+        "kind": "text",
+        "text": "Covered. See everyone at the boathouse.",
+        "at": "2026-09-01T09:15:00.000Z",
+        "handle": "+15550142001",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

@@ -303,6 +303,21 @@ enum ID {
   static let whatsAppBanner = "wemessage.board.whatsapp.banner"
   static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
   static let fixtureChip = "wemessage.board.chip"
+  // v2 B1, board 03 over fixtures: an open WhatsApp chat's strips, the
+  // re-link card and its QR frame, the transcript's fixed lines, the phone
+  // panel, and the per-turn prefixes (voice.<guid>, media.<guid>,
+  // notshown.<guid>).
+  static let whatsAppLinked = "wemessage.board.whatsapp.linked"
+  static let whatsAppAdmins = "wemessage.board.whatsapp.admins"
+  static let whatsAppRelink = "wemessage.board.whatsapp.relink"
+  static let whatsAppQR = "wemessage.board.whatsapp.qr"
+  static let whatsAppEncrypted = "wemessage.board.whatsapp.encrypted"
+  static let whatsAppHorizon = "wemessage.board.whatsapp.horizon"
+  static let whatsAppPhone = "wemessage.board.whatsapp.phone"
+  static let whatsAppFetchNote = "wemessage.board.whatsapp.fetchnote"
+  static let whatsAppVoicePrefix = "wemessage.board.whatsapp.voice."
+  static let whatsAppMediaPrefix = "wemessage.board.whatsapp.media."
+  static let whatsAppNotShownPrefix = "wemessage.board.whatsapp.notshown."
   // v2 B2, board 05: the board, its banner, the open thread and a card per
   // message (this prefix and the turn guid), the images line per message
   // (value "blocked" or "loaded") and its Load images, the invite, the

@@ -1,0 +1,29 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "whatsapp;-;+15550142002",
+    "channel": "whatsapp",
+    "turns": [
+      {
+        "guid": "wa-0201",
+        "from": "me",
+        "kind": "text",
+        "text": "Sending the floor plan tonight.",
+        "at": "2026-08-30T20:10:00.000Z",
+        "attachments": 0
+      },
+      {
+        "guid": "wa-0202",
+        "from": "them",
+        "kind": "text",
+        "text": "Perfect, thanks. I will mark it up tomorrow.",
+        "at": "2026-09-01T10:05:00.000Z",
+        "handle": "+15550142002",
+        "attachments": 0
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

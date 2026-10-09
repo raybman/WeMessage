@@ -94,8 +94,8 @@ final class StreamScript: @unchecked Sendable {
   }
 }
 
-/// R7: the reconnect ladder and resync, ported from the Electron main
-/// process's createEventStream (apps/desktop/src/main/event-stream.ts).
+/// R7: the reconnect ladder and resync, ported from the v1 desktop main
+/// process's createEventStream (deleted in v2 S6c).
 @Suite("EventStream", .timeLimit(.minutes(1)))
 struct EventStreamTests {
   static let greeting = GatewayEvent.connectionState(ConnectionStateEvent(state: "fully-connected"))

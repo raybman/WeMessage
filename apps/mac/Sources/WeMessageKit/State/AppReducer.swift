@@ -1,7 +1,7 @@
 import Foundation
 
-/// The pure reducer, ported from the Electron renderer's optimistic store
-/// (apps/desktop/src/renderer/store/optimistic.ts). It performs no work: what
+/// The pure reducer, ported from the v1 desktop renderer's optimistic store
+/// (deleted in v2 S6c). It performs no work: what
 /// it needs from the daemon it returns as effects.
 ///
 /// A draft's state change moves the draft it names. An event the queue cannot

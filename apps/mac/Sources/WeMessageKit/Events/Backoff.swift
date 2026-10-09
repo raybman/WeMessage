@@ -1,7 +1,7 @@
 import Foundation
 
-/// The reconnect ladder, ported from the Electron main process
-/// (apps/desktop/src/main/event-stream.ts) and pinned by
+/// The reconnect ladder, ported from the v1 desktop app's main process
+/// (deleted in v2 S6c; this file is now its only home) and pinned by
 /// fixtures/contract/wire.json: 500, 1000, 2000, 4000, then 8000 ms for every
 /// later attempt, each scaled by up to 20 percent either way and rounded half
 /// up, the way Math.round does.

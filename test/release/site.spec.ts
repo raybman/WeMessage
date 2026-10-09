@@ -19,7 +19,7 @@
  *   - They hold NO COLOUR outside their own `:root{...}` block. This is S8's
  *     locality rule (F-104) restated for a page that carries its own token
  *     sheet instead of deferring to `tokens.css`. It is not the no-green
- *     sweep, which `apps/desktop/test/tokens.spec.ts` runs over `site/` for
+ *     sweep, which `test/release/no-green.spec.ts` runs over `site/` for
  *     every ship surface. It is the stronger, narrower rule that makes "what
  *     colour is this page" a question with a fourteen-line answer.
  *   - They say the things the plan makes BINDING, in their own words: the
@@ -70,7 +70,7 @@ const RELEASES = 'https://github.com/raybman/WeMessage/releases';
 /**
  * `#30D158`, assembled from fragments.
  *
- * The convention is `apps/desktop/test/tokens.spec.ts`, and the reason is
+ * The convention is `test/release/no-green.spec.ts`, and the reason is
  * the same one that file gives: a spec that forbids a literal should not be
  * the file a search for that literal finds. Row 11 asserts the landing page
  * does not carry it; writing it whole here would make this spec the second
@@ -378,7 +378,7 @@ describe('s9 Sc13 rows 10 and 11: the site and its five docs pages', () => {
      * literal sitting in the source would convict this spec of the thing
      * this spec is checking for. The fragments read as `+1${'...'}` on disk,
      * so the pattern only exists at runtime, which is the same move
-     * `apps/desktop/test/tokens.spec.ts` makes with its green hexes.
+     * `test/release/no-green.spec.ts` makes with its green hexes.
      */
     const probe = `+1${'2025550100'}`;
     expect(

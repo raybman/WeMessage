@@ -6,12 +6,12 @@
   package.json, so the 0.0.0 below is a placeholder and never ships.
 
   The Automation prompt, the copyright and the category are the strings the
-  Electron app shipped. Since v2 S6a test/release/pack-swift.spec.ts pins
-  them as literals, so this lane reads nothing under the Electron app.
+  v1 desktop app shipped. Since v2 S6a test/release/pack-swift.spec.ts pins
+  them as literals, and v2 S6c deleted that app.
 
   No LSUIElement: the host has no UI in this slice and is launched by launchd
   in daemon mode, so there is no Dock icon to hide. No CFBundleURLTypes: the
-  wemessage URL scheme belongs to the Electron app until a Swift UI exists.
+  wemessage URL scheme was the v1 desktop app's and is not claimed here.
 
   The Contacts prompt (S4g) is D-UI-9's copy, ProvisionalUI.contactsUsage,
   and pack-swift.spec.ts holds the two equal. The app asks for Contacts only

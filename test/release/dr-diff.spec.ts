@@ -330,7 +330,7 @@ esac
           'first-release',
         );
 
-        // An older release with no designated requirement (the Electron era)
+        // An older release with no designated requirement (the v1 desktop era)
         // is skipped, not compared.
         const legacy = fakeGh(
           [

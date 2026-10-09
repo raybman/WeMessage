@@ -3431,6 +3431,95 @@ describe('v2 S6c: the desktop app is deleted, not dormant', () => {
     expect(ELECTRON_TOOLCHAIN.test('vitest')).toBe(false);
   });
 
+  /* ── the word itself: an exact allowlist ────────────────────────────── */
+
+  /**
+   * Every tracked file that still names Electron, each with the reason it
+   * may. EXACT, both ways: a file that starts naming it fails (the prose of
+   * a deleted app creeping back in), and a file listed here that stops
+   * naming it fails too, so the list can only shrink by an edit that says
+   * so. S6d is expected to shrink it: the rows marked S6d go when the
+   * doctor's runtime union and the bundle plist variable go.
+   *
+   * "electronic" is not a mention: the Apache LICENSE files say "any form
+   * of electronic ... communication", and a guard that convicts a licence
+   * text gets an exemption bolted on until it guards nothing.
+   */
+  const ELECTRON_WORD = /electron(?!ic)/i;
+  const ELECTRON_WORD_ALLOWLIST: Readonly<Record<string, string>> = {
+    // history: what shipped before, by name
+    'CHANGELOG.md': 'history',
+    // the guards that refuse the word have to spell it
+    'test/arch.spec.ts': 'this tombstone',
+    'test/release/workflows.spec.ts': 'guard: ci-macos names no electron',
+    'test/release/s9-e2e.spec.ts': 'guard: ci-macos names no electron',
+    'packages/daemon/test/helpers/contract-recorder.ts':
+      'guard: refuses to record under process.versions.electron',
+    'packages/daemon/test/launchd-lifecycle.spec.ts':
+      'guard: the dev vector carries no ELECTRON_RUN_AS_NODE',
+    // the host scrubs the variable and still reads an old plist's vector
+    'apps/mac/Sources/WeMessageDaemonHost/HostArguments.swift':
+      'migration: the legacy bundle argv a pre-Swift plist passes',
+    'apps/mac/Sources/WeMessageDaemonHost/HostEnvironment.swift':
+      'guard: ELECTRON_RUN_AS_NODE is scrubbed from the child env',
+    'apps/mac/Tests/WeMessageDaemonHostTests/DaemonHostTests.swift':
+      'migration + scrub rows',
+    'apps/mac/Tests/WeMessageDaemonHostTests/HostArgumentsTests.swift':
+      'migration rows',
+    'apps/mac/Tests/WeMessageDaemonHostTests/HostEnvironmentTests.swift':
+      'scrub rows',
+    'packages/daemon/src/launchd/paths.ts':
+      'migration: the bundle pair an installed pre-Swift app resolves to',
+    'packages/daemon/test/launchd-paths.spec.ts': 'migration rows',
+    // S6d: the doctor runtime union and the bundle plist variable
+    'packages/daemon/src/doctor.ts': 'S6d',
+    'packages/daemon/test/doctor.spec.ts': 'S6d',
+    'packages/client/src/index.ts': 'S6d',
+    'packages/client/test/client-s3.spec.ts': 'S6d',
+    'fixtures/doctor-runtime/electron.json': 'S6d',
+    'apps/mac/Sources/WeMessageKit/DTO/System.swift': 'S6d',
+    'apps/mac/Tests/WeMessageKitTests/SystemDTOTests.swift': 'S6d',
+    'packages/daemon/src/launchd/plist.ts': 'S6d',
+    'packages/daemon/test/launchd-plist.spec.ts': 'S6d',
+  };
+  function electronWordFiles(): string[] {
+    // The file NAME counts as a mention too: a tracked `electron.json`
+    // names the app as plainly as a sentence does.
+    const out = new Set<string>(lsFiles().filter((f) => ELECTRON_WORD.test(f)));
+    let hits = '';
+    try {
+      hits = execFileSync(
+        'git',
+        ['grep', '-l', '-I', '-i', '-P', 'electron(?!ic)'],
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
+    } catch (err) {
+      // exit 1 is "no match", anything else is a real failure
+      if ((err as { status?: number }).status !== 1) throw err;
+    }
+    for (const f of hits.split('\n')) if (f.length > 0) out.add(f);
+    return [...out].sort();
+  }
+
+  it('the word electron appears only in the files allowed to name it', () => {
+    expect(electronWordFiles()).toEqual(
+      Object.keys(ELECTRON_WORD_ALLOWLIST).sort(),
+    );
+  });
+
+  it('the word predicate is not vacuous, and spares a licence', () => {
+    expect(ELECTRON_WORD.test('the Electron app')).toBe(true);
+    expect(ELECTRON_WORD.test('ELECTRON_RUN_AS_NODE')).toBe(true);
+    expect(ELECTRON_WORD.test('electron.json')).toBe(true);
+    // LEGITIMATE NEAR-MISS: the Apache licence text.
+    expect(ELECTRON_WORD.test('any form of electronic communication')).toBe(
+      false,
+    );
+    // The allowlist is not a wildcard: README is the first surface a user
+    // reads, and it is not on it.
+    expect(Object.keys(ELECTRON_WORD_ALLOWLIST)).not.toContain('README.md');
+  });
+
   /* ── S8 Sc1 row 12, re-planted: the capability scan reaches apps/ ──── */
 
   it('apps is still one of the production-source roots', () => {

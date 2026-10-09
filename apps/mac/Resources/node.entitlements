@@ -8,8 +8,7 @@
 
   disable-library-validation: node loads the better-sqlite3 addon, and a
   self-signed leaf has no Team ID for library validation to match the addon
-  against. This is the trade the Electron release lane avoids with a
-  Developer ID; this lane has none.
+  against. A Developer ID would avoid this trade; this project has none.
 
   automation.apple-events: the daemon is the process that talks to Messages.
 

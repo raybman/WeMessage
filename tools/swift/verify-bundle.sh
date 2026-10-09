@@ -6,7 +6,7 @@
 # What a user's Mac would trip over first, checked on the real tree:
 #   - every path of the layout is present, with the right exec bits;
 #   - daemon/ABI.json says runtime "node" at the version node.lock.json pins
-#     (the number itself is read, never typed: plain Node and Electron
+#     (the number itself is read, never typed: plain Node and an embedding
 #     disagree on it, and both change with every major);
 #   - Info.plist names sh.wemessage.gateway and WeMessage, at the
 #     package.json version;

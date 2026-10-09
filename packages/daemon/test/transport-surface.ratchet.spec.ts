@@ -16,8 +16,8 @@
  *     PORT_IMPORTER_ALLOWLIST (INV-2: send capability cannot leak into new
  *     call sites silently). s8 Sc1 moved the walk itself into
  *     `helpers/production-sources.ts` and widened its roots to `apps/*` as
- *     well as `packages/*`, so that the Electron main process — which holds
- *     the token and the one `createClient()` — is inside the scan rather
+ *     well as `packages/*`, so that the v1 desktop main process — which held
+ *     the token and the one `createClient()` — was inside the scan rather
  *     than structurally invisible to it (F-103). `test/arch.spec.ts` runs
  *     the same walk against a planted offender, which is why it is a shared
  *     module and not a local function.
@@ -333,7 +333,7 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
   it('SendBackend/ChatDbReader importer set equals the allowlist', () => {
     // The predicate lives in helpers/production-sources.ts since s8 Sc1, so
     // that the arch suite can prove this row bites by planting an offender
-    // under apps/desktop/src and running THIS scan rather than a copy of it.
+    // under apps/ and running THIS scan rather than a copy of it.
     expect(portImporters()).toEqual([...PORT_IMPORTER_ALLOWLIST]);
   });
 });

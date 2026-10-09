@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import WeMessageKit
 
-/// R4: the reconnect ladder, ported from the Electron app's backoffFor
-/// (apps/desktop/src/main/event-stream.ts) and pinned to wire.json.
+/// R4: the reconnect ladder, ported from the v1 desktop app's backoffFor
+/// (deleted in v2 S6c) and pinned to wire.json.
 @Suite("Backoff")
 struct BackoffTests {
   @Test("delay(attempt:roll:) == wire.json steps with jitter 0.2 at roll 0, 0.5, 1 for attempts 0...7")

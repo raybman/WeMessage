@@ -19,7 +19,7 @@
  *
  * The previous release is the newest published one, other than this tag,
  * that carries DESIGNATED_REQUIREMENT.txt. Releases without one (the
- * Electron builds) are skipped. None at all is `first-release`.
+ * v1 desktop builds) are skipped. None at all is `first-release`.
  *
  * Exit 0: first-release, same, or rotated and justified. Exit 6: rotated
  * and unjustified. Exit 2: a usage error, an unreadable requirement, or a

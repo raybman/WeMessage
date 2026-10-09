@@ -85,8 +85,8 @@ printf 'APPL????' > "$app/Contents/PkgInfo"
 cp "$exe" "$app/Contents/MacOS/WeMessage"
 chmod 755 "$app/Contents/MacOS/WeMessage"
 
-# Icon: apps/mac/Resources/icon.icns, a byte copy of the Electron app's mark
-# (v2 S6a), so this script reads nothing under the Electron app. Rendering
+# Icon: apps/mac/Resources/icon.icns, a byte copy of the v1 desktop app's mark
+# (v2 S6a), made so this script never read that app's tree. Rendering
 # it from the brand source with iconutil is deferred to S7 polish.
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 

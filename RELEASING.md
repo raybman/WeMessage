@@ -19,7 +19,7 @@ There is one packaging lane: `pack-swift` in `release.yml`.
                 signing secrets are absent)  DESIGNATED_REQUIREMENT.txt
 ```
 
-The Electron lanes (`pack-adhoc` in `ci-macos.yml`, `pack-macos` in
+The v1 desktop lanes (`pack-adhoc` in `ci-macos.yml`, `pack-macos` in
 `release.yml`, Developer ID plus notarization) were removed in v2 S6b. Nothing
 is notarized, and nothing in the project depends on a Developer ID.
 
@@ -86,7 +86,7 @@ that passed on an earlier commit proves nothing about the one you are shipping.
 
 ## Release smoke checklist
 
-Legs 1 through 3 were automated in the Electron `pack-adhoc` job, which v2 S6b
+Legs 1 through 3 were automated in the v1 desktop `pack-adhoc` job, which v2 S6b
 removed; until `pack-swift` carries them, run them by hand on the release
 artefact. Leg 4
 is manual and cannot be automated, because it tests the parts of macOS that
@@ -112,7 +112,7 @@ in. An unchecked row is a row that did not run.
       result on the ad-hoc lane and is the one step a user cannot skip.
 - [ ] The bundled daemon installs a background service, and the service answers
       `/v1/doctor` within the deadline reporting the launchd supervisor, the
-      Electron runtime it was built for, and the expected version.
+      host runtime it was built for, and the expected version.
 - [ ] The onboarding wizard, launched from the packaged app rather than from a
       development build, reaches the send test.
 - [ ] The send test produces exactly one send, it went through the approval
@@ -286,7 +286,7 @@ What else has to be true first:
 
 - Run it in your own macOS account, signed in to Messages, because step 11
   sends a real message. macOS 26 is the target.
-- If the Electron build of WeMessage is installed, remove its background
+- If the v1 desktop build of WeMessage is installed, remove its background
   service with its own `wemessaged service uninstall` and remove its Full
   Disk Access entry first. Both builds use the identifier
   `sh.wemessage.gateway`, and this project never installs them side by side.

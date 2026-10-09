@@ -7,12 +7,12 @@
  *
  *  - **Roots.** The walk covered `packages/<pkg>/src` and nothing else, which
  *    was complete for as long as every line of production TypeScript lived
- *    under `packages/`. S8 adds `apps/desktop/src`, an Electron main process
- *    that holds the bearer token and the one `createClient()`. A capability
+ *    under `packages/`. S8 added the v1 desktop app under `apps/`, whose main
+ *    process held the bearer token and the one `createClient()`. A capability
  *    scan that structurally cannot see the GUI is a scan that would have
  *    reported "clean" on the day the GUI imported `SendBackend` (F-103).
  *  - **Two consumers.** `test/arch.spec.ts` has to be able to plant a
- *    `SendBackend` import under `apps/desktop/src` and show that the ratchet's
+ *    `SendBackend` import under `apps/` and show that the ratchet's
  *    allowlist row catches it. It can only do that honestly by running the
  *    ratchet's OWN scan, not a second copy that agrees with it today.
  *

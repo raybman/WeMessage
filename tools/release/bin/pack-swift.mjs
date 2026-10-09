@@ -41,10 +41,10 @@
  *
  * THE FENCE (`tools-import-runtime-nothing`): node builtins only.
  *
- * NOTHING HERE NAMES THE ELECTRON APP'S DIRECTORY (v2 S6a, and an arch row
+ * NOTHING HERE NAMES THE V1 DESKTOP APP'S DIRECTORY (v2 S6a, and an arch row
  * holds it). The bundler is this directory's bundle-daemon.mjs and its output
- * is apps/mac/dist-bundle-node, so this lane keeps working the day the
- * Electron app is deleted (S6c).
+ * is apps/mac/dist-bundle-node, which is why this lane kept working the day
+ * v2 S6c deleted that app.
  */
 import { spawnSync } from 'node:child_process';
 import {

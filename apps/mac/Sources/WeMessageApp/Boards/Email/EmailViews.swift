@@ -279,7 +279,7 @@ struct EmailImagesRow: View {
   let desk: EmailDesk
   let palette: Tokens.Palette
 
-  private var revealed: Bool { true }
+  private var revealed: Bool { desk.isRevealed(card.id) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {

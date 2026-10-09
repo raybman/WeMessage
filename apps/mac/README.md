@@ -78,6 +78,14 @@ Board03Tests        board 03 from the preview-whatsapp scenario: the WhatsApp
                     the fixture chip over the New here empty state, no
                     not-connected zero or connect card, and no write in the
                     journal
+Board07Tests        board 07, the voice dock, from the preview-voice
+                    scenarios in one launch per appearance: three sizes
+                    bottom-centre over the reader with the draft never under
+                    the dock, the caption always drawn and no switch in the
+                    dock, the six failure lines, a disarmed card that ignores
+                    cmd-Return, and an armed card whose cmd-Return starts the
+                    approve window and ends in one POST
+                    /v1/drafts/drf-0102/approve, never /v1/send
 ```
 
 Every UI test class resets the fake daemon in `setUp` (S0 goldens, empty
@@ -482,4 +490,45 @@ D-UI-135  105       WhatsApp's banner names the channel, then the linked
 D-UI-140  110       a fixture channel's rail tile draws the mark a connected
                     channel would, on the same freshness; the chip, not the
                     rail, carries the difference
+```
+
+- Board 07 (v2 B4) is a shell over fixtures. There is no microphone, no
+  audio and no speech engine: every dock state is `status.meta.voice` from a
+  preview-voice scenario, read only behind the fixture gate, and
+  `VoiceDockHygieneTests` (H-B-5) fails if an audio or speech framework, a
+  microphone entitlement or a usage string reaches the app. A spoken
+  approve only arms the confirm card; cmd-Return is the one way forward,
+  through `approvePending` and the same window as A. Its provisional
+  values live in `Sources/WeMessageApp/ProvisionalUI+Board07.swift`:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-138  108       the dock is anchored bottom-centre over the reader, 12 pt
+                    above its bottom edge, in three widths: idle 320,
+                    speaking 420, confirm 520 pt
+D-UI-170  (B4)      nine chips, one at a time, each a glyph and a word:
+                    Idle, Listening, Speaking, Thinking, Driving,
+                    Interrupted, Did not catch that, Confirm, Muted by you
+D-UI-171  (B4)      chip shapes: a 1 pt ink outline; Confirm 3 pt; the
+                    unheard chip dashed; Muted by you inverted; the active
+                    chips bold. Never a colour
+D-UI-172  (B4)      the caption is always drawn, 13 pt ink, at most three
+                    lines, with no switch; a state with no words of its own
+                    reads its chip's word
+D-UI-173  (B4)      the confirm card names the recipient, the channel, the
+                    readback token and the draft verbatim; armed by voice,
+                    it proceeds only on cmd-Return (or a click on Send);
+                    Cancel disarms it
+D-UI-174  (B4)      the six failure lines (07.F), one under the caption
+D-UI-175  (B4)      the mic indicator, in words: muted or open
+D-UI-176  (B4)      the dock is opaque layer1 with a 1 pt inkDim rule and a
+                    14 pt corner; glass waits for a real engine
+D-UI-177  (B4)      Cancel is a click, never Escape, so Escape keeps its
+                    ladder
+D-UI-178  (B4)      the dock is drawn over the open thread's transcript
+                    only, never over the banner or the composer, and only
+                    while the fixture gate is open
+D-UI-179  (B4)      the reader insets by the dock's measured overlap plus
+                    the gap, never a fixed height
 ```

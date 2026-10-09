@@ -374,7 +374,7 @@ struct LinkedInInMailCard: View {
     .background(RoundedRectangle(cornerRadius: 12).fill(Tokens.color(palette.layer1)))
     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Tokens.color(palette.inkDim, opacity: 0.35), lineWidth: 1))
     .overlay(alignment: outbound ? .trailing : .leading) {
-      Rectangle().fill(Color(hue: 0.33, saturation: 1, brightness: 0.8)).frame(width: 3).padding(.vertical, 8).accessibilityHidden(true)
+      Rectangle().fill(Tokens.color(Tokens.tint)).frame(width: 3).padding(.vertical, 8).accessibilityHidden(true)
     }
     .accessibilityElement(children: .combine)
     .accessibilityLabel(mail.subject)
@@ -520,7 +520,7 @@ struct LinkedInFoot: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      switch model.linkedInStatus.paused ? LinkedInComposer.composer(.message) : model.linkedInComposer(thread) {
+      switch model.linkedInComposer(thread) {
       case .composer(let rung):
         LinkedInComposerView(model: model, thread: thread, rung: rung, degree: meta.degree, palette: palette)
           .id(thread.chatGuid)

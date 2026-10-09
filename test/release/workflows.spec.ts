@@ -81,6 +81,7 @@ interface Step {
   readonly if?: string;
   readonly with?: Readonly<Record<string, unknown>>;
   readonly env?: Readonly<Record<string, unknown>>;
+  readonly 'timeout-minutes'?: number;
 }
 
 interface Job {
@@ -1021,6 +1022,48 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       true,
       false,
     ]);
+  });
+
+  // A live dispatch hung in verify-swift-untrusted until the job limit. The
+  // likely cause: a trust change in the USER domain asks for authorization
+  // in a dialog, and a headless runner has no one to answer it. So every
+  // trust change in the
+  // Swift job is the admin domain through sudo, and the steps that undo
+  // trust carry their own limit, so a hang fails fast with its log.
+  it('row 22: Swift trust changes are admin-domain only, and the undo steps are time-boxed', () => {
+    const changes = swiftSteps().flatMap((s) =>
+      (s.run ?? '')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /security (add|remove)-trusted-cert/.test(l))
+        .map((l) => [s.id, l] as const),
+    );
+    // Non-vacuity: both identity steps add trust, verify and cleanup remove it.
+    expect([...new Set(changes.map(([id]) => id))]).toEqual([
+      'import-release-signing-identity',
+      'mint-throwaway-signing-identity',
+      'verify-swift-untrusted',
+      'cleanup-swift-signing-identity',
+    ]);
+    for (const [id, line] of changes) {
+      expect([id, line, line.startsWith('sudo security ')]).toEqual([
+        id,
+        line,
+        true,
+      ]);
+      expect([id, line, /-trusted-cert -d /.test(line)]).toEqual([
+        id,
+        line,
+        true,
+      ]);
+    }
+    for (const id of [
+      'verify-swift-untrusted',
+      'cleanup-swift-signing-identity',
+    ]) {
+      const limit = swiftStep(id)['timeout-minutes'] ?? 0;
+      expect([id, limit > 0 && limit <= 10]).toEqual([id, true]);
+    }
   });
 
   /* ── row 12: actionlint, when the machine has one ───────────────────── */

@@ -345,17 +345,15 @@ jobs:
           # p12, so the p12's encryption suite never matters to openssl.
           security find-certificate -a -p "$kc" > "$RUNNER_TEMP/cert.pem"
           # A self-signed leaf is refused by codesign until it is trusted for
-          # code signing. The admin domain first (passwordless sudo on hosted
-          # runners), the user domain as the fallback; the log says which.
-          if sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"; then
-            echo "trust: admin domain"
-          elif security add-trusted-cert -r trustRoot -p codeSign -k "$kc" "$RUNNER_TEMP/cert.pem"; then
-            echo "trust: user domain"
-          else
+          # code signing. The admin domain only, through the passwordless sudo
+          # hosted runners have: a user-domain trust change asks for
+          # authorization in a dialog, and a headless runner waits on it
+          # until the job times out.
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" || {
             echo "the signing certificate could not be trusted for code signing" >&2
             exit 1
-          fi
+          }
           leaf="$(openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -fingerprint -sha1 |
             awk -F= '{gsub(":", "", $2); print tolower($2)}')"
           security find-identity -v -p codesigning "$kc" |
@@ -405,17 +403,15 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" login.keychain-db
           # A self-signed leaf is refused by codesign until it is trusted for
-          # code signing. The admin domain first (passwordless sudo on hosted
-          # runners), the user domain as the fallback; the log says which.
-          if sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"; then
-            echo "trust: admin domain"
-          elif security add-trusted-cert -r trustRoot -p codeSign -k "$kc" "$RUNNER_TEMP/cert.pem"; then
-            echo "trust: user domain"
-          else
+          # code signing. The admin domain only, through the passwordless sudo
+          # hosted runners have: a user-domain trust change asks for
+          # authorization in a dialog, and a headless runner waits on it
+          # until the job times out.
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" || {
             echo "the signing certificate could not be trusted for code signing" >&2
             exit 1
-          fi
+          }
           leaf="$(/usr/bin/openssl x509 -in "$RUNNER_TEMP/cert.pem" -noout -fingerprint -sha1 |
             awk -F= '{gsub(":", "", $2); print tolower($2)}')"
           security find-identity -v -p codesigning "$kc" |
@@ -447,12 +443,16 @@ jobs:
       # Gatekeeper makes of it (recorded, never fatal).
       - id: verify-swift-untrusted
         name: verify-swift-untrusted
+        # A step limit, so a hang fails this step with its log intact rather
+        # than eating the job's 40 minutes.
+        timeout-minutes: 10
         env:
           LEAF: ${{ steps.import-release-signing-identity.outputs.leaf || steps.mint-throwaway-signing-identity.outputs.leaf }}
         run: |
           set -euo pipefail
+          # Through sudo only, the domain the trust was added in: a
+          # user-domain removal would wait on an authorization dialog.
           sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
-          security remove-trusted-cert "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
           sudo security delete-certificate -Z "$LEAF" /Library/Keychains/System.keychain 2> /dev/null || true
           bash tools/swift/verify-bundle.sh --app apps/mac/dist-app/WeMessage.app --expect-leaf "$LEAF"
 
@@ -490,11 +490,11 @@ jobs:
         # `always()`: a job that dies mid-pack must not leave a private key,
         # or a trust setting, on a runner about to be recycled.
         if: always()
+        timeout-minutes: 5
         run: |
           kc="$RUNNER_TEMP/wemessage-sign.keychain-db"
           if [ -f "$kc" ]; then security delete-keychain "$kc" || true; fi
           if [ -f "$RUNNER_TEMP/cert.pem" ]; then
             sudo security remove-trusted-cert -d "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
-            security remove-trusted-cert "$RUNNER_TEMP/cert.pem" 2> /dev/null || true
           fi
           rm -f "$RUNNER_TEMP/identity.p12" "$RUNNER_TEMP/cert.pem" "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/mint.cnf" || true

@@ -358,6 +358,21 @@ enum ShellID {
   static let whatsAppBanner = "wemessage.board.whatsapp.banner"
   static let whatsAppEmpty = "wemessage.board.whatsapp.empty"
   static let fixtureChip = "wemessage.board.chip"
+  // v2 B1, board 03 over fixtures: an open WhatsApp chat's strips, the
+  // re-link card and its QR frame, the transcript's fixed lines, the phone
+  // panel, and the per-turn prefixes (voice.<guid>, media.<guid>,
+  // notshown.<guid>).
+  static let whatsAppLinked = "wemessage.board.whatsapp.linked"
+  static let whatsAppAdmins = "wemessage.board.whatsapp.admins"
+  static let whatsAppRelink = "wemessage.board.whatsapp.relink"
+  static let whatsAppQR = "wemessage.board.whatsapp.qr"
+  static let whatsAppEncrypted = "wemessage.board.whatsapp.encrypted"
+  static let whatsAppHorizon = "wemessage.board.whatsapp.horizon"
+  static let whatsAppPhone = "wemessage.board.whatsapp.phone"
+  static let whatsAppFetchNote = "wemessage.board.whatsapp.fetchnote"
+  static let whatsAppVoicePrefix = "wemessage.board.whatsapp.voice."
+  static let whatsAppMediaPrefix = "wemessage.board.whatsapp.media."
+  static let whatsAppNotShownPrefix = "wemessage.board.whatsapp.notshown."
 
   static func draftVerb(_ draftId: String, _ verb: String) -> String { draftPrefix + draftId + "." + verb }
 
@@ -720,7 +735,7 @@ private struct SidebarView: View {
           LazyVStack(spacing: 0) {
             ForEach(rows, id: \.chatGuid) { thread in
               ListRow(
-                thread: thread, showsChannel: model.scope == .all, selected: model.selectedThread == thread.chatGuid,
+                thread: thread, showsChannel: WhatsAppThreadLayout.showsChannelTag(model.scope), selected: model.selectedThread == thread.chatGuid,
                 asOf: asOf, palette: palette, dark: dark, note: note(thread.chatGuid),
                 dimmed: model.snoozedThreads[thread.chatGuid] != nil,
                 checked: model.queue.selection.contains(thread.chatGuid),

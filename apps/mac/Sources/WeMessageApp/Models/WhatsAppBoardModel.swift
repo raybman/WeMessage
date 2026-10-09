@@ -15,9 +15,11 @@ struct WhatsAppBoardModel: Equatable, Sendable {
   let chip: String?
 
   /// The board for a channel's availability, or nil when there is none to
-  /// draw: a channel not connected keeps the not-connected zero.
+  /// draw: a channel not connected keeps the not-connected zero. With chats
+  /// `listed` and none open, the pane asks for a pick instead of New here
+  /// (v2 B1, D-UI-141).
   static func make(
-    _ availability: ChannelAvailability?, linkedDevice: String? = nil, chipText: String
+    _ availability: ChannelAvailability?, linkedDevice: String? = nil, listed: Bool = false, chipText: String
   ) -> WhatsAppBoardModel? {
     let chip: String?
     switch availability {
@@ -26,8 +28,9 @@ struct WhatsAppBoardModel: Equatable, Sendable {
     case .notConnected, nil: return nil
     }
     return WhatsAppBoardModel(
-      banner: banner(linkedDevice: linkedDevice), headline: ProvisionalUI.whatsAppEmptyHeadline,
-      detail: ProvisionalUI.whatsAppEmptyDetail, chip: chip)
+      banner: banner(linkedDevice: linkedDevice),
+      headline: listed ? ProvisionalUI.whatsAppPickHeadline : ProvisionalUI.whatsAppEmptyHeadline,
+      detail: listed ? ProvisionalUI.whatsAppPickDetail : ProvisionalUI.whatsAppEmptyDetail, chip: chip)
   }
 
   /// The banner names the channel, then the linked device when one is known.

@@ -498,6 +498,9 @@ struct ReactionRow: View {
   let guid: String
   let reactions: [MessageTurn.Reaction]
   let ink: Color
+  /// The chip's fill: clear on board 08, the tint wash on board 03
+  /// (D-UI-146).
+  var fill: Color = .clear
 
   var body: some View {
     HStack(spacing: 4) {
@@ -508,6 +511,7 @@ struct ReactionRow: View {
           .foregroundStyle(ink)
           .padding(.vertical, 2)
           .padding(.horizontal, 6)
+          .background(Capsule().fill(fill))
           .overlay(Capsule().strokeBorder(ink.opacity(0.6), lineWidth: 1))
           .accessibilityElement(children: .combine)
           .accessibilityLabel("Reaction \(glyph), \(reaction.count)")

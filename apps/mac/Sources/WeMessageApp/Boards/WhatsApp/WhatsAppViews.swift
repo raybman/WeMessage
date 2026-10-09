@@ -13,7 +13,7 @@ struct WhatsAppBoardView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      banner
+      WhatsAppBanner(board: board, palette: palette)
       VStack(spacing: 8) {
         Text(board.headline)
           .font(.system(size: 15, weight: .semibold))
@@ -37,8 +37,16 @@ struct WhatsAppBoardView: View {
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(ShellID.whatsAppBoard)
   }
+}
 
-  private var banner: some View {
+/// Board 03's channel banner (D-UI-135): the channel named in ink on
+/// layer1 with the tint rule at its leading edge, and the fixture chip at
+/// its trailing edge (D-UI-132). The empty board and an open chat share it.
+struct WhatsAppBanner: View {
+  let board: WhatsAppBoardModel
+  let palette: Tokens.Palette
+
+  var body: some View {
     HStack(spacing: 10) {
       Text(board.banner)
         .font(.system(size: 11, weight: .semibold))

@@ -113,6 +113,10 @@ struct AppHygieneTests {
     // v2 B0, board 03.
     "wemessage.board.whatsapp", "wemessage.board.whatsapp.banner", "wemessage.board.whatsapp.empty",
     "wemessage.board.chip",
+    // v2 B1, board 03 over fixtures.
+    "wemessage.board.whatsapp.linked", "wemessage.board.whatsapp.admins", "wemessage.board.whatsapp.relink",
+    "wemessage.board.whatsapp.qr", "wemessage.board.whatsapp.encrypted", "wemessage.board.whatsapp.horizon",
+    "wemessage.board.whatsapp.phone", "wemessage.board.whatsapp.fetchnote",
   ]
 
   static let nsApp = "NS" + "App"

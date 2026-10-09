@@ -120,7 +120,8 @@ struct ListRow: View {
     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     // Under the UI-test flag only: which avatar the row draws, so board 01
     // can hold both a photo and an initials disc on screen (S4g).
-    .accessibilityValue(TestHooks.isUITest ? (image == nil ? "initials" : "photo") : "")
+    // Board 03 (v2 B1) adds whether the row drew its channel tag.
+    .accessibilityValue(TestHooks.isUITest ? (image == nil ? "initials" : "photo") + (showsChannel ? "" : " untagged") : "")
     // Ignoring children drops the Button's press; give it back so
     // VoiceOver and the audit see an action on the row.
     .accessibilityAction { action() }
@@ -159,13 +160,17 @@ struct ContentPane: View {
     }
   }
 
-  /// The audit, the bulk card, the thread, board 03 (v2 B0), a zero screen
-  /// outside Recent, or the empty state, in that order.
+  /// The audit, the bulk card, a WhatsApp chat in board 03 (v2 B1), the
+  /// thread, board 03 (v2 B0), a zero screen outside Recent, or the empty
+  /// state, in that order.
   @ViewBuilder private var pane: some View {
     if model.auditShown {
       AuditView(model: model, palette: palette)
     } else if model.bulkSheetShown {
       BulkConfirmCard(model: model, palette: palette)
+    } else if let thread = model.selected, let board = model.whatsAppBoard(for: thread) {
+      // v2 B1: a WhatsApp chat opens inside board 03, read only.
+      WhatsAppThreadPane(model: model, thread: thread, board: board, palette: palette)
     } else if let thread = model.selected {
       VStack(spacing: 0) {
         ThreadHeader(thread: thread, image: model.avatars.image(for: thread), asOf: model.thread.asOf, palette: palette) {
@@ -206,6 +211,9 @@ struct ThreadHeader: View {
   let thread: ThreadSummary
   var image: NSImage? = nil
   var asOf: Date? = nil
+  /// A board's own line under the name (board 03, D-UI-148), in place of
+  /// board 02's.
+  var subline: String? = nil
   let palette: Tokens.Palette
   let toggle: () -> Void
 
@@ -217,7 +225,7 @@ struct ThreadHeader: View {
           .font(.system(size: 13, weight: .semibold))
           .foregroundStyle(Tokens.color(palette.ink))
           .lineLimit(1)
-        Text(subline)
+        Text(subline ?? standardSubline)
           .font(.system(size: 9))
           .foregroundStyle(Tokens.color(palette.inkDim))
           .lineLimit(1)
@@ -242,7 +250,7 @@ struct ThreadHeader: View {
     .frame(minHeight: 52)
   }
 
-  private var subline: String {
+  private var standardSubline: String {
     let channel = ShellModel.Scope(rawValue: thread.channel)?.fullLabel ?? thread.channel
     // D-UI-30: what this app knows about reading, which is only that the
     // transcript was fetched, and when.

@@ -420,6 +420,22 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   `wemessage.board.whatsapp.banner` (D-UI-135), the fixture chip
   `wemessage.board.chip` at the banner's trailing edge (D-UI-132), and the
   New here empty state `wemessage.board.whatsapp.empty` (D-UI-135)
+- An open WhatsApp chat (v2 B1) keeps `wemessage.content` and
+  `wemessage.thread` and adds: the linked device's line
+  `wemessage.board.whatsapp.linked` (D-UI-141), who may send in an
+  admin-only group `wemessage.board.whatsapp.admins`, the re-link card
+  `wemessage.board.whatsapp.relink` with its QR placeholder
+  `wemessage.board.whatsapp.qr` (an image, D-UI-142), the end-to-end line
+  `wemessage.board.whatsapp.encrypted`, the history horizon
+  `wemessage.board.whatsapp.horizon` (D-UI-143), the phone panel
+  `wemessage.board.whatsapp.phone` (D-UI-144), a voice note
+  `wemessage.board.whatsapp.voice.<guid>` labelled
+  `<duration>, <transcript>` (D-UI-145), a media tile never fetched
+  `wemessage.board.whatsapp.media.<guid>` and, once pressed, its note
+  `wemessage.board.whatsapp.fetchnote` (D-UI-149), and a not-shown card
+  `wemessage.board.whatsapp.notshown.<guid>` (D-UI-147). In a single
+  scope list rows carry the value suffix ` untagged` under the UI-test
+  flag (wireframe 03 legend 4)
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the

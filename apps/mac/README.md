@@ -519,8 +519,9 @@ D-UI-145  115       a voice note draws its transcript and duration in board
                     08's voice body; a sent note says its played state is
                     unknown to this device
 D-UI-146  116       reactions sit under their bubble, one chip per emoji with
-                    its count, on the tint at .12 alpha; one per person, a
-                    later one replacing theirs
+                    its count, the glyph drawn grey (a colour emoji too), on
+                    the tint at .12 alpha; one per person, a later one
+                    replacing theirs
 D-UI-147  117       disappearing, view-once and poll messages are dashed
                     not-shown cards with a title and a reason, and no control
 D-UI-148  118       the head's line: one to one, the channel, the number, when

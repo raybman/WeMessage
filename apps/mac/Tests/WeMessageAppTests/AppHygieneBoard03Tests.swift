@@ -15,6 +15,7 @@ struct AppHygieneBoard03Tests {
   static let threadViews = boardDir + "WhatsAppThreadViews.swift"
   static let models = [appDir + "/Models/WhatsAppBoardModel.swift", appDir + "/Models/WhatsAppThreadModel.swift"]
   static let shellView = appDir + "/ShellView.swift"
+  static let bubbleContent = appDir + "/Boards/Thread/BubbleContent.swift"
   static let dUINumbers = Array(141...149)
   static let header = "PROVISIONAL pending Eric's D-UI-141..149 decisions"
 
@@ -125,6 +126,12 @@ struct AppHygieneBoard03Tests {
     if !tile.contains("Button {\n        asked = true\n      } label: {") {
       out.append("\(threadViews): a media tile's press does more than raise its note")
     }
+    // A reaction's glyph is drawn unsaturated: U+FE0E cannot stop a colour
+    // emoji with no text glyph, and its edge over the wash reads as green.
+    let reactions = AppHygieneTests.block("ReactionRow", in: code(files.first { $0.0 == bubbleContent }?.1 ?? ""))
+    if !reactions.contains("Text(glyph).saturation(0)") {
+      out.append("\(bubbleContent): a reaction's glyph keeps its colour")
+    }
     let shell = files.first { $0.0 == shellView }?.1 ?? ""
     if !shell.contains("showsChannel: WhatsAppThreadLayout.showsChannelTag(model.scope)") {
       out.append("\(shellView): the list's tag does not follow the scope")
@@ -132,7 +139,7 @@ struct AppHygieneBoard03Tests {
     return out
   }
 
-  @Test("H-B-2: board 03 reads only: no client, route or write; no composer, draft or text entry; colours only through Tokens and never green; one await, the thread's read; a media tile only raises its note; a single scope's rows draw no tag")
+  @Test("H-B-2: board 03 reads only: no client, route or write; no composer, draft or text entry; colours only through Tokens and never green; one await, the thread's read; a media tile only raises its note; a single scope's rows draw no tag; a reaction's glyph is drawn without colour")
   func boardSealed() throws {
     let files = try AppHygieneTests.sources(Self.appDir)
     let leaks = Self.boardLeaks(files)
@@ -153,6 +160,7 @@ struct AppHygieneBoard03Tests {
       (Self.threadViews, "import WeMessageKit\n", "import WeMessageKit\nlet probe = Color(" + "hue: 0.33, saturation: 1, brightness: 1)\n"),
       (Self.models[1], "import Foundation\n", "import Foundation\nlet probe = \"/v1/" + "attachments\"\n"),
       (Self.shellView, "WhatsAppThreadLayout.showsChannelTag(model.scope)", "true"),
+      (Self.bubbleContent, "Text(glyph).saturation(0)", "Text(glyph)"),
     ]
     for (path, from, to) in plants {
       let source = files.first { $0.0 == path }?.1 ?? ""

@@ -506,16 +506,24 @@ struct ReactionRow: View {
     HStack(spacing: 4) {
       ForEach(Array(reactions.enumerated()), id: \.offset) { n, reaction in
         let glyph = SpecimenText.textPresentation(reaction.glyph)
-        Text(glyph + " \(reaction.count)")
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(ink)
-          .padding(.vertical, 2)
-          .padding(.horizontal, 6)
-          .background(Capsule().fill(fill))
-          .overlay(Capsule().strokeBorder(ink.opacity(0.6), lineWidth: 1))
-          .accessibilityElement(children: .combine)
-          .accessibilityLabel("Reaction \(glyph), \(reaction.count)")
-          .accessibilityIdentifier(ShellID.reactionPrefix + guid + ".\(n)")
+        // U+FE0E is a request, not a guarantee: a thumbs up has no text
+        // glyph, so the colour bitmap draws, and its yellow edge over the
+        // tint wash reads as green (board 03, dark). The glyph alone is
+        // drawn without saturation, so a reaction is monochrome whatever
+        // emoji arrives; the count keeps the ink.
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+          Text(glyph).saturation(0)
+          Text(" \(reaction.count)")
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(ink)
+        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .background(Capsule().fill(fill))
+        .overlay(Capsule().strokeBorder(ink.opacity(0.6), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Reaction \(glyph), \(reaction.count)")
+        .accessibilityIdentifier(ShellID.reactionPrefix + guid + ".\(n)")
       }
     }
   }

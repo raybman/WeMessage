@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# A stand-in for security(1), for test/swift/sign.sh.spec.ts only. It opens
+# no keychain. It answers exactly one question, the read-only one sign.sh
+# asks, from $FAKE_SECURITY_IDENTITY, and refuses anything else. Every call
+# is logged, so a test can prove sign.sh asks that one question and no other.
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${FAKE_CODESIGN_STATE:?}/security.log"
+if [ "$*" != "find-identity -v -p codesigning" ]; then
+  printf 'fake security: refused: %s\n' "$*" >&2
+  exit 64
+fi
+if [ -n "${FAKE_SECURITY_IDENTITY:-}" ]; then
+  printf '  1) %s "WeMessage Throwaway"\n     1 valid identities found\n' "$FAKE_SECURITY_IDENTITY"
+else
+  printf '     0 valid identities found\n'
+fi

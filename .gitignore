@@ -52,7 +52,7 @@ dist-pack-next/
 /apps/mac/WeMessage.xcodeproj/
 
 # v2 S2d: the Swift packaging lane. dist-app holds the assembled, unsigned
-# WeMessage.app; dist-pack and dist-pack-2 are the zips of two packs the S2e
+# WeMessage.app; dist-pack and dist-pack-2 are the zips of two packs the S5a
 # lane compares; dist-bundle-node is the daemon bundle for plain Node.
 /apps/mac/dist-app/
 /apps/mac/dist-pack/

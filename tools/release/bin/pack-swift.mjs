@@ -4,6 +4,7 @@
  * Node, signed, checked, zipped.
  *
  *   pnpm pack:swift --identity <sha1> [--out apps/mac/dist-pack] [--skip-build]
+ *                   [--throwaway]
  *
  * THE STEPS, IN ORDER, AND WHY THE ORDER IS THE CONTRACT:
  *   1. tools/swift/node-fetch.sh      the pinned Node, verified twice
@@ -11,8 +12,9 @@
  *   3. bundle-daemon.mjs --runtime node   apps/mac/dist-bundle-node
  *   4. tools/swift/swift.sh build -c release   the host
  *   5. tools/swift/bundle.sh          apps/mac/dist-app/WeMessage.app
- *   6. tools/swift/sign.sh            inside-out, one identity (S2e)
- *   7. tools/swift/verify-bundle.sh   layout, ABI, machine paths
+ *   6. tools/swift/sign.sh            inside-out, one identity (S5a)
+ *   7. tools/swift/verify-bundle.sh   layout, ABI, machine paths, and the
+ *                                     identity half: --expect-leaf <sha1>
  *   8. ditto -c -k --keepParent       the zip
  *   9. shasum -a 256                  SHA256SUMS
  *  10. codesign -d -r-                DESIGNATED_REQUIREMENT.txt
@@ -20,13 +22,22 @@
  * designated requirement is captured last, from the app that was zipped.
  *
  * --skip-build reuses the outputs of steps 2 to 4 and repeats everything
- * else. The S2e lane packs twice that way and compares the two designated
- * requirements, which is the whole proof that the signature is stable.
+ * else. The release lane (release.yml `pack-swift`) packs twice that way and
+ * compares the two designated requirements, which is the whole proof that
+ * the signature is stable.
+ *
+ * --identity is the certificate's 40-hex SHA-1, never its name, and the same
+ * value is what step 7 expects to find as the leaf: there is no "any leaf"
+ * mode here, because the lane always knows which identity it signed with.
+ *
+ * --throwaway names the zip WeMessage-<version>-arm64-throwaway.zip. The
+ * lane passes it when it signed with an identity minted for the run, so a
+ * build nobody can verify against a published leaf can never be mistaken
+ * for a release; the lane never uploads it.
  *
  * REFUSALS EXIT 2, BEFORE ANYTHING IS BUILT where they can be: no
  * --identity, or no tools/swift/sign.sh. An unsigned zip is not an artefact
- * this lane produces, so until sign.sh lands (S2e) the lane says so rather
- * than packing something that cannot be launched under TCC.
+ * this lane produces.
  *
  * THE FENCE (`tools-import-runtime-nothing`): node builtins only.
  *
@@ -85,11 +96,13 @@ const argv = process.argv.slice(2);
 let identity = '';
 let out = join(REPO, 'apps', 'mac', 'dist-pack');
 let skipBuild = false;
+let throwaway = false;
 for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i];
   if (a === '--identity') identity = argv[++i] ?? '';
   else if (a === '--out') out = resolve(REPO, argv[++i] ?? '');
   else if (a === '--skip-build') skipBuild = true;
+  else if (a === '--throwaway') throwaway = true;
   else refuse(`unknown argument: ${a}`);
 }
 
@@ -97,8 +110,8 @@ if (!/^[0-9A-Fa-f]{40}$/.test(identity))
   refuse('--identity <sha1> is required: the SHA-1 of the signing certificate');
 if (!existsSync(SIGN))
   refuse(
-    'tools/swift/sign.sh is absent. Signing arrives in S2e, and this lane does\n' +
-      'not pack an unsigned app.',
+    'tools/swift/sign.sh is missing, and this lane does not pack an unsigned\n' +
+      'app.',
   );
 
 const version = JSON.parse(
@@ -180,11 +193,15 @@ run('verify WeMessage.app', 'bash', [
   join(SWIFT, 'verify-bundle.sh'),
   '--app',
   APP,
+  '--expect-leaf',
+  identity,
 ]);
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-const zip = `WeMessage-${version}-arm64.zip`;
+const zip = throwaway
+  ? `WeMessage-${version}-arm64-throwaway.zip`
+  : `WeMessage-${version}-arm64.zip`;
 run('zip WeMessage.app', 'ditto', [
   '-c',
   '-k',
@@ -201,7 +218,7 @@ writeFileSync(
 );
 
 // Only the requirement line: the `Executable=` line names a path, and the
-// S2e lane compares this file byte for byte across two packs.
+// release lane compares this file byte for byte across two packs.
 const report = run(
   'record the designated requirement',
   'codesign',

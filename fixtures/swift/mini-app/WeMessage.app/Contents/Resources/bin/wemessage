@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fixture: never run. test/swift/sign.sh.spec.ts only.
+exit 0

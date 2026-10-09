@@ -5,7 +5,7 @@
   foreign library; it drives nothing itself. automation.apple-events is here
   because TCC attributes the Messages automation grant to the responsible
   process, which is the app. Signed onto Contents/MacOS/WeMessage and the app
-  by tools/swift/sign.sh (S2e).
+  by tools/swift/sign.sh (S5a).
 -->
 <plist version="1.0">
   <dict>

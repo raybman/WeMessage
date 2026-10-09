@@ -1345,7 +1345,8 @@ describe('v2 B4: the voice scenarios', () => {
         string,
         Json
       >;
-      const { meta: _meta, ...rest } = status;
+      const rest = { ...status };
+      delete rest.meta;
       expect(rest, name).toEqual(rich);
     }
   });

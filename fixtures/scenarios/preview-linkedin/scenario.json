@@ -1,0 +1,4 @@
+{
+  "summary": "Board 04 over fixtures: LinkedIn in the fixture state, iMessage connected and scanned, zero threads and zero drafts. A later slice fills the threads. Fake daemon only; the real daemon cannot say this state.",
+  "extends": "quiet"
+}

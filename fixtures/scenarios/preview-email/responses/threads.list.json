@@ -1,0 +1,243 @@
+{
+  "route": "GET /v1/threads",
+  "status": 200,
+  "body": {
+    "threads": [
+      {
+        "chatGuid": "email;-;q3-terms",
+        "channel": "email",
+        "title": "Q3 terms, revised",
+        "isGroup": true,
+        "lastLine": "Revised terms attached with 45 days, notice in writing, and the schedule from Owen. If nobody objects by Wednesday I will send them for signature.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T11:52:00.000Z",
+        "meta": {
+          "subject": "Q3 terms, revised",
+          "participants": [
+            {
+              "name": "Nadia Brooks",
+              "address": "nadia.brooks@example.com"
+            },
+            {
+              "name": "Owen Hale",
+              "address": "owen.hale@example.com"
+            },
+            {
+              "name": "Lucia Ferrer",
+              "address": "lucia.ferrer@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "people",
+          "sizeBytes": 3746000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;design-review",
+        "channel": "email",
+        "title": "Invitation: Design review, rail and cards",
+        "isGroup": true,
+        "lastLine": "Thirty minutes on the rail and the email cards. Bring the open questions.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T10:30:00.000Z",
+        "meta": {
+          "subject": "Invitation: Design review, rail and cards",
+          "participants": [
+            {
+              "name": "Felix Grant",
+              "address": "felix.grant@example.com"
+            },
+            {
+              "name": "Owen Hale",
+              "address": "owen.hale@example.com"
+            },
+            {
+              "name": "Lucia Ferrer",
+              "address": "lucia.ferrer@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "people",
+          "sizeBytes": 4000,
+          "hasInvite": true,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;contoso-weekly",
+        "channel": "email",
+        "title": "Contoso Weekly: the September issue",
+        "isGroup": false,
+        "lastLine": "This month: three workshops worth the trip, a reading list for long flights, and the gear we kept using all summer.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T08:00:00.000Z",
+        "meta": {
+          "subject": "Contoso Weekly: the September issue",
+          "participants": [
+            {
+              "name": "Contoso Weekly",
+              "address": "news@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "feed",
+          "sizeBytes": 4000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;woodgrove-statement",
+        "channel": "email",
+        "title": "Your August statement is ready",
+        "isGroup": false,
+        "lastLine": "Your statement for August is attached. No action is needed.",
+        "lastFromMe": false,
+        "lastAt": "2026-09-01T06:15:00.000Z",
+        "meta": {
+          "subject": "Your August statement is ready",
+          "participants": [
+            {
+              "name": "Woodgrove Bank",
+              "address": "statements@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "paperTrail",
+          "sizeBytes": 384000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;hello-from-hana",
+        "channel": "email",
+        "title": "Hello from a fellow maker",
+        "isGroup": false,
+        "lastLine": "Hi, we met briefly at the meetup on Thursday. Would you be up for a coffee next week to compare notes on small workshops?",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T21:04:00.000Z",
+        "meta": {
+          "subject": "Hello from a fellow maker",
+          "participants": [
+            {
+              "name": "Hana Sato",
+              "address": "hana.sato@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "newSenders",
+          "sizeBytes": 4000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;site-photos",
+        "channel": "email",
+        "title": "Site photos, batch 2",
+        "isGroup": false,
+        "lastLine": "Here is batch 2. The north wall is in the last three.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-31T18:30:00.000Z",
+        "meta": {
+          "subject": "Site photos, batch 2",
+          "participants": [
+            {
+              "name": "Tomas Wren",
+              "address": "tomas.wren@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "people",
+          "sizeBytes": 22408000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;northwind-receipt",
+        "channel": "email",
+        "title": "Receipt for order 4821",
+        "isGroup": false,
+        "lastLine": "Thanks for your order. Two items ship from the east warehouse within two days.",
+        "lastFromMe": false,
+        "lastAt": "2026-08-30T14:00:00.000Z",
+        "meta": {
+          "subject": "Receipt for order 4821",
+          "participants": [
+            {
+              "name": "Northwind Outfitters",
+              "address": "orders@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "paperTrail",
+          "sizeBytes": 4000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      },
+      {
+        "chatGuid": "email;-;offsite-dates",
+        "channel": "email",
+        "title": "Offsite dates",
+        "isGroup": false,
+        "lastLine": "Both work. I will hold the 14th and 15th.",
+        "lastFromMe": true,
+        "lastAt": "2026-08-30T09:20:00.000Z",
+        "meta": {
+          "subject": "Offsite dates",
+          "participants": [
+            {
+              "name": "Lucia Ferrer",
+              "address": "lucia.ferrer@example.com"
+            },
+            {
+              "name": "Me",
+              "address": "me@example.com"
+            }
+          ],
+          "category": "people",
+          "sizeBytes": 8000,
+          "hasInvite": false,
+          "remoteImages": "blocked",
+          "account": "me@example.com"
+        }
+      }
+    ],
+    "nextCursor": null,
+    "total": 8,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

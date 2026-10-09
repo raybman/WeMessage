@@ -83,6 +83,7 @@ function status(over: Partial<StatusPayload> = {}): StatusPayload {
     adapters: [],
     killSwitch: false,
     armed: { armed: true, until: null, reason: 'armed' },
+    channels: [{ channel: 'imessage', state: 'connected' }],
     ...over,
   };
 }

@@ -10,9 +10,13 @@ public struct ThreadSummary: Codable, Equatable, Sendable {
   public var lastLine: String?
   public var lastFromMe: Bool
   public var lastAt: String
+  /// v2 Phase B: per-board fixture detail (WhatsApp linked device, LinkedIn
+  /// inbox, email subject). Only the fake daemon's preview-* scenarios send
+  /// it; the real daemon never does. Absent means none.
+  public var meta: [String: JSONValue]?
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case chatGuid, channel, title, isGroup, lastLine, lastFromMe, lastAt
+    case chatGuid, channel, title, isGroup, lastLine, lastFromMe, lastAt, meta
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -24,6 +28,7 @@ public struct ThreadSummary: Codable, Equatable, Sendable {
     try c.encode(lastLine, forKey: .lastLine)
     try c.encode(lastFromMe, forKey: .lastFromMe)
     try c.encode(lastAt, forKey: .lastAt)
+    try c.encodeIfPresent(meta, forKey: .meta)
   }
 }
 
@@ -37,6 +42,7 @@ extension ThreadSummary {
     lastLine = try c.decode(String?.self, forKey: .lastLine)
     lastFromMe = try c.decode(Bool.self, forKey: .lastFromMe)
     lastAt = try c.decode(String.self, forKey: .lastAt)
+    meta = try c.decodeIfPresent([String: JSONValue].self, forKey: .meta)
   }
 }
 
@@ -85,9 +91,12 @@ public struct ThreadTurn: Codable, Equatable, Sendable {
   public var unsentAt: String?
   /// How many attachments the message carries. A count, never the files.
   public var attachments: Int
+  /// v2 Phase B: per-board fixture detail (reactions, a voice note's
+  /// transcript, an email envelope). Fake daemon preview-* scenarios only.
+  public var meta: [String: JSONValue]?
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case guid, from, kind, text, at, handle, editedAt, unsentAt, attachments
+    case guid, from, kind, text, at, handle, editedAt, unsentAt, attachments, meta
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -101,6 +110,7 @@ public struct ThreadTurn: Codable, Equatable, Sendable {
     try c.encodeIfPresent(editedAt, forKey: .editedAt)
     try c.encodeIfPresent(unsentAt, forKey: .unsentAt)
     try c.encode(attachments, forKey: .attachments)
+    try c.encodeIfPresent(meta, forKey: .meta)
   }
 }
 
@@ -116,6 +126,7 @@ extension ThreadTurn {
     editedAt = try c.decodeIfPresent(String.self, forKey: .editedAt)
     unsentAt = try c.decodeIfPresent(String.self, forKey: .unsentAt)
     attachments = try c.decode(Int.self, forKey: .attachments)
+    meta = try c.decodeIfPresent([String: JSONValue].self, forKey: .meta)
   }
 }
 

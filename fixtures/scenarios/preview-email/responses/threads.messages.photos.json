@@ -1,0 +1,78 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;site-photos",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0109",
+        "from": "me",
+        "kind": "text",
+        "text": "Could you send the second batch when you are back at a desk?",
+        "at": "2026-08-31T16:02:00.000Z",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Me",
+              "address": "me@example.com"
+            },
+            "to": [
+              {
+                "name": "Tomas Wren",
+                "address": "tomas.wren@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000
+        }
+      },
+      {
+        "guid": "mail-0110",
+        "from": "them",
+        "kind": "text",
+        "text": "Here is batch 2. The north wall is in the last three.",
+        "at": "2026-08-31T18:30:00.000Z",
+        "handle": "tomas.wren@example.com",
+        "attachments": 3,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Tomas Wren",
+              "address": "tomas.wren@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000,
+          "attachments": [
+            {
+              "name": "site-north-01.jpg",
+              "mime": "image/jpeg",
+              "bytes": 7400000
+            },
+            {
+              "name": "site-north-02.jpg",
+              "mime": "image/jpeg",
+              "bytes": 7600000
+            },
+            {
+              "name": "site-north-03.jpg",
+              "mime": "image/jpeg",
+              "bytes": 7400000
+            }
+          ]
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

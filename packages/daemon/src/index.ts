@@ -141,3 +141,11 @@ export {
   type ArmingSweepDeps,
   type SweepArmingOptions,
 } from './arming.js';
+export {
+  CHANNEL_NAMES,
+  NOT_CONNECTED_REASONS,
+  channelStatusSchema,
+  channelsSchema,
+  channelStatuses,
+  type ChannelStatusEntry,
+} from './channels.js';

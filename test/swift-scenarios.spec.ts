@@ -49,12 +49,24 @@ const AUTH = `Bearer ${TOKEN}`;
 const LOOP = '127.0.0.1';
 const NOW = '2026-09-01T12:30:00.000Z';
 
+/**
+ * v2 B0: the channel state only the fake daemon serves. The word may appear
+ * under fixtures/scenarios/preview-* and nowhere else in the tree; the
+ * quoted state value is what opens a board over fixtures.
+ */
+const FIXTURE_WORD_RE = /preview/i;
+const FIXTURE_STATE = '"state": "preview"';
+
 const EXPECTED_SCENARIOS = [
   'degraded',
   'empty-earned',
   'fda-denied',
   'kill',
   'pending',
+  'preview-email',
+  'preview-linkedin',
+  'preview-voice',
+  'preview-whatsapp',
   'quiet',
   'rich',
   'search',
@@ -124,7 +136,7 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the eight shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twelve shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
@@ -810,9 +822,9 @@ function merge(shape: Shape | null, v: Json): Shape {
  */
 const SUPPLEMENT: Record<string, Record<string, string[]>> = {
   'GET /v1/threads/:guid/messages': {
-    'turns[]': ['editedAt', 'unsentAt', 'handle'],
+    'turns[]': ['editedAt', 'unsentAt', 'handle', 'meta'],
   },
-  'GET /v1/threads': { 'threads[]': ['displayName', 'title'] },
+  'GET /v1/threads': { 'threads[]': ['displayName', 'title', 'meta'] },
   'GET /v1/drafts': {
     'drafts[]': ['ruleId', 'sendNotBefore', 'proactiveReason', 'error'],
   },
@@ -852,6 +864,9 @@ const NULLABLE: Record<string, string[]> = {
  */
 const OPEN: Record<string, string[]> = {
   'GET /v1/adapters': ['adapters[].config'],
+  // v2 Phase B: per-board fixture detail, preview-* scenarios only (row below).
+  'GET /v1/threads': ['threads[].meta'],
+  'GET /v1/threads/:guid/messages': ['turns[].meta'],
   'GET /v1/settings': ['settings'],
   'PATCH /v1/settings': ['settings'],
   'GET /v1/status': ['adapters'],
@@ -1106,9 +1121,10 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
     }
   });
 
-  it('synthetic only: no public-string offenders, emails only at example.com', () => {
+  it('synthetic only: no public-string offenders, emails only at example.com, the fixture state and meta only under preview-*', () => {
     const offenders: string[] = [];
     let phones = 0;
+    let fixtureStates = 0;
     for (const path of allFiles(scenariosDir)) {
       const text = readFileSync(path, 'utf8');
       const rel = path.slice(scenariosDir.length + 1);
@@ -1119,8 +1135,20 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
       phones += (text.match(/\+1555\d{7}/g) ?? []).length;
       if (/\u2014/.test(text)) offenders.push(`${rel}: em dash`);
       if (/wm_[0-9a-f]{8}/.test(text)) offenders.push(`${rel}: token shape`);
+      // v2 B0: the state that opens a board over fixtures lives in the
+      // preview-* scenarios and nowhere else in the tree, so a scenario that
+      // mirrors the real daemon can never carry it by accident.
+      if (FIXTURE_WORD_RE.test(text) && !rel.startsWith('preview-'))
+        offenders.push(`${rel}: the fixture word outside preview-*`);
+      // v2 Phase B: per-board `meta` is fixture detail the real daemon never
+      // sends, so it rides only in the preview-* scenarios.
+      if (/"meta"\s*:/.test(text) && !rel.startsWith('preview-'))
+        offenders.push(`${rel}: meta outside preview-*`);
+      fixtureStates += text.split(FIXTURE_STATE).length - 1;
     }
     expect(phones).toBeGreaterThan(20);
+    // Three boards open over fixtures; preview-voice opens none.
+    expect(fixtureStates).toBe(3);
     expect(offenders).toEqual([]);
   });
 

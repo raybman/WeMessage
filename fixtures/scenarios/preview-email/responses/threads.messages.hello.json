@@ -1,0 +1,37 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "email;-;hello-from-hana",
+    "channel": "email",
+    "turns": [
+      {
+        "guid": "mail-0108",
+        "from": "them",
+        "kind": "text",
+        "text": "Hi, we met briefly at the meetup on Thursday. Would you be up for a coffee next week to compare notes on small workshops?",
+        "at": "2026-08-31T21:04:00.000Z",
+        "handle": "hana.sato@example.com",
+        "attachments": 0,
+        "meta": {
+          "envelope": {
+            "from": {
+              "name": "Hana Sato",
+              "address": "hana.sato@example.com"
+            },
+            "to": [
+              {
+                "name": "Me",
+                "address": "me@example.com"
+              }
+            ],
+            "cc": []
+          },
+          "undoWindowMs": 30000
+        }
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

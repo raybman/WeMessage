@@ -422,7 +422,14 @@ describe('TN-imessage-is-just-a-source (v2 A1)', () => {
   });
 
   it('puts the DTO on the wire, not whatever else the source returned', async () => {
-    const leaky = { ...ROW, rowid: 42, rawDate: '781012800000000000' };
+    // v2 Phase B: `meta` is per-board fixture detail only the fake daemon's
+    // preview-* scenarios carry. The real route never forwards it.
+    const leaky = {
+      ...ROW,
+      rowid: 42,
+      rawDate: '781012800000000000',
+      meta: { linkedDevice: 'linked' },
+    };
     const source = fakeSource(() =>
       Promise.resolve({ chats: [leaky], nextCursor: null, total: 1 }),
     );

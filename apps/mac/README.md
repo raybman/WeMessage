@@ -73,6 +73,19 @@ FakeDaemonControlTests
                     a scenario served through the control routes reaches the
                     window (its connection line), the journal sees the status
                     read, the stream and the resync, and nothing was sent
+Board03Tests        board 03 from the preview-whatsapp scenario: the WhatsApp
+                    rail mark drawn as a connected channel's, the banner with
+                    the fixture chip over the New here empty state, no
+                    not-connected zero or connect card, and no write in the
+                    journal
+Board05Tests        board 05 from the preview-email scenario: the Email rail
+                    mark, the banner with the fixture chip, cards at the 68
+                    character measure (never bubbles), remote images blocked
+                    with zero /remote-image/ requests in the journal until
+                    Load images, the invite card, the category chips filtering
+                    the list, shift-R opening Reply all, Undo writing nothing,
+                    and Send writing exactly one POST /v1/drafts after the
+                    30 s window
 ```
 
 Every UI test class resets the fake daemon in `setUp` (S0 goldens, empty
@@ -409,6 +422,36 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   Save a temporary folder); the zero screen's `wemessage.zero.kind`,
   labelled `<earned|still clear|nothing arrived>: <heading>`,
   `wemessage.zero.progress` and `wemessage.zero.streak` (17.H, D-UI-128)
+- `wemessage.board.whatsapp`: board 03, drawn while the WhatsApp tile is
+  selected and the channel is connected or, under the UI-test flag only,
+  in the fake daemon's fixture state (v2 B0, H-B-1); its banner
+  `wemessage.board.whatsapp.banner` (D-UI-135), the fixture chip
+  `wemessage.board.chip` at the banner's trailing edge (D-UI-132), and the
+  New here empty state `wemessage.board.whatsapp.empty` (D-UI-135)
+- `wemessage.board.email`: board 05, drawn while the Email tile is selected
+  and the channel is connected or in the fixture state (v2 B2); its banner
+  `wemessage.board.email.banner` (D-UI-150) and empty state
+  `wemessage.board.email.empty` (D-UI-152). The open thread
+  `wemessage.email.thread` holds one `wemessage.email.card.<guid>` per
+  message (D-UI-136), `wemessage.email.earlier` for the folded ones
+  (D-UI-153), `wemessage.email.images.<guid>` on the images line, valued
+  `blocked` or `loaded`, with its `wemessage.email.load.<guid>` button
+  (D-UI-154, D-UI-159), `wemessage.email.invite` (D-UI-155), and the verbs
+  `wemessage.email.reply`, `wemessage.email.replyall` and
+  `wemessage.email.forward` (D-UI-158). The inline compose
+  `wemessage.email.compose`, scrolled into view whole when it opens, holds
+  `wemessage.email.compose.to`, `wemessage.email.compose.cc`,
+  `wemessage.email.compose.bcc`, `wemessage.email.compose.subject`,
+  `wemessage.email.compose.body` (which takes the keyboard as the compose
+  opens, through KeyboardClaim), the parked
+  `wemessage.email.compose.hold` (D-UI-139), the wall line
+  `wemessage.email.compose.wall` valued `warn` or `block` (D-UI-157),
+  `wemessage.email.compose.send` valued `enabled` or `inert`,
+  `wemessage.email.compose.undo`, `wemessage.email.compose.discard` and
+  `wemessage.email.compose.state`, valued `composing`, `undo`, `drafting`,
+  `drafted` or `failed` (D-UI-156). The sidebar's `wemessage.email.chips`
+  holds one `wemessage.email.chip.<category>` per category, valued `on` or
+  `off` (D-UI-151).
 - In Needs You and Triage the single-letter keys (A, R, Backspace, E, H, M,
   X, Z, J, K, shift-A) are heard only by the list's key view, never while
   the composer has the keyboard; bare Return does nothing outside the
@@ -448,4 +491,66 @@ runner's result (display size, scale and Xcode build all differ). Locally,
 - The `ui` job's build is ad hoc signed and iconless on purpose. It is never
   what ships; see `RELEASING.md`.
 - The design values in `Sources/WeMessageApp/ProvisionalUI.swift` are
-  provisional, pending the D-UI-1..53 decisions.
+  provisional, pending the D-UI-1..131, 132, 135 and 140 decisions. B0's
+  three, with the plan's row each renumbers (plan row plus 30):
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-132  102       a board drawn over fixtures carries a chip at the
+                    trailing edge of its channel banner: 11 pt semibold ink
+                    on the tint at .16 alpha, a capsule, never a watermark
+D-UI-135  105       WhatsApp's banner names the channel, then the linked
+                    device once a thread's meta carries it (B1); the empty
+                    state reads New here, with one line on the phone's sync
+D-UI-140  110       a fixture channel's rail tile draws the mark a connected
+                    channel would, on the same freshness; the chip, not the
+                    rail, carries the difference
+```
+
+- Board 05's design values live in
+  `Sources/WeMessageApp/ProvisionalUI+Board05.swift`, pending the D-UI-136,
+  139 and 150..159 decisions (v2 B2). 136 and 139 renumber the plan's rows
+  106 and 109; 150..159 are defaults this build took:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-136  106       each message is a card, never a bubble, at a 68
+                    character measure (68 figure zeros of the 13 pt body
+                    face, plus 16 pt padding each side), oldest first
+D-UI-139  109       Hold until is parked: drawn disabled in the compose row
+                    with "Scheduling is parked in this version." beside it
+D-UI-150  -         the banner reads Email. then the fixture mailbox, with
+                    the fixture chip at its trailing edge, as on board 03
+D-UI-151  -         category chips sit in the sidebar under All while board
+                    05 is drawn; one at a time, the same chip again clears
+D-UI-152  -         with no thread open the board says to pick one and that
+                    Send here makes a draft, never mail
+D-UI-153  -         a long thread shows its last three messages; the rest
+                    fold into one row that opens them all
+D-UI-154  -         remote images are blocked with a count of images and
+                    trackers, and one Load images button per message
+D-UI-155  -         an invite is an object card (title, when, where,
+                    organizer, guests' answers) with no RSVP control
+D-UI-156  -         compose is inline under the last card; Send opens the
+                    message's 30 s undo window, then creates a draft
+D-UI-157  -         the attachment wall is a line above Send: warn from
+                    20 MB, block from 25 MB with Send disabled
+D-UI-158  -         the verbs under the last card: Reply, Reply all with
+                    shift-R printed, Forward
+D-UI-159  -         a reveal is per message and for this window only;
+                    nothing about it is persisted
+```
+
+- Board 05, 05.H: the open protocol moves UI budget toward email. That is
+  recorded here as a direction and has no UI in this build.
+- Board 05 deviations. The draft carries the reply's body only: the
+  daemon's draft has no envelope, subject or attachment fields, so To, Cc,
+  Bcc, Subject and any forwarded files stay in the compose window and are
+  not written (POST /v1/drafts takes a chatGuid and a body). Under the
+  UI-test flag a remote image is fetched from the fake daemon's
+  `/remote-image/<name>` path instead of its own address, so the journal can
+  count requests; the fake daemon answers 404 and the card keeps the image's
+  placeholder. The fixture's `remoteImages` value is read but never lifts
+  the block: only a reveal does.

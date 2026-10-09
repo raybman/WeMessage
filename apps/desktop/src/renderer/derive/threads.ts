@@ -30,8 +30,15 @@
 import type { ThreadChannel, ThreadSummary, Weekday } from '@wemessage/client';
 import { nowInZone } from './projectWindow.js';
 
+/**
+ * The channels this renderer draws a mark for. v2 B0 widened the client's
+ * `ThreadChannel` to the four the Swift rail names; this renderer still
+ * draws iMessage only, and any other channel takes the unknown mark.
+ */
+type DrawnChannel = Extract<ThreadChannel, 'imessage'>;
+
 /** The mark board 01 draws for each channel the wire can name. */
-export const CHANNEL_MARK: Readonly<Record<ThreadChannel, string>> = {
+export const CHANNEL_MARK: Readonly<Record<DrawnChannel, string>> = {
   imessage: 'iM',
 };
 
@@ -39,7 +46,7 @@ export const CHANNEL_MARK: Readonly<Record<ThreadChannel, string>> = {
 export const UNKNOWN_MARK = '?';
 
 /** Each channel's name, as the option's label speaks it. */
-const CHANNEL_NAME: Readonly<Record<ThreadChannel, string>> = {
+const CHANNEL_NAME: Readonly<Record<DrawnChannel, string>> = {
   imessage: 'iMessage',
 };
 
@@ -108,7 +115,7 @@ function dayNumber(date: string): number {
   return Math.round(Date.parse(`${date}T00:00:00.000Z`) / MS_PER_DAY);
 }
 
-function isKnown(channel: string): channel is ThreadChannel {
+function isKnown(channel: string): channel is DrawnChannel {
   return Object.prototype.hasOwnProperty.call(CHANNEL_MARK, channel);
 }
 

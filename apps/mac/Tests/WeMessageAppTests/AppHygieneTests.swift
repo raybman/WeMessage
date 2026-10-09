@@ -110,6 +110,9 @@ struct AppHygieneTests {
     "wemessage.streak.longest", "wemessage.streak.ribbon", "wemessage.card", "wemessage.card.copy",
     "wemessage.card.save", "wemessage.card.share", "wemessage.card.status", "wemessage.zero.kind",
     "wemessage.zero.progress", "wemessage.zero.streak",
+    // v2 B0, board 03.
+    "wemessage.board.whatsapp", "wemessage.board.whatsapp.banner", "wemessage.board.whatsapp.empty",
+    "wemessage.board.chip",
   ]
 
   static let nsApp = "NS" + "App"
@@ -404,8 +407,11 @@ struct AppHygieneTests {
   /// avatar choices the plan leaves open), and S4h's 58..68 (where board 10
   /// leaves a choice open or the daemon cannot serve what it draws), and
   /// S4h2's 69..78 (the same for board 12), and on to S4l's 112..120
-  /// (the OS layer, board 16) and S4m's 121..131 (board 17, progress).
-  static let dUIKeys = (1...131).map { "D-UI-\($0)" }
+  /// (the OS layer, board 16) and S4m's 121..131 (board 17, progress), and
+  /// B0's 132, 135 and 140 (plan rows 102, 105 and 110 plus 30: the
+  /// fixture chip, the WhatsApp board's words, the fixture rail mark).
+  static let dUINumbers = Array(1...131) + [132, 135, 140]
+  static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
   static func dUISections(_ text: String) throws -> [Int: String] {
@@ -422,11 +428,11 @@ struct AppHygieneTests {
     return out
   }
 
-  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..131, one section and at least one constant per question, and is never repeated as a literal")
+  @Test("D-UI: every provisional design value lives in ProvisionalUI.swift, marked pending Eric's D-UI-1..131, 132, 135 and 140, one section and at least one constant per question, and is never repeated as a literal")
   func provisionalValues() throws {
     let file = Self.appDir + "/ProvisionalUI.swift"
     let provisional = try Repo.text(file)
-    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..131 decisions"))
+    #expect(provisional.contains("PROVISIONAL pending Eric's D-UI-1..131, 132, 135 and 140 decisions"))
     for key in Self.dUIKeys {
       // D-UI-1 must not be satisfied by D-UI-10..19.
       #expect(try Self.count(key + #"(?!\d)"#, in: provisional) >= 1, "ProvisionalUI.swift does not mark \(key)")
@@ -434,7 +440,7 @@ struct AppHygieneTests {
     // One section per question, in order, each holding a constant the app
     // can read.
     let sections = try Self.dUISections(provisional)
-    #expect(sections.keys.sorted() == Array(1...131), "sections found: \(sections.keys.sorted())")
+    #expect(sections.keys.sorted() == Self.dUINumbers, "sections found: \(sections.keys.sorted())")
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
@@ -1701,6 +1707,110 @@ struct AppHygieneTests {
       #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
       let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
       #expect(!Self.progressLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
+    }
+  }
+}
+
+// MARK: - H-B-1, v2 B0
+
+extension AppHygieneTests {
+  /// The fixture state's word. Assembled, so this file never spells it.
+  static let fixtureWord = "pre" + "view"
+  static let testHooksFile = appDir + "/TestHooks.swift"
+  static let shellModelFile = appDir + "/ShellModel.swift"
+  static let whatsAppModelFile = appDir + "/Models/WhatsAppBoardModel.swift"
+  /// The one line that opens the gate: the UI-test flag returns first.
+  static var gateLine: String { "    if isUITest { return PreviewGate(state: \"" + fixtureWord + "\") }" }
+
+  /// Every string literal on a line (no escapes, no multi-line).
+  static func literals(_ text: String) -> [String] {
+    guard let regex = try? NSRegularExpression(pattern: #""([^"\\\n]*)""#) else { return [] }
+    let range = NSRange(text.startIndex..., in: text)
+    return regex.matches(in: text, range: range).compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+  }
+
+  /// The H-B-1 verdicts over (path, text) pairs of the app and kit sources:
+  /// the fixture state's word is a whole string literal in TestHooks.swift
+  /// alone, and nowhere in the kit at all; the gate is built open in one
+  /// TestHooks line behind the flag, and closed everywhere else; the shell
+  /// model's state takes the gate from TestHooks; the chip's word reaches
+  /// a board only through the shell model, and only a fixture board draws
+  /// it.
+  static func fixtureStateLeaks(_ files: [(String, String)]) -> [String] {
+    var out: [String] = []
+    let word = fixtureWord
+    for (path, text) in files {
+      let inKit = path.hasPrefix(kitDir + "/")
+      for literal in literals(text) {
+        let lower = literal.lowercased()
+        if inKit && lower.contains(word) { out.append("\(path): the kit spells \"\(literal)\"") }
+        if !inKit && path != testHooksFile && lower.trimmingCharacters(in: .whitespaces) == word {
+          out.append("\(path): the literal \"\(literal)\" outside TestHooks")
+        }
+      }
+      for line in text.components(separatedBy: "\n") where line.contains("PreviewGate(state:") {
+        if inKit {
+          if !line.contains("PreviewGate(state: nil)") { out.append("\(path): the kit builds an open gate: \(line)") }
+        } else if path != testHooksFile {
+          out.append("\(path): a gate built outside TestHooks: \(line)")
+        } else if line != gateLine {
+          out.append("\(path): the gate is not built behind the flag: \(line)")
+        }
+      }
+      if !inKit && path != shellModelFile && path != testHooksFile {
+        if text.contains("TestHooks.previewGate()") { out.append("\(path): reads the gate outside the shell model") }
+        if text.contains("TestHooks.previewChipText") { out.append("\(path): reads the chip's word outside the shell model") }
+        if text.contains("AppState(previewGate:") { out.append("\(path): builds a gated state outside the shell model") }
+      }
+    }
+    let hooks = files.first { $0.0 == testHooksFile }?.1 ?? ""
+    if hooks.components(separatedBy: "PreviewGate(state:").count - 1 != 1 { out.append("TestHooks builds the gate other than once") }
+    let shell = files.first { $0.0 == shellModelFile }?.1 ?? ""
+    if !shell.contains("state = AppState(previewGate: TestHooks.previewGate())") {
+      out.append("the shell model's state does not take its gate from TestHooks")
+    }
+    let board = files.first { $0.0 == whatsAppModelFile }?.1 ?? ""
+    if !board.contains("case .connected: chip = nil") || !board.contains("case .notConnected, nil: return nil") {
+      out.append("board 03 draws the chip, or a board at all, beyond a fixture board")
+    }
+    return out
+  }
+
+  static func fixtureStateSources() throws -> [(String, String)] {
+    try sources(appDir) + sources(kitDir)
+  }
+
+  @Test("H-B-1: the fixture state's word is no production string: a literal in TestHooks alone, behind the UI-test flag, and never in the kit; the gate opens nowhere else; only a fixture board draws the chip")
+  func fixtureStateConfined() throws {
+    let files = try Self.fixtureStateSources()
+    #expect(files.count > 50)
+    #expect(Self.fixtureStateLeaks(files) == [])
+    let hooks = files.first { $0.0 == Self.testHooksFile }?.1 ?? ""
+    #expect(hooks.contains(Self.gateLine), "the flag-first gate line is gone")
+  }
+
+  @Test("H-B-1 teeth: every planted leak of the fixture state is seen")
+  func fixtureStatePlants() throws {
+    let files = try Self.fixtureStateSources()
+    let word = Self.fixtureWord
+    let capital = word.prefix(1).uppercased() + word.dropFirst()
+    let swaps: [(String, String, String)] = [
+      (Self.appDir + "/ShellView.swift", "import SwiftUI\n", "import SwiftUI\nlet probe = \"" + capital + "\"\n"),
+      (Self.appDir + "/ProvisionalUI.swift", "import Foundation\n", "import Foundation\nlet probe = \" " + word + "\"\n"),
+      (Self.testHooksFile, Self.gateLine, "    return PreviewGate(state: \"" + word + "\")"),
+      (Self.shellModelFile, "AppState(previewGate: TestHooks.previewGate())", "AppState(previewGate: PreviewGate(state: \"x\"))"),
+      (Self.kitDir + "/Channel.swift", "PreviewGate(state: nil)", "PreviewGate(state: \"x\")"),
+      (Self.kitDir + "/Channel.swift", "import Foundation\n", "import Foundation\nlet probe = \"a " + word + " board\"\n"),
+      (Self.whatsAppModelFile, "case .connected: chip = nil", "case .connected: chip = chipText"),
+      (Self.whatsAppModelFile, "case .notConnected, nil: return nil", "case .notConnected, nil: chip = chipText"),
+      (Self.appDir + "/Boards/WhatsApp/WhatsAppViews.swift", "import WeMessageKit\n",
+       "import WeMessageKit\nlet probe = TestHooks.previewChipText\n"),
+    ]
+    for (path, from, to) in swaps {
+      let source = files.first { $0.0 == path }?.1 ?? ""
+      #expect(source.contains(from), "plant anchor \(from) is gone from \(path)")
+      let swapped = files.map { $0.0 == path ? ($0.0, $0.1.replacingOccurrences(of: from, with: to)) : $0 }
+      #expect(!Self.fixtureStateLeaks(swapped).isEmpty, "a planted \(to) in \(path) went unseen")
     }
   }
 }

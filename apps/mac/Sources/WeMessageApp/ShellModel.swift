@@ -38,6 +38,10 @@ public final class ShellModel {
       }
     }
 
+    /// The kit's channel this tile reads; nil for ALL, the fold of the
+    /// others (v2 B0).
+    public var channel: Channel? { Channel(rawValue: rawValue) }
+
     /// The digit cmd binds to this tile, in rail order: cmd-1 is ALL.
     public var shortcutDigit: Character {
       let index = Self.allCases.firstIndex(of: self) ?? 0
@@ -72,15 +76,22 @@ public final class ShellModel {
   /// The latest avatar resolve, so a test can wait for it.
   private(set) var avatarTask: Task<Void, Never>?
 
-  /// The last status read; nil until one succeeds.
-  public internal(set) var status: StatusPayload?
+  /// The last status read; nil until one succeeds. Every read also folds
+  /// through the reducer, which derives the channels' availability from it.
+  public internal(set) var status: StatusPayload? {
+    didSet { if let status { fold(.response(.status(status))) } }
+  }
   /// The last thread list read.
   public internal(set) var threads: ThreadsPage?
-  /// The kit's state: the draft queue, folded by AppReducer.
-  public internal(set) var state = AppState()
+  /// The kit's state: the draft queue and the channels' availability,
+  /// folded by AppReducer. Its gate is closed outside the UI-test flag
+  /// (v2 B0, H-B-1).
+  public internal(set) var state = AppState(previewGate: TestHooks.previewGate())
 
   /// The selected thread's transcript (board 02).
   public let thread: ThreadModel
+  /// Board 05's chip, reveals and inline compose (v2 B2).
+  let email: EmailDesk
   /// The one send funnel: every send and approval goes through it.
   public let outbound: Outbound
   /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
@@ -147,7 +158,31 @@ public final class ShellModel {
     let clock = ShellBoard.clock(status: status, threads: threads, drafts: state.queue)
     return ShellBoard.fold(
       status: status, threads: threads, drafts: state.queue, window: window,
-      excluding: excludedDrafts(clock: clock, window: window))
+      excluding: excludedDrafts(clock: clock, window: window), channels: state.channels)
+  }
+
+  /// What the app may do with the channel a scope reads; nil for ALL.
+  public func availability(_ scope: Scope) -> ChannelAvailability? {
+    scope.channel.map(state.availability)
+  }
+
+  /// Board 03 while the WhatsApp tile is selected and its channel draws a
+  /// board (v2 B0); nil otherwise, and nil for a channel not connected,
+  /// which keeps the not-connected zero.
+  var whatsAppBoard: WhatsAppBoardModel? {
+    guard scope == .whatsapp else { return nil }
+    return WhatsAppBoardModel.make(availability(.whatsapp), chipText: TestHooks.previewChipText)
+  }
+
+  /// Board 05 while the Email tile is selected and its channel draws a
+  /// board (v2 B2); nil otherwise, as board 03's. The banner names the
+  /// mailbox of the open thread, or of the first email thread listed.
+  var emailBoard: EmailBoardModel? {
+    guard scope == .email else { return nil }
+    let mail = (threads?.threads ?? []).filter { $0.channel == Channel.email.rawValue }
+    let shown = mail.first { $0.chatGuid == selectedThread } ?? mail.first
+    return EmailBoardModel.make(
+      availability(.email), account: shown.flatMap { EmailThreadMeta($0).account }, chipText: TestHooks.previewChipText)
   }
 
   /// Board 10.A: the trust banner's line, nil while no connected channel
@@ -233,12 +268,13 @@ public final class ShellModel {
   /// The threads the list shows for the current scope and lens.
   public var rows: [ThreadSummary] {
     board.rows(threads?.threads ?? [], scope: scope, lens: lens, including: Set(snoozedThreads.keys))
+      .filter { email.admits($0, scope: scope) }
   }
 
   /// The queue items in the selected scope, in list order.
   public var scopedQueue: [QueueItem] {
     let channel = ShellBoard.channel(of: scope)
-    return board.queue.filter { item in channel.map { $0 == item.channel } ?? true }
+    return board.queue.filter { item in channel.map { $0.rawValue == item.channel } ?? true }
   }
 
   /// Picks a lens. Entering Triage starts its burn-down; leaving it ends it.
@@ -456,6 +492,7 @@ public final class ShellModel {
     self.client = client
     self.avatars = avatars
     self.thread = ThreadModel(client: client)
+    self.email = EmailDesk(client: client)
     self.search = SearchModel(source: DaemonSearchSource(client: client))
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()

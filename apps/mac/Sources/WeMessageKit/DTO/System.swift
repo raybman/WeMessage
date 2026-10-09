@@ -100,6 +100,43 @@ extension ArmingStatePayload {
   }
 }
 
+/// v2 B0: one entry of status's `channels`, as the wire carries it. The
+/// strings stay strings here: `Channel(wire:)` and
+/// `ChannelAvailability.table(_:gate:)` fold them, so an unknown channel or
+/// state never fails a decode.
+public struct ChannelStatusPayload: Codable, Equatable, Sendable {
+  public var channel: String
+  public var state: String
+  /// Optional and absent (not null) when the channel is connected.
+  public var reason: String?
+
+  public init(channel: String, state: String, reason: String? = nil) {
+    self.channel = channel
+    self.state = state
+    self.reason = reason
+  }
+
+  enum CodingKeys: String, CodingKey, CaseIterable {
+    case channel, state, reason
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(channel, forKey: .channel)
+    try c.encode(state, forKey: .state)
+    try c.encodeIfPresent(reason, forKey: .reason)
+  }
+}
+
+extension ChannelStatusPayload {
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    channel = try c.decode(String.self, forKey: .channel)
+    state = try c.decode(String.self, forKey: .state)
+    reason = try c.decodeIfPresent(String.self, forKey: .reason)
+  }
+}
+
 public struct StatusPayload: Codable, Equatable, Sendable {
   public var connectionState: String
   /// Required and nullable: null before the first scan.
@@ -110,9 +147,12 @@ public struct StatusPayload: Codable, Equatable, Sendable {
   public var killSwitch: Bool?
   /// Required and nullable.
   public var armed: ArmingStatePayload?
+  /// v2 B0: required. Which message channels this version reads, one entry
+  /// per channel in rail order.
+  public var channels: [ChannelStatusPayload]
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case connectionState, cursor, counts, adapters, killSwitch, armed
+    case connectionState, cursor, counts, adapters, killSwitch, armed, channels
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -123,6 +163,7 @@ public struct StatusPayload: Codable, Equatable, Sendable {
     try c.encode(adapters, forKey: .adapters)
     try c.encode(killSwitch, forKey: .killSwitch)
     try c.encode(armed, forKey: .armed)
+    try c.encode(channels, forKey: .channels)
   }
 }
 
@@ -135,6 +176,7 @@ extension StatusPayload {
     adapters = try c.decode([JSONValue].self, forKey: .adapters)
     killSwitch = try c.decode(Bool?.self, forKey: .killSwitch)
     armed = try c.decode(ArmingStatePayload?.self, forKey: .armed)
+    channels = try c.decode([ChannelStatusPayload].self, forKey: .channels)
   }
 }
 

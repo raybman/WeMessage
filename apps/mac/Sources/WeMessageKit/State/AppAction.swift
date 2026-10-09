@@ -17,6 +17,8 @@ public enum StreamFrame: Equatable, Sendable {
 /// A response to an effect the reducer asked for.
 public enum AppResponse: Equatable, Sendable {
   case drafts([DraftPayload])
+  /// A status read: the channels' availability is derived from it.
+  case status(StatusPayload)
 }
 
 /// Everything that can change AppState.

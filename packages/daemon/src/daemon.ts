@@ -59,6 +59,7 @@ import type { AdapterTransportHandle } from './adapters/transport.js';
 import type { AgentRequests } from './adapters/submit.js';
 import { createScheduler } from './scheduler.js';
 import { resolveArming } from './arming.js';
+import { channelStatuses } from './channels.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
 import type { SupervisionDeps } from './connection.js';
@@ -609,6 +610,8 @@ export async function startDaemon(
       // millisecond later. Neither is cached and neither is a column.
       killSwitch: store.getSetting(SETTING_KILL_SWITCH) === '1',
       armed: resolveArming({ store, clock: options.clock, autonomy }),
+      // v2 B0: the message channels this version reads (channels.ts).
+      channels: channelStatuses(),
     }),
     onEventsClient: (socket) => {
       sockets.add(socket);

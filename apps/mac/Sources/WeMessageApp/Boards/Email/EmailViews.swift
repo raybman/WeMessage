@@ -513,7 +513,9 @@ struct EmailComposeView: View {
 
   /// D-UI-139: drawn and disabled, its reason beside it at full contrast;
   /// it never opens a picker. It is read as text, not as a button: a button
-  /// with nothing to press fails the audit's "Action is missing".
+  /// with nothing to press fails the audit's "Action is missing", and an
+  /// ignored-children group has no role and drops its value, so the two
+  /// texts are combined into one element (as the compose recipient chip is).
   private var hold: some View {
     HStack(spacing: 8) {
       Text(ProvisionalUI.emailHoldLabel)
@@ -527,7 +529,7 @@ struct EmailComposeView: View {
         .foregroundStyle(Tokens.color(palette.inkDim))
         .fixedSize(horizontal: false, vertical: true)
     }
-    .accessibilityElement(children: .ignore)
+    .accessibilityElement(children: .combine)
     .accessibilityLabel(ProvisionalUI.emailHoldLabel)
     .accessibilityValue(ProvisionalUI.emailHoldParked)
     .accessibilityIdentifier(ShellID.emailComposeHold)

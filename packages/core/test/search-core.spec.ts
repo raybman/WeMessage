@@ -18,6 +18,7 @@ import {
   SEARCH_MATCH_CAP,
   searchQueryHash,
   senderFacets,
+  yearCountsOf,
   yearFacets,
   yearStartInZone,
   type SearchParams,
@@ -356,6 +357,61 @@ describe('time zones and facets (v2 F2b)', () => {
       { handle: 'me', count: 2 },
       { handle: '+15550100001', count: 1 },
       { handle: '+15550100003', count: 1 },
+    ]);
+  });
+});
+
+describe('yearCountsOf (v2 F2c)', () => {
+  const ms = (iso: string): number => Date.parse(iso);
+
+  it('nothing said is no years at all', () => {
+    expect(yearCountsOf([], 'UTC')).toEqual([]);
+  });
+
+  it('newest year first, each with its first and last turn, empty years kept', () => {
+    const years = yearCountsOf(
+      [
+        ms('2019-03-01T10:00:00.000Z'),
+        ms('2019-11-30T10:00:00.000Z'),
+        ms('2022-06-01T10:00:00.000Z'),
+      ],
+      'UTC',
+    );
+    expect(years).toEqual([
+      {
+        year: 2022,
+        count: 1,
+        first: '2022-06-01T10:00:00.000Z',
+        last: '2022-06-01T10:00:00.000Z',
+      },
+      { year: 2021, count: 0, first: null, last: null },
+      { year: 2020, count: 0, first: null, last: null },
+      {
+        year: 2019,
+        count: 2,
+        first: '2019-03-01T10:00:00.000Z',
+        last: '2019-11-30T10:00:00.000Z',
+      },
+    ]);
+  });
+
+  it("a year is the zone's year: 23:30 on New Year's Eve in LA is still 2024", () => {
+    const t = [ms('2025-01-01T07:30:00.000Z')];
+    expect(yearCountsOf(t, 'America/Los_Angeles').map((y) => y.year)).toEqual([
+      2024,
+    ]);
+    expect(yearCountsOf(t, 'UTC').map((y) => y.year)).toEqual([2025]);
+    expect(yearCountsOf(t, 'Pacific/Chatham').map((y) => y.year)).toEqual([
+      2025,
+    ]);
+  });
+
+  it('the boundary instant belongs to the year it opens', () => {
+    const start = yearStartInZone(2025, 'Asia/Kolkata').getTime();
+    const years = yearCountsOf([start - 1, start], 'Asia/Kolkata');
+    expect(years.map((y) => [y.year, y.count])).toEqual([
+      [2025, 1],
+      [2024, 1],
     ]);
   });
 });

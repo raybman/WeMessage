@@ -20,7 +20,9 @@
  *  - rules refuse `outsideWindow: 'queue'` with a typed 400;
  *  - PUT /v1/threads/:guid/state takes `snoozedUntil` exactly when `act` is
  *    `snoozed`, and refuses an `actAt` in the future or beside a null act;
- *  - GET /v1/search refuses a `tz` that is not an IANA time zone.
+ *  - GET /v1/search refuses a `tz` that is not an IANA time zone;
+ *  - GET /v1/threads/:guid/years refuses a `tz` that is not an IANA time
+ *    zone.
  */
 import { z } from 'zod';
 import { adapterSchemas } from './routes/adapters.js';
@@ -64,6 +66,7 @@ export const REQUEST_SCHEMAS = {
   'PATCH /v1/settings': settingsSchemas.patchBody,
   'GET /v1/threads': threadSchemas.listQuery,
   'GET /v1/threads/:guid/messages': threadSchemas.pageQuery,
+  'GET /v1/threads/:guid/years': threadSchemas.yearsQuery,
   'PUT /v1/threads/:guid/state': threadStateSchemas.putStateBody,
   'POST /v1/toggles/kill-switch': toggleSchemas.toggleBody,
   'POST /v1/toggles/pause': toggleSchemas.pauseBody,
@@ -71,11 +74,12 @@ export const REQUEST_SCHEMAS = {
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;
 
 /**
- * Path-parameter schemas. Only three routes validate their params with zod;
+ * Path-parameter schemas. Only four routes validate their params with zod;
  * the rest take a bare string id and answer 404 for one they do not know.
  */
 export const PARAM_SCHEMAS = {
   'GET /v1/threads/:guid/messages': threadSchemas.pageParams,
+  'GET /v1/threads/:guid/years': threadSchemas.yearsParams,
   'GET /v1/threads/by-handle/:handle': threadSchemas.handleParams,
   'PUT /v1/threads/:guid/state': threadStateSchemas.stateParams,
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;

@@ -1,0 +1,17 @@
+{
+  "route": "GET /v1/threads/:guid/years",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15551234567",
+    "tz": "America/Los_Angeles",
+    "years": [
+      {
+        "year": 2026,
+        "count": 5,
+        "first": "2026-09-01T12:00:11.000Z",
+        "last": "2026-09-01T12:00:43.000Z"
+      }
+    ],
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

@@ -38,6 +38,8 @@ import {
   UnknownChatError,
   normalizeHandle,
   parseChatGuid,
+  yearCountsOf,
+  type YearCount,
 } from '@wemessage/core';
 import {
   isoToAppleNs,
@@ -91,6 +93,13 @@ export interface IngestChatDbReader extends ChatDbReader {
    * whose guid is missing here was deleted in Messages.
    */
   existingGuids(guids: readonly string[]): Set<string>;
+  /**
+   * v2 F2c: one conversation's turns counted by year in `tz`, newest year
+   * first, silent years kept. A turn is what readChatPage shows (the same
+   * turn test, the same clamped date), so the counts add up to a full walk.
+   * Throws UnknownChatError for a chat chat.db does not hold.
+   */
+  yearCounts(chatGuid: string, tz: string): YearCount[];
   close(): void;
 }
 
@@ -339,19 +348,43 @@ const CHAT_ROWID_SQL = `SELECT ROWID AS chatRowid, style AS style FROM chat WHER
 const CHAT_STYLE_GROUP = 43n;
 
 /**
+ * A turn, in SQL: a message somebody said, not a reaction and not a group
+ * event. One text, used by the page (pageWindow) and by the year counts
+ * (YEARS_SQL), so the two can never disagree about what a turn is.
+ */
+const TURN_TEST = `
+      AND m.item_type = 0
+      AND NOT (m.associated_message_guid IS NOT NULL
+               AND m.associated_message_type != 0)`;
+
+/**
  * The turn test, the keyset and the `until` window over one candidate
  * \`d\` expression (see CHAT_PAGE_SQL). Shared by its two halves.
  */
-const pageWindow = (d: string): string => `
-      AND m.item_type = 0
-      AND NOT (m.associated_message_guid IS NOT NULL
-               AND m.associated_message_type != 0)
+const pageWindow = (d: string): string => `${TURN_TEST}
       AND (@beforeDate IS NULL
            OR ${d} < @beforeDate
            OR (${d} = @beforeDate AND cmj.message_id < @beforeRowid))
       AND (@untilNs IS NULL
            OR (${d} < ${SECONDS_ERA_LIMIT_SQL} AND ${d} <= @untilSeconds)
            OR (${d} >= ${SECONDS_ERA_LIMIT_SQL} AND ${d} <= @untilNs))`;
+
+/**
+ * v2 F2c: every turn of one chat as Unix milliseconds, dated exactly as
+ * the page dates it (the clamped join date, seconds before High Sierra,
+ * nanoseconds after; chatDbDateToIso in SQL). Counting by year is done in
+ * JS (yearCountsOf) because a zone's New Year is not a SQL expression.
+ */
+const YEARS_SQL = `
+  SELECT
+    CASE WHEN d < ${SECONDS_ERA_LIMIT_SQL} THEN d * 1000 ELSE d / 1000000 END
+      + 978307200000 AS ms
+  FROM (
+    SELECT MAX(COALESCE(cmj.message_date, 0), 0) AS d
+    FROM chat_message_join cmj
+    JOIN message m ON m.ROWID = cmj.message_id
+    WHERE cmj.chat_id = ?${TURN_TEST}
+  )`;
 
 /**
  * readChatPage (v2 A2): one page of one conversation, newest first.
@@ -830,6 +863,8 @@ export function createChatDbReader(
   const chatTitlesStmt = db.prepare(CHAT_TITLES_SQL);
   const existingGuidsStmt = db.prepare(EXISTING_GUIDS_SQL);
   existingGuidsStmt.pluck(true);
+  const yearsStmt = db.prepare(YEARS_SQL);
+  yearsStmt.pluck(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -1134,6 +1169,13 @@ export function createChatDbReader(
     existingGuids(guids: readonly string[]): Set<string> {
       if (guids.length === 0) return new Set();
       return new Set(existingGuidsStmt.all(JSON.stringify(guids)) as string[]);
+    },
+
+    yearCounts(chatGuid: string, tz: string): YearCount[] {
+      const chat = chatRowidStmt.get(chatGuid) as
+        { chatRowid: bigint; style: bigint | null } | undefined;
+      if (chat === undefined) throw new UnknownChatError();
+      return yearCountsOf(yearsStmt.all(chat.chatRowid) as number[], tz);
     },
 
     close() {

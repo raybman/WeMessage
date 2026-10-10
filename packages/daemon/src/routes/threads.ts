@@ -6,6 +6,9 @@
  * to that handle would land in, or null. The same lookup the send path
  * makes (the reader's `resolveChat`), asked before the draft rather than
  * after, so compose can refuse up front instead of failing at dispatch.
+ * v2 F2c: `GET /v1/threads/:guid/years?tz=`, one conversation's turns
+ * counted by year in the operator's zone, for the transcript's scrubber.
+ * Through a closure (the reader's `yearCounts`), like F5's lookup.
  *
  * A read, and only a read. The route asks the channel source it was handed
  * for one page, copies that source's channel tag onto every row, strips
@@ -31,6 +34,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   InvalidCursorError,
+  isValidTimeZone,
   normalizeHandle,
   UnknownChatError,
   type ChannelName,
@@ -49,6 +53,7 @@ import {
   type TurnReaction,
   type TurnsPage,
   type TurnsQuery,
+  type YearCount,
 } from '@wemessage/core';
 import { stripControlChars } from '../sanitize.js';
 
@@ -68,6 +73,12 @@ export interface ThreadRouteDeps {
    * only: it never mints a chat.
    */
   resolveChat: (handle: Handle) => Promise<ResolvedChat | null>;
+  /**
+   * v2 F2c: one chat's turns by year in `tz`, newest first. A closure for
+   * the same reason as `resolveChat`. Throws UnknownChatError for a chat
+   * the source never held.
+   */
+  yearCounts: (chatGuid: string, tz: string) => YearCount[];
 }
 
 // strictObject: an unknown query param is surface too (fail closed, the
@@ -136,6 +147,22 @@ const handleParams = z.strictObject({
     .max(320)
     .refine((h) => !h.includes(';'), { message: 'a handle has no ";"' }),
 });
+
+// v2 F2c. The zone is required: which year a turn falls in is the
+// operator's zone's call, and the daemon has no zone of its own to assume.
+// 64 bounds the longest IANA name with room to spare; a name Intl does not
+// know is refused, not quietly read as UTC.
+// Its own object, not pageParams again: the contract ratchet holds every
+// exported schema to exactly one route, and a shared object would hide
+// which route a later change to it moves.
+const yearsParams = z.strictObject({ guid: z.string().min(1).max(512) });
+
+const yearsQuery = z
+  .strictObject({ tz: z.string().min(1).max(64) })
+  .refine((q) => isValidTimeZone(q.tz), {
+    message: 'tz is not an IANA time zone',
+    path: ['tz'],
+  });
 
 /** One transcript turn as the wire carries it. */
 interface WireTurn {
@@ -338,6 +365,47 @@ export function registerThreadRoutes(
       asOf: clock.now(),
     };
   });
+  // GET, and fastify's auto-HEAD twin (route ratchet #31). No audit row and
+  // no broadcast: counting is a read, like the page beside it.
+  app.get('/v1/threads/:guid/years', async (req, reply) => {
+    const params = yearsParams.safeParse(req.params);
+    const parsed = yearsQuery.safeParse(req.query);
+    if (!params.success || !parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid-query',
+        detail: {
+          issues: [
+            ...(params.success ? [] : params.error.issues),
+            ...(parsed.success ? [] : parsed.error.issues),
+          ],
+        },
+      });
+    }
+    const { guid } = params.data;
+    const { tz } = parsed.data;
+
+    let years: YearCount[];
+    try {
+      years = await Promise.resolve().then(() => deps.yearCounts(guid, tz));
+    } catch (err) {
+      if (err instanceof UnknownChatError) {
+        return reply.code(404).send({ error: 'unknown-chat' });
+      }
+      return reply.code(503).send({ error: 'source-unavailable' });
+    }
+
+    return {
+      chatGuid: guid,
+      tz,
+      years: years.map((y) => ({
+        year: y.year,
+        count: y.count,
+        first: y.first,
+        last: y.last,
+      })),
+      asOf: clock.now(),
+    };
+  });
   // GET, and fastify's auto-HEAD twin (route ratchet #28). No audit row: a
   // lookup is a read, like the list. The answer's `handle` is the
   // normalized form, so "+1 (555) 010-0001" and "+15550100001" are one
@@ -385,4 +453,6 @@ export const threadSchemas = {
   pageQuery,
   pageParams,
   handleParams,
+  yearsParams,
+  yearsQuery,
 } as const;

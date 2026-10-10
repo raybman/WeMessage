@@ -252,6 +252,22 @@ export const ROUTE_TABLE: readonly string[] = [
   // NO port importer moves: `routes/search.ts` takes the Store by a `Pick`
   // and its three chat.db reads as closures from `daemon.ts`, never naming
   // ChatDbReader or SendBackend, so PORT_IMPORTER_ALLOWLIST stays at 16.
+  //
+  // #31 deliberate (v2 F2c): `GET /v1/threads/:guid/years?tz=`, one
+  // conversation's turns counted by year in the operator's zone, for the
+  // transcript's year scrubber, 78 -> 80.
+  //   1 route + 1 auto-HEAD twin = +2; 78 + 2 = 80.
+  // A read under every rule #26 set: behind the operator bearer, no audit
+  // row, no broadcast, dated by the daemon clock. The zone is required and
+  // must be IANA; an unknown chat is a 404, a reader that throws a 503 that
+  // names nothing. A turn is the page's own turn (one SQL turn test), so
+  // the counts add up to a full walk of the transcript.
+  //
+  // NO WS event moves and NO frame moves: counting pushes nothing.
+  //
+  // NO port importer moves: the counts reach `routes/threads.ts` as a
+  // closure from `daemon.ts`, like F5's lookup, so PORT_IMPORTER_ALLOWLIST
+  // stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -279,6 +295,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/status',
   'GET /v1/threads',
   'GET /v1/threads/:guid/messages',
+  'GET /v1/threads/:guid/years',
   'GET /v1/threads/by-handle/:handle',
   'GET /v1/threads/state',
   'HEAD /v1/adapters',
@@ -304,6 +321,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/status',
   'HEAD /v1/threads',
   'HEAD /v1/threads/:guid/messages',
+  'HEAD /v1/threads/:guid/years',
   'HEAD /v1/threads/by-handle/:handle',
   'HEAD /v1/threads/state',
   'PATCH /v1/adapters/:id',
@@ -596,9 +614,10 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
  * for them, so a HEAD route is covered by whatever covers its GET twin.
  *
  * Path params are not bodies. `/:id`, `/:handle` and `/:guid` are read raw
- * by every route except two, `GET /v1/threads/:guid/messages` and
- * `GET /v1/threads/by-handle/:handle`, whose params schemas are pinned
- * separately in `PARAM_SCHEMAS`. The second parses params and nothing else,
+ * by every route except those in `PARAM_SCHEMAS` (`GET
+ * /v1/threads/:guid/messages`, `GET /v1/threads/:guid/years` (v2 F2c),
+ * `GET /v1/threads/by-handle/:handle` and `PUT /v1/threads/:guid/state`),
+ * whose params schemas are pinned there. The second parses params and nothing else,
  * so it is listed here.
  *
  * `GET /v1/events` and `GET /v1/events/sse` read an `events` filter from the

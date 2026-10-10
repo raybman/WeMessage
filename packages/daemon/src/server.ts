@@ -61,7 +61,10 @@ import { registerSettingsRoutes } from './routes/settings.js';
 import { registerThreadStateRoutes } from './routes/thread-state.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
-import { registerThreadRoutes } from './routes/threads.js';
+import {
+  registerThreadRoutes,
+  type ThreadRouteDeps,
+} from './routes/threads.js';
 import { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
 import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
@@ -208,6 +211,8 @@ export interface DaemonOptions {
     clock: Clock;
     /** v2 F5: `GET /v1/threads/by-handle/:handle`, the send path's lookup. */
     resolveChat: ChatDbReader['resolveChat'];
+    /** v2 F2c: `GET /v1/threads/:guid/years`, the reader's year counts. */
+    yearCounts: ThreadRouteDeps['yearCounts'];
   };
 
   /**

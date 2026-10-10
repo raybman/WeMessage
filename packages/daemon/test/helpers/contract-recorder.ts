@@ -124,6 +124,7 @@ export const CONTRACT_NOTES: readonly string[] = [
   'GET /v1/threads/:guid/messages: before and until are mutually exclusive (both is 400).',
   'GET /v1/search: tz must be an IANA time zone (400 invalid-search); term, channel and has repeat as keys; a query with no term, from, in, has, before or after is 400 empty-search.',
   "GET /v1/threads/by-handle/:handle: a handle containing ';' is refused with 400 invalid-handle.",
+  'GET /v1/threads/:guid/years: tz is required and must be an IANA time zone (400 invalid-query).',
   "POST /v1/rules and PATCH /v1/rules/:id: outsideWindow 'queue' is refused with 400 unsupported-outside-window.",
   "PUT /v1/threads/:guid/state: snoozedUntil is required when act is 'snoozed' and refused otherwise; actAt is refused when act is null or when it is later than the daemon clock (all 400 invalid-thread-state).",
   'PATCH /v1/settings is an open object by design: the closed key list is enforced by a typed refusal (unknown-key, read-only-key, wrong-type, below-floor, above-ceiling).',
@@ -182,6 +183,7 @@ export const RESPONSE_NAMES = [
   'threads.messages.rich',
   'threads.by-handle.found',
   'threads.by-handle.none',
+  'threads.years',
   'threads.state.put.snoozed',
   'threads.state.put.cleared',
   'threads.state.list',
@@ -1194,6 +1196,12 @@ async function recordMain(
     method: 'GET',
     url: `/v1/threads/by-handle/${encodeURIComponent('+15550100001;x')}`,
     route: 'GET /v1/threads/by-handle/:handle',
+  });
+  // v2 F2c: the harness chat's turns by year in the operator's zone.
+  await ok('threads.years', 200, {
+    method: 'GET',
+    url: `/v1/threads/${encodeURIComponent(CHAT)}/years?tz=${encodeURIComponent('America/Los_Angeles')}`,
+    route: 'GET /v1/threads/:guid/years',
   });
 
   // --- thread state (v2 F3) -----------------------------------------------

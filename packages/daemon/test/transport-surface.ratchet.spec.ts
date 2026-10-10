@@ -140,6 +140,11 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
             'resolveChat must not be called: route-table test only',
           );
         },
+        yearCounts: () => {
+          throw new Error(
+            'yearCounts must not be called: route-table test only',
+          );
+        },
       },
       // v2 F2b (#30): search is real reachable surface. Its chat.db reads
       // throw, for the same reason the page reader does.

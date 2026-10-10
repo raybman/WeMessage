@@ -239,7 +239,7 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
    */
   search: Pick<
     IngestChatDbReader,
-    'chatTitles' | 'chatsTitled' | 'existingGuids'
+    'chatTitles' | 'chatsTitled' | 'existingGuids' | 'yearCounts'
   >;
   close(): void;
   reopen(): void;
@@ -272,6 +272,8 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       chatTitles: (guids) => live().chatTitles(guids),
       chatsTitled: (needle) => live().chatsTitled(needle),
       existingGuids: (guids) => live().existingGuids(guids),
+      // v2 F2c: the transcript's year scrubber, under the same rule.
+      yearCounts: (chatGuid, tz) => live().yearCounts(chatGuid, tz),
     },
     close: () => {
       current?.close();
@@ -671,6 +673,8 @@ export async function startDaemon(
       // v2 F5: the lookup compose asks before a new conversation's draft,
       // the same one dispatch makes, through the same handle.
       resolveChat: (h) => sendReaderHandle.reader.resolveChat(h),
+      // v2 F2c: the year scrubber's counts, through the same handle.
+      yearCounts: (g, tz) => sendReaderHandle.search.yearCounts(g, tz),
     },
     // v2 F2b: search over the daemon's own index. chat.db is read only for
     // titles, the `in:` lookup and the deleted-in-Messages check, through

@@ -413,7 +413,9 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // twin) and `PUT /v1/threads/:guid/state`: 73 -> 76, with ONE event,
     // `thread.state`, declared and emitted together: 21 -> 22. v2 F2b
     // minted #30 for `GET /v1/search` (+ HEAD twin): 76 -> 78, no event.
-    expect(ROUTE_TABLE.length).toBe(78);
+    // v2 F2c minted #31 for `GET /v1/threads/:guid/years` (+ HEAD twin):
+    // 78 -> 80, no event.
+    expect(ROUTE_TABLE.length).toBe(80);
     expect(WS_EVENT_VOCABULARY.length).toBe(22);
     expect(GATEWAY_EVENT_NAMES.length).toBe(22);
     expect(EMITTED_WS_EVENTS.length).toBe(22);
@@ -427,7 +429,7 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     expect(Object.keys(FRAME_SPECS).length).toBe(9);
   });
 
-  it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29) and v2 F2b (#30), and #31 was never minted', () => {
+  it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30) and v2 F2c (#31), and #32 was never minted', () => {
     // S9 itself minted nothing, which is what this row was written to prove.
     // s10 Slice 2 minted #25 for the PORT allowlist (late verification reads
     // chat.db), not for the wire, and says so in the ratchet file itself.
@@ -435,20 +437,22 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // `GET /v1/threads/:guid/messages` and v2 F5 #28 for
     // `GET /v1/threads/by-handle/:handle`, and nothing else on the wire.
     // v2 F3 minted #29 for the thread-state pair and `thread.state`. v2 F2b
-    // minted #30 for `GET /v1/search`. #31 is the next tooth.
+    // minted #30 for `GET /v1/search`. v2 F2c minted #31 for
+    // `GET /v1/threads/:guid/years`. #32 is the next tooth.
     const text = read(RATCHET);
     const seen = deliberateUpdates(text);
-    expect(Math.max(...seen)).toBe(30);
-    expect(seen).not.toContain(31);
+    expect(Math.max(...seen)).toBe(31);
+    expect(seen).not.toContain(32);
     expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
     expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
     expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
     expect(text).toMatch(/#28 deliberate \(v2 F5\)/);
     expect(text).toMatch(/#29 deliberate \(v2 F3/);
     expect(text).toMatch(/#30 deliberate \(v2 F2b\)/);
+    expect(text).toMatch(/#31 deliberate \(v2 F2c\)/);
   });
 
-  it('TEETH: a planted #31 in a temp copy is caught by this same extractor', () => {
+  it('TEETH: a planted #32 in a temp copy is caught by this same extractor', () => {
     /*
      * The row above is an absence, and an absence proves nothing unless the
      * thing looking for it can see a presence. So a real copy of the real
@@ -461,12 +465,12 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     const planted = join(dir, 'transport-surface.snapshot.ts');
     writeFileSync(
       planted,
-      `${read(RATCHET)}\n// #31 deliberate (s9 Scenario 15): a new route.\n`,
+      `${read(RATCHET)}\n// #32 deliberate (s9 Scenario 15): a new route.\n`,
       'utf8',
     );
     const seen = deliberateUpdates(readFileSync(planted, 'utf8'));
-    expect(seen).toContain(31);
-    expect(Math.max(...seen)).toBe(31);
+    expect(seen).toContain(32);
+    expect(Math.max(...seen)).toBe(32);
   });
 
   it('the guard that runs on every `pnpm test` is still in the tree', () => {
@@ -475,7 +479,7 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // every assertion above true and worthless the next day.
     const arch = read('test/arch.spec.ts');
     expect(arch).toContain('row 12: the ratchet reads #24');
-    expect(arch).toContain('expect(ROUTE_TABLE.length).toBe(78)');
+    expect(arch).toContain('expect(ROUTE_TABLE.length).toBe(80)');
   });
 });
 

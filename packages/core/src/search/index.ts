@@ -485,6 +485,75 @@ export function yearFacets(
     .sort((a, b) => b.year - a.year);
 }
 
+/** v2 F2c: one year of one conversation, for the transcript's scrubber. */
+export interface YearCount {
+  year: number;
+  count: number;
+  /** The year's oldest turn, or null for a year with none. */
+  first: IsoUtc | null;
+  /** The year's newest turn: where a jump to this year lands. */
+  last: IsoUtc | null;
+}
+
+/**
+ * v2 F2c: turns (as Unix milliseconds, any order) counted by their year in
+ * `tz`, newest year first. Every year from the oldest turn's to the newest
+ * turn's is present, a year with no turns as a count of 0 with null ends,
+ * so a scrubber shows the silence instead of skipping over it. A year's
+ * start is the instant its local New Year happens in `tz`
+ * (yearStartInZone), so a boundary costs two number compares per turn and
+ * no formatter call.
+ */
+export function yearCountsOf(
+  turnsMs: readonly number[],
+  tz: string,
+): YearCount[] {
+  if (turnsMs.length === 0) return [];
+  const starts = new Map<number, number>();
+  const startOf = (y: number): number => {
+    let s = starts.get(y);
+    if (s === undefined) {
+      s = yearStartInZone(y, tz).getTime();
+      starts.set(y, s);
+    }
+    return s;
+  };
+  const byYear = new Map<
+    number,
+    { count: number; first: number; last: number }
+  >();
+  for (const ms of turnsMs) {
+    let y = new Date(ms).getUTCFullYear();
+    if (ms >= startOf(y + 1)) y += 1;
+    else if (ms < startOf(y)) y -= 1;
+    const b = byYear.get(y);
+    if (b === undefined) byYear.set(y, { count: 1, first: ms, last: ms });
+    else {
+      b.count += 1;
+      if (ms < b.first) b.first = ms;
+      if (ms > b.last) b.last = ms;
+    }
+  }
+  const years = [...byYear.keys()];
+  const newest = Math.max(...years);
+  const oldest = Math.min(...years);
+  const out: YearCount[] = [];
+  for (let y = newest; y >= oldest; y -= 1) {
+    const b = byYear.get(y);
+    out.push(
+      b === undefined
+        ? { year: y, count: 0, first: null, last: null }
+        : {
+            year: y,
+            count: b.count,
+            first: new Date(b.first).toISOString(),
+            last: new Date(b.last).toISOString(),
+          },
+    );
+  }
+  return out;
+}
+
 export interface SenderFacet {
   /** A handle, or 'me' for the operator's own messages. */
   handle: string;

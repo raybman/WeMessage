@@ -152,6 +152,8 @@ function controllableOpenReader(): ControllableOpenReader {
         chatTitles: boom,
         chatsTitled: boom,
         existingGuids: boom,
+        // v2 F2c: and so do the year counts.
+        yearCounts: boom,
         close: () => undefined,
       };
     },

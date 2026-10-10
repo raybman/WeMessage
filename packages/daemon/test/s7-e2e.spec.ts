@@ -1699,7 +1699,8 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // v2 F3 (#29) added `GET /v1/threads/state`, its twin and the PUT: 76,
     // and `thread.state`, declared and emitted together: 22 and 22.
     // v2 F2b (#30) added `GET /v1/search` and its twin: 78, no event.
-    expect(ROUTE_TABLE).toHaveLength(78);
+    // v2 F2c (#31) added `GET /v1/threads/:guid/years` and its twin: 80.
+    expect(ROUTE_TABLE).toHaveLength(80);
     expect(WS_EVENT_VOCABULARY).toHaveLength(22);
     expect(EMITTED_WS_EVENTS).toHaveLength(22);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);

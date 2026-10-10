@@ -23,6 +23,7 @@ import type {
   Clock,
   Draft,
   Ulid,
+  YearCount,
 } from '@wemessage/core';
 import {
   dispatchApproved,
@@ -171,6 +172,12 @@ export interface BootOptions {
    */
   resolveChat?: ChatDbReader['resolveChat'];
   /**
+   * v2 F2c: what `GET /v1/threads/:guid/years` asks. Defaults to this
+   * harness's reader, as `daemon.ts` composes it; a suite hands in a fake to
+   * reach the 404 and the 503, or to pin what the route forwards.
+   */
+  yearCounts?: (chatGuid: string, tz: string) => YearCount[];
+  /**
    * v2 F2b: also register `GET /v1/search`, composed exactly as `daemon.ts`
    * composes it (this harness's store, clock and reader). An object keeps
    * that composition but swaps in the closures it names, which is how a
@@ -250,6 +257,9 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   // v2 F5: the by-handle lookup, from this reader unless a suite overrides.
   const resolveChat: ChatDbReader['resolveChat'] =
     opts.resolveChat ?? ((h) => reader.resolveChat(h));
+  // v2 F2c: the year counts, from this reader unless a suite overrides.
+  const yearCounts =
+    opts.yearCounts ?? ((g: string, tz: string) => reader.yearCounts(g, tz));
 
   const server = await buildServer({
     ...autonomyOpt,
@@ -279,6 +289,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
             },
             clock: clockCtl.clock,
             resolveChat,
+            yearCounts,
           },
         }
       : opts.threads !== undefined && opts.threads !== false
@@ -287,6 +298,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
               source: opts.threads,
               clock: clockCtl.clock,
               resolveChat,
+              yearCounts,
             },
           }
         : {}),

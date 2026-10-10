@@ -83,12 +83,14 @@ enum SpecimenText {
 
   /// 08.A note 3: the delivery state rides the last outbound turn only, so
   /// a long thread does not double its lines with receipts. Every other
-  /// turn comes back as it was, less its delivery.
+  /// turn comes back as it was, less its delivery. v2 F4: a failure stays
+  /// where it happened, because a message that never arrived is not a
+  /// receipt (D-UI-197).
   static func statusOnLastOutbound(_ turns: [MessageTurn]) -> [MessageTurn] {
     let last = turns.lastIndex { $0.direction == .outbound }
     return turns.indices.map { index in
       let turn = turns[index]
-      guard index != last, turn.delivery != nil else { return turn }
+      guard index != last, let delivery = turn.delivery, !delivery.isFailure else { return turn }
       return MessageTurn(
         guid: turn.guid, direction: turn.direction, kind: turn.kind, text: turn.text, sentAt: turn.sentAt,
         handle: turn.handle, isEdited: turn.isEdited, isUnsent: turn.isUnsent, attachments: turn.attachments,
@@ -98,9 +100,26 @@ enum SpecimenText {
   }
 
   /// v2 F4: a file's name, or the words for one the source did not name
-  /// (D-UI-200).
+  /// (D-UI-200). A sticker is the word, not its file name (D-UI-202).
   static func fileName(_ attachment: MessageTurn.Attachment) -> String {
-    attachment.name ?? ProvisionalUI.untitledFile
+    if attachment.sticker == true { return ProvisionalUI.stickerLine }
+    return attachment.name ?? ProvisionalUI.untitledFile
+  }
+
+  /// v2 F4: media with no dimensions, as its tile reads: the name and,
+  /// when known, the size (D-UI-201).
+  static func mediaTile(_ attachment: MessageTurn.Attachment) -> String {
+    [fileName(attachment), attachment.bytes.map(size)].compactMap { $0 }.joined(separator: " \u{00B7} ")
+  }
+
+  /// What a reaction chip says to a screen reader. v2 F4: a chip with a
+  /// word says it ("Loved, 1"), and one that counts mine says so
+  /// (D-UI-196). A chip with no word keeps its glyph.
+  static func reactionLabel(_ reaction: MessageTurn.Reaction) -> String {
+    guard let name = reaction.name else {
+      return "Reaction \(textPresentation(reaction.glyph)), \(reaction.count)"
+    }
+    return "\(name), \(reaction.count)" + (reaction.isMine ? ProvisionalUI.reactionMineSuffix : "")
   }
 
   /// A file's badge: its type's short name ("PDF", "ZIP").
@@ -198,6 +217,10 @@ struct MediaCell: View {
 struct MediaBody: View {
   let items: [MessageTurn.Attachment]
   let palette: Tokens.Palette
+  /// v2 F4: a single image the source gave no dimensions for is a fixed
+  /// 4:3 tile with its name and size (D-UI-201). Off on board 08, whose
+  /// specimens are drawn at the wireframe's size.
+  var fixedTile = false
 
   var body: some View {
     Group {
@@ -235,8 +258,15 @@ struct MediaBody: View {
           .padding(6)
       }
     } else {
-      let dims = item.width.flatMap { w in item.height.map { "IMG \(w)\u{00D7}\($0)" } } ?? "IMG"
-      MediaCell(label: dims, width: 184, height: 128, palette: palette)
+      let dims = item.width.flatMap { w in item.height.map { "IMG \(w)\u{00D7}\($0)" } }
+      if fixedTile, dims == nil {
+        let width = ProvisionalUI.mediaTileWidth
+        MediaCell(
+          label: SpecimenText.mediaTile(item), width: width, height: width / ProvisionalUI.mediaTileAspect,
+          palette: palette)
+      } else {
+        MediaCell(label: dims ?? "IMG", width: 184, height: 128, palette: palette)
+      }
     }
   }
 
@@ -527,10 +557,23 @@ struct ReactionRow: View {
         .padding(.horizontal, 6)
         .background(Capsule().fill(fill))
         .overlay(Capsule().strokeBorder(ink.opacity(0.6), lineWidth: 1))
+        // D-UI-196: mine gets one more rule round the chip, never a colour.
+        .padding(reaction.isMine ? ProvisionalUI.reactionMineRule + 1 : 0)
+        .overlay {
+          if reaction.isMine {
+            Capsule().strokeBorder(ink, lineWidth: ProvisionalUI.reactionMineRule)
+          }
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Reaction \(glyph), \(reaction.count)")
+        .accessibilityLabel(SpecimenText.reactionLabel(reaction))
         .accessibilityIdentifier(ShellID.reactionPrefix + guid + ".\(n)")
       }
     }
   }
+}
+
+/// v2 F4: the app's reaction table (D-UI-195), passed to the Kit where a
+/// page of turns is mapped.
+extension ReactionGlyphs {
+  static let provisional = ReactionGlyphs(glyphs: ProvisionalUI.reactionGlyphs, names: ProvisionalUI.reactionNames)
 }

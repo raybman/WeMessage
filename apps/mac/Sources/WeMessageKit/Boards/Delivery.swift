@@ -27,7 +27,7 @@ public enum Delivery: Equatable, Sendable {
   }
 
   /// Only a failure escalates in visual weight (a dotted 2 pt border) and
-  /// offers Retry.
+  /// points to Messages to resend (D-UI-197: no resend route exists).
   public var isFailure: Bool { rung == nil }
 
   /// The state after `next` arrives. A higher rung wins; a lower one is

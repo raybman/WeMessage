@@ -15,8 +15,9 @@ struct TranscriptView: View {
 
   private var rows: [TranscriptLayout.Row] {
     guard let asOf = model.thread.asOf, model.thread.guid == thread.chatGuid else { return [] }
+    // v2 F4: receipts ride the last outbound turn only (08.A note 3).
     return TranscriptLayout.rows(
-      model.thread.turns, asOf: asOf, calendar: .current, isGroup: thread.isGroup,
+      SpecimenText.statusOnLastOutbound(model.thread.turns), asOf: asOf, calendar: .current, isGroup: thread.isGroup,
       senderName: { model.senderName(handle: $0) })
   }
 
@@ -196,8 +197,8 @@ enum BubbleStroke {
 /// with no stamp beside it, the per-message facts inside the bubble (the
 /// delivery state, reactions, the edit time, a quote, an SMS message's rail
 /// and tag, an effect's double rule) and the richer payloads. The thread
-/// style draws those facts too when a turn carries them; today's daemon
-/// serves none (gap G-08a).
+/// style draws those facts too when a turn carries them (v2 F4: the
+/// daemon now serves service, delivery, reactions and files).
 struct BubbleView: View {
   enum Style: Sendable {
     case thread
@@ -216,8 +217,21 @@ struct BubbleView: View {
   private var turn: MessageTurn { bubble.turn }
   private var outbound: Bool { turn.direction == .outbound }
   private var look: BubbleLook { BubbleLook(turn: turn, sms: sms, style: style) }
-  /// D-UI-39: one message that went over SMS in an iMessage chat.
-  private var smsMessage: Bool { turn.service == .sms && !turn.isUnsent }
+  /// D-UI-39: one message that went over SMS in an iMessage chat. v2 F4:
+  /// RCS takes the same rail with its own tag (D-UI-199). In an SMS chat
+  /// the stamp already says the transport, so no turn is railed there.
+  private var smsMessage: Bool { BubbleLook.railed(turn, sms: sms) }
+  private var smsTag: String { turn.service == .rcs ? ProvisionalUI.rcsMessageTag : ProvisionalUI.smsMessageTag }
+
+  /// v2 F4: a thread turn that carries board 08's facts (a file, media,
+  /// reactions, a delivery state, a rail) draws them as the sheet does.
+  private var drawsFacts: Bool {
+    guard !turn.isUnsent else { return false }
+    switch turn.kind {
+    case .media, .file: return true
+    default: return !turn.reactions.isEmpty || turn.delivery != nil || smsMessage
+    }
+  }
 
   private var shape: UnevenRoundedRectangle {
     let c = bubble.corners
@@ -283,7 +297,7 @@ struct BubbleView: View {
     let who = outbound ? "You" : (bubble.senderName ?? title)
     let state = turn.isUnsent ? "Unsent" : (outbound ? "Sent" : "Received")
     var facts: [String] = []
-    if smsMessage { facts.append("SMS") }
+    if smsMessage { facts.append(turn.service == .rcs ? "RCS" : "SMS") }
     if turn.isForwarded { facts.append("Forwarded") }
     if let quote = turn.quote { facts.append("replying to " + quote) }
     if turn.isEdited { facts.append("Edited") }
@@ -314,7 +328,7 @@ struct BubbleView: View {
               Spacer(minLength: 0)
               if bubble.showsTime { stampView }
             }
-            content
+            if drawsFacts { specimenBubble } else { content }
             if !outbound {
               if bubble.showsTime { stampView }
               Spacer(minLength: 0)
@@ -411,11 +425,15 @@ struct BubbleView: View {
   @ViewBuilder private var specimenBubble: some View {
     switch turn.kind {
     case .media(let items) where turn.text == nil:
-      MediaBody(items: items, palette: palette)
+      VStack(alignment: outbound ? .trailing : .leading, spacing: 4) {
+        MediaBody(items: items, palette: palette, fixedTile: style == .thread)
+        if style == .thread { mediaFacts }
+      }
     case .media(let items):
       // A caption keeps the asset in a frame filled as the direction says.
       VStack(alignment: .leading, spacing: 6) {
-        MediaBody(items: items, palette: palette)
+        MediaBody(items: items, palette: palette, fixedTile: style == .thread)
+        if style == .thread { mediaFacts }
         Text(turn.text ?? "")
           .font(.system(size: 12))
           .foregroundStyle(textColor)
@@ -435,11 +453,22 @@ struct BubbleView: View {
     }
   }
 
+  /// v2 F4: media has no bubble of its own, so in a thread its reactions
+  /// and delivery sit under the asset in the page's ink.
+  @ViewBuilder private var mediaFacts: some View {
+    if !turn.reactions.isEmpty {
+      ReactionRow(guid: turn.guid, reactions: turn.reactions, ink: Tokens.color(palette.ink))
+    }
+    if let delivery = turn.delivery {
+      deliveryLine(delivery, ink: Tokens.color(palette.ink), dim: Tokens.color(palette.inkDim))
+    }
+  }
+
   /// Everything inside the bubble, top to bottom.
   private var facts: some View {
     VStack(alignment: .leading, spacing: 4) {
       if smsMessage {
-        Text(ProvisionalUI.smsMessageTag.uppercased())
+        Text(smsTag.uppercased())
           .font(.system(size: 8, weight: .bold))
           .tracking(1)
           .foregroundStyle(secondary)
@@ -466,7 +495,7 @@ struct BubbleView: View {
       if !turn.reactions.isEmpty {
         ReactionRow(guid: turn.guid, reactions: turn.reactions, ink: textColor)
       }
-      if let delivery = turn.delivery { deliveryLine(delivery) }
+      if let delivery = turn.delivery { deliveryLine(delivery, ink: textColor, dim: secondary) }
       if smsMessage {
         Text(ProvisionalUI.smsMessageNote)
           .font(.system(size: 9))
@@ -502,16 +531,16 @@ struct BubbleView: View {
     default:
       Text(SpecimenText.mentions(words))
         .font(.system(size: 13))
-        .italic(turn.isUnsent)
+        .italic(turn.isUnsent || (style == .thread && turn.kind != .text))
         .foregroundStyle(textColor)
         .fixedSize(horizontal: false, vertical: true)
     }
   }
 
   /// The delivery state inside the bubble (08.A note 3): quiet words, or
-  /// for a failure the cause and Retry, drawn and not bound (the sheet
-  /// sends nothing).
-  @ViewBuilder private func deliveryLine(_ delivery: Delivery) -> some View {
+  /// for a failure the cause and where to resend it (D-UI-197: no resend
+  /// route exists, so the words point to Messages and bind nothing).
+  @ViewBuilder private func deliveryLine(_ delivery: Delivery, ink: Color, dim: Color) -> some View {
     if case .notDelivered(let reason) = delivery {
       HStack(spacing: 6) {
         Circle()
@@ -519,13 +548,13 @@ struct BubbleView: View {
           .overlay(Text("!").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.color(palette.layer1)))
           .frame(width: 14, height: 14)
           .accessibilityHidden(true)
-        Text(reason).font(.system(size: 9)).foregroundStyle(secondary)
-        Text("Retry")
+        Text(reason).font(.system(size: 9)).foregroundStyle(dim)
+        Text(ProvisionalUI.resendInMessages)
           .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(textColor)
+          .foregroundStyle(ink)
           .padding(.vertical, 2)
           .padding(.horizontal, 6)
-          .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(textColor, lineWidth: 1))
+          .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(ink, lineWidth: 1))
           .accessibilityHidden(true)
       }
       .accessibilityElement(children: .combine)
@@ -534,7 +563,7 @@ struct BubbleView: View {
     } else {
       Text(SpecimenText.delivery(delivery, zone: zone))
         .font(.system(size: 10, weight: .medium))
-        .foregroundStyle(secondary)
+        .foregroundStyle(dim)
         .accessibilityIdentifier(ShellID.deliveryPrefix + turn.guid)
     }
   }
@@ -593,8 +622,13 @@ struct BubbleLook: Equatable {
     case .thread:
       if turn.isUnsent {
         rule = .placeholder
+      } else if failed {
+        // v2 F4, D-UI-197: a failure escalates in the thread as on the sheet.
+        rule = .dotted
       } else if outbound && sms {
         rule = ProvisionalUI.smsOutbound == .dashedUnfilled ? .dashed : .smsTrailingRail
+      } else if Self.railed(turn, sms: sms) {
+        rule = .smsInsetRail
       } else {
         rule = inbound
       }
@@ -603,7 +637,7 @@ struct BubbleLook: Equatable {
         rule = .placeholder
       } else if failed {
         rule = .dotted
-      } else if turn.service == .sms {
+      } else if Self.railed(turn, sms: sms) {
         switch ProvisionalUI.smsMessage {
         case .insetRailAndTag: rule = .smsInsetRail
         }
@@ -613,5 +647,11 @@ struct BubbleLook: Equatable {
         rule = inbound
       }
     }
+  }
+
+  /// D-UI-39 and D-UI-199: one message that went over SMS or RCS in a chat
+  /// that is not itself SMS. An unsent turn keeps its placeholder.
+  static func railed(_ turn: MessageTurn, sms: Bool) -> Bool {
+    (turn.service == .sms || turn.service == .rcs) && !turn.isUnsent && !sms
   }
 }

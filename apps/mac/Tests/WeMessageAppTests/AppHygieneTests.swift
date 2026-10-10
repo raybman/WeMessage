@@ -434,7 +434,7 @@ struct AppHygieneTests {
   /// silent save). v2 F3 retires D-UI-51: queue state is no longer
   /// memory-only, the daemon keeps it. v2 F4's 195..202: the rich turns'
   /// glyphs, delivery words and file lines.
-  static let dUINumbers = Array(1...50) + Array(52...131) + [132, 135, 140, 185] + Array(186...194) + [200]
+  static let dUINumbers = Array(1...50) + Array(52...131) + [132, 135, 140, 185] + Array(186...194) + Array(195...202)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.

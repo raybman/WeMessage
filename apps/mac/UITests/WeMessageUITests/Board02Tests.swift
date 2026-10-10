@@ -130,6 +130,66 @@ final class Board02Tests: XCTestCase {
     try await Self.assertSends(1, "at the end of the board")
   }
 
+  // MARK: v2 F4d, rich turns
+
+  static let maya = "iMessage;-;+15550100001"
+
+  /// The "rich-turns" scenario's Maya transcript, once per appearance: the
+  /// read and failed lines in words, the chip that counts mine saying so,
+  /// the SMS and RCS turns naming their transport, and nothing but GETs in
+  /// the journal. Shot as board-02-rich-<appearance>.png and swept for
+  /// green. The times print in UTC (the ui job pins TZ), as "HH:mm".
+  @MainActor
+  func testRichTurnsFromDaemon() async throws {
+    for appearance in ["light", "dark"] {
+      try await richTurns(appearance: appearance) { mean in
+        if appearance == "light" {
+          XCTAssertGreaterThan(mean, 0.6, "a light thread renders dark: mean luminance \(mean)")
+        } else {
+          XCTAssertLessThan(mean, 0.4, "a dark thread renders light: mean luminance \(mean)")
+        }
+      }
+    }
+  }
+
+  @MainActor
+  private func richTurns(appearance: String, luminance: (Double) -> Void) async throws {
+    try await FakeDaemon.reset()
+    try await FakeDaemon.scenario("rich-turns")
+    let app = UITestApp.make(appearance: appearance, reduceTransparency: false)
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let geometry = settledGeometry(app)
+    open(app, Self.maya)
+
+    let read = ID.deliveryPrefix + "r-08"
+    XCTAssertTrue(waitUntil { self.label(app, read) == "Read 09:57" }, "\(appearance): r-08 reads \(label(app, read))")
+    let failed = ID.deliveryPrefix + "r-07"
+    XCTAssertTrue(
+      waitUntil { self.label(app, failed) == "Not delivered: Messages error 22" },
+      "\(appearance): r-07 reads \(label(app, failed))")
+    // Receipts ride the last outbound turn only; the failure stays put.
+    XCTAssertFalse(element(app, ID.deliveryPrefix + "r-05").exists, "\(appearance): r-05 kept its receipt")
+    let mine = ID.reactionPrefix + "r-06.0"
+    let loved = (ProvisionalUI.reactionNames["love"] ?? "") + ", 1" + ProvisionalUI.reactionMineSuffix
+    XCTAssertTrue(waitUntil { self.label(app, mine) == loved }, "\(appearance): r-06's chip reads \(label(app, mine))")
+    let sms = label(app, ID.bubblePrefix + "r-05")
+    XCTAssertTrue(sms.contains(", SMS,"), "\(appearance): r-05 does not say SMS: \(sms)")
+    let rcs = label(app, ID.bubblePrefix + "r-06")
+    XCTAssertTrue(rcs.contains(", RCS,"), "\(appearance): r-06 does not say RCS: \(rcs)")
+
+    settle()
+    capture(
+      app, geometry: geometry, appearance: appearance, frost: true, name: "board-02-rich-\(appearance).png",
+      layout: .thread, luminance: luminance)
+
+    let requests = try await FakeDaemon.journal().requests.filter { !$0.path.hasPrefix("/v1/_") }
+    XCTAssertTrue(
+      requests.contains { $0.method == "GET" && $0.path.hasSuffix("/messages") }, "\(appearance): no transcript read: \(requests)")
+    XCTAssertEqual(requests.filter { $0.method != "GET" }, [], "\(appearance): the rich thread wrote")
+  }
+
   // MARK: The composer's teeth
 
   /// Return is a newline: type, press Return, and after the whole window

@@ -56,7 +56,7 @@ public final class ThreadModel {
   /// The turns this build can draw, oldest first.
   public var turns: [MessageTurn] {
     guard case .loaded(let page) = load else { return [] }
-    return MessageTurn.turns(page)
+    return MessageTurn.turns(page, glyphs: .provisional)
   }
 
   /// The page's as-of, the clock Today and the read line are measured on.
@@ -118,7 +118,7 @@ public final class ThreadModel {
       turnPages.fail()
       return
     }
-    let first = MessageTurn.turns(shown).first?.guid
+    let first = MessageTurn.turns(shown, glyphs: .provisional).first?.guid
     turnPages.prependPage(page.turns, next: page.nextBefore)
     anchorTurn = first
     if case .loaded(let now) = load { load = .loaded(merged(now)) }

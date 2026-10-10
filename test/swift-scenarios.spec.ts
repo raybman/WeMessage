@@ -89,6 +89,7 @@ const EXPECTED_SCENARIOS = [
   'preview-whatsapp-empty',
   'quiet',
   'rich',
+  'rich-turns',
   'search',
   'thread-state',
 ];
@@ -157,12 +158,13 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twenty-six shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty-seven shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
     expect(map.get('pending')?.parent).toBe('rich');
     expect(map.get('rich')?.parent).toBe(null);
+    expect(map.get('rich-turns')?.parent).toBe('rich');
     expect(map.get('thread-state')?.parent).toBe('pending');
     for (const s of map.values()) expect(s.summary.length).toBeGreaterThan(20);
   });
@@ -541,6 +543,55 @@ describe('v2 S4b SC8: transcripts by chat guid', () => {
       path: `/v1/threads/${encodeURIComponent('SMS;-;+15550100004')}/messages`,
     }).out;
     expect(priya.status).toBe(200);
+  });
+  it('v2 F4: rich-turns serves Maya the rich transcript and inherits the rest', () => {
+    const state = switchTo('rich-turns');
+    const maya = step(state, {
+      method: 'GET',
+      path: `/v1/threads/${encodeURIComponent('iMessage;-;+15550100001')}/messages`,
+    }).out;
+    const golden = readJson<Golden>(
+      join(scenariosDir, 'rich-turns/responses/threads.messages.maya.json'),
+    ).body as { turns: Array<Record<string, Json>> };
+    expect(body(maya)).toEqual(golden);
+    const turns = golden.turns;
+    const states = turns.map((t) =>
+      t.delivery === undefined
+        ? 'inbound'
+        : t.delivery === null
+          ? 'null'
+          : (t.delivery as { state: string }).state,
+    );
+    for (const s of ['null', 'sent', 'delivered', 'read', 'failed']) {
+      expect(states, s).toContain(s);
+    }
+    expect(turns.flatMap((t) => t.reactions as Json[])).toHaveLength(3);
+    expect(
+      turns
+        .flatMap((t) => t.reactions as Array<{ from: string }>)
+        .filter((r) => r.from === 'me'),
+    ).toHaveLength(1);
+    const files = turns.flatMap(
+      (t) => t.files as Array<{ mime: string | null; hidden: boolean }>,
+    );
+    expect(files.map((f) => f.mime)).toEqual([
+      'application/pdf',
+      'image/heic',
+      null,
+    ]);
+    expect(files.filter((f) => f.hidden)).toHaveLength(1);
+    expect(turns.map((t) => t.service)).toContain('sms');
+    expect(turns.map((t) => t.service)).toContain('rcs');
+    const daniel = step(state, {
+      method: 'GET',
+      path: `/v1/threads/${encodeURIComponent('iMessage;-;+15550100002')}/messages`,
+    }).out;
+    expect(daniel.status).toBe(200);
+    expect(body(daniel)).toEqual(
+      readJson<Golden>(
+        join(scenariosDir, 'rich/responses/threads.messages.daniel.json'),
+      ).body,
+    );
   });
   it('an unknown chat, or a broken escape, is the S0 404 unknown-chat', () => {
     const unknown = readJson<Golden>(

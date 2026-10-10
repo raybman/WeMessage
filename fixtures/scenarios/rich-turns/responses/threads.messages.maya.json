@@ -1,0 +1,179 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100001",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "r-00",
+        "from": "me",
+        "kind": "text",
+        "text": "made the reservation",
+        "at": "2026-09-01T09:39:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": null,
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-01",
+        "from": "them",
+        "kind": "text",
+        "text": "which time did you get?",
+        "at": "2026-09-01T09:40:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "imessage",
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-02",
+        "from": "me",
+        "kind": "text",
+        "text": "seven thirty",
+        "at": "2026-09-01T09:41:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "sent",
+          "at": null
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-03",
+        "from": "me",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T09:42:00.000Z",
+        "attachments": 1,
+        "service": "imessage",
+        "delivery": {
+          "state": "delivered",
+          "at": "2026-09-01T09:42:30.000Z"
+        },
+        "reactions": [],
+        "files": [
+          {
+            "name": "itinerary.pdf",
+            "mime": "application/pdf",
+            "uti": "com.adobe.pdf",
+            "bytes": 88000,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "guid": "r-04",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T09:50:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 2,
+        "service": "imessage",
+        "reactions": [],
+        "files": [
+          {
+            "name": "IMG_0412.heic",
+            "mime": "image/heic",
+            "uti": "public.heic",
+            "bytes": 2400000,
+            "sticker": false,
+            "hidden": false
+          },
+          {
+            "name": null,
+            "mime": null,
+            "uti": null,
+            "bytes": null,
+            "sticker": false,
+            "hidden": true
+          }
+        ]
+      },
+      {
+        "guid": "r-05",
+        "from": "me",
+        "kind": "text",
+        "text": "sent this one as a text message",
+        "at": "2026-09-01T09:55:00.000Z",
+        "attachments": 0,
+        "service": "sms",
+        "delivery": {
+          "state": "delivered",
+          "at": "2026-09-01T09:55:20.000Z"
+        },
+        "reactions": [
+          {
+            "kind": "laugh",
+            "from": "them",
+            "handle": "+15550100001"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "r-06",
+        "from": "them",
+        "kind": "text",
+        "text": "got it over RCS",
+        "at": "2026-09-01T09:56:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "rcs",
+        "reactions": [
+          {
+            "kind": "love",
+            "from": "me"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "r-07",
+        "from": "me",
+        "kind": "text",
+        "text": "are you there?",
+        "at": "2026-09-01T09:56:30.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "failed",
+          "at": null,
+          "errorCode": 22
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-08",
+        "from": "me",
+        "kind": "text",
+        "text": "see you at the door",
+        "at": "2026-09-01T09:57:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "read",
+          "at": "2026-09-01T09:57:40.000Z"
+        },
+        "reactions": [
+          {
+            "kind": "emphasize",
+            "from": "them",
+            "handle": "+15550100001"
+          }
+        ],
+        "files": []
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T09:58:00.000Z"
+  }
+}

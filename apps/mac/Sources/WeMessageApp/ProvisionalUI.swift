@@ -1279,7 +1279,57 @@ public enum ProvisionalUI {
   // v2 F4, rich turns (docs/plans/v2-F4-rich-turns.md). The daemon serves
   // service, delivery, reactions and file metadata; these are the words.
 
+  // D-UI-195: one chip per reaction kind, drawn as a monochrome glyph in
+  // text presentation (never emoji colour), with the word a screen reader
+  // speaks. A kind this table does not name is drawn as `other`.
+  public static let reactionGlyphs: [String: String] = [
+    "love": "\u{2665}\u{FE0E}",
+    "like": "\u{25B2}\u{FE0E}",
+    "dislike": "\u{25BC}\u{FE0E}",
+    "laugh": "Ha",
+    "emphasize": "\u{203C}\u{FE0E}",
+    "question": "?",
+    "other": "\u{2022}",
+  ]
+  public static let reactionNames: [String: String] = [
+    "love": "Loved",
+    "like": "Liked",
+    "dislike": "Disliked",
+    "laugh": "Laughed at",
+    "emphasize": "Emphasized",
+    "question": "Questioned",
+    "other": "Reacted",
+  ]
+
+  // D-UI-196: a chip that counts my own reaction gets one more 1 pt rule
+  // around it (no colour) and says so.
+  public static let reactionMineSuffix = ", including you"
+  public static let reactionMineRule: Double = 1
+
+  // D-UI-197: a failed send names its Messages error under the dotted 2 pt
+  // border. There is no resend route, so the action points to Messages.
+  public static let resendInMessages = "Resend in Messages"
+
+  // D-UI-198: a delivery nobody proved draws nothing, never a "status
+  // unknown" line.
+  public enum NullDelivery: Sendable {
+    case nothing
+  }
+  public static let nullDelivery: NullDelivery = .nothing
+
+  // D-UI-199: RCS takes the SMS rail with its own tag. Encryption is not
+  // claimed either way.
+  public static let rcsMessageTag = "RCS · not iMessage"
+
   // D-UI-200: a file the source did not name. With no size, the size is
   // left out rather than guessed.
   public static let untitledFile = "Untitled file"
+
+  // D-UI-201: media the source gave no dimensions for is a fixed 4:3 tile
+  // with its name and size. Nothing is fetched.
+  public static let mediaTileAspect: Double = 4.0 / 3.0
+  public static let mediaTileWidth: Double = 184
+
+  // D-UI-202: a sticker's file line is the word, not its file name.
+  public static let stickerLine = "Sticker"
 }

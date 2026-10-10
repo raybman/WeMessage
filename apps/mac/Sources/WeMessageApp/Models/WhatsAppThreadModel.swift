@@ -170,7 +170,7 @@ struct WhatsAppTurn: Equatable, Sendable, Identifiable {
   /// The daemon's turn with its meta, or nil when board 02 would skip it.
   /// A voice note's transcript and duration ride in the meta.
   init?(turn wire: ThreadTurn) {
-    guard let base = MessageTurn(turn: wire) else { return nil }
+    guard let base = MessageTurn(turn: wire, glyphs: .provisional) else { return nil }
     let meta = WhatsAppTurnMeta.parse(wire.meta)
     self.meta = meta
     if case .voice = base.kind, let note = meta.voiceNote {

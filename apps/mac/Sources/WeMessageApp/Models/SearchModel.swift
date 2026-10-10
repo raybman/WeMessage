@@ -78,7 +78,7 @@ public struct DaemonSearchSource: SearchSource {
       else { continue }
       searched += 1
       channels.insert(thread.channel)
-      docs += SearchCorpus.docs(MessageTurn.turns(messages), thread: thread)
+      docs += SearchCorpus.docs(MessageTurn.turns(messages, glyphs: .provisional), thread: thread)
     }
     return SearchCorpus(
       docs: docs, threads: page.threads, searchedThreads: searched, channelsSearched: channels,

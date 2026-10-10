@@ -279,7 +279,7 @@ struct LinkedInTranscript: View {
       (page?.turns ?? []).map { ($0.guid, LinkedInTurnMeta($0)) }, uniquingKeysWith: { first, _ in first })
     let rows: [TranscriptLayout.Row] =
       if let page, let asOf = model.thread.asOf {
-        TranscriptLayout.rows(MessageTurn.turns(page), asOf: asOf, calendar: .current, isGroup: false)
+        TranscriptLayout.rows(MessageTurn.turns(page, glyphs: .provisional), asOf: asOf, calendar: .current, isGroup: false)
       } else { [] }
     GeometryReader { geometry in
       let maxWidth = TranscriptLayout.maxBubbleWidth(paneWidth: geometry.size.width)

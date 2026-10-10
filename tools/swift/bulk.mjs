@@ -29,6 +29,14 @@ export const BULK = Object.freeze({
   asOf: '2026-09-01T12:00:43.000Z',
 });
 
+/**
+ * v2 F1: the `long` scenario, small enough to scroll to its end. 250
+ * threads are three pages of the list (100, 100, 50); the newest carries
+ * 450 turns, three pages of the transcript (200, 200, 50).
+ * @type {Readonly<BulkSpec>}
+ */
+export const LONG = Object.freeze({ ...BULK, threads: 250, longTurns: 450 });
+
 /** The real daemon's paging bounds, quoted, not imported (tools/ never imports packages/). */
 export const THREADS_PAGE = Object.freeze({ min: 1, max: 200, fallback: 100 });
 export const MESSAGES_PAGE = Object.freeze({ min: 1, max: 200, fallback: 50 });

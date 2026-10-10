@@ -28,7 +28,8 @@
 //
 // v2 S7a: a scenario.json may name a generator instead of shipping
 // responses: {"generator": "bulk"} serves tools/swift/bulk.mjs's 4,000
-// threads and 2,000-turn transcript, paged as the real daemon pages. With
+// threads and 2,000-turn transcript, paged as the real daemon pages (v2 F1:
+// {"generator": "long"} serves 250 threads and a 450-turn transcript). With
 // --control, POST /v1/_emit {"state"} writes one live connection.state
 // frame to every open stream, so a UI test can time event to label.
 import { timingSafeEqual, randomBytes } from 'node:crypto';
@@ -42,7 +43,7 @@ import {
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { generateBulk, pageMessages, pageThreads } from './bulk.mjs';
+import { LONG, generateBulk, pageMessages, pageThreads } from './bulk.mjs';
 
 const CONTRACT = fileURLToPath(
   new URL('../../fixtures/contract', import.meta.url),
@@ -93,7 +94,7 @@ const EMIT_BASE_ID = 100000;
 /** A connection state is a short kebab word, as the daemon's are. */
 const EMIT_STATE = /^[a-z][a-z-]{0,39}$/;
 /** The generators a scenario.json may name. */
-const GENERATORS = { bulk: generateBulk };
+const GENERATORS = { bulk: generateBulk, long: () => generateBulk(LONG) };
 /** v2 S4f: served (only with --control) so the kill banner can disengage. */
 const KILL_TOGGLE = 'POST /v1/toggles/kill-switch';
 

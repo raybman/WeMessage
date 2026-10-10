@@ -40,6 +40,7 @@ import {
 } from '../tools/swift/fake-daemon.mjs';
 import {
   BULK,
+  LONG,
   MESSAGES_PAGE,
   THREADS_PAGE,
   generateBulk,
@@ -69,6 +70,7 @@ const EXPECTED_SCENARIOS = [
   'empty-earned',
   'fda-denied',
   'kill',
+  'long',
   'pending',
   'preview-email',
   'preview-linkedin',
@@ -979,7 +981,7 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
     }
   });
 
-  it('scenario.json holds a summary and, at most, extends (and, for bulk alone, its generator)', () => {
+  it('scenario.json holds a summary and, at most, extends (and, for bulk and long alone, its generator)', () => {
     for (const name of EXPECTED_SCENARIOS) {
       const meta = readJson<Record<string, Json>>(
         join(scenariosDir, name, 'scenario.json'),
@@ -989,7 +991,7 @@ describe('v2 S4b SC12: every scenario fixture validates against S0', () => {
           (k) =>
             k === 'summary' ||
             k === 'extends' ||
-            (k === 'generator' && name === 'bulk'),
+            (k === 'generator' && (name === 'bulk' || name === 'long')),
         ),
         name,
       ).toBe(true);
@@ -1755,6 +1757,85 @@ describe('v2 S7a: POST /v1/_emit, a live connection.state frame, only with --con
       await daemon.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * v2 F1: the long scenario, the paging XCUITest's daemon. Small enough to
+ * scroll to the end of: 250 threads are three of the app's 100-thread
+ * pages, and the newest thread's 450 turns three of its 200-turn pages.
+ */
+describe('v2 F1: the long scenario', () => {
+  type Row = Record<string, Json>;
+  const long = () => switchTo('long');
+  const at = (state: State, path: string) =>
+    step(state, { method: 'GET', path }).out;
+  const uiTest = readFileSync(
+    join(repoRoot, 'apps/mac/UITests/WeMessageUITests/PagingTests.swift'),
+    'utf8',
+  );
+
+  it('the generator is the bulk one at 250 threads and 450 turns, same seed', () => {
+    expect(LONG).toEqual({ ...BULK, threads: 250, longTurns: 450 });
+    expect(
+      readJson<Row>(join(scenariosDir, 'long', 'scenario.json')).generator,
+    ).toBe('long');
+  });
+
+  it("the app's thread read (no limit) walks 100, 100, 50 to the 250th chat, the one the XCUITest scrolls to", () => {
+    const state = long();
+    const sizes: number[] = [];
+    const cursors: string[] = [];
+    const all: Row[] = [];
+    let path = '/v1/threads';
+    for (let n = 0; n < 10; n += 1) {
+      const page = body(at(state, path));
+      sizes.push((page.threads as Row[]).length);
+      all.push(...(page.threads as Row[]));
+      if (page.nextCursor === null) break;
+      cursors.push(String(page.nextCursor));
+      path = `/v1/threads?cursor=${String(page.nextCursor)}`;
+    }
+    expect(sizes).toEqual([100, 100, 50]);
+    expect(cursors).toEqual(['o100', 'o200']);
+    expect(new Set(all.map((t) => t.chatGuid)).size).toBe(250);
+    const first = String(all[0]!.chatGuid);
+    const last = String(all[249]!.chatGuid);
+    expect(first).toBe('iMessage;-;+15552000000');
+    expect(uiTest).toContain(`static let newest = "${first}"`);
+    expect(uiTest).toContain(`static let last = "${last}"`);
+    expect(uiTest).toContain('["cursor=o100", "cursor=o200"]');
+  });
+
+  it("the app's transcript read (limit=200) walks 200, 200, 50 back to the first turn, the one the XCUITest scrolls to", () => {
+    const state = long();
+    const guid = encodeURIComponent('iMessage;-;+15552000000');
+    const sizes: number[] = [];
+    const befores: string[] = [];
+    const pages: Row[][] = [];
+    let query = '?limit=200';
+    for (let n = 0; n < 10; n += 1) {
+      const page = body(at(state, `/v1/threads/${guid}/messages${query}`));
+      sizes.push((page.turns as Row[]).length);
+      pages.push(page.turns as Row[]);
+      if (page.nextBefore === null) break;
+      befores.push(String(page.nextBefore));
+      query = `?limit=200&before=${String(page.nextBefore)}`;
+    }
+    expect(sizes).toEqual([200, 200, 50]);
+    expect(befores).toEqual(['o200', 'o400']);
+    const turns = pages.reverse().flat();
+    expect(turns.length).toBe(450);
+    expect(new Set(turns.map((t) => t.guid)).size).toBe(450);
+    const ats = turns.map((t) => String(t.at));
+    expect(ats).toEqual([...ats].sort());
+    expect(uiTest).toContain(
+      `static let firstTurn = "${String(turns[0]!.guid)}"`,
+    );
+    expect(uiTest).toContain(
+      `static let lastTurn = "${String(turns[449]!.guid)}"`,
+    );
+    expect(uiTest).toContain('["before=o200", "before=o400"]');
   });
 });
 

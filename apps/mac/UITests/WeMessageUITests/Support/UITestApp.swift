@@ -189,6 +189,10 @@ enum ID {
   static let composeUndo = "wemessage.compose.undo"
   static let composeBubble = "wemessage.compose.bubble"
   static let composeStatePrefix = "wemessage.compose.state."
+  // v2 F5: the lookup's refusal line, the typed-handle row, the hint.
+  static let composeRefusal = "wemessage.compose.refusal"
+  static let composeResultTyped = "wemessage.compose.result.typed"
+  static let composeHint = "wemessage.compose.hint"
   // v2 S4k, board 15: media, reachable only with WEMESSAGE_UI_BOARD=15
   // under the UI-test flag (D-UI-102). The window, its tabs and pages (these
   // prefixes and thread, walls, refusal), the rail (value refused), the

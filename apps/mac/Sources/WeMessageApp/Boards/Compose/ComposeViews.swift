@@ -68,7 +68,8 @@ struct NewMessagePage: View {
 
   /// Before a person: the reason there is no composer, or the rows.
   @ViewBuilder private var resolving: some View {
-    let rows = model.matches
+    // v2 F5: a typed handle that matches no one is one row, first.
+    let rows = (model.typed.map { [$0] } ?? []) + model.matches
     if model.query.trimmingCharacters(in: .whitespaces).isEmpty {
       Text("No composer yet. A composer is a function of a channel, and a channel is a function of a person.")
         .font(.system(size: 12))
@@ -78,6 +79,12 @@ struct NewMessagePage: View {
       Text(rows.isEmpty ? "No match among the people this version knows." : "\(rows.count) \(rows.count == 1 ? "match" : "matches"), most recent first")
         .font(.system(size: 11))
         .foregroundStyle(Tokens.color(palette.inkDim))
+      if let hint = model.hint {
+        Text(hint)
+          .font(.system(size: 11))
+          .foregroundStyle(Tokens.color(palette.ink))
+          .accessibilityIdentifier(ShellID.composeHint)
+      }
       VStack(alignment: .leading, spacing: 4) {
         ForEach(rows) { person in
           ResolutionRow(person: person, palette: palette) { model.choose(person) }
@@ -111,7 +118,14 @@ struct NewMessagePage: View {
       if model.phase != .composing {
         SendStateBubble(model: model, palette: palette)
       }
-    } else {
+    } else if let refusal = model.refusal {
+      // v2 F5 (D-F5-2): one static line where the composer would be.
+      Text(refusal)
+        .font(.system(size: 12))
+        .foregroundStyle(Tokens.color(palette.ink))
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier(ShellID.composeRefusal)
+    } else if model.resolution != .checking {
       Text(
         "No channel here can reach \(person.firstName) from this Mac, so there is no composer. Better to say so than to pick one badly."
       )
@@ -200,7 +214,7 @@ struct ResolutionRow: View {
     .accessibilityLabel(person.title + ", " + person.evidence)
     // Ignoring children drops the Button's press; give it back.
     .accessibilityAction { action() }
-    .accessibilityIdentifier(ShellID.composeResultPrefix + person.id)
+    .accessibilityIdentifier(person.name == nil && person.id.hasPrefix("typed:") ? ShellID.composeResultTyped : ShellID.composeResultPrefix + person.id)
   }
 }
 
@@ -224,10 +238,12 @@ struct ChannelRow: View {
         Text(card.headline)
           .font(.system(size: 12))
           .foregroundStyle(Tokens.color(palette.ink))
-        Text(card.detail)
-          .font(.system(size: 11))
-          .foregroundStyle(Tokens.color(palette.inkDim))
-          .fixedSize(horizontal: false, vertical: true)
+        if !card.detail.isEmpty {
+          Text(card.detail)
+            .font(.system(size: 11))
+            .foregroundStyle(Tokens.color(palette.inkDim))
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
       Spacer(minLength: 8)
       Text(card.kind.rawValue)

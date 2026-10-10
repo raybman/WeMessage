@@ -9,6 +9,12 @@ import WeMessageKit
 // its text down (14.E). Send waits out a 4 s undo window and then creates a
 // pending draft through POST /v1/drafts: the approve that sends is the
 // queue's, so compose has no send call site at all (D-UI-96, H-S4-10).
+//
+// v2 F5: choosing someone asks the daemon which conversation their handle
+// would be written to (GET /v1/threads/by-handle/:handle, a read). Only an
+// existing iMessage 1:1 gets a composer, and the draft goes on the guid the
+// daemon named (macOS 26 mints any;-; guids); anything else is refused in
+// words before a draft exists. Compose never starts a conversation (D-F5-1).
 
 /// Someone compose can resolve to: a person with a name, or a bare handle
 /// with none (14.A ruling 5: a handle is never given a guessed name).
@@ -63,6 +69,10 @@ struct ChannelCardState: Equatable, Sendable {
     case noHandle = "no handle"
     /// The channel is not connected on this Mac in this version.
     case notConnected = "not connected"
+    /// v2 F5: a handle, but nothing on this Mac compose can write to.
+    case noConversation = "no conversation"
+    /// v2 F5: the lookup is in flight.
+    case checking
   }
 
   let channel: ComposeChannel
@@ -183,6 +193,22 @@ final class ComposeModel {
     }
   }
 
+  /// v2 F5: what this Mac's Messages holds for the chosen handle. Only
+  /// `.existing` (an iMessage 1:1) can be written to.
+  enum Resolution: Equatable, Sendable {
+    /// No handle chosen, so nothing to look up.
+    case idle
+    case checking
+    case existing(chatGuid: String)
+    /// The handle's only 1:1 is not iMessage (SMS, RCS, or a service this
+    /// Mac never recorded, which the send gate treats as SMS too).
+    case smsOnly
+    case none
+    case groupOnly
+    /// The lookup failed: chat.db unreadable or the daemon unreachable.
+    case unavailable
+  }
+
   static let undoSeconds = ProvisionalUI.composeUndoSeconds
 
   let people: [ComposePerson]
@@ -195,11 +221,16 @@ final class ComposeModel {
   private(set) var phase: Phase = .composing
   /// The text Send took, which the live bubble draws after the input clears.
   private(set) var sending = ""
+  private(set) var resolution: Resolution = .idle
 
   @ObservationIgnored private let client: GatewayClient
   @ObservationIgnored private let propose: @Sendable (ComposePerson) -> String
   @ObservationIgnored private let tick: @Sendable () async throws -> Void
   @ObservationIgnored private var pending: Task<Void, Never>?
+  @ObservationIgnored private var lookup: Task<Void, Never>?
+  /// Bumped by every choose and clear: a lookup answers only the choice
+  /// that started it.
+  @ObservationIgnored private var lookups = 0
 
   /// `people` and `propose` come from the hooks (fixtures only in this
   /// version: D-UI-98, D-UI-100). `tick` waits one second of the undo
@@ -238,15 +269,92 @@ final class ComposeModel {
     }.map(\.element)
   }
 
+  /// v2 F5 (D-F5-3): a query that is a whole handle, + and 8 to 15 digits
+  /// or an address, and matches no person, gets one row. Never a name.
+  var typed: ComposePerson? {
+    guard person == nil, matches.isEmpty, let handle = Self.typedHandle(query) else { return nil }
+    return ComposePerson(
+      id: "typed:" + handle, name: nil, initials: ProvisionalUI.composeTypedInitials,
+      evidence: ProvisionalUI.composeTypedEvidence, lastExchange: nil, imessage: handle, email: nil)
+  }
+
+  /// v2 F5 (D-F5-4): ten bare digits match nothing and get the hint, not a
+  /// guessed country code.
+  var hint: String? {
+    let q = query.trimmingCharacters(in: .whitespaces)
+    guard person == nil, matches.isEmpty, q.count == 10, q.allSatisfy(\.isNumber) else { return nil }
+    return ProvisionalUI.composeCountryCodeHint
+  }
+
+  /// "+15550100099" (separators dropped) or "sam@example.com" (lowercased),
+  /// or nil. A plus is required: the country code is never guessed.
+  nonisolated static func typedHandle(_ query: String) -> String? {
+    let q = query.trimmingCharacters(in: .whitespaces)
+    if q.hasPrefix("+") {
+      let rest = q.dropFirst()
+      guard rest.allSatisfy({ $0.isASCII && ($0.isNumber || " -().".contains($0)) }) else { return nil }
+      let digits = rest.filter(\.isNumber)
+      return (8...15).contains(digits.count) ? "+" + digits : nil
+    }
+    let parts = q.split(separator: "@", omittingEmptySubsequences: false)
+    guard parts.count == 2, !parts[0].isEmpty, parts[1].contains("."), !parts[1].hasPrefix("."),
+      !parts[1].hasSuffix("."), !q.contains(where: { $0.isWhitespace || $0 == ";" })
+    else { return nil }
+    return q.lowercased()
+  }
+
+  /// Chooses someone and, when they have a handle, asks the daemon which
+  /// conversation it would be written to. Choosing again asks again.
   func choose(_ chosen: ComposePerson) {
     person = chosen
     query = ""
+    lookup?.cancel()
+    lookups += 1
+    guard let handle = chosen.imessage else {
+      resolution = .idle
+      lookup = nil
+      return
+    }
+    resolution = .checking
+    let mine = lookups
+    lookup = Task { [weak self] in
+      guard let self else { return }
+      let found: Resolution
+      do {
+        switch try await self.client.resolveHandle(handle) {
+        case .ok(let answer): found = Self.resolution(of: answer.conversation)
+        case .refused: found = .unavailable
+        }
+      } catch {
+        found = .unavailable
+      }
+      // A stale answer, for a choice since replaced, is dropped.
+      guard mine == self.lookups else { return }
+      self.resolution = found
+    }
+  }
+
+  /// Waits for the lookup the last choose started (tests).
+  func lookedUp() async {
+    await lookup?.value
+  }
+
+  /// The daemon's answer as compose reads it: only an iMessage 1:1 is
+  /// somewhere to write.
+  nonisolated static func resolution(of conversation: ResolvedConversation?) -> Resolution {
+    guard let conversation else { return .none }
+    if conversation.isGroup { return .groupOnly }
+    return conversation.service == "imessage" ? .existing(chatGuid: conversation.chatGuid) : .smsOnly
   }
 
   /// Clears the To chip: back to one field, and nothing written survives.
   func clearPerson() {
     pending?.cancel()
     pending = nil
+    lookup?.cancel()
+    lookup = nil
+    lookups += 1
+    resolution = .idle
     person = nil
     body = ""
     proposal = .empty
@@ -262,6 +370,12 @@ final class ComposeModel {
       switch channel {
       case .imessage:
         if let handle = person.imessage {
+          if resolution == .checking || resolution == .idle {
+            return ChannelCardState(channel: channel, kind: .checking, headline: ProvisionalUI.composeChecking, detail: "")
+          }
+          if let why = refusalParts {
+            return ChannelCardState(channel: channel, kind: .noConversation, headline: why.headline, detail: why.detail)
+          }
           return ChannelCardState(
             channel: channel, kind: .default,
             headline: "Free. " + Self.printed(handle) + " \u{00B7} on this Mac",
@@ -283,17 +397,36 @@ final class ComposeModel {
   /// The derived channel, or nil (14.B rule 4: better to ask than to pick
   /// badly). Never a channel that costs, never one not connected.
   var defaultChannel: ComposeChannel? {
-    person?.imessage == nil ? nil : .imessage
+    chatGuid == nil ? nil : .imessage
   }
 
   private func defaultReason(_ person: ComposePerson) -> String {
     person.lastExchange == nil ? "it is the one connected channel with a handle" : "you last exchanged here"
   }
 
-  /// The chat a draft is created on: the 1:1 iMessage thread for the handle.
+  /// The chat a draft is created on: the iMessage 1:1 the daemon named for
+  /// the handle, and nothing compose made up (v2 F5).
   var chatGuid: String? {
-    guard defaultChannel == .imessage, let handle = person?.imessage else { return nil }
-    return "iMessage;-;" + handle
+    guard person?.imessage != nil, case .existing(let guid) = resolution else { return nil }
+    return guid
+  }
+
+  /// v2 F5 (D-F5-2): why there is no composer for a handle, in the card's
+  /// two parts, or nil while checking or when there is somewhere to write.
+  private var refusalParts: (headline: String, detail: String)? {
+    guard let handle = person?.imessage.map(Self.printed) else { return nil }
+    switch resolution {
+    case .none: return ProvisionalUI.composeNoConversation(handle)
+    case .smsOnly: return ProvisionalUI.composeSMSOnly
+    case .groupOnly: return ProvisionalUI.composeGroupOnly(handle)
+    case .unavailable: return (ProvisionalUI.composeCheckFailed, "")
+    case .idle, .checking, .existing: return nil
+    }
+  }
+
+  /// The one static line that replaces the composer.
+  var refusal: String? {
+    refusalParts.map { $0.detail.isEmpty ? $0.headline : $0.headline + " " + $0.detail }
   }
 
   /// Kit rule 7: the channel and the handle are named from the first
@@ -320,7 +453,7 @@ final class ComposeModel {
 
   /// opt-cmd-D: fills the region. Never the input.
   func askForDraft() {
-    guard let person, defaultChannel != nil, case .empty = proposal else { return }
+    guard let person, case .existing = resolution, case .empty = proposal else { return }
     proposal = .ready(propose(person))
   }
 
@@ -349,7 +482,8 @@ final class ComposeModel {
   }
 
   var canSend: Bool {
-    chatGuid != nil && !busy && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard case .existing = resolution else { return false }
+    return chatGuid != nil && !busy && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   /// The live bubble's small print for the phase.

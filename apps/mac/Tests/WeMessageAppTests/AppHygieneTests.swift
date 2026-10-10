@@ -87,6 +87,8 @@ struct AppHygieneTests {
     "wemessage.compose.strip", "wemessage.compose.proposal", "wemessage.compose.proposal.ask",
     "wemessage.compose.proposal.take", "wemessage.compose.proposal.hold", "wemessage.compose.field",
     "wemessage.compose.send", "wemessage.compose.undo", "wemessage.compose.bubble",
+    // v2 F5: the lookup's refusal, the typed-handle row and the hint.
+    "wemessage.compose.refusal", "wemessage.compose.result.typed", "wemessage.compose.hint",
     // v2 S4k, board 15 (prefixes: media.tab.<p>, media.page.<p>, media.row.<id>,
     // media.message.<id>, media.item.<id>, media.tray.item.<id>,
     // media.tray.remove.<id>, media.compression.row.<w>, media.wall.<c>,
@@ -426,8 +428,9 @@ struct AppHygieneTests {
   /// (the OS layer, board 16) and S4m's 121..131 (board 17, progress), and
   /// B0's 132, 135 and 140 (plan rows 102, 105 and 110 plus 30: the
   /// fixture chip, the WhatsApp board's words, the fixture rail mark), and
-  /// v2 F1's 185 (the paging caption, Eric's choice (b)).
-  static let dUINumbers = Array(1...131) + [132, 135, 140, 185]
+  /// v2 F1's 185 (the paging caption, Eric's choice (b)), and v2 F5's
+  /// 186..189 (the compose lookup's words, plan rows D-F5-2..5).
+  static let dUINumbers = Array(1...131) + [132, 135, 140, 185] + Array(186...189)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
@@ -1227,7 +1230,8 @@ struct AppHygieneTests {
   }
 
   /// The H-S4-10 verdicts over (path, text) pairs of the app sources: board
-  /// 14's one client call is createDraft, after the undo window; nothing in
+  /// 14's one client write is createDraft, after the undo window, and its
+  /// one read is v2 F5's resolveHandle, from the model; nothing in
   /// it can send, approve or name a route; the proposal reaches the input
   /// only through takeProposal; no channel exists before a person; nothing
   /// is green; and the window opens only under the flag with board 14.
@@ -1250,6 +1254,7 @@ struct AppHygieneTests {
         .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
     }
     var creates = 0
+    var lookups = 0
     for (path, source) in files where path.hasPrefix(dir) || path == model || path == fixture {
       swept += 1
       let body = code(source)
@@ -1257,11 +1262,18 @@ struct AppHygieneTests {
       let regex = try? NSRegularExpression(pattern: #"\bclient\.([A-Za-z]+)"#)
       for m in regex?.matches(in: body, range: NSRange(body.startIndex..., in: body)) ?? [] {
         guard let r = Range(m.range(at: 1), in: body) else { continue }
-        if body[r] == "createDraft" { creates += 1 } else { leaks.append("\(path): client.\(body[r])") }
+        if body[r] == "createDraft" {
+          creates += 1
+        } else if body[r] == "resolveHandle" && path == model {
+          lookups += 1
+        } else {
+          leaks.append("\(path): client.\(body[r])")
+        }
       }
     }
     if swept < 4 { leaks.append("swept \(swept) board 14 files") }
     if creates != 1 { leaks.append("\(model): \(creates) createDraft calls, not one") }
+    if lookups != 1 { leaks.append("\(model): \(lookups) resolveHandle calls, not one") }
     let modelText = code(text(model))
     // The create runs only from the undo window's task, after the window.
     let send = Self.function("send(", in: modelText)
@@ -1313,6 +1325,9 @@ struct AppHygieneTests {
       (model, "try await client.createDraft(", "try await client.send" + "(to: chatGuid, body: text) ?? client.createDraft("),
       (model, "try await client.createDraft(", "try await client.approve" + "Draft(id: \"x\") ?? client.createDraft("),
       (model, "phase = .drafting", "phase = .drafting\n    _ = try? await client.settings()"),
+      // v2 F5: the one read is the model's, and only one.
+      (model, "lookup = Task {", "_ = Task { _ = try? await self.client.resolveHandle(handle) }\n    lookup = Task {"),
+      (views, ".foregroundStyle(Tokens.color(palette.inkDim))", ".foregroundStyle(Tokens.color(palette.inkDim))\n        .task { _ = try? await model.client.resolveHandle(\"x\") }"),
       (model, "proposal = .ready(propose(person))", "body = propose(person)"),
       (model, "guard let person else { return [] }", "let person = person ?? people[0]"),
       (model, "guard !Task.isCancelled, case .undo = phase else { return }", "guard !Task.isCancelled else { return }"),

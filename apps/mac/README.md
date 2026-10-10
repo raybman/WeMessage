@@ -329,10 +329,17 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   band's tabs (valued `shown`) and their pages, `new` and `states`
 - `wemessage.compose.to`: the one field before a person (14.A);
   `wemessage.compose.result.<id>`: a resolution row, ordered by last
-  exchange; `wemessage.compose.recipient`: the chosen person's chip,
-  valued by the person's id
+  exchange; `wemessage.compose.result.typed`: the one typed-handle row, a
+  - number or an address that matches no one (D-UI-187);
+    `wemessage.compose.hint`: the country-code hint for ten bare digits
+    (D-UI-188); `wemessage.compose.recipient`: the chosen person's chip,
+    valued by the person's id
 - `wemessage.compose.channel.<channel>`: a channel's report, valued
-  `default`, `no handle` or `not connected`; never a picker (D-UI-97)
+  `default`, `no handle`, `not connected`, `checking` or `no conversation`;
+  never a picker (D-UI-97, D-UI-189)
+- `wemessage.compose.refusal`: the one line that replaces the composer when
+  the daemon names no iMessage 1:1 for the handle, or the check failed
+  (v2 F5, D-UI-186)
 - `wemessage.compose.banner`: the channel and handle Send is on, from the
   first keystroke (kit rule 7)
 - `wemessage.compose.strip`, `wemessage.compose.slot.<id>`: the capability
@@ -799,4 +806,29 @@ D-UI-185  F1        while an older page loads, one dim caption row at the
                     turns, "Loading more conversations" below the list),
                     10 pt inkDim in the day separator's caption style; no
                     spinner, no new colour
+```
+
+- New conversation by handle (v2 F5). Choosing someone in compose asks the
+  daemon which conversation their handle would be written to
+  (`GET /v1/threads/by-handle/:handle`, a read). Only an existing iMessage
+  1:1 gets a composer, and the draft goes on the guid the daemon named
+  (macOS 26 mints `any;-;` guids); SMS, RCS or an unrecorded service, a
+  group-only handle, no conversation, and a failed check are each refused
+  in words before any draft exists, and opt-cmd-D is refused with Send.
+  Compose never starts a conversation (D-F5-1, default no). Its provisional
+  values are in `ProvisionalUI.swift`:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-186  D-F5-2    one static refusal line replaces the composer, and the
+                    iMessage card's headline says why: no conversation,
+                    SMS only, group only, or the check failed
+D-UI-187  D-F5-3    a typed + number (8 to 15 digits) or address that
+                    matches no one is one row, first, initials #, evidence
+                    "not in Contacts · typed", never a name
+D-UI-188  D-F5-4    ten bare digits get no row, only the hint "Add the
+                    country code, e.g. +1"
+D-UI-189  D-F5-5    while the lookup runs, the iMessage card's headline is
+                    "Checking this Mac", no spinner and no composer
 ```

@@ -23,7 +23,8 @@ import Foundation
 // D-UI-132, 135 and 140: the B0 build, plan rows 102, 105 and 110 plus 30,
 // the fixture boards' chip, the WhatsApp board's words and their rail;
 // D-UI-185: the v2 F1 paging caption, Eric's choice (b), held here like
-// the rest until the words are final).
+// the rest until the words are final; D-UI-186..189: the v2 F5 compose
+// lookup's words, plan rows D-F5-2..5, batched to Eric).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1203,4 +1204,37 @@ public enum ProvisionalUI {
   public static let loadingOlderMessages = "Loading older messages"
   public static let loadingMoreConversations = "Loading more conversations"
   public static let pagingCaptionSize: CGFloat = 10
+
+  // v2 F5, a new conversation by handle (plan rows D-F5-2..5). Compose asks
+  // this Mac's Messages which conversation a handle would be written to
+  // before it offers a composer; it never starts a conversation (D-F5-1).
+
+  // D-UI-186: (D-F5-2) when there is nothing compose can write to, one
+  // static line replaces the composer, and the iMessage card's headline
+  // and detail are the same two sentences. The handle is printed.
+  public static func composeNoConversation(_ handle: String) -> (headline: String, detail: String) {
+    ("No conversation with \(handle) on this Mac yet.", "Start it in Messages; WeMessage can write to it after that.")
+  }
+  public static let composeSMSOnly = (
+    headline: "Their only thread on this Mac is SMS.", detail: "This version sends on iMessage only."
+  )
+  public static func composeGroupOnly(_ handle: String) -> (headline: String, detail: String) {
+    ("\(handle) is only in group threads here.", "This version writes 1:1 only.")
+  }
+  // A failed check is one sentence pair on the card's headline alone.
+  public static let composeCheckFailed = "Could not check this Mac's Messages. Nothing was sent."
+
+  // D-UI-187: (D-F5-3) a typed number (+ and 8 to 15 digits) or address
+  // that matches no person gets one row, first, with # for initials and
+  // these words for evidence. It is never given a name.
+  public static let composeTypedInitials = "#"
+  public static let composeTypedEvidence = "not in Contacts \u{00B7} typed"
+
+  // D-UI-188: (D-F5-4) ten bare digits get no row, only this hint. The
+  // country code is never guessed.
+  public static let composeCountryCodeHint = "Add the country code, e.g. +1"
+
+  // D-UI-189: (D-F5-5) while the lookup runs, the iMessage card's headline.
+  // No spinner, and no composer until the answer is in.
+  public static let composeChecking = "Checking this Mac"
 }

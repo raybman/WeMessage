@@ -81,8 +81,18 @@ public final class ShellModel {
   public internal(set) var status: StatusPayload? {
     didSet { if let status { fold(.response(.status(status))) } }
   }
-  /// The last thread list read.
+  /// The thread list as read so far: page 1 and every older page the user
+  /// scrolled to (v2 F1), rebuilt from `threadPages` after each read.
   public internal(set) var threads: ThreadsPage?
+  /// v2 F1: the list's pages. Older chats append at the tail; a refresh
+  /// re-reads page 1 and merges it, never collapsing what was opened.
+  private(set) var threadPages = PagedList<ThreadSummary, String>(edge: .tail, key: { $0.chatGuid })
+  /// The latest page read the list's approach started, so a test can wait for it.
+  private(set) var pageTask: Task<Void, Never>?
+  /// v2 F1: a row this close to the end of the list asks for the next page.
+  static let prefetchRows = 20
+  /// True while an older page of the list is on its way (D-UI-185's caption).
+  public var loadingMoreThreads: Bool { threadPages.inFlight }
   /// The kit's state: the draft queue and the channels' availability,
   /// folded by AppReducer. Its gate is closed outside the UI-test flag
   /// (v2 B0, H-B-1).
@@ -459,6 +469,49 @@ public final class ShellModel {
       return
     }
     selectedThread = list[min(max(at + delta, 0), list.count - 1)]
+    // v2 F1: arrowing toward the end pages as scrolling does.
+    if let selected = selectedThread, threadPages.cursor != nil {
+      pageTask = Task { await self.threadRowAppeared(selected) }
+    }
+  }
+
+  /// v2 F1: a list row was drawn. Within `prefetchRows` of the end of the
+  /// rows shown, the next older page is read. Views report; they never read.
+  public func threadRowAppeared(_ chatGuid: String) async {
+    guard threadPages.cursor != nil, !threadPages.inFlight else { return }
+    let shown = rows
+    guard let at = shown.firstIndex(where: { $0.chatGuid == chatGuid }),
+      threadPages.shouldFetch(nearIndex: at, of: shown.count, threshold: Self.prefetchRows)
+    else { return }
+    await loadMoreThreads()
+  }
+
+  /// Reads the next older page of the thread list and appends it. One page
+  /// at a time; a failure keeps the list and lets the next approach ask
+  /// again; a page whose cursor the list no longer holds (a refresh moved
+  /// it) is dropped.
+  func loadMoreThreads() async {
+    guard let cursor = threadPages.cursor, threadPages.begin() else { return }
+    let listed = try? await client.listThreads(cursor: cursor)
+    guard case .ok(let page)? = listed, threadPages.cursor == cursor else {
+      threadPages.fail()
+      return
+    }
+    threadPages.appendPage(page.threads, next: page.nextCursor)
+    publishThreads(total: page.total, asOf: threads?.asOf ?? page.asOf)
+    let avatars = self.avatars
+    let added = page.threads
+    avatarTask = Task { await avatars.prefetch(added) }
+  }
+
+  /// `threads`, rebuilt from the pages: every board reads it unchanged.
+  private func publishThreads(total: Int, asOf: String) {
+    guard var out = threads else { return }
+    out.threads = threadPages.items
+    out.nextCursor = threadPages.cursor
+    out.total = max(total, threadPages.items.count)
+    out.asOf = asOf
+    threads = out
   }
 
   /// Z: the newest send still counting comes back; else the newest act.
@@ -742,7 +795,9 @@ public final class ShellModel {
     if case .refused(.sourceUnavailable)? = listed { sourceUnavailable = true }
     if case .ok(let page)? = listed {
       sourceUnavailable = false
+      threadPages.mergeHead(page.threads, next: page.nextCursor)
       threads = page
+      publishThreads(total: page.total, asOf: page.asOf)
       let avatars = self.avatars
       avatarTask?.cancel()
       avatarTask = Task { await avatars.prefetch(page.threads) }

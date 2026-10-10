@@ -425,8 +425,9 @@ struct AppHygieneTests {
   /// S4h2's 69..78 (the same for board 12), and on to S4l's 112..120
   /// (the OS layer, board 16) and S4m's 121..131 (board 17, progress), and
   /// B0's 132, 135 and 140 (plan rows 102, 105 and 110 plus 30: the
-  /// fixture chip, the WhatsApp board's words, the fixture rail mark).
-  static let dUINumbers = Array(1...131) + [132, 135, 140]
+  /// fixture chip, the WhatsApp board's words, the fixture rail mark), and
+  /// v2 F1's 185 (the paging caption, Eric's choice (b)).
+  static let dUINumbers = Array(1...131) + [132, 135, 140, 185]
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.

@@ -784,3 +784,19 @@ D-UI-182  S5c       the cask's caveats call the build self-signed with the
                     D-UI-180; one line says the grants follow the
                     certificate, so an ordinary update keeps them
 ```
+
+- Paging (v2 F1). The thread list reads 100 threads a page and the
+  transcript 200 turns a page; a row within 20 of the growing edge asks for
+  the next one, one page in flight per list. A refresh merges page 1 and
+  keeps every older page already read. Its one provisional value is in
+  `ProvisionalUI.swift` (Eric chose (b)):
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-185  F1        while an older page loads, one dim caption row at the
+                    edge that grows ("Loading older messages" above the
+                    turns, "Loading more conversations" below the list),
+                    10 pt inkDim in the day separator's caption style; no
+                    spinner, no new colour
+```

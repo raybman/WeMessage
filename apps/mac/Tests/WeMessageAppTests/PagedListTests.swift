@@ -79,6 +79,11 @@ struct PagedListTests {
     fresh.mergeHead(Self.rows("b", "a"), next: "c9")
     #expect(fresh.items.map(\.id) == ["b", "a"])
     #expect(fresh.cursor == "c9")
+    // Page 1 alone is the whole list: what a refresh no longer lists goes.
+    var gone = Self.tail(["a", "b"], cursor: "c1")
+    gone.mergeHead(Self.rows("c"), next: nil)
+    #expect(gone.items.map(\.id) == ["c"])
+    #expect(gone.cursor == nil)
     // A transcript's newest page sits at the bottom; older turns stay above.
     var turns = Self.head(["m3", "m4"], cursor: "b1")
     _ = turns.begin()

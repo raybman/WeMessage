@@ -66,18 +66,23 @@ struct PagedList<Item: Sendable, Key: Hashable & Sendable>: Sendable {
 
   /// A refresh re-read page 1: its items replace their keys and sit at the
   /// newest edge; every item it does not hold (the older pages the user
-  /// already opened) is kept. The cursor moves only when nothing past
-  /// page 1 was ever read, so a refresh never collapses an opened list.
+  /// already opened) is kept. When nothing past page 1 was ever read, page
+  /// 1 is the whole list and replaces it, cursor and all, so a refresh
+  /// never collapses an opened list and never keeps a stale unopened one.
   mutating func mergeHead(_ page: [Item], next: String?) {
     let head = Self.unique(page, key: key)
+    if pages <= 1 {
+      items = head
+      cursor = next
+      pages = 1
+      return
+    }
     let keys = Set(head.map(key))
     let kept = items.filter { !keys.contains(key($0)) }
     switch edge {
     case .tail: items = head + kept
     case .head: items = kept + head
     }
-    if pages <= 1 { cursor = next }
-    pages = max(pages, 1)
   }
 
   /// True when `index` (of `count` rows drawn, the items by default) is

@@ -21,7 +21,9 @@ import Foundation
 // for what this version cannot do; D-UI-121..131: the S4m build, where
 // board 17 leaves a choice open or this version keeps no history to draw;
 // D-UI-132, 135 and 140: the B0 build, plan rows 102, 105 and 110 plus 30,
-// the fixture boards' chip, the WhatsApp board's words and their rail).
+// the fixture boards' chip, the WhatsApp board's words and their rail;
+// D-UI-185: the v2 F1 paging caption, Eric's choice (b), held here like
+// the rest until the words are final).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1192,4 +1194,13 @@ public enum ProvisionalUI {
     case connectedMark
   }
   public static let fixtureRailMark: RailMarkRule = .connectedMark
+
+  // v2 F1, paging. 183 and 184 stay spare for S5.
+
+  // D-UI-185: while an older page loads, one dim caption row at the edge
+  // that grows (Eric's choice (b)), drawn in the day separator's caption
+  // style: 10 pt inkDim, centred. No spinner, no new colour.
+  public static let loadingOlderMessages = "Loading older messages"
+  public static let loadingMoreConversations = "Loading more conversations"
+  public static let pagingCaptionSize: CGFloat = 10
 }

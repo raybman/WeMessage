@@ -40,6 +40,8 @@ struct TranscriptView: View {
                 .overlay { Board11Outline(guid: bubble.turn.guid, model: model, palette: palette) }
                 .accessibilityIdentifier(ShellID.bubblePrefix + bubble.turn.guid)
                 .id(bubble.turn.guid)
+                // v2 F1: a drawn turn reports; the model decides whether to page.
+                .task { await model.thread.turnAppeared(bubble.turn.guid) }
               }
             }
             if let draft = model.pendingDraft(for: thread.chatGuid) {
@@ -85,6 +87,13 @@ struct TranscriptView: View {
           .accessibilityElement(children: .contain)
           .accessibilityLabel("Messages")
         }
+        // v2 F1, D-UI-185: one dim caption above the turns while an older
+        // page loads; outside the lazy stack, so its rows stay the turns.
+        .safeAreaInset(edge: .top, spacing: 0) {
+          if model.thread.loadingOlder {
+            PagingCaption(text: ProvisionalUI.loadingOlderMessages, palette: palette)
+          }
+        }
         .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
@@ -99,6 +108,11 @@ struct TranscriptView: View {
         }
         .onAppear {
           if let target = model.scrollTarget { proxy.scrollTo(target, anchor: .center) }
+        }
+        // v2 F1: an older page landed above; the turn that was on top stays
+        // on top, so the reader keeps their place.
+        .onChange(of: model.thread.anchorTurn) { _, anchor in
+          if let anchor { proxy.scrollTo(anchor, anchor: .top) }
         }
       }
     }
@@ -142,6 +156,23 @@ struct DaySeparator: View {
       .frame(maxWidth: .infinity)
       .padding(.vertical, 8)
       .accessibilityAddTraits(.isHeader)
+  }
+}
+
+/// v2 F1, D-UI-185: the one dim caption row a list shows while its older
+/// page loads, in the day separator's caption style. The sidebar and the
+/// transcript both draw it.
+struct PagingCaption: View {
+  let text: String
+  let palette: Tokens.Palette
+
+  var body: some View {
+    Text(text)
+      .font(.system(size: ProvisionalUI.pagingCaptionSize))
+      .foregroundStyle(Tokens.color(palette.inkDim))
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 8)
+      .accessibilityLabel(text)
   }
 }
 

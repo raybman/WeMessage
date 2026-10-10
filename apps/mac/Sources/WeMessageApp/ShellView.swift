@@ -817,6 +817,11 @@ private struct SidebarView: View {
               ) { model.open(thread.chatGuid) }
               .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
               .onAppear { TestHooks.firstRow.mark() }
+              // v2 F1: a drawn row reports; the model decides whether to page.
+              .task { await model.threadRowAppeared(thread.chatGuid) }
+            }
+            if model.loadingMoreThreads {
+              PagingCaption(text: ProvisionalUI.loadingMoreConversations, palette: palette)
             }
           }
           .accessibilityElement(children: .contain)

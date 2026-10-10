@@ -100,6 +100,16 @@ struct ThreadModelTests {
     #expect(transport.requests.allSatisfy { $0.httpMethod == "GET" })
   }
 
+  @Test("S7a: a transcript read asks for the daemon's largest page, 200 turns")
+  func pageLimit() async throws {
+    let transport = FakeTransport { _ in try Reply.scenario("rich", "threads.messages.daniel.json") }
+    let model = ThreadModel(client: testClient(transport))
+    await model.open("iMessage;-;+15550100002")
+    #expect(ThreadModel.pageLimit == 200)
+    let query = try #require(transport.requests.first?.url?.query)
+    #expect(query == "limit=200")
+  }
+
   @Test("S4 02.J / D-UI-36: holding a draft is local; no request is made")
   func holdIsLocal() {
     let transport = FakeTransport { _ in throw Unreachable() }

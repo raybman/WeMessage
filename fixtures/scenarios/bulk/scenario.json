@@ -1,0 +1,4 @@
+{
+  "summary": "Bulk: 4,000 generated threads, newest first, the newest carrying a 2,000-turn transcript, paged as the daemon pages (tools/swift/bulk.mjs, seeded). Everything else is the S0 goldens.",
+  "generator": "bulk"
+}

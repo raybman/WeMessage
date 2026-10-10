@@ -25,6 +25,12 @@
 // (bearer and journal as any app route) and flips the kill switch in status
 // and settings until the next scenario switch or reset. Without --control it
 // stays parked (409), as S3 pinned it.
+//
+// v2 S7a: a scenario.json may name a generator instead of shipping
+// responses: {"generator": "bulk"} serves tools/swift/bulk.mjs's 4,000
+// threads and 2,000-turn transcript, paged as the real daemon pages. With
+// --control, POST /v1/_emit {"state"} writes one live connection.state
+// frame to every open stream, so a UI test can time event to label.
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -36,6 +42,7 @@ import {
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { generateBulk, pageMessages, pageThreads } from './bulk.mjs';
 
 const CONTRACT = fileURLToPath(
   new URL('../../fixtures/contract', import.meta.url),
@@ -80,6 +87,13 @@ const CONTROL_PREFIX = '/v1/_';
 const CONTROL_SCENARIO = 'POST /v1/_scenario';
 const CONTROL_RESET = 'POST /v1/_reset';
 const CONTROL_JOURNAL = 'GET /v1/_journal';
+const CONTROL_EMIT = 'POST /v1/_emit';
+/** The ids live frames carry: past any replayed frame, rising per emit. */
+const EMIT_BASE_ID = 100000;
+/** A connection state is a short kebab word, as the daemon's are. */
+const EMIT_STATE = /^[a-z][a-z-]{0,39}$/;
+/** The generators a scenario.json may name. */
+const GENERATORS = { bulk: generateBulk };
 /** v2 S4f: served (only with --control) so the kill banner can disengage. */
 const KILL_TOGGLE = 'POST /v1/toggles/kill-switch';
 
@@ -203,13 +217,22 @@ export function loadScenarios(dir = SCENARIOS) {
   for (const name of readdirSync(dir).sort()) {
     const meta = join(dir, name, 'scenario.json');
     if (!existsSync(meta)) continue;
-    const { summary, extends: parent = null } = readJson(meta);
+    const {
+      summary,
+      extends: parent = null,
+      generator = null,
+    } = readJson(meta);
+    if (generator !== null && !Object.hasOwn(GENERATORS, generator))
+      throw new Error(
+        `fake-daemon: "${name}" names no generator "${generator}"`,
+      );
     const responses = join(dir, name, 'responses');
     const has = existsSync(responses);
     map.set(name, {
       name,
       summary,
       parent,
+      generated: generator === null ? null : GENERATORS[generator](),
       responses: has ? indexDir(responses) : new Map(),
       messages: has ? indexMessages(responses) : new Map(),
       frames: readFrames(join(dir, name, 'sse')),
@@ -278,6 +301,7 @@ export function initialState({ control = false } = {}) {
     drafts: {},
     journal: [],
     killSwitch: null,
+    emitted: 0,
   };
 }
 
@@ -302,6 +326,13 @@ function resolve(goldens, state, key) {
     if (hit) return hit;
   }
   return goldens.responses.get(key);
+}
+
+/** The nearest generated data along the scenario chain, or null. */
+function generatedFor(goldens, state) {
+  return (
+    chainOf(goldens, state.scenario).find((s) => s.generated)?.generated ?? null
+  );
 }
 
 function resolveMessages(goldens, state, guid) {
@@ -396,7 +427,13 @@ function controlError(error, detail, extra = {}) {
   };
 }
 
-/** The three control routes. Only reached with --control and a loopback peer. */
+/** One connection.state frame, as the daemon writes it. */
+function liveFrame(id, connection) {
+  const data = JSON.stringify({ event: 'connection.state', state: connection });
+  return Buffer.from(`id: ${id}\nevent: connection.state\ndata: ${data}\n\n`);
+}
+
+/** The control routes. Only reached with --control and a loopback peer. */
 function control(goldens, state, key, rawBody) {
   if (key === CONTROL_JOURNAL) {
     return {
@@ -418,6 +455,23 @@ function control(goldens, state, key, rawBody) {
     parsed = JSON.parse(String(rawBody ?? ''));
   } catch {
     parsed = null;
+  }
+  if (key === CONTROL_EMIT) {
+    const wanted =
+      parsed && typeof parsed === 'object' ? parsed.state : undefined;
+    if (typeof wanted !== 'string' || !EMIT_STATE.test(wanted))
+      return controlError(
+        'invalid-body',
+        'want a JSON body {"state": "<connection state>"}',
+      );
+    const id = EMIT_BASE_ID + state.emitted + 1;
+    return {
+      status: 200,
+      headers: JSON_HEADERS,
+      body: { emitted: 'connection.state', state: wanted, id },
+      emit: liveFrame(id, wanted),
+      next: { ...state, emitted: state.emitted + 1 },
+    };
   }
   const name = parsed && typeof parsed === 'object' ? parsed.name : undefined;
   if (typeof name !== 'string')
@@ -515,6 +569,7 @@ function dispatch(req, token, goldens, state, key, query) {
       CONTROL_SCENARIO,
       CONTROL_RESET,
       CONTROL_JOURNAL,
+      CONTROL_EMIT,
     ].includes(key);
     if (!isControl || !state.control || !LOOPBACK_PEERS.has(req.remote ?? ''))
       return answer(goldens.errors.notFound);
@@ -560,6 +615,11 @@ function dispatch(req, token, goldens, state, key, query) {
     } catch {
       return answer(goldens.errors.unknownChat);
     }
+    const generated = generatedFor(goldens, state);
+    if (generated) {
+      const page = pageMessages(generated, guid, query);
+      return answer(page ?? goldens.errors.unknownChat);
+    }
     return answer(resolveMessages(goldens, state, guid));
   }
   const action = DRAFT_ACTION.exec(key);
@@ -575,6 +635,10 @@ function dispatch(req, token, goldens, state, key, query) {
     return next ? { ...out, next } : out;
   }
   if (key === 'GET /v1/drafts') return listDrafts(goldens, state, query);
+  if (key === 'GET /v1/threads') {
+    const generated = generatedFor(goldens, state);
+    if (generated) return answer(pageThreads(generated, query));
+  }
   if (key === 'GET /v1/status' || key === 'GET /v1/settings')
     return answer(withKill(goldens, state, key));
   return answer(resolve(goldens, state, key));
@@ -653,6 +717,7 @@ export async function start({
       state,
     );
     if (out.next) state = out.next;
+    if (out.emit) for (const open of streams) open.write(out.emit);
     if (out.stream) {
       res.writeHead(200, out.headers);
       // The greeting at once, then one replayed frame per gap, then the

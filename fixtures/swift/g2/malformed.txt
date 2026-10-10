@@ -1,0 +1,2 @@
+G2|first-paint|212.00|ms|300|hard
+G2|first paint|fast|ms|300|hard

@@ -62,6 +62,9 @@ targets:
       # Board 05's provisional values (v2 B2), read by Board05Tests.
       - path: Sources/WeMessageApp/ProvisionalUI+Board05.swift
       - path: Sources/WeMessageApp/ProvisionalUI+Board04.swift
+      # v2 S7a: the G2 limit table, so Board00PerfTests reads the limits
+      # the kit's pin test holds instead of restating them.
+      - path: Sources/WeMessageKit/Perf/G2Limits.swift
     dependencies:
       - target: WeMessageMac
     settings:

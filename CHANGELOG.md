@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Performance evidence for the Mac app. CI now measures first paint, mounted
+  transcript rows, launch time, memory and event-to-screen latency against a
+  generated 4,000-conversation scenario, and publishes them as a G2 report
+  (`G2-REPORT-kit.md`, `G2-REPORT-ui.md`). First paint over 300 ms or more
+  than 120 mounted transcript rows fails the build.
+
 ### Changed
+
+- Mac app: a conversation opens on its latest 200 messages (was 50), and the
+  transcript mounts only the rows on screen.
+- Mac app: the connection line follows a live connection-state change from
+  the gateway (for example to read-only) instead of waiting for the next
+  status poll.
 
 - doctor: runtime kind `electron` removed; launchd plist no longer sets
   `ELECTRON_RUN_AS_NODE`. The `kind` tag stays on the wire with `node` as its

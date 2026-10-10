@@ -65,6 +65,24 @@ struct ShellModelTests {
     #expect(m.connection == .connected(state: "x"))
   }
 
+  @Test("M5b (S7a): a live connection.state frame names a connected window's state")
+  func liveConnectionState() throws {
+    let m = Self.model(.connected(state: "fully-connected"))
+    m.apply(.frame(.event(seq: 4, event: try Self.liveState("read-only"))))
+    #expect(m.connection == .connected(state: "read-only"))
+    #expect(m.connectionLine == ProvisionalUI.connectedLine(state: "read-only"))
+  }
+
+  @Test("M5c (S7a): a connection.state frame never revives a window that is not connected")
+  func liveConnectionStateWhileNotConnected() throws {
+    let frame = AppAction.frame(.event(seq: 1, event: try Self.liveState("read-only")))
+    for start in [ShellModel.Connection.idle, .reconnecting(attempt: 2), .down(reason: "unreachable")] {
+      let m = Self.model(start)
+      m.apply(frame)
+      #expect(m.connection == start)
+    }
+  }
+
   @Test("M6 (P0-2): reconnecting while down stays down")
   func reconnectingWhileDown() {
     let m = Self.model(.down(reason: "unreachable"))
@@ -97,6 +115,12 @@ struct ShellModelTests {
   func scopeNamesAndDigits() {
     #expect(ShellModel.Scope.allCases.map(\.fullLabel) == ["All channels", "iMessage", "WhatsApp", "LinkedIn", "Email"])
     #expect(ShellModel.Scope.allCases.map(\.shortcutDigit) == ["1", "2", "3", "4", "5"])
+  }
+
+  /// A connection.state event, decoded the way the stream decodes one.
+  static func liveState(_ state: String) throws -> GatewayEvent {
+    let body = Data(("{\"state\":\"" + state + "\"}").utf8)
+    return .connectionState(try JSONDecoder().decode(ConnectionStateEvent.self, from: body))
   }
 
   /// Polls the model until `done` or two seconds pass.

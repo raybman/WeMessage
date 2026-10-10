@@ -34,6 +34,12 @@ public final class ThreadModel {
     self.client = client
   }
 
+  /// S7a: one read asks for the daemon's largest page, the newest 200 turns
+  /// (packages/daemon/src/routes/threads.ts caps `limit` at 200). The
+  /// transcript is a lazy stack, so a long page costs memory for the turns,
+  /// never views for the rows off screen (G2Limits.mountedTranscriptRows).
+  public static let pageLimit = 200
+
   /// The turns this build can draw, oldest first.
   public var turns: [MessageTurn] {
     guard case .loaded(let page) = load else { return [] }
@@ -56,7 +62,7 @@ public final class ThreadModel {
     guard let guid else { return }
     let next: Load
     do {
-      switch try await client.readThread(guid) {
+      switch try await client.readThread(guid, limit: Self.pageLimit) {
       case .ok(let page): next = .loaded(page)
       case .refused(.unknownChat): next = .unknownChat
       case .refused(let refusal): next = .failed(String(describing: refusal))

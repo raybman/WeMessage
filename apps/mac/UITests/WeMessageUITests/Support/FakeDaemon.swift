@@ -2,11 +2,12 @@ import Foundation
 import XCTest
 
 /// v2 S4b: the UI tests' handle on tools/swift/fake-daemon.mjs, which the
-/// ci-swift `ui` job starts with --control on WEMESSAGE_PORT. Three loopback
+/// ci-swift `ui` job starts with --control on WEMESSAGE_PORT. Four loopback
 /// routes, no bearer (the sandboxed runner cannot read the token file):
 ///   POST /v1/_scenario {"name"}  serve a scenario from fixtures/scenarios
 ///   POST /v1/_reset              back to the S0 goldens, journal cleared
 ///   GET  /v1/_journal            every request the app made since the reset
+///   POST /v1/_emit {"state"}     one connection.state frame to open streams (S7a)
 /// Every UI test class resets in setUp, so no test sees another's scenario
 /// or requests.
 enum FakeDaemon {
@@ -73,6 +74,24 @@ enum FakeDaemon {
     guard switched.scenario == name else {
       throw Failure(description: "asked for scenario \(name), got \(switched.scenario)")
     }
+  }
+
+  private struct Emitted: Decodable, Sendable {
+    let emitted: String
+    let state: String
+    let id: Int
+  }
+
+  /// v2 S7a: POST /v1/_emit {"state"} writes one connection.state frame to
+  /// every open event stream. Returns the frame's id.
+  @discardableResult
+  static func emit(state: String) async throws -> Int {
+    let body = try JSONEncoder().encode(["state": state])
+    let out = try JSONDecoder().decode(Emitted.self, from: try await call("POST", "/v1/_emit", body: body))
+    guard out.emitted == "connection.state", out.state == state else {
+      throw Failure(description: "asked to emit \(state), got \(out.emitted) \(out.state)")
+    }
+    return out.id
   }
 
   static func journal() async throws -> Journal {

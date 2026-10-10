@@ -1,0 +1,3 @@
+G2|first-paint|212.00|ms|300|hard
+G2|mounted-rows|2000.00|rows|120|hard
+G2|rss|88.25|MB|-|soft

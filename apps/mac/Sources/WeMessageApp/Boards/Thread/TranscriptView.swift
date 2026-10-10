@@ -25,7 +25,8 @@ struct TranscriptView: View {
       let maxWidth = TranscriptLayout.maxBubbleWidth(paneWidth: geometry.size.width)
       ScrollViewReader { proxy in
         ScrollView {
-          VStack(spacing: 0) {
+          // S7a: lazy, so a 200-turn page mounts only the rows on screen.
+          LazyVStack(spacing: 0) {
             ForEach(rows) { row in
               switch row {
               case .day(let id, let label):

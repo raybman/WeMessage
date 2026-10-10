@@ -1,0 +1,9 @@
+Test Suite 'Board00PerfTests' started at 2026-09-01 12:00:00.000.
+G2|launch|1840.12|ms|-|soft
+G2|first-paint|212.00|ms|300|hard
+    t =     2.10s Waiting for the thread row
+G2|mounted-rows|38.00|rows|120|hard
+G2|rss|88.25|MB|-|soft
+G2|event-to-ui|-|ms|-|soft
+  print("G2|rss|-|MB|-|soft")
+Test Suite 'Board00PerfTests' passed.

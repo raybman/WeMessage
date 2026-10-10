@@ -47,9 +47,42 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: swift --version
       - run: swift build --package-path apps/mac
-      - run: swift test --package-path apps/mac
+      # v2 S7a: the test output is kept so the G2 report can read the Kit's
+      # perf rows (G2PerfTests prints one `G2|` line per measure).
+      - name: swift test (output kept for the G2 report)
+        run: |
+          set -eu
+          set -o pipefail
+          swift test --package-path apps/mac 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
       - name: Build the host (release)
         run: swift build -c release --package-path apps/mac --product WeMessage
+      # v2 S7a: the release executable's size, a soft G2 row.
+      - name: release host size (G2, soft)
+        run: |
+          set -eu
+          exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
+          bytes=$(stat -f %z "$exe")
+          awk -v b="$bytes" 'BEGIN { printf "G2|release-exe|%.2f|MB|-|soft\n", b / 1048576 }' | tee -a "$RUNNER_TEMP/swift-test.log"
+      # v2 S7a: G2-REPORT-kit.md from the kept log. Red on a hard row over its
+      # limit; written first and kept in the job summary either way.
+      - name: G2 report (kit)
+        run: |
+          set -eu
+          set +e
+          bash tools/swift/g2-report.sh --title kit "$RUNNER_TEMP/swift-test.log" > "$RUNNER_TEMP/G2-REPORT-kit.md"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/G2-REPORT-kit.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/G2-REPORT-kit.md"
+          test "$code" -eq 0 || { echo "g2-report exited $code" >&2; exit 1; }
+      - name: G2 report artifact (kit)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wemessage-g2-report-${{ github.sha }}-kit
+          path: ${{ runner.temp }}/G2-REPORT-kit.md
+          retention-days: 30
+          if-no-files-found: warn
       - name: Release host names no override key
         run: |
           exe="$(swift build -c release --package-path apps/mac --product WeMessage --show-bin-path)/WeMessage"
@@ -152,7 +185,7 @@ jobs:
       matrix:
         include:
           - shard: a
-            classes: AccessibilityTests Board02Tests Board03Tests Board04Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
+            classes: AccessibilityTests Board00PerfTests Board02Tests Board03Tests Board04Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
           - shard: b
             classes: Board01Tests Board05Tests Board06Tests Board07Tests Board09Tests Board10Tests Board11Tests Board12Tests Board14Tests Board16Tests FakeDaemonControlTests SnapshotTests
     env:
@@ -259,6 +292,28 @@ jobs:
         run: |
           awk '/FROST\|/ { print; n++ } END { if (n == 0) print "no FROST lines in the raw log" }' \
             "$RUNNER_TEMP/xcodebuild-raw.log" || true
+      # v2 S7a: Board00PerfTests runs in shard a only, so only shard a has
+      # G2 rows. Its report is written on every outcome and is red on a hard
+      # row over its limit or never measured.
+      - name: G2 report (ui)
+        if: always() && matrix.shard == 'a'
+        run: |
+          set -eu
+          set +e
+          bash tools/swift/g2-report.sh --title "ui (a)" "$RUNNER_TEMP/xcodebuild-raw.log" > "$RUNNER_TEMP/G2-REPORT-ui.md"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/G2-REPORT-ui.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/G2-REPORT-ui.md"
+          test "$code" -eq 0 || { echo "g2-report exited $code" >&2; exit 1; }
+      - name: G2 report artifact (ui)
+        if: always() && matrix.shard == 'a'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wemessage-g2-report-${{ github.sha }}-ui
+          path: ${{ runner.temp }}/G2-REPORT-ui.md
+          retention-days: 30
+          if-no-files-found: warn
       - name: stop the fake daemon
         if: always()
         run: |

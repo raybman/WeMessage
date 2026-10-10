@@ -791,6 +791,13 @@ public final class ShellModel {
   /// "not reachable", never "reconnecting".
   public func apply(_ action: AppAction) {
     fold(action)
+    // S7a: a live connection.state frame names the state a connected window
+    // shows. Only a connection the window has; the line never says
+    // "connected" on the strength of a frame alone.
+    if case .frame(.event(_, .connectionState(let live))) = action {
+      if case .connected = connection { connection = .connected(state: live.state) }
+      return
+    }
     guard case .status(let status) = action else { return }
     switch status {
     case .connected:

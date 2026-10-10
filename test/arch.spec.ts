@@ -7023,6 +7023,10 @@ describe('v2 S1: the Swift tree', () => {
     // Non-vacuity: the reader sees the thirteen classes S4i shipped.
     expect(classes.length).toBeGreaterThanOrEqual(13);
     expect(classes).toContain('Board12Tests');
+    // v2 S7a: the perf class rides shard a, where the G2 ui report is read.
+    expect(shards.find((s) => s.shard === 'a')?.classes).toContain(
+      'Board00PerfTests',
+    );
     const named = shards.flatMap((s) => s.classes);
     expect(classes.filter((c) => !named.includes(c))).toEqual([]);
     expect(named.filter((c) => !classes.includes(c))).toEqual([]);
@@ -7140,6 +7144,22 @@ describe('v2 S1: the Swift tree', () => {
       expect([banned, launch.includes(banned)]).toEqual([banned, false]);
   });
 
+  it('the transcript mounts its rows lazily and reads the daemon page of 200 (S7a)', () => {
+    // v2 S7a: the 2,000-turn bulk thread is read 200 turns at a time and
+    // the stack mounts only the rows on screen; Board00PerfTests holds the
+    // mounted count to G2Limits.mountedTranscriptRows in CI. This row is the
+    // same promise in text, so a plain VStack is red before the ui lane runs.
+    const view = archRead(
+      `${MAC}/Sources/WeMessageApp/Boards/Thread/TranscriptView.swift`,
+    );
+    expect(view).toMatch(/LazyVStack\([^)]*\)\s*\{\s*ForEach\(rows\)/);
+    const model = archRead(
+      `${MAC}/Sources/WeMessageApp/Models/ThreadModel.swift`,
+    );
+    expect(model).toContain('public static let pageLimit = 200');
+    expect(model).toContain('limit: Self.pageLimit');
+  });
+
   it('the fake daemon imports node builtins only and serves the goldens from fixtures', () => {
     // v2 S3b R-A12 (§4.10, P2-12): loopback is not an option, the bearer
     // compare is constant-time, and every byte it answers is read from
@@ -7149,7 +7169,14 @@ describe('v2 S1: the Swift tree', () => {
       ...text.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm),
     ].map((m) => m[1]);
     expect(specs.length).toBeGreaterThanOrEqual(4);
-    expect(specs.filter((s) => !s?.startsWith('node:'))).toEqual([]);
+    // v2 S7a: one sibling, the `bulk` scenario's generator, which itself
+    // imports nothing at all (pure functions over a seed).
+    expect(
+      specs.filter((s) => !s?.startsWith('node:') && s !== './bulk.mjs'),
+    ).toEqual([]);
+    const bulk = archRead('tools/swift/bulk.mjs');
+    expect(bulk).not.toMatch(/^\s*import\s/m);
+    expect(bulk).not.toMatch(/\bimport\s*\(|\brequire\s*\(/);
     expect(text).not.toMatch(/\bimport\s*\(/);
     expect(text).not.toMatch(/\brequire\s*\(/);
     for (const needed of [

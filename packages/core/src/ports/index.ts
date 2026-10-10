@@ -165,8 +165,7 @@ export interface Store {
    * Derived from `drafts` rather than stored: a draft parked 'failed' already
    * records both the instant and the cause, so a second ledger would be a
    * second source of truth for a fact we have (F-62 — no new table, column or
-   * index; C-8 kept the repo index-free until v2 F2's three search indexes, and
-   * a recent-window scan on a
+   * index; C-8 keeps the repo index-free and a recent-window scan on a
    * single-operator daemon is small).
    *
    * The exclusion is the whole point. A gate denial at the send moment parks a
@@ -219,12 +218,11 @@ export interface Store {
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */
   listRecentInboundMessages(limit: number): Message[];
   getInboundMessage(guid: MessageGuid): Message | null;
-  /**
-   * Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). v2 F2:
-   * in the same transaction, an indexed row leaves the search index and is
-   * re-added under the same doc id only if it still carries searchable text,
-   * so an unsent message is never findable after this returns.
-   */
+  // v2 F2: in the same transaction, an indexed row leaves the search index
+  // and is re-added under the same doc id only if it still carries
+  // searchable text, so an unsent message is never findable after this
+  // returns. (C-8's index-free mirror ended with F2's three search indexes.)
+  /** Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). */
   updateInboundMessage(message: Message): void;
 
   // --- search index over the mirror (v2 F2) ---

@@ -43,6 +43,8 @@ export {
 export { registerRuleRoutes, type RuleRouteDeps } from './routes/rules.js';
 export { registerDoctorRoutes, type DoctorRouteDeps } from './routes/doctor.js';
 export { registerSendRoutes, type SendRouteDeps } from './routes/send.js';
+// v2 F2b: message search over the daemon's own index.
+export { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
 export {
   registerConnectionRoutes,
   type ConnectionRouteDeps,

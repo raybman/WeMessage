@@ -40,6 +40,7 @@ import {
   readConnectionState,
   type DaemonServer,
   type Scheduler,
+  type SearchRouteDeps,
   type SseTimer,
 } from '@wemessage/daemon';
 import type { GatewayEventPayload } from '@wemessage/protocol';
@@ -170,6 +171,13 @@ export interface BootOptions {
    */
   resolveChat?: ChatDbReader['resolveChat'];
   /**
+   * v2 F2b: also register `GET /v1/search`, composed exactly as `daemon.ts`
+   * composes it (this harness's store, clock and reader). An object keeps
+   * that composition but swaps in the closures it names, which is how a
+   * suite makes chat.db fail under one read and not the others.
+   */
+  search?: boolean | Partial<Omit<SearchRouteDeps, 'clock'>>;
+  /**
    * v2 A0p: the park. Suites here exercise autonomy, so the harness lifts the
    * park by default; `park.spec` passes 'parked' to prove the default build.
    * `null` composes exactly as production does, with the field absent.
@@ -282,6 +290,24 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
             },
           }
         : {}),
+    ...(opts.search === undefined || opts.search === false
+      ? {}
+      : {
+          search: {
+            clock: clockCtl.clock,
+            store,
+            chatTitles: (guids: Parameters<SearchRouteDeps['chatTitles']>[0]) =>
+              reader.chatTitles(guids),
+            chatsTitled: (needle: string) =>
+              reader.chatsTitled(needle) as ReturnType<
+                SearchRouteDeps['chatsTitled']
+              >,
+            existingGuids: (
+              guids: Parameters<SearchRouteDeps['existingGuids']>[0],
+            ) => reader.existingGuids(guids),
+            ...(opts.search === true ? {} : opts.search),
+          },
+        }),
     ...(opts.rules === true
       ? { rules: { store, clock: clockCtl.clock, sink } }
       : {}),

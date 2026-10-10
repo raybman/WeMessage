@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/search",
+  "status": 400,
+  "body": {
+    "error": "empty-search"
+  }
+}

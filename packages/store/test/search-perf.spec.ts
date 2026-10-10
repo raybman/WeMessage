@@ -16,7 +16,7 @@
  *   filter-only query (from:me after:)    <= 60 ms
  *
  * Query rows are the median of five, after one untimed warm-up. The page-2
- * cursor row lives with the cursor, in the daemon's search-routes spec.
+ * cursor row lives with the route, in the daemon's search-route-perf spec.
  *
  * Plus the EXPLAIN rows, which do not depend on the runner's speed: no
  * term query scans `inbound_messages`, and a filter-only query walks

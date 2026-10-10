@@ -1,0 +1,97 @@
+{
+  "route": "GET /v1/search",
+  "status": 200,
+  "body": {
+    "hits": [
+      {
+        "guid": "id-0024",
+        "chatGuid": "iMessage;-;+15551234567",
+        "title": "+15551234567",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "me",
+        "handle": null,
+        "text": "ok",
+        "sentAt": "2026-09-01T08:05:00.000Z",
+        "hasAttachment": false
+      }
+    ],
+    "total": 1,
+    "nextCursor": null,
+    "asOf": "2026-09-01T12:00:43.000Z",
+    "facets": {
+      "years": [
+        {
+          "year": 2026,
+          "count": 1
+        }
+      ],
+      "channels": [
+        {
+          "channel": "imessage",
+          "count": 1
+        }
+      ],
+      "senders": [
+        {
+          "handle": "me",
+          "count": 1
+        }
+      ]
+    },
+    "coverage": {
+      "channels": [
+        {
+          "channel": "imessage",
+          "state": "searched",
+          "indexed": 7,
+          "eligible": 7,
+          "indexedThroughRowid": 7,
+          "mirrorAsOf": null
+        },
+        {
+          "channel": "whatsapp",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "linkedin",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "email",
+          "state": "not-searched",
+          "reason": "no-source"
+        }
+      ],
+      "tokens": [
+        {
+          "op": "term",
+          "value": "ok",
+          "applied": "partial",
+          "reason": "short-term"
+        },
+        {
+          "op": "from",
+          "value": "me",
+          "applied": "applied"
+        },
+        {
+          "op": "channel",
+          "value": "imessage",
+          "applied": "applied"
+        },
+        {
+          "op": "channel",
+          "value": "whatsapp",
+          "applied": "not-applied",
+          "reason": "no-source"
+        }
+      ],
+      "capped": false,
+      "deletedHidden": 0,
+      "deletionsChecked": true
+    }
+  }
+}

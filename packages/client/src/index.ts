@@ -1012,6 +1012,119 @@ export interface ThreadsPage {
 }
 
 /**
+ * v2 F2b: `GET /v1/search` (route ratchet #30). Client-local, mirroring the
+ * daemon's wire page. The app parses what the operator typed; these are
+ * the structured tokens it sends.
+ */
+export type SearchChannel = 'imessage' | 'whatsapp' | 'linkedin' | 'email';
+export type SearchHas = 'attachment' | 'link' | 'voice';
+
+export interface SearchParams {
+  /** Words to find. A term of two characters or fewer is matched partially. */
+  terms?: string[];
+  /** 'me', or a handle or saved name (never Contacts). */
+  from?: string;
+  /** A chat title to look within, folded for case and accents. */
+  in?: string;
+  channels?: SearchChannel[];
+  has?: SearchHas[];
+  /** ISO-8601 instants; an offset is accepted and normalised to UTC. */
+  before?: string;
+  after?: string;
+  /** The IANA zone the year facets are counted in. Required. */
+  tz: string;
+  limit?: number;
+  /** Pass back verbatim; it is bound to the query and zone that minted it. */
+  cursor?: string;
+}
+
+export type SearchTokenOp =
+  'term' | 'from' | 'in' | 'channel' | 'has' | 'before' | 'after';
+export type SearchTokenReason =
+  'short-term' | 'handles-and-saved-names' | 'source-unavailable' | 'no-source';
+
+/** One token the operator sent, and how far the daemon honoured it. */
+export interface SearchTokenApplied {
+  op: SearchTokenOp;
+  value: string;
+  applied: 'applied' | 'partial' | 'not-applied';
+  reason?: SearchTokenReason;
+}
+
+export type SearchChannelCoverage =
+  | {
+      channel: 'imessage';
+      state: 'searched';
+      indexed: number;
+      eligible: number;
+      indexedThroughRowid: number;
+      mirrorAsOf: string | null;
+    }
+  | {
+      channel: SearchChannel;
+      state: 'not-searched';
+      reason: 'no-source' | 'not-requested';
+    };
+
+/** One hit. Never an attachment path. */
+export interface SearchHit {
+  guid: string;
+  chatGuid: string;
+  /** Null when the daemon could not read chat titles. */
+  title: string | null;
+  isGroup: boolean;
+  channel: 'imessage';
+  from: 'me' | 'them';
+  /** Null for the operator's own. */
+  handle: string | null;
+  text: string | null;
+  /** ISO-8601 UTC. */
+  sentAt: string;
+  hasAttachment: boolean;
+}
+
+export interface SearchPage {
+  hits: SearchHit[];
+  /** Every match, not just this page's. */
+  total: number;
+  nextCursor: string | null;
+  /** ISO-8601 UTC: when the daemon answered. */
+  asOf: string;
+  facets: {
+    years: { year: number; count: number }[];
+    channels: { channel: SearchChannel; count: number }[];
+    /** A handle, or 'me'. */
+    senders: { handle: string; count: number }[];
+  };
+  coverage: {
+    channels: SearchChannelCoverage[];
+    tokens: SearchTokenApplied[];
+    capped: boolean;
+    deletedHidden: number;
+    deletionsChecked: boolean;
+  };
+}
+
+/**
+ * The query string, in one fixed key order (term, from, in, channel, has,
+ * before, after, tz, limit, cursor), repeating keys for lists.
+ */
+export function searchQueryString(params: SearchParams): string {
+  const qs = new URLSearchParams();
+  for (const t of params.terms ?? []) qs.append('term', t);
+  if (params.from !== undefined) qs.set('from', params.from);
+  if (params.in !== undefined) qs.set('in', params.in);
+  for (const c of params.channels ?? []) qs.append('channel', c);
+  for (const h of params.has ?? []) qs.append('has', h);
+  if (params.before !== undefined) qs.set('before', params.before);
+  if (params.after !== undefined) qs.set('after', params.after);
+  qs.set('tz', params.tz);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.cursor !== undefined) qs.set('cursor', params.cursor);
+  return qs.toString();
+}
+
+/**
  * v2 A2: `GET /v1/threads/:guid/messages`, one page of one conversation
  * (route ratchet #27). Client-local, mirroring the daemon's wire turn.
  */
@@ -1249,6 +1362,14 @@ export interface WeMessageClient {
     chatGuid: string,
     params?: ThreadMessagesParams,
   ): Promise<ThreadMessagesPage>;
+
+  /**
+   * v2 F2b: one page of message search, and a read only. Every token comes
+   * back in `coverage.tokens` with how far it was honoured. Rejects with a
+   * 400 `DaemonRequestError` for an empty search, a zone that is not IANA,
+   * or a cursor minted under another query.
+   */
+  search(params: SearchParams): Promise<SearchPage>;
 }
 
 export function createClient(options: ClientOptions): WeMessageClient {
@@ -1559,6 +1680,9 @@ export function createClient(options: ClientOptions): WeMessageClient {
         throw asUnknownChat(err);
       }
     },
+
+    search: (params) =>
+      get(`/v1/search?${searchQueryString(params)}`) as Promise<SearchPage>,
 
     events(onEvent, opts) {
       // The filter is a QUERY STRING; the bearer is a HEADER (F-84). The

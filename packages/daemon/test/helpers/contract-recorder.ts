@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  INDEX_BATCH,
   InvalidCursorError,
   SETTING_CONNECTION_STATE,
   UnknownChatError,
@@ -121,6 +122,7 @@ export const CONTRACT_NOTES: readonly string[] = [
   'Refinements are dropped by toJSONSchema; the following are enforced by the daemon but absent from the request schemas.',
   'POST /v1/drafts/bulk: exactly one of ids or filter (both, or neither, is 400).',
   'GET /v1/threads/:guid/messages: before and until are mutually exclusive (both is 400).',
+  'GET /v1/search: tz must be an IANA time zone (400 invalid-search); term, channel and has repeat as keys; a query with no term, from, in, has, before or after is 400 empty-search.',
   "GET /v1/threads/by-handle/:handle: a handle containing ';' is refused with 400 invalid-handle.",
   "POST /v1/rules and PATCH /v1/rules/:id: outsideWindow 'queue' is refused with 400 unsupported-outside-window.",
   "PUT /v1/threads/:guid/state: snoozedUntil is required when act is 'snoozed' and refused otherwise; actAt is refused when act is null or when it is later than the daemon clock (all 400 invalid-thread-state).",
@@ -183,6 +185,8 @@ export const RESPONSE_NAMES = [
   'threads.state.put.snoozed',
   'threads.state.put.cleared',
   'threads.state.list',
+  'search',
+  'search.partial',
 ] as const;
 
 export const ERROR_NAMES = [
@@ -202,6 +206,8 @@ export const ERROR_NAMES = [
   '400.invalid-body',
   '400.settings-refusal',
   '400.invalid-thread-state',
+  '400.invalid-search',
+  '400.empty-search',
   '409.thread-state-conflict',
   '400.unknown-event',
 ] as const;
@@ -791,6 +797,7 @@ async function recordMain(
     rules: true,
     send: true,
     threads: source,
+    search: true,
   });
   const H = h.headers;
   const ok = async (
@@ -1235,6 +1242,56 @@ async function recordMain(
     route: 'GET /v1/threads',
   });
   source.down = false;
+
+  // --- search (v2 F2b) ----------------------------------------------------
+  // Two messages in the harness's 1:1 chat, mirrored and indexed the way the
+  // daemon's scan and index step would.
+  const chatRow = h.fixture.db
+    .prepare('SELECT ROWID AS id FROM chat WHERE guid = ?')
+    .get(CHAT) as { id: number };
+  const handleRow = h.fixture.db
+    .prepare('SELECT ROWID AS id FROM handle WHERE id = ?')
+    .get(HANDLE) as { id: number };
+  h.fixture.addMessage({
+    chatId: chatRow.id,
+    handleId: handleRow.id,
+    text: 'see you at the cabin',
+    at: '2026-09-01T08:00:00.000Z',
+  });
+  h.fixture.addMessage({
+    chatId: chatRow.id,
+    text: 'ok',
+    at: '2026-09-01T08:05:00.000Z',
+    isFromMe: true,
+  });
+  const mirrorFrom = h.store.getCursor()?.lastRowid ?? 0;
+  for (const m of await h.reader.readSince(mirrorFrom))
+    h.store.insertInboundMessage(m);
+  for (let mark = -1; ;) {
+    const step = h.store.indexPending(INDEX_BATCH);
+    if (step.throughRowid === mark) break;
+    mark = step.throughRowid;
+  }
+  await ok('search', 200, {
+    method: 'GET',
+    url: '/v1/search?term=cabin&tz=America%2FLos_Angeles',
+    route: 'GET /v1/search',
+  });
+  await ok('search.partial', 200, {
+    method: 'GET',
+    url: '/v1/search?term=ok&from=me&channel=imessage&channel=whatsapp&tz=UTC',
+    route: 'GET /v1/search',
+  });
+  await err('400.invalid-search', 400, {
+    method: 'GET',
+    url: '/v1/search?term=cabin&tz=Mars%2FOlympus',
+    route: 'GET /v1/search',
+  });
+  await err('400.empty-search', 400, {
+    method: 'GET',
+    url: '/v1/search?tz=UTC',
+    route: 'GET /v1/search',
+  });
 
   // --- the remaining envelopes -------------------------------------------
   await err('401.unauthorized', 401, {

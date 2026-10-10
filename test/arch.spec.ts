@@ -3848,7 +3848,9 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // the operator bearer; the frame table and the port allowlist did not
     // move. 76 since v2 F3 (#29): `GET /v1/threads/state`, its twin and
     // `PUT /v1/threads/:guid/state`, the stored Done, Snooze and Mute.
-    expect(ROUTE_TABLE.length).toBe(76);
+    // 78 since v2 F2b (#30): `GET /v1/search` and its twin, search over
+    // the daemon's own index; no event, no frame, no port importer.
+    expect(ROUTE_TABLE.length).toBe(78);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -5812,8 +5814,9 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // minted #29 for `GET /v1/threads/state` (+ HEAD twin) and
       // `PUT /v1/threads/:guid/state`: 73 -> 76, and for ONE event,
       // `thread.state`, declared and emitted together: 21 -> 22. No frame
-      // and no port importer moved.
-      expect(ROUTE_TABLE.length).toBe(76);
+      // and no port importer moved. v2 F2b minted #30 for `GET /v1/search`
+      // (+ HEAD twin): 76 -> 78, and nothing else moved.
+      expect(ROUTE_TABLE.length).toBe(78);
       expect(WS_EVENT_VOCABULARY.length).toBe(22);
       expect(GATEWAY_EVENT_NAMES.length).toBe(22);
       expect(EMITTED_WS_EVENTS.length).toBe(22);
@@ -5827,7 +5830,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28) and v2 F3 (#29), and #30 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29) and v2 F2b (#30), and #31 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
@@ -5835,17 +5838,18 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // `GET /v1/threads/:guid/messages`, and v2 F5 #28 for a third,
       // `GET /v1/threads/by-handle/:handle`, and nothing else on the wire:
       // the event and frame counts in the row above are S8's. v2 F3 minted
-      // #29 for the thread-state pair and the `thread.state` event. #30 is
-      // the next tooth.
+      // #29 for the thread-state pair and the `thread.state` event. v2 F2b
+      // minted #30 for `GET /v1/search`. #31 is the next tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(29);
-      expect(seen).not.toContain(30);
+      expect(Math.max(...seen)).toBe(30);
+      expect(seen).not.toContain(31);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
       expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
       expect(text).toMatch(/#28 deliberate \(v2 F5\)/);
       expect(text).toMatch(/#29 deliberate \(v2 F3/);
+      expect(text).toMatch(/#30 deliberate \(v2 F2b\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {

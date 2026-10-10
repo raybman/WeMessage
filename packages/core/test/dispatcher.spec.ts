@@ -246,6 +246,20 @@ function makeStore(cfg: {
     listThreadStates: () => [],
     putThreadState: () => null,
     getSettingVersion: () => -1,
+    // v2 F2: the search index. The dispatcher never searches.
+    indexPending: () => ({ indexed: 0, throughRowid: 0 }),
+    searchMirror: () => ({
+      matches: [],
+      capped: false,
+      shortTermWindowed: false,
+    }),
+    searchCoverage: () => ({
+      indexed: 0,
+      eligible: 0,
+      throughRowid: 0,
+      mirrorAsOf: null,
+    }),
+    resetIndexThrough: () => undefined,
     // s5 Scenario 3: adapter registry additions to the Store port.
     listAdapters: () => [],
     getAdapter: (id: string) => {

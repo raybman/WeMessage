@@ -19,7 +19,8 @@
  *  - GET /v1/threads/by-handle/:handle refuses a handle containing `;`;
  *  - rules refuse `outsideWindow: 'queue'` with a typed 400;
  *  - PUT /v1/threads/:guid/state takes `snoozedUntil` exactly when `act` is
- *    `snoozed`, and refuses an `actAt` in the future or beside a null act.
+ *    `snoozed`, and refuses an `actAt` in the future or beside a null act;
+ *  - GET /v1/search refuses a `tz` that is not an IANA time zone.
  */
 import { z } from 'zod';
 import { adapterSchemas } from './routes/adapters.js';
@@ -29,6 +30,7 @@ import { contactSchemas } from './routes/contacts.js';
 import { draftSchemas } from './routes/drafts.js';
 import { ruleSchemas } from './routes/rules.js';
 import { scheduleSchemas } from './routes/schedules.js';
+import { searchSchemas } from './routes/search.js';
 import { sendSchemas } from './routes/send.js';
 import { settingsSchemas } from './routes/settings.js';
 import { threadStateSchemas } from './routes/thread-state.js';
@@ -57,6 +59,7 @@ export const REQUEST_SCHEMAS = {
   'GET /v1/rules/:id/dry-run': ruleSchemas.dryRunQuery,
   'POST /v1/schedules': scheduleSchemas.createBody,
   'PATCH /v1/schedules/:id': scheduleSchemas.patchBody,
+  'GET /v1/search': searchSchemas.searchQuery,
   'POST /v1/send': sendSchemas.sendBody,
   'PATCH /v1/settings': settingsSchemas.patchBody,
   'GET /v1/threads': threadSchemas.listQuery,

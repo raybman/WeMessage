@@ -55,6 +55,7 @@ import { contactSchemas } from '../src/routes/contacts.js';
 import { draftSchemas } from '../src/routes/drafts.js';
 import { ruleSchemas } from '../src/routes/rules.js';
 import { scheduleSchemas } from '../src/routes/schedules.js';
+import { searchSchemas } from '../src/routes/search.js';
 import { sendSchemas } from '../src/routes/send.js';
 import { settingsSchemas } from '../src/routes/settings.js';
 import { threadStateSchemas } from '../src/routes/thread-state.js';
@@ -195,6 +196,7 @@ describe('S0 requests: every schema is public', () => {
       draftSchemas,
       ruleSchemas,
       scheduleSchemas,
+      searchSchemas,
       sendSchemas,
       settingsSchemas,
       threadSchemas,

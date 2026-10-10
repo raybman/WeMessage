@@ -148,6 +148,10 @@ function controllableOpenReader(): ControllableOpenReader {
         // v2 A1: the conversations list fails the same way when unreadable.
         listChats: boom,
         readChatPage: boom,
+        // v2 F2b: the search reads fail the same way; the route degrades.
+        chatTitles: boom,
+        chatsTitled: boom,
+        existingGuids: boom,
         close: () => undefined,
       };
     },

@@ -416,7 +416,8 @@ describe("thread state is the operator's alone (v2 F3)", () => {
 
 describe('the surface (v2 F3, route ratchet #29)', () => {
   it('pins PUT, GET and its HEAD twin, and no path says seen, read or mark', () => {
-    expect(ROUTE_TABLE).toHaveLength(76);
+    // 78 since v2 F2b (#30) added `GET /v1/search` and its twin.
+    expect(ROUTE_TABLE).toHaveLength(78);
     for (const r of [
       'GET /v1/threads/state',
       'HEAD /v1/threads/state',

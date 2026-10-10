@@ -62,6 +62,7 @@ import { registerThreadStateRoutes } from './routes/thread-state.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import { registerThreadRoutes } from './routes/threads.js';
+import { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
 import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
 import { closeReasonFor, parseEventFilter } from './events-filter.js';
@@ -208,6 +209,13 @@ export interface DaemonOptions {
     /** v2 F5: `GET /v1/threads/by-handle/:handle`, the send path's lookup. */
     resolveChat: ChatDbReader['resolveChat'];
   };
+
+  /**
+   * v2 F2b: when provided, registers `GET /v1/search` (and its HEAD twin).
+   * A read over the daemon's own index: no sink, because it audits and
+   * broadcasts nothing. chat.db is reached only through the closures.
+   */
+  search?: SearchRouteDeps;
 
   /**
    * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they
@@ -630,6 +638,11 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // operator bearer like everything but health and the adapter socket: an
     // adapter token is not a bearer.
     registerThreadRoutes(app, opts.threads);
+  }
+
+  if (opts.search) {
+    // v2 F2b: route ratchet #30. Operator bearer only, like the list.
+    registerSearchRoutes(app, opts.search);
   }
 
   if (opts.connection && sink) {

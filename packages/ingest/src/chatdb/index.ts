@@ -75,7 +75,29 @@ export interface IngestChatDbReader extends ChatDbReader {
   readonly openMode: ChatDbOpenMode;
   /** Underlying handle, exposed so tests can prove writes are impossible. */
   readonly rawDb: Database.Database;
+  /**
+   * v2 F2: the title and group-ness of each chat asked about, computed the
+   * way listChats computes them. A guid chat.db does not hold is absent from
+   * the map. One statement, however many guids.
+   */
+  chatTitles(guids: readonly string[]): Map<string, ChatTitle>;
+  /**
+   * v2 F2: every chat whose title contains `needle`, case and diacritics
+   * folded. The `in:` search token narrows to these.
+   */
+  chatsTitled(needle: string): string[];
+  /**
+   * v2 F2: which of these message guids chat.db still holds. A mirror row
+   * whose guid is missing here was deleted in Messages.
+   */
+  existingGuids(guids: readonly string[]): Set<string>;
   close(): void;
+}
+
+/** v2 F2: a chat's title as listChats shows it, and whether it is a group. */
+export interface ChatTitle {
+  title: string;
+  isGroup: boolean;
 }
 
 const MESSAGE_SELECT_SQL = `
@@ -670,11 +692,49 @@ function lastLineOf(row: ListChatsDbRow): string | null {
 }
 
 /**
+ * v2 F2: the columns titleOf reads, for the chats named in a JSON array of
+ * guids (or every chat, when the array parameter is NULL). Same participant
+ * subquery as LIST_CHATS_SQL, so a title here is the title in the list.
+ */
+const CHAT_TITLES_SQL = `
+  SELECT
+    c.guid            AS chatGuid,
+    c.display_name    AS displayName,
+    c.chat_identifier AS chatIdentifier,
+    (SELECT json_group_array(h.id)
+       FROM chat_handle_join chj
+       JOIN handle h ON h.ROWID = chj.handle_id
+      WHERE chj.chat_id = c.ROWID) AS participants
+  FROM chat c
+  WHERE @guids IS NULL OR c.guid IN (SELECT value FROM json_each(@guids))
+`;
+
+/** v2 F2: the message guids, of those asked about, chat.db still holds. */
+const EXISTING_GUIDS_SQL = `
+  SELECT guid FROM message WHERE guid IN (SELECT value FROM json_each(?))
+`;
+
+interface ChatTitleDbRow {
+  chatGuid: string;
+  displayName: string | null;
+  chatIdentifier: string | null;
+  participants: string | null;
+}
+
+/** Case and diacritics folded, for the in: match ("Café" finds "cafe"). */
+function foldForMatch(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+/**
  * The chat's own name, else (for a group) its participants sorted and
  * comma-separated, else its identifier. chat.db writes "" for an unnamed
  * chat, so a name that is only whitespace is no name.
  */
-function titleOf(row: ListChatsDbRow, isGroup: boolean): string {
+function titleOf(
+  row: Pick<ListChatsDbRow, 'displayName' | 'participants' | 'chatIdentifier'>,
+  isGroup: boolean,
+): string {
   const named = row.displayName?.trim() ?? '';
   if (named.length > 0) return named;
   if (isGroup) {
@@ -767,6 +827,9 @@ export function createChatDbReader(
   filesForPageStmt.safeIntegers(true);
   const reactionsForPageStmt = db.prepare(REACTIONS_FOR_PAGE_SQL);
   reactionsForPageStmt.safeIntegers(true);
+  const chatTitlesStmt = db.prepare(CHAT_TITLES_SQL);
+  const existingGuidsStmt = db.prepare(EXISTING_GUIDS_SQL);
+  existingGuidsStmt.pluck(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -1042,6 +1105,35 @@ export function createChatDbReader(
           err instanceof Error ? err : new Error(String(err)),
         );
       }
+    },
+
+    chatTitles(guids: readonly string[]): Map<string, ChatTitle> {
+      const out = new Map<string, ChatTitle>();
+      if (guids.length === 0) return out;
+      for (const r of chatTitlesStmt.all({
+        guids: JSON.stringify(guids),
+      }) as ChatTitleDbRow[]) {
+        const { isGroup } = parseChatGuid(r.chatGuid);
+        out.set(r.chatGuid, { title: titleOf(r, isGroup), isGroup });
+      }
+      return out;
+    },
+
+    chatsTitled(needle: string): string[] {
+      const want = foldForMatch(needle);
+      const out: string[] = [];
+      for (const r of chatTitlesStmt.all({ guids: null }) as ChatTitleDbRow[]) {
+        const { isGroup } = parseChatGuid(r.chatGuid);
+        if (foldForMatch(titleOf(r, isGroup)).includes(want)) {
+          out.push(r.chatGuid);
+        }
+      }
+      return out.sort();
+    },
+
+    existingGuids(guids: readonly string[]): Set<string> {
+      if (guids.length === 0) return new Set();
+      return new Set(existingGuidsStmt.all(JSON.stringify(guids)) as string[]);
     },
 
     close() {

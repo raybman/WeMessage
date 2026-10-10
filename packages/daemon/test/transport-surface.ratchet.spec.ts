@@ -141,6 +141,27 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
           );
         },
       },
+      // v2 F2b (#30): search is real reachable surface. Its chat.db reads
+      // throw, for the same reason the page reader does.
+      search: {
+        clock,
+        store,
+        chatTitles: () => {
+          throw new Error(
+            'chatTitles must not be called: route-table test only',
+          );
+        },
+        chatsTitled: () => {
+          throw new Error(
+            'chatsTitled must not be called: route-table test only',
+          );
+        },
+        existingGuids: () => {
+          throw new Error(
+            'existingGuids must not be called: route-table test only',
+          );
+        },
+      },
       send: {
         store,
         reader: createUnusedChatDbReader(),

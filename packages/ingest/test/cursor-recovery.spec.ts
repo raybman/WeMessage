@@ -17,7 +17,9 @@ import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import { createChatDbReader, createScanLoop } from '@wemessage/ingest';
 import {
+  INDEX_BATCH,
   runStartupRecovery,
+  SETTING_SEARCH_INDEXED_THROUGH,
   type Clock,
   type Message,
   type SendBackend,
@@ -234,6 +236,33 @@ describe('cursor-recovery (Scenario 9, T-9.3, §4.0 / §2.2.2 / F-2)', () => {
     });
     const out = await c.scanner();
     expect(out.map((m) => m.guid)).toEqual(extra.map((r) => r.guid));
+  });
+
+  it('v2 F2b: the heal lowers the search index mark with the cursor, never raises it', async () => {
+    const c = ctx();
+    c.fixture.addMessageBurst(10, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      startAt: '2026-01-03T00:00:00Z',
+    });
+    await c.scanner();
+    const max = c.store.getCursor()?.lastRowid ?? 0;
+    c.store.indexPending(INDEX_BATCH);
+    expect(c.store.searchCoverage().throughRowid).toBe(max);
+
+    // Restored backup: both marks point past chat.db head.
+    c.store.setCursor({ lastRowid: max + 50, lastScanAt: FIXED_NOW });
+    c.store.setSetting(SETTING_SEARCH_INDEXED_THROUGH, String(max + 50));
+
+    const result = await c.recover();
+    expect(result.cursor.healed).toBe(true);
+    expect(c.store.searchCoverage().throughRowid).toBe(max);
+
+    // A clean boot does not touch a mark below the cursor.
+    c.store.setSetting(SETTING_SEARCH_INDEXED_THROUGH, '3');
+    const again = await c.recover();
+    expect(again.cursor.healed).toBe(false);
+    expect(c.store.searchCoverage().throughRowid).toBe(3);
   });
 
   it('torn/corrupt cursor state fails safe: reset + full rescan with zero duplicates', async () => {

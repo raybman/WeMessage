@@ -576,12 +576,13 @@ describe('s7 Sc4 row 9: the cap the route wrote is the cap the gate reads', () =
  * --------------------------------------------------------------------- */
 
 describe('s7 Sc4 row 10: the transport surface', () => {
-  it('pins GET, HEAD and PATCH in the route table (#22; 76 rows since #29)', async () => {
+  it('pins GET, HEAD and PATCH in the route table (#22; 78 rows since #30)', async () => {
     // 67 at #22. v2 A1 (#26) added `GET /v1/threads` and its twin, v2 A2
     // (#27) `GET /v1/threads/:guid/messages` and v2 F5 (#28)
     // `GET /v1/threads/by-handle/:handle`, each with its twin. v2 F3 (#29)
     // `GET /v1/threads/state`, its twin and `PUT /v1/threads/:guid/state`.
-    expect(ROUTE_TABLE).toHaveLength(76);
+    // v2 F2b (#30) `GET /v1/search` and its twin.
+    expect(ROUTE_TABLE).toHaveLength(78);
     expect(ROUTE_TABLE).toContain('GET /v1/settings');
     expect(ROUTE_TABLE).toContain('HEAD /v1/settings');
     expect(ROUTE_TABLE).toContain('PATCH /v1/settings');

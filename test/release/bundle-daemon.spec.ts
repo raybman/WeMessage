@@ -217,6 +217,7 @@ describe('s9 Sc5 row 1: the bundle is an exact listing, not a directory that gre
       'daemon/wemessaged.mjs',
       'migrations/0001_init.sql',
       'migrations/0002_thread_state.sql',
+      'migrations/0003_search.sql',
     ]);
   });
 

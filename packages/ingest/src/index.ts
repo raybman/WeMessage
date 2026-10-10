@@ -22,6 +22,7 @@ export {
   createChatDbReader,
   type ChatDbOpenMode,
   type ChatDbReaderOptions,
+  type ChatTitle,
   type IngestChatDbReader,
 } from './chatdb/index.js';
 export {

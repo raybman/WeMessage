@@ -29,6 +29,7 @@ import type {
 } from '@wemessage/core';
 import {
   dispatchApproved,
+  INDEX_BATCH,
   type DispatchGateDenied,
   runStartupRecovery,
   systemActor,
@@ -230,6 +231,16 @@ const mustNotCallSendBackend: SendBackend = {
  */
 function createReaderHandle(factory: () => IngestChatDbReader): {
   reader: ChatDbReader;
+  /**
+   * v2 F2b: the three chat.db reads search makes, through the same live
+   * handle, so a disconnected gateway throws here and the search route
+   * degrades (titles null, `in:` not applied, deletions unchecked) and
+   * says so in its coverage.
+   */
+  search: Pick<
+    IngestChatDbReader,
+    'chatTitles' | 'chatsTitled' | 'existingGuids'
+  >;
   close(): void;
   reopen(): void;
 } {
@@ -256,6 +267,11 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       listChats: (q) => live().listChats(q),
       // v2 A2: one conversation's history, under the same rule as the list.
       readChatPage: (q) => live().readChatPage(q),
+    },
+    search: {
+      chatTitles: (guids) => live().chatTitles(guids),
+      chatsTitled: (needle) => live().chatsTitled(needle),
+      existingGuids: (guids) => live().existingGuids(guids),
     },
     close: () => {
       current?.close();
@@ -453,10 +469,35 @@ export async function startDaemon(
       );
     },
   });
+  // v2 F2b: the search indexer. One step indexes batches of INDEX_BATCH
+  // mirror rows until it has spent INDEX_STEP_MS (by the injected clock) or
+  // the through-mark stops moving. It runs inside `tick()` and once after
+  // each scan burst, so a fresh mirror row is findable within a second and
+  // the backfill of an old mirror never holds the event loop for long. A
+  // failure is reported and the step ends; the next one picks up from the
+  // persisted through-mark, so nothing is lost or indexed twice.
+  const INDEX_STEP_MS = 200;
+  const indexStep = (): void => {
+    try {
+      const startedMs = options.clock.nowMs();
+      let mark = -1;
+      for (;;) {
+        // A batch walks rows, not hits (tapbacks are skipped), so the stop
+        // is the mark standing still, never a short `indexed` count.
+        const step = store.indexPending(INDEX_BATCH);
+        if (step.throughRowid === mark) return;
+        mark = step.throughRowid;
+        if (options.clock.nowMs() - startedMs >= INDEX_STEP_MS) return;
+      }
+    } catch (err) {
+      options.onError?.(err);
+    }
+  };
   const scan = async (): Promise<void> => {
     burstRules = store.listRules();
     try {
       await scanLoop.scanOnce();
+      indexStep();
     } catch (err) {
       // §2.2.3: a scan hitting EPERM/EACCES means FDA was revoked mid-run
       // (or never propagated, macOS 26) — re-probe immediately rather than
@@ -631,6 +672,16 @@ export async function startDaemon(
       // the same one dispatch makes, through the same handle.
       resolveChat: (h) => sendReaderHandle.reader.resolveChat(h),
     },
+    // v2 F2b: search over the daemon's own index. chat.db is read only for
+    // titles, the `in:` lookup and the deleted-in-Messages check, through
+    // the same handle, so a disconnect degrades search and says so.
+    search: {
+      clock: options.clock,
+      store,
+      chatTitles: (guids) => sendReaderHandle.search.chatTitles(guids),
+      chatsTitled: (needle) => sendReaderHandle.search.chatsTitled(needle),
+      existingGuids: (guids) => sendReaderHandle.search.existingGuids(guids),
+    },
     // greeting frame (§3.4 connection.state): proves the stream is live.
     //
     // s7 Scenario 3 moved this out of `onEventsClient` and into a closure
@@ -715,7 +766,10 @@ export async function startDaemon(
     store,
     bootLog,
     recovery,
-    tick: () => scheduler.tick(),
+    tick: () => {
+      indexStep();
+      return scheduler.tick();
+    },
     stop: async () => {
       trigger.stop();
       // Adapter sessions first: they finalize against the store, and their

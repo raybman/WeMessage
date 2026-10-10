@@ -235,6 +235,23 @@ export const ROUTE_TABLE: readonly string[] = [
   // NO port importer moves: `routes/thread-state.ts` takes the Store by a
   // `Pick`, never ChatDbReader or SendBackend, so PORT_IMPORTER_ALLOWLIST
   // stays at 16.
+  //
+  // #30 deliberate (v2 F2b): `GET /v1/search`, message search over the
+  // daemon's own index, 76 -> 78.
+  //   1 route + 1 auto-HEAD twin = +2; 76 + 2 = 78.
+  // A read under every rule #26 set: behind the operator bearer (an adapter
+  // token is a 401), no audit row, no broadcast, dated by the daemon clock.
+  // The query is validated whole (strict keys, an IANA zone, bounded terms)
+  // and a cursor is bound to the query it was minted for. Every token comes
+  // back in `coverage` as applied, partial or not-applied with a reason, so
+  // nothing the operator typed is dropped silently. Hits are built field by
+  // field and never carry the mirror's `meta` (attachment paths).
+  //
+  // NO WS event moves and NO frame moves: a search pushes nothing.
+  //
+  // NO port importer moves: `routes/search.ts` takes the Store by a `Pick`
+  // and its three chat.db reads as closures from `daemon.ts`, never naming
+  // ChatDbReader or SendBackend, so PORT_IMPORTER_ALLOWLIST stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -257,6 +274,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/rules/:id/dry-run',
   'GET /v1/schedules',
   'GET /v1/schedules/:id',
+  'GET /v1/search',
   'GET /v1/settings',
   'GET /v1/status',
   'GET /v1/threads',
@@ -281,6 +299,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/rules/:id/dry-run',
   'HEAD /v1/schedules',
   'HEAD /v1/schedules/:id',
+  'HEAD /v1/search',
   'HEAD /v1/settings',
   'HEAD /v1/status',
   'HEAD /v1/threads',

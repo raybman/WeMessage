@@ -1,0 +1,18 @@
+{
+  "route": "GET /v1/search",
+  "status": 400,
+  "body": {
+    "error": "invalid-search",
+    "detail": {
+      "issues": [
+        {
+          "code": "custom",
+          "path": [
+            "tz"
+          ],
+          "message": "tz is not an IANA time zone"
+        }
+      ]
+    }
+  }
+}

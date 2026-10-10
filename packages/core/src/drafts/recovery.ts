@@ -91,6 +91,10 @@ export async function runStartupRecovery(
     cursor = { healed: false, lastRowid: persisted.lastRowid };
   }
   if (cursor.healed) {
+    // v2 F2b: the search index's through-mark lives in the same ROWID space
+    // as the cursor, so it heals with it. Lower only: rows past the healed
+    // cursor are re-walked and indexed again as they are re-mirrored.
+    store.resetIndexThrough(cursor.lastRowid);
     audit.push({
       event: 'cursor.recovery',
       at: clock.now(),

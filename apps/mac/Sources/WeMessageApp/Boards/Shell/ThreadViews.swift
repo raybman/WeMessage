@@ -44,7 +44,7 @@ struct ListRow: View {
   let asOf: Date?
   let palette: Tokens.Palette
   let dark: Bool
-  /// Boards 06 and 09: the row's queue note ("Draft ready", "opened 14:02",
+  /// Boards 06 and 09: the row's queue note (the D-UI-190 reason line, "opened 14:02",
   /// an exclusion reason, "Snoozed until Monday 9:00").
   var note: String? = nil
   /// A snoozed row stays listed in Triage, dimmed (06.C).

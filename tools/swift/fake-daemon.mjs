@@ -32,6 +32,15 @@
 // {"generator": "long"} serves 250 threads and a 450-turn transcript). With
 // --control, POST /v1/_emit {"state"} writes one live connection.state
 // frame to every open stream, so a UI test can time event to label.
+//
+// v2 F3d (G-06a): Done, Snooze and Mute are kept as the daemon keeps them
+// (packages/daemon/src/routes/thread-state.ts): PUT /v1/threads/:guid/state
+// with its strict body, the ifUpdatedAt 409 and a cleared record deleted,
+// and GET /v1/threads/state with wake judged against the request clock.
+// Seed records come from the scenario chain only, never from S0, so no
+// other board's queue moves; writes live until a scenario switch or reset,
+// so a relaunched app reads back what it wrote. A write is journaled with
+// its sorted body keys (never values) so a UI test can ban seenAt.
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -87,6 +96,21 @@ const DRAFT_ACTION = /^POST \/v1\/drafts\/([^/]+)\/(approve|reject|recall)$/;
  */
 const BY_HANDLE = /^GET \/v1\/threads\/by-handle\/([^/]*)$/;
 const BY_HANDLE_ROUTE = 'GET /v1/threads/by-handle/:handle';
+/** v2 F3d: the thread-state pair. */
+const THREAD_STATES = 'GET /v1/threads/state';
+const THREAD_STATE = /^PUT \/v1\/threads\/([^/]+)\/state$/;
+const ACTS = new Set(['done', 'snoozed', 'muted']);
+const ATTENTIONS = new Set(['queue', 'stream', 'muted']);
+const STATE_KEYS = new Set([
+  'act',
+  'actAt',
+  'snoozedUntil',
+  'attention',
+  'ifUpdatedAt',
+]);
+/** An ISO-8601 instant with an offset, as the daemon's zod `iso.datetime({offset: true})`. */
+const INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 /** Auto-send and schedules are parked: 409 for these, whatever the body. */
 const PARKED =
   /^(POST \/v1\/schedules|POST \/v1\/send|PATCH \/v1\/toggles\/.+|POST \/v1\/toggles\/.+)$/;
@@ -289,6 +313,8 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
       unknownChat: byName(errors, '404.unknown-chat.json'),
       illegalTransition: byName(errors, '409.illegal-transition.json'),
       invalidHandle: byName(errors, '400.invalid-handle.json'),
+      invalidThreadState: byName(errors, '400.invalid-thread-state.json'),
+      threadStateConflict: byName(errors, '409.thread-state-conflict.json'),
     },
     sse: {
       headers: readJson(join(sse, 'headers.json')),
@@ -310,7 +336,8 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 
 /**
  * @typedef {{ status: number, headers: Record<string, string>, body?: unknown,
- *   stream?: boolean, frames?: Buffer[], next?: ReturnType<typeof initialState> }} Answer
+ *   stream?: boolean, frames?: Buffer[], emit?: Buffer,
+ *   next?: ReturnType<typeof initialState> }} Answer
  */
 
 /** @param {{ status: number, body: unknown }} golden @returns {Answer} */
@@ -323,8 +350,9 @@ function answer(golden) {
  * `killSwitch` is null until the kill toggle flips it (v2 S4f).
  * @returns {{ control: boolean, scenario: string, drafts: Record<string, any>,
  *   journal: Array<{ method: string, path: string, query: string, status: number,
- *     chatGuid?: string | null }>,
- *   killSwitch: boolean | null }}
+ *     chatGuid?: string | null, bodyKeys?: string[] }>,
+ *   killSwitch: boolean | null, emitted: number,
+ *   threadState: Record<string, Record<string, unknown> | null> }}
  */
 export function initialState({ control = false } = {}) {
   return {
@@ -334,6 +362,8 @@ export function initialState({ control = false } = {}) {
     journal: [],
     killSwitch: null,
     emitted: 0,
+    // v2 F3d: writes over the scenario's seed, by chatGuid; null deletes.
+    threadState: {},
   };
 }
 
@@ -524,7 +554,13 @@ function control(goldens, state, key, rawBody) {
       scenario: name,
       summary: goldens.scenarios.get(name)?.summary ?? 'the S0 goldens alone',
     },
-    next: { ...state, scenario: name, drafts: {}, killSwitch: null },
+    next: {
+      ...state,
+      scenario: name,
+      drafts: {},
+      killSwitch: null,
+      threadState: {},
+    },
   };
 }
 
@@ -614,6 +650,189 @@ function resolveHandle(goldens, state, raw) {
   );
 }
 
+/** The stored fields of a record, without the computed `awake`. */
+function stored(record) {
+  const rest = { ...record };
+  delete rest.awake;
+  return rest;
+}
+
+/** v2 F3d: the scenario chain's seed records overlaid with this daemon's writes, by chatGuid. */
+function threadStates(goldens, state) {
+  const byGuid = new Map();
+  for (const scenario of chainOf(goldens, state.scenario)) {
+    const hit = scenario.responses.get(THREAD_STATES);
+    if (!hit) continue;
+    for (const r of hit.body?.states ?? []) byGuid.set(r.chatGuid, stored(r));
+    break;
+  }
+  for (const [guid, r] of Object.entries(state.threadState ?? {})) {
+    if (r === null) byGuid.delete(guid);
+    else byGuid.set(guid, r);
+  }
+  return byGuid;
+}
+
+/** The request clock, else the scenario's own `asOf`: never wall time. */
+function clockOf(goldens, state, now) {
+  if (now) return now;
+  for (const scenario of chainOf(goldens, state.scenario)) {
+    const asOf = scenario.responses.get(THREAD_STATES)?.body?.asOf;
+    if (asOf) return asOf;
+  }
+  return goldens.responses.get(THREAD_STATES)?.body?.asOf;
+}
+
+/** A record as the wire carries it: wake is computed, never stored. */
+function wireState(record, now) {
+  if (!record) return null;
+  const awake =
+    record.act === 'snoozed' &&
+    record.snoozedUntil !== null &&
+    Date.parse(record.snoozedUntil) <= Date.parse(now);
+  return { ...record, awake };
+}
+
+/** GET /v1/threads/state, sorted by chatGuid as the store lists them. */
+function listThreadStates(goldens, state, now) {
+  const at = clockOf(goldens, state, now);
+  const states = [...threadStates(goldens, state).values()]
+    .sort((a, b) =>
+      a.chatGuid < b.chatGuid ? -1 : a.chatGuid > b.chatGuid ? 1 : 0,
+    )
+    .map((r) => wireState(r, at));
+  return { status: 200, headers: JSON_HEADERS, body: { states, asOf: at } };
+}
+
+function isInstant(v) {
+  return (
+    typeof v === 'string' && INSTANT.test(v) && !Number.isNaN(Date.parse(v))
+  );
+}
+
+/** The daemon's strict PUT body, or null when it would refuse it. */
+function stateBody(raw, now) {
+  let body = null;
+  try {
+    body = JSON.parse(String(raw ?? ''));
+  } catch {
+    return null;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (!Object.keys(body).every((k) => STATE_KEYS.has(k))) return null;
+  if (!Object.hasOwn(body, 'act')) return null;
+  const { act, actAt, snoozedUntil, attention, ifUpdatedAt } = body;
+  if (act !== null && !ACTS.has(act)) return null;
+  if (actAt !== undefined && !isInstant(actAt)) return null;
+  if (
+    snoozedUntil !== undefined &&
+    snoozedUntil !== null &&
+    !isInstant(snoozedUntil)
+  )
+    return null;
+  if (
+    attention !== undefined &&
+    attention !== null &&
+    !ATTENTIONS.has(attention)
+  )
+    return null;
+  if (
+    ifUpdatedAt !== undefined &&
+    ifUpdatedAt !== null &&
+    !isInstant(ifUpdatedAt)
+  )
+    return null;
+  if (
+    (act === 'snoozed') !==
+    (snoozedUntil !== undefined && snoozedUntil !== null)
+  )
+    return null;
+  if (
+    actAt !== undefined &&
+    (act === null || Date.parse(actAt) > Date.parse(now))
+  )
+    return null;
+  return body;
+}
+
+/** One thread.state frame, as the daemon broadcasts it. */
+function stateFrame(id, chatGuid, record) {
+  const data = JSON.stringify({
+    event: 'thread.state',
+    chatGuid,
+    state: record,
+  });
+  return Buffer.from(`id: ${id}\nevent: thread.state\ndata: ${data}\n\n`);
+}
+
+/** PUT /v1/threads/:guid/state, in the daemon's order: validate, check, write, frame. */
+function putThreadState(goldens, state, raw, rawBody, now) {
+  let chatGuid = '';
+  try {
+    chatGuid = decodeURIComponent(raw);
+  } catch {
+    return answer(goldens.errors.invalidThreadState);
+  }
+  const at = clockOf(goldens, state, now);
+  const body =
+    chatGuid.length < 1 || chatGuid.length > 512
+      ? null
+      : stateBody(rawBody, at);
+  if (!body) return answer(goldens.errors.invalidThreadState);
+  const previous = threadStates(goldens, state).get(chatGuid) ?? null;
+  if (body.ifUpdatedAt !== undefined) {
+    const current = previous?.updatedAt ?? null;
+    const same =
+      body.ifUpdatedAt === null || current === null
+        ? body.ifUpdatedAt === current
+        : Date.parse(body.ifUpdatedAt) === Date.parse(current);
+    if (!same) {
+      const conflict = goldens.errors.threadStateConflict;
+      return {
+        status: conflict.status,
+        headers: JSON_HEADERS,
+        body: {
+          ...conflict.body,
+          detail: { current: wireState(previous, at) },
+        },
+      };
+    }
+  }
+  const attention =
+    body.attention !== undefined
+      ? body.attention
+      : (previous?.attention ?? null);
+  const next =
+    body.act === null && attention === null
+      ? null
+      : {
+          chatGuid,
+          act: body.act,
+          actAt:
+            body.act === null
+              ? null
+              : body.actAt !== undefined
+                ? new Date(body.actAt).toISOString()
+                : at,
+          snoozedUntil: body.act === 'snoozed' ? body.snoozedUntil : null,
+          attention,
+          updatedAt: at,
+        };
+  const wire = wireState(next, at);
+  const id = EMIT_BASE_ID + state.emitted + 1;
+  return {
+    status: 200,
+    headers: JSON_HEADERS,
+    body: { state: wire },
+    emit: stateFrame(id, chatGuid, wire),
+    next: {
+      ...state,
+      emitted: state.emitted + 1,
+      threadState: { ...state.threadState, [chatGuid]: next },
+    },
+  };
+}
+
 /** The S3b table, now over a scenario. -> an Answer and, if it moved, the next state. */
 function dispatch(req, token, goldens, state, key, query) {
   if (
@@ -639,7 +858,9 @@ function dispatch(req, token, goldens, state, key, query) {
     PARKED.test(key) ||
     MESSAGES.test(key) ||
     BY_HANDLE.test(key) ||
-    DRAFT_ACTION.test(key);
+    DRAFT_ACTION.test(key) ||
+    key === THREAD_STATES ||
+    THREAD_STATE.test(key);
   if (!known) return answer(goldens.errors.notFound);
 
   const header = req.authorization ?? '';
@@ -678,6 +899,16 @@ function dispatch(req, token, goldens, state, key, query) {
     }
     return answer(resolveMessages(goldens, state, guid));
   }
+  if (key === THREAD_STATES) return listThreadStates(goldens, state, req.now);
+  const threadState = THREAD_STATE.exec(key);
+  if (threadState)
+    return putThreadState(
+      goldens,
+      state,
+      threadState[1] ?? '',
+      req.body,
+      req.now,
+    );
   const byHandle = BY_HANDLE.exec(key);
   if (byHandle) return answer(resolveHandle(goldens, state, byHandle[1] ?? ''));
   const action = DRAFT_ACTION.exec(key);
@@ -709,6 +940,18 @@ function draftChatGuid(raw) {
     return typeof guid === 'string' ? guid : null;
   } catch {
     return null;
+  }
+}
+
+/** v2 F3d: the sorted top-level keys a state write sent, never their values. */
+function bodyKeys(raw) {
+  try {
+    const body = JSON.parse(String(raw ?? ''));
+    return body && typeof body === 'object' && !Array.isArray(body)
+      ? Object.keys(body).sort()
+      : [];
+  } catch {
+    return [];
   }
 }
 
@@ -744,6 +987,7 @@ export function route(req, token, goldens, state = initialState()) {
     query,
     status: out.status,
     ...(key === 'POST /v1/drafts' ? { chatGuid: draftChatGuid(req.body) } : {}),
+    ...(THREAD_STATE.test(key) ? { bodyKeys: bodyKeys(req.body) } : {}),
   };
   return {
     ...out,

@@ -4,8 +4,38 @@ import WeMessageKit
 // Boards 06 and 09: the queue's surfaces. Every verb here is absent, never
 // greyed, when its gate refuses (06.F, 09.F): a control that cannot act is
 // not drawn. Nothing here reaches the client; approvals go through the
-// shell model to Outbound, and Done, Snooze and Mute stay in this window's
-// QueueStateStore (D-UI-51).
+// shell model to Outbound, and Done, Snooze and Mute go through the
+// QueueStateStore, which writes them to the daemon (v2 F3).
+
+extension QueueReason {
+  /// D-UI-190: the row's reason line.
+  var line: String {
+    switch self {
+    case .ruleFired(let name): ProvisionalUI.ruleLine(name)
+    case .agentFlag(let text): ProvisionalUI.agentFlagLine(text)
+    case .pendingDraft: ProvisionalUI.draftReady
+    }
+  }
+}
+
+/// D-UI-191: the one static line a write the daemon did not take draws at
+/// the queue foot, for ProvisionalUI.threadStateFailureSeconds. Never a
+/// saved line (D-UI-192).
+struct ThreadStateFailureLine: View {
+  let text: String
+  let palette: Tokens.Palette
+
+  var body: some View {
+    Text(text)
+      .font(.system(size: 11))
+      .foregroundStyle(Tokens.color(palette.inkDim))
+      .lineLimit(2)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .accessibilityIdentifier(ShellID.threadStateFailure)
+  }
+}
 
 /// Triage's list header (06.C): the dated counter and a burn-down bar that
 /// shrinks as the queue empties. No percentage: the count is the measure.

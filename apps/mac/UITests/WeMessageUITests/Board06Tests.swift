@@ -12,7 +12,7 @@ import XCTest
 /// takes it back; E clears the queue to a zero that says what was done;
 /// a channel with no source says it is not connected rather than zero.
 /// The journal at the end holds no send, no draft action and no read
-/// state: Triage reads, and its verbs are local (D-UI-51).
+/// state: Triage reads, and its verbs write to the daemon (v2 F3).
 /// The light launch also runs the accessibility audit at the triage state.
 /// CI only.
 final class Board06Tests: XCTestCase {

@@ -24,7 +24,10 @@ import Foundation
 // the fixture boards' chip, the WhatsApp board's words and their rail;
 // D-UI-185: the v2 F1 paging caption, Eric's choice (b), held here like
 // the rest until the words are final; D-UI-186..189: the v2 F5 compose
-// lookup's words, plan rows D-F5-2..5, batched to Eric).
+// lookup's words, plan rows D-F5-2..5, batched to Eric; D-UI-190..194:
+// the v2 F3 thread state build, the queue row's reason and the one line a
+// write the daemon refused draws. D-UI-51 is retired: the daemon keeps
+// Done, Snooze and Mute since v2 F3).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -504,13 +507,6 @@ public enum ProvisionalUI {
     case clickOnly
   }
   public static let killDisengage: KillDisengage = .clickOnly
-
-  // D-UI-51: Done, Snooze and Mute (06.C). The daemon has no route for
-  // them, so they live in this window's memory and end with it.
-  public enum QueueStatePersistence: Sendable {
-    case memoryOnly
-  }
-  public static let queueStatePersistence: QueueStatePersistence = .memoryOnly
 
   // D-UI-52: the zero screen (06.E). It prints the last event's clock, not
   // a relative age, and does not hand off to the next channel: the build
@@ -1237,4 +1233,44 @@ public enum ProvisionalUI {
   // D-UI-189: (D-F5-5) while the lookup runs, the iMessage card's headline.
   // No spinner, and no composer until the answer is in.
   public static let composeChecking = "Checking this Mac"
+
+  // v2 F3, thread state in the daemon (docs/plans/v2-F3-thread-state.md).
+  // Done, Snooze and Mute are written to the daemon and survive a quit; a
+  // queue row says why it is there only when the draft proves it.
+
+  // D-UI-190: the reason line on a queue row, secondary text after the
+  // name. A rule the shell cannot name reads as a rule, unnamed; nothing
+  // proves a direct question or a mention, so neither is ever said.
+  // Foundation only (the UI test bundle compiles this file), so the line
+  // is spelled per reason; QueueReason.line picks one.
+  public static func ruleLine(_ name: String?) -> String {
+    guard let name else { return "Rule: a rule" }
+    return String(format: "Rule: %@", name)
+  }
+  public static func agentFlagLine(_ text: String) -> String { "Agent flagged: " + agentFlagExcerpt(text) }
+  public static let draftReady = "Draft ready"
+
+  // D-UI-191: a write the daemon refused, or could not take, is rolled back
+  // and says so in one static line at the queue foot for six seconds. A
+  // conflict (another window acted first) shows the record that won.
+  public static let threadStateRefusedLine = "Not saved: the daemon said no. Nothing changed."
+  public static let threadStateConflictLine = "Changed in another window. Showing the latest."
+  public static let threadStateFailureSeconds: Double = 6
+
+  // D-UI-192: a saved act draws nothing. The row already moved.
+  public enum ThreadStateSaved: Sendable {
+    case silent
+  }
+  public static let threadStateSaved: ThreadStateSaved = .silent
+
+  // D-UI-193: Triage draws no reason line; its card already says the draft
+  // is ready.
+  public static let reasonLineInTriage = false
+
+  // D-UI-194: the agent's own words are cut to 60 characters with an
+  // ellipsis: never coloured, never given an icon.
+  public static let agentFlagLimit = 60
+  public static func agentFlagExcerpt(_ text: String) -> String {
+    text.count <= agentFlagLimit ? text : String(text.prefix(agentFlagLimit)) + "\u{2026}"
+  }
 }

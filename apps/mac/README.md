@@ -207,7 +207,10 @@ equal):
 - `wemessage.verbs`: Triage's verb row under the reader (06.C)
 - `wemessage.verb.reply`: Reply (R) when no draft is pending
 - `wemessage.verb.done`, `wemessage.verb.snooze`, `wemessage.verb.mute`:
-  Done (E), Snooze (H), Mute (M), local to this window (D-UI-51)
+  Done (E), Snooze (H), Mute (M), written to the daemon's thread state
+  (`PUT /v1/threads/:guid/state`, v2 F3) and read back on every launch
+- `wemessage.sidebar.threadstate.failure`: the queue foot's one line when the
+  daemon refused or could not take a Done, Snooze or Mute (D-UI-191)
 - `wemessage.draft.<draftId>.approve`, `.edit`, `.hold`: a draft's own verbs
   outside Recent (A, R, Backspace); absent, never greyed, under the kill
   switch, and Approve absent until the body was drawn
@@ -831,4 +834,28 @@ D-UI-188  D-F5-4    ten bare digits get no row, only the hint "Add the
                     country code, e.g. +1"
 D-UI-189  D-F5-5    while the lookup runs, the iMessage card's headline is
                     "Checking this Mac", no spinner and no composer
+```
+
+- Thread state in the daemon (v2 F3). Done, Snooze and Mute are written
+  through to the daemon (`PUT /v1/threads/:guid/state`) and survive a quit,
+  a second window and a reinstall; the app is a cache over them, hydrated on
+  launch and on reconnect, kept current by `thread.state` frames. Reading a
+  thread is never an act: nothing writes seen or read. D-UI-51 (memory
+  only) is retired. Its provisional values are in `ProvisionalUI.swift`:
+
+```
+Row       Default
+--------  ---------------------------------------------------------------
+D-UI-190  a queue row's reason line after the name: "Rule: <name>" ("a
+          rule" when the shell cannot name it), "Agent flagged: <first 60
+          chars>", or "Draft ready"
+D-UI-191  a write the daemon refused or could not take rolls back and says
+          "Not saved: the daemon said no. Nothing changed." at the queue
+          foot for 6 s; a conflict says "Changed in another window.
+          Showing the latest."
+D-UI-192  a saved act draws nothing: the row already moved
+D-UI-193  Triage draws no reason line; its card already says the draft is
+          ready
+D-UI-194  the agent's words are cut to 60 characters with an ellipsis,
+          never coloured, no icon
 ```

@@ -6,6 +6,8 @@ import XCTest
 /// poll, and the journal rules every queue launch ends on: nothing was
 /// sent, nothing was approved at the daemon, and nothing was marked seen or
 /// read (06.A: the queue reads; it never writes the user's read state).
+/// v2 F3: the one write a queue act makes is PUT /v1/threads/:guid/state,
+/// and its body never names seenAt or attention.
 @MainActor
 enum QueueUI {
   static let maya = "iMessage;-;+15550100001"
@@ -70,6 +72,11 @@ enum QueueUI {
     XCTAssertTrue(waitUntil { thread.exists && thread.label.hasSuffix(": loaded") }, "\(guid): thread reads \(thread.label)")
   }
 
+  /// The PUT /v1/threads/:guid/state requests in `requests` (v2 F3).
+  static func stateWrites(_ requests: [FakeDaemon.Request]) -> [FakeDaemon.Request] {
+    requests.filter { $0.method == "PUT" && $0.path.range(of: #"^/v1/threads/[^/]+/state$"#, options: .regularExpression) != nil }
+  }
+
   /// The journal rules of a queue launch. `toggles` is how many kill
   /// switch posts the launch made on purpose (the banner's Disengage).
   static func assertJournal(_ when: String, toggles: Int = 0, file: StaticString = #filePath, line: UInt = #line) async throws {
@@ -86,7 +93,14 @@ enum QueueUI {
     let writes = requests.filter { $0.method != "GET" }
     let kill = writes.filter { $0.method == "POST" && $0.path == "/v1/toggles/kill-switch" }
     XCTAssertEqual(kill.count, toggles, "\(when): kill switch posts \(kill)", file: file, line: line)
-    XCTAssertEqual(writes.count, kill.count, "\(when): writes beyond the kill toggle: \(writes)", file: file, line: line)
+    // v2 F3: Done, Snooze and Mute write thread state, and only the act:
+    // never seen, never attention (D-F3-1, D-F3-4).
+    let state = stateWrites(requests)
+    let banned = state.filter { ($0.bodyKeys ?? ["(none)"]).contains { $0 == "seenAt" || $0 == "attention" || $0 == "(none)" } }
+    XCTAssertEqual(banned, [], "\(when): a thread-state write named seenAt or attention", file: file, line: line)
+    XCTAssertEqual(
+      writes.count, kill.count + state.count, "\(when): writes beyond the kill toggle and thread state: \(writes)",
+      file: file, line: line)
   }
 
   static func printTime(_ board: String, _ appearance: String, _ step: String, since start: Date) {

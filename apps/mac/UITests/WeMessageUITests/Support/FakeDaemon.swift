@@ -23,6 +23,8 @@ enum FakeDaemon {
     let status: Int
     /// v2 F5: the conversation a POST /v1/drafts body named; nil elsewhere.
     let chatGuid: String?
+    /// v2 F3: a PUT /v1/threads/:guid/state body's keys, sorted; nil elsewhere.
+    let bodyKeys: [String]?
     var description: String { "\(method) \(path) \(status)" }
   }
 

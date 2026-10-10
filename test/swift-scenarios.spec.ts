@@ -90,6 +90,7 @@ const EXPECTED_SCENARIOS = [
   'quiet',
   'rich',
   'search',
+  'thread-state',
 ];
 
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -156,12 +157,13 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twenty-two shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty-six shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
     expect(map.get('pending')?.parent).toBe('rich');
     expect(map.get('rich')?.parent).toBe(null);
+    expect(map.get('thread-state')?.parent).toBe('pending');
     for (const s of map.values()) expect(s.summary.length).toBeGreaterThan(20);
   });
 

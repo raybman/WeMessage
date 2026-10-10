@@ -178,15 +178,44 @@ struct ShellModelTests {
     let threads = try Reply.scenario(name, "threads.list.json")
     let drafts = try Reply.scenario(name, "drafts.list.json")
     let sse = try Reply.sse("greeting.txt")
+    // v2 F3: the thread states the fake daemon seeds (D20: the scenario
+    // chain only, never S0's golden), and the two PUT answers.
+    let states = try Self.chainStates(name)
+    let put = try Reply.golden("responses/threads.state.put.snoozed.json")
+    let cleared = try Reply.golden("responses/threads.state.put.cleared.json")
     return FakeTransport { request in
-      switch request.url?.path {
+      let path = request.url?.path ?? ""
+      if request.httpMethod == "PUT" && path.hasPrefix("/v1/threads/") && path.hasSuffix("/state") {
+        let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return body?["act"] is NSNull ? cleared : put
+      }
+      switch path {
       case "/v1/status": return status
       case "/v1/threads": return threads
       case "/v1/drafts": return drafts
+      case "/v1/threads/state": return states
       case "/v1/events/sse": return sse
       default: throw Unreachable()
       }
     }
+  }
+
+  /// GET /v1/threads/state as the fake daemon serves `name`: the nearest
+  /// scenario in the chain that has one, else no records.
+  static func chainStates(_ name: String) throws -> Reply {
+    let file = "threads.state.list.json"
+    var at: String? = name
+    while let scenario = at {
+      let dir = "fixtures/scenarios/" + scenario + "/"
+      if let url = try? Repo.url(dir + "responses/" + file), FileManager.default.fileExists(atPath: url.path) {
+        return try Reply.scenario(scenario, file)
+      }
+      let meta = try Data(contentsOf: try Repo.url(dir + "scenario.json"))
+      at = (try JSONSerialization.jsonObject(with: meta) as? [String: Any])?["extends"] as? String
+    }
+    return Reply(
+      status: 200, body: Data(#"{"states":[],"asOf":"2026-09-01T12:00:43.000Z"}"#.utf8),
+      headers: ["Content-Type": "application/json"])
   }
 
   static func decode<T: Decodable>(_ reply: Reply, _ type: T.Type) throws -> T {
@@ -352,7 +381,7 @@ struct ShellModelTests {
     m.stop()
   }
 
-  @Test("06.A under D-UI-44: Done on a drafted thread takes it out of the queue, Z puts it back, and no request leaves")
+  @Test("06.A under v2 F3: Done on a drafted thread takes it out of the queue, Z puts it back, and the only writes are its two PUTs of thread state")
   func doneClearsDraftThenUndo() async throws {
     let transport = try Self.scenarioTransport("pending")
     let m = ShellModel(client: testClient(transport))
@@ -374,10 +403,43 @@ struct ShellModelTests {
     #expect(m.selectedThread != guid, "the selection did not advance")
     #expect(m.undoLast())
     #expect(m.board.queue.count == 5)
-    #expect(transport.requests.count == before, "a queue act reached the daemon")
+    await m.queue.settle()
+    // Only the writes are counted: the stream's own resync (a GET of the
+    // draft queue the reducer asks for once the stream opens) can land in
+    // this window on a loaded runner, and a read is not a queue act.
+    let after = transport.requests.dropFirst(before).filter { $0.httpMethod != "GET" }
+    #expect(after.count == 2, "want the act's PUT and the undo's PUT, got \(after.map { $0.url?.path ?? "" })")
+    #expect(after.allSatisfy { $0.httpMethod == "PUT" && $0.url?.path == "/v1/threads/\(guid)/state" })
     m.choose(.recent)
     #expect(m.queue.triageStart == nil)
     m.stop()
+  }
+
+  @Test("v2 F3: start() hydrates the daemon's thread state; a hydrated snooze is drawn and is not this session's receipt")
+  func hydratesThreadState() async throws {
+    let transport = try Self.scenarioTransport("thread-state")
+    let m = ShellModel(client: testClient(transport))
+    m.start()
+    let daniel = "iMessage;-;+15550100002"
+    await Self.settle(m) { _ in m.queue.acts[daniel] != nil }
+    #expect(m.queue.acts[daniel] == .snoozed(at: WireDate.parse("2026-09-01T11:00:00.000Z")!, until: WireDate.parse("2026-09-02T09:00:00.000Z")!))
+    #expect(m.queue.sessionActs.isEmpty)
+    #expect(m.receipt.snoozed == 0, "a snooze another window made is not this session's work")
+    #expect(!transport.requests.contains { $0.httpMethod == "PUT" }, "hydrating wrote something")
+    m.stop()
+  }
+
+  @Test("v2 F3: a thread.state frame from another window lands in the queue store")
+  func threadStateFrameApplies() throws {
+    let m = Self.model(.connected(state: "connected"))
+    let guid = "iMessage;-;+15550100001"
+    let record = ThreadStateRecord(
+      chatGuid: guid, act: "muted", actAt: "2026-09-01T12:00:00.000Z", snoozedUntil: nil, attention: nil,
+      updatedAt: "2026-09-01T12:00:00.000Z", awake: false)
+    m.apply(.frame(.event(seq: 1, event: .threadState(ThreadStateEvent(chatGuid: guid, state: record)))))
+    #expect(m.queue.acts[guid] == .muted(at: WireDate.parse("2026-09-01T12:00:00.000Z")!))
+    m.apply(.frame(.event(seq: 1, event: .threadState(ThreadStateEvent(chatGuid: guid, state: nil)))))
+    #expect(m.queue.acts[guid] == nil)
   }
 
   @Test("06.E: Done never succeeds against a source that is not connected")

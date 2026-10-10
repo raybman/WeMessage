@@ -125,4 +125,154 @@ struct QueueModelTests {
     let r = QueueStateStore.receipt(entries: entries, acts: acts)
     #expect(r.line == "1 replied \u{00B7} 1 done \u{00B7} 1 snoozed \u{00B7} 1 approved \u{00B7} 1 failed")
   }
+
+  // MARK: v2 F3d (G-06a): the store is a cache over the daemon's record
+
+  static let a = "iMessage;-;+15550100001"
+  static let b = "iMessage;-;+15550100002"
+
+  static func synced(_ act: ThreadAct?, _ updatedAt: String) -> SyncedThreadState {
+    SyncedThreadState(act: act, mode: nil, updatedAt: updatedAt)
+  }
+
+  @Test("an act writes through: one PUT per thread, a fresh act lets the daemon stamp it, the next sends the stamp back")
+  func testActWritesThrough() async throws {
+    let sync = InMemoryThreadStateSync()
+    let store = QueueStateStore(sync: sync)
+    let now = try Self.at("2026-09-01T12:01:34.000Z")
+    store.act(.done, on: [Self.a, Self.b], at: now)
+    #expect(store.acts[Self.a] == .done(at: now), "the act is applied at once, before the daemon answers")
+    await store.settle()
+    let writes = await sync.writes
+    #expect(
+      writes == [
+        .init(guid: Self.a, act: .done(at: now), expected: nil, restore: false),
+        .init(guid: Self.b, act: .done(at: now), expected: nil, restore: false),
+      ])
+    let stamp = try #require(await sync.records[Self.a]?.updatedAt)
+    store.act(.mute, on: [Self.a], at: now)
+    await store.settle()
+    #expect(await sync.writes.last == .init(guid: Self.a, act: .muted(at: now), expected: stamp, restore: false))
+    #expect(store.failure == nil, "D-UI-192: success says nothing")
+    #expect(await sync.records[Self.a]?.act == .muted(at: now))
+  }
+
+  @Test("a refused or failed write rolls the act back and says D-UI-191 once")
+  func testRefusalRollsBackAndSetsFailure() async throws {
+    let sync = InMemoryThreadStateSync()
+    let store = QueueStateStore(sync: sync)
+    let now = try Self.at("2026-09-01T12:01:34.000Z")
+    await sync.refuseNext(.denied(reason: "test"))
+    store.act(.done, on: [Self.a], at: now)
+    await store.settle()
+    #expect(store.acts[Self.a] == nil, "a refused act is rolled back")
+    #expect(store.failure == .refused)
+    #expect(store.failureLine == ProvisionalUI.threadStateRefusedLine)
+
+    await sync.failNext()
+    store.act(.snooze, on: [Self.b], at: now, calendar: Self.calendar)
+    await store.settle()
+    #expect(store.acts[Self.b] == nil, "an unreachable daemon rolls back too")
+    #expect(store.failure == .refused)
+    #expect(await sync.records.isEmpty)
+  }
+
+  @Test("undo PUTs the prior record exactly: a restore with its own instant, or a clear for a first act")
+  func testUndoRestoresPriorRecord() async throws {
+    let earlier = try Self.at("2026-09-01T11:00:00.000Z")
+    let until = try Self.at("2026-09-02T09:00:00.000Z")
+    let sync = InMemoryThreadStateSync(records: [Self.a: Self.synced(.snoozed(at: earlier, until: until), "2026-09-01T11:00:00.000Z")])
+    let store = QueueStateStore(sync: sync)
+    await store.hydrate()
+    let now = try Self.at("2026-09-01T12:01:34.000Z")
+    store.act(.done, on: [Self.a, Self.b], at: now)
+    await store.settle()
+    #expect(store.undo())
+    #expect(store.acts[Self.a] == .snoozed(at: earlier, until: until))
+    #expect(store.acts[Self.b] == nil)
+    await store.settle()
+    let writes = await sync.writes
+    #expect(writes.count == 4)
+    let undone = writes.suffix(2).sorted { $0.guid < $1.guid }
+    #expect(undone.map(\.restore) == [true, true])
+    #expect(undone.map(\.act) == [.snoozed(at: earlier, until: until), nil])
+    #expect(await sync.records[Self.a]?.act == .snoozed(at: earlier, until: until))
+    #expect(await sync.records[Self.b] == nil, "undoing a first act clears the record")
+    #expect(store.failure == nil)
+  }
+
+  @Test("a conflict (another window acted first) shows the record that won and says so")
+  func testConflictRehydrates() async throws {
+    let sync = InMemoryThreadStateSync(records: [Self.a: Self.synced(.done(at: try Self.at("2026-09-01T11:00:00.000Z")), "2026-09-01T11:00:00.000Z")])
+    let store = QueueStateStore(sync: sync)
+    await store.hydrate()
+    let theirs = try Self.at("2026-09-01T12:00:00.000Z")
+    await sync.set(Self.a, Self.synced(.muted(at: theirs), "2026-09-01T12:00:00.000Z"))
+    store.act(.snooze, on: [Self.a], at: try Self.at("2026-09-01T12:01:34.000Z"), calendar: Self.calendar)
+    await store.settle()
+    #expect(store.acts[Self.a] == .muted(at: theirs), "the window shows the latest, not its own lost act")
+    #expect(store.failure == .conflict)
+    #expect(store.failureLine == ProvisionalUI.threadStateConflictLine)
+    #expect(await sync.loads == 2, "one hydrate, one re-read after the 409")
+    // The next act carries the winner's stamp and lands.
+    store.act(.done, on: [Self.a], at: theirs)
+    await store.settle()
+    #expect(await sync.writes.last?.expected == "2026-09-01T12:00:00.000Z")
+    #expect(await sync.records[Self.a]?.act == .done(at: theirs))
+  }
+
+  @Test("hydrate on connect: the daemon's record replaces the cache, and a failed read keeps it")
+  func testHydrateOnConnect() async throws {
+    let at = try Self.at("2026-09-01T11:00:00.000Z")
+    let until = try Self.at("2026-09-02T09:00:00.000Z")
+    let sync = InMemoryThreadStateSync(records: [Self.b: Self.synced(.snoozed(at: at, until: until), "2026-09-01T11:00:00.000Z")])
+    let store = QueueStateStore(sync: sync)
+    #expect(store.acts.isEmpty)
+    await store.hydrate()
+    #expect(store.acts == [Self.b: .snoozed(at: at, until: until)])
+    #expect(store.sessionActs.isEmpty, "a hydrated act is not this session's work (06.E receipt)")
+    await sync.failNextLoad()
+    await store.hydrate()
+    #expect(store.acts == [Self.b: .snoozed(at: at, until: until)], "an unreachable read changes nothing")
+    await sync.set(Self.b, nil)
+    await store.hydrate()
+    #expect(store.acts.isEmpty, "a record cleared elsewhere clears here")
+    #expect(store.failure == nil, "a read never draws D-UI-191")
+  }
+
+  @Test("a thread.state frame from another window applies; an older or in-flight one does not")
+  func testEventFromOtherWindowApplies() async throws {
+    let store = QueueStateStore(sync: InMemoryThreadStateSync())
+    func record(_ act: String?, _ at: String, until: String? = nil) -> ThreadStateRecord {
+      ThreadStateRecord(
+        chatGuid: Self.b, act: act, actAt: act == nil ? nil : at, snoozedUntil: until, attention: nil,
+        updatedAt: at, awake: false)
+    }
+    store.apply(record("muted", "2026-09-01T12:00:00.000Z"), guid: Self.b)
+    #expect(store.acts[Self.b] == .muted(at: try Self.at("2026-09-01T12:00:00.000Z")))
+    store.apply(record("done", "2026-09-01T11:00:00.000Z"), guid: Self.b)
+    #expect(store.acts[Self.b] == .muted(at: try Self.at("2026-09-01T12:00:00.000Z")), "an older frame is stale")
+    store.apply(nil, guid: Self.b)
+    #expect(store.acts[Self.b] == nil, "a cleared record clears the row")
+    #expect(store.sessionActs.isEmpty, "another window's act is not this session's")
+
+    // A frame for a thread with a write in flight waits for the write.
+    let now = try Self.at("2026-09-01T12:01:34.000Z")
+    store.act(.done, on: [Self.a], at: now)
+    store.apply(nil, guid: Self.a)
+    #expect(store.acts[Self.a] == .done(at: now))
+    await store.settle()
+    #expect(store.sessionActs == [Self.a: .done(at: now)])
+  }
+
+  @Test("D-UI-190/194: the reason line names the rule, cuts the agent's words at 60, else says the draft is ready")
+  func reasonLines() {
+    #expect(QueueReason.ruleFired("Weekday hours").line == "Rule: Weekday hours")
+    #expect(QueueReason.ruleFired(nil).line == "Rule: a rule")
+    #expect(QueueReason.agentFlag("Follow up").line == "Agent flagged: Follow up")
+    let long = String(repeating: "x", count: 61)
+    #expect(QueueReason.agentFlag(long).line == "Agent flagged: " + String(repeating: "x", count: 60) + "\u{2026}")
+    #expect(QueueReason.agentFlag(String(repeating: "y", count: 60)).line.hasSuffix("y"))
+    #expect(QueueReason.pendingDraft.line == ProvisionalUI.draftReady)
+  }
 }

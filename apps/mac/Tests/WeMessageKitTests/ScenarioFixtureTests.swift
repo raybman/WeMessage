@@ -19,6 +19,7 @@ struct ScenarioFixtureTests {
     case "GET /v1/threads": return "threads.list"
     case "GET /v1/threads/:guid/messages": return "threads.messages"
     case "GET /v1/threads/by-handle/:handle": return "threads.by-handle.found"
+    case "GET /v1/threads/state": return "threads.state.list"
     case "GET /v1/drafts": return "drafts.list.pending"
     case "GET /v1/contacts": return "contacts.list"
     case "GET /v1/adapters": return "adapters.list"

@@ -15,6 +15,8 @@ enum ID {
   static let sidebar = "wemessage.sidebar"
   static let lens = "wemessage.lens"
   static let sidebarEmpty = "wemessage.sidebar.empty"
+  /// v2 F3, D-UI-191: the queue foot's write-failure line.
+  static let threadStateFailure = "wemessage.sidebar.threadstate.failure"
   static let connection = "wemessage.connection"
   static let contentEmpty = "wemessage.content.empty"
   // v2 S4c, board 01.

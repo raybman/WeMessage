@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  initialState,
   loadGoldens,
   mintToken,
   parseArgs,
@@ -253,5 +254,333 @@ describe('v2 S3b F8-F9: start on port 0', () => {
       expect(line).not.toContain(daemon.token);
       expect(line).not.toContain('wm_');
     }
+  });
+});
+
+/**
+ * v2 F3d (G-06a): the fake daemon keeps Done, Snooze and Mute the way the
+ * daemon does, so a UI test can act, relaunch the app against the same
+ * process and still see the act. The rules are the daemon's
+ * (packages/daemon/src/routes/thread-state.ts): a strict body, an
+ * ifUpdatedAt check that answers 409 with the record that won, a cleared
+ * record deleted, wake computed against the request clock. Base records come
+ * from the scenario chain only, never from S0, so no other board's queue
+ * moves (deviation D20).
+ */
+describe('v2 F3d T1-T9: thread state on the fake daemon', () => {
+  const g = loadGoldens();
+  type State = ReturnType<typeof initialState>;
+  const NOW = '2026-09-01T12:30:00.000Z';
+  const DANIEL = 'iMessage;-;+15550100002';
+  const MAYA = 'iMessage;-;+15550100001';
+  const enc = encodeURIComponent;
+
+  function step(
+    state: State,
+    req: {
+      method: string;
+      path: string;
+      body?: unknown;
+      auth?: boolean;
+      now?: string;
+    },
+  ) {
+    const out = route(
+      {
+        method: req.method,
+        path: req.path,
+        authorization: req.auth === false ? undefined : `Bearer ${TOKEN}`,
+        remote: '127.0.0.1',
+        now: req.now ?? NOW,
+        body:
+          req.body === undefined
+            ? undefined
+            : typeof req.body === 'string'
+              ? req.body
+              : JSON.stringify(req.body),
+      },
+      TOKEN,
+      g,
+      state,
+    );
+    return { out, state: out.next ?? state };
+  }
+  const scenario = (name: string): State =>
+    step(initialState({ control: true }), {
+      method: 'POST',
+      path: '/v1/_scenario',
+      body: { name },
+    }).state;
+  const list = (state: State, now = NOW) =>
+    step(state, { method: 'GET', path: '/v1/threads/state', now });
+  const put = (state: State, guid: string, body: unknown, now = NOW) =>
+    step(state, {
+      method: 'PUT',
+      path: `/v1/threads/${enc(guid)}/state`,
+      body,
+      now,
+    });
+  const states = (out: { body?: unknown }) =>
+    (out.body as { states: Array<Record<string, unknown>> }).states;
+
+  it('T1 GET /v1/threads/state: the thread-state scenario seeds one snooze on Daniel; default and rich seed none', () => {
+    const seeded = list(scenario('thread-state'));
+    expect(seeded.out.status).toBe(200);
+    expect(seeded.out.body).toEqual({
+      states: [
+        {
+          chatGuid: DANIEL,
+          act: 'snoozed',
+          actAt: '2026-09-01T11:00:00.000Z',
+          snoozedUntil: '2026-09-02T09:00:00.000Z',
+          attention: null,
+          updatedAt: '2026-09-01T11:00:00.000Z',
+          awake: false,
+        },
+      ],
+      asOf: NOW,
+    });
+    expect(states(list(initialState()).out)).toEqual([]);
+    expect(states(list(scenario('rich')).out)).toEqual([]);
+    expect(states(list(scenario('pending')).out)).toEqual([]);
+  });
+
+  it('T2 wake is computed against the request clock, never stored', () => {
+    const state = scenario('thread-state');
+    const later = list(state, '2026-09-02T09:00:00.000Z');
+    expect(states(later.out)[0]?.awake).toBe(true);
+    expect(later.out.body).toMatchObject({ asOf: '2026-09-02T09:00:00.000Z' });
+    expect(states(list(later.state).out)[0]?.awake).toBe(false);
+  });
+
+  it('T3 PUT stores the act, stamps actAt and updatedAt with the request clock, and GET then serves it', () => {
+    const first = put(scenario('rich'), MAYA, {
+      act: 'done',
+      ifUpdatedAt: null,
+    });
+    expect(first.out.status).toBe(200);
+    const done = {
+      chatGuid: MAYA,
+      act: 'done',
+      actAt: NOW,
+      snoozedUntil: null,
+      attention: null,
+      updatedAt: NOW,
+      awake: false,
+    };
+    expect(first.out.body).toEqual({ state: done });
+    expect(states(list(first.state).out)).toEqual([done]);
+
+    const snoozed = put(
+      first.state,
+      MAYA,
+      {
+        act: 'snoozed',
+        snoozedUntil: '2026-09-02T09:00:00.000Z',
+        ifUpdatedAt: NOW,
+      },
+      '2026-09-01T12:31:00.000Z',
+    );
+    expect(snoozed.out.status).toBe(200);
+    expect(snoozed.out.body).toMatchObject({
+      state: {
+        act: 'snoozed',
+        actAt: '2026-09-01T12:31:00.000Z',
+        snoozedUntil: '2026-09-02T09:00:00.000Z',
+        updatedAt: '2026-09-01T12:31:00.000Z',
+      },
+    });
+  });
+
+  it('T4 a restore (undo) keeps its own actAt; a cleared act with no attention deletes the record, even a seeded one', () => {
+    const base = scenario('thread-state');
+    const restored = put(base, MAYA, {
+      act: 'muted',
+      actAt: '2026-09-01T10:00:00.000Z',
+      ifUpdatedAt: null,
+    });
+    expect(restored.out.body).toMatchObject({
+      state: {
+        act: 'muted',
+        actAt: '2026-09-01T10:00:00.000Z',
+        updatedAt: NOW,
+      },
+    });
+    const cleared = put(restored.state, DANIEL, {
+      act: null,
+      ifUpdatedAt: '2026-09-01T11:00:00.000Z',
+    });
+    expect(cleared.out.status).toBe(200);
+    expect(cleared.out.body).toEqual({ state: null });
+    expect(states(list(cleared.state).out).map((s) => s.chatGuid)).toEqual([
+      MAYA,
+    ]);
+  });
+
+  it('T5 a stale ifUpdatedAt is 409 conflict carrying the record that won, and changes nothing', () => {
+    const base = scenario('thread-state');
+    const stale = put(base, DANIEL, { act: 'done', ifUpdatedAt: null });
+    expect(stale.out.status).toBe(409);
+    expect(stale.out.body).toEqual({
+      error: 'conflict',
+      detail: { current: states(list(base).out)[0] },
+    });
+    expect(stale.state.threadState).toEqual(base.threadState);
+    const missing = put(base, MAYA, {
+      act: 'done',
+      ifUpdatedAt: '2026-09-01T11:00:00.000Z',
+    });
+    expect(missing.out.status).toBe(409);
+    expect(missing.out.body).toEqual({
+      error: 'conflict',
+      detail: { current: null },
+    });
+    // Omitted: no check at all, as the daemon does.
+    expect(put(base, DANIEL, { act: 'done' }).out.status).toBe(200);
+  });
+
+  it('T6 a bad body is the S0 400 invalid-thread-state, and changes nothing', () => {
+    const invalid = golden('errors/400.invalid-thread-state.json').body;
+    const base = scenario('rich');
+    for (const bad of [
+      'not json',
+      [],
+      {},
+      { act: 'archived' },
+      { act: 'snoozed' },
+      { act: 'done', snoozedUntil: '2026-09-02T09:00:00.000Z' },
+      { act: 'done', seenAt: NOW },
+      { act: 'done', attention: 'loud' },
+      { act: 'done', ifUpdatedAt: 'yesterday' },
+      { act: null, actAt: '2026-09-01T10:00:00.000Z' },
+      { act: 'done', actAt: '2026-09-01T13:00:00.000Z' },
+    ]) {
+      const out = put(base, MAYA, bad);
+      expect([bad, out.out.status, out.out.body]).toEqual([bad, 400, invalid]);
+      expect(out.state.threadState, JSON.stringify(bad)).toEqual({});
+    }
+  });
+
+  it('T7 both routes need the bearer, and an act frame reaches every open stream', () => {
+    const base = scenario('rich');
+    expect(
+      step(base, { method: 'GET', path: '/v1/threads/state', auth: false }).out
+        .status,
+    ).toBe(401);
+    const refused = step(base, {
+      method: 'PUT',
+      path: `/v1/threads/${enc(MAYA)}/state`,
+      body: { act: 'done' },
+      auth: false,
+    });
+    expect(refused.out.status).toBe(401);
+    expect(refused.state.threadState).toEqual({});
+
+    const acted = put(base, MAYA, { act: 'done' });
+    const frame = String(acted.out.emit ?? '');
+    expect(frame).toMatch(/^id: \d+\nevent: thread\.state\ndata: /);
+    const data = JSON.parse(/^data: (.*)$/m.exec(frame)?.[1] ?? 'null');
+    expect(data).toEqual({
+      event: 'thread.state',
+      chatGuid: MAYA,
+      state: (acted.out.body as { state: unknown }).state,
+    });
+  });
+
+  it('T8 the journal carries the sorted body keys of a state write, so a UI test can ban seenAt', () => {
+    const acted = put(scenario('rich'), MAYA, {
+      ifUpdatedAt: null,
+      act: 'done',
+    });
+    expect(acted.state.journal.at(-1)).toEqual({
+      method: 'PUT',
+      path: `/v1/threads/${enc(MAYA)}/state`,
+      query: '',
+      status: 200,
+      bodyKeys: ['act', 'ifUpdatedAt'],
+    });
+    const listed = list(acted.state);
+    expect(listed.state.journal.at(-1)).toEqual({
+      method: 'GET',
+      path: '/v1/threads/state',
+      query: '',
+      status: 200,
+    });
+  });
+
+  it('T9 a scenario switch and a reset drop every write', () => {
+    const acted = put(scenario('thread-state'), MAYA, { act: 'done' });
+    expect(states(list(acted.state).out)).toHaveLength(2);
+    const switched = step(acted.state, {
+      method: 'POST',
+      path: '/v1/_scenario',
+      body: { name: 'thread-state' },
+    }).state;
+    expect(states(list(switched).out).map((s) => s.chatGuid)).toEqual([DANIEL]);
+    const reset = step(acted.state, {
+      method: 'POST',
+      path: '/v1/_reset',
+    }).state;
+    expect(reset.threadState).toEqual({});
+    expect(states(list(reset).out)).toEqual([]);
+  });
+});
+
+describe('v2 F3d T10: an act survives a new connection (the relaunch, over a socket)', () => {
+  let dir = '';
+  let close: (() => Promise<void>) | null = null;
+  afterEach(async () => {
+    if (close) await close();
+    close = null;
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  it('T10 PUT on one connection, GET on a fresh one: the snooze is still there', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'wm-fake-daemon-'));
+    const daemon = await start({
+      dir: join(dir, 'wm'),
+      port: 0,
+      control: true,
+      write: () => undefined,
+    });
+    close = daemon.close;
+    const base = `http://127.0.0.1:${daemon.port}`;
+    const auth = { authorization: `Bearer ${daemon.token}` };
+    const switched = await fetch(`${base}/v1/_scenario`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'rich' }),
+    });
+    expect(switched.status).toBe(200);
+    await switched.body?.cancel();
+    const guid = 'iMessage;-;+15550100001';
+    const wrote = await fetch(
+      `${base}/v1/threads/${encodeURIComponent(guid)}/state`,
+      {
+        method: 'PUT',
+        headers: {
+          ...auth,
+          'content-type': 'application/json',
+          connection: 'close',
+        },
+        body: JSON.stringify({
+          act: 'snoozed',
+          snoozedUntil: '2099-01-01T09:00:00.000Z',
+          ifUpdatedAt: null,
+        }),
+      },
+    );
+    expect(wrote.status).toBe(200);
+    await wrote.body?.cancel();
+    const read = await fetch(`${base}/v1/threads/state`, {
+      headers: { ...auth, connection: 'close' },
+    });
+    expect(read.status).toBe(200);
+    const page = (await read.json()) as {
+      states: Array<{ chatGuid: string; act: string; awake: boolean }>;
+    };
+    expect(page.states.map((s) => [s.chatGuid, s.act, s.awake])).toEqual([
+      [guid, 'snoozed', false],
+    ]);
   });
 });

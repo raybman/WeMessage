@@ -8,8 +8,8 @@ import WeMessageKit
 /// `board` is board 01's marks, counter and list, folded from all of it.
 /// Nothing here sends anything (Outbound does, after its undo window): the
 /// one write is the kill switch, engaged from the chip and disengaged only
-/// from the banner's click (D-UI-50). Done, Snooze and Mute live in the
-/// local QueueStateStore (D-UI-51) and reach no route.
+/// from the banner's click (D-UI-50), and Done, Snooze and Mute, which
+/// QueueStateStore writes through to the daemon's thread state (v2 F3).
 @MainActor
 @Observable
 public final class ShellModel {
@@ -123,8 +123,9 @@ public final class ShellModel {
   /// Approve then carries the field as the edited body.
   public var editedFrom: [String: String] = [:]
 
-  /// Boards 06 and 09: the completion acts and the Triage selection.
-  public let queue = QueueStateStore()
+  /// Boards 06 and 09: the completion acts and the Triage selection, a
+  /// cache over the daemon's thread state (v2 F3).
+  public let queue: QueueStateStore
   /// The audit view (09.G) is open in the content pane.
   public var auditShown = false
   /// The audit rows last read, oldest first.
@@ -584,7 +585,7 @@ public final class ShellModel {
 
   /// The zero screen's receipt (06.E): this session's work.
   public var receipt: QueueStateStore.Receipt {
-    QueueStateStore.receipt(entries: outbound.entries, acts: queue.acts)
+    QueueStateStore.receipt(entries: outbound.entries, acts: queue.sessionActs)
   }
 
   /// Escape's ladder (06.C): the composer gives the keyboard back to the
@@ -622,6 +623,7 @@ public final class ShellModel {
     self.email = EmailDesk(client: client)
     self.linkedIn = LinkedInDesk(client: client)
     self.search = SearchModel(source: DaemonSearchSource(client: client))
+    self.queue = QueueStateStore(sync: GatewayThreadStateSync(client: client))
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()
     self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
@@ -807,6 +809,8 @@ public final class ShellModel {
       outbound.approveSeconds = UndoWindow.agent(fromSetting: envelope.settings["send.undoGraceSeconds"]?.value)
     }
     if let envelope = try? await client.listDrafts() { fold(.response(.drafts(envelope.drafts))) }
+    // v2 F3: the daemon's Done, Snooze and Mute replace the cache.
+    await queue.hydrate()
     await thread.reload()
   }
 
@@ -853,10 +857,20 @@ public final class ShellModel {
       if case .connected = connection { connection = .connected(state: live.state) }
       return
     }
+    // v2 F3: another window's act (or the echo of this one's).
+    if case .frame(.event(_, .threadState(let event))) = action {
+      queue.apply(event.state, guid: event.chatGuid)
+      return
+    }
     guard case .status(let status) = action else { return }
     switch status {
     case .connected:
       if case .connected = connection { return }
+      // A window that had the stream back re-reads what it missed.
+      switch connection {
+      case .reconnecting, .down: Task { [weak self] in await self?.queue.hydrate() }
+      case .idle, .connected: break
+      }
       connection = .connected(state: "connected")
     case .reconnecting(let attempt):
       switch connection {

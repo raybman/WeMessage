@@ -10,6 +10,8 @@ enum ShellID {
   static let rail = "wemessage.rail"
   static let sidebar = "wemessage.sidebar"
   static let sidebarEmpty = "wemessage.sidebar.empty"
+  /// v2 F3, D-UI-191: the queue foot's write-failure line.
+  static let threadStateFailure = "wemessage.sidebar.threadstate.failure"
   static let connection = "wemessage.connection"
   static let title = "wemessage.title"
   static let titleCounter = "wemessage.title.counter"
@@ -753,10 +755,19 @@ private struct SidebarView: View {
     guard model.lens != .recent, let draft = model.pendingDraft(for: guid), !model.thread.held.contains(draft.id) else {
       return nil
     }
-    if model.lens == .triage { return "Draft ready" }
-    if model.hasUnsavedEdit(guid) { return QueueStateStore.reasonText(.unsavedEdit) }
-    if let opened = model.outbound.renderedAt[draft.id] { return "opened " + ShellText.shortClock(opened) }
-    return QueueStateStore.reasonText(.notRendered)
+    // D-UI-193: Triage's card already says the draft is ready.
+    if model.lens == .triage { return ProvisionalUI.reasonLineInTriage ? QueueReasons.derive(draft).line : ProvisionalUI.draftReady }
+    // D-UI-190: why the row is here, then its state.
+    let reason = QueueReasons.derive(draft).line
+    let state: String
+    if model.hasUnsavedEdit(guid) {
+      state = QueueStateStore.reasonText(.unsavedEdit)
+    } else if let opened = model.outbound.renderedAt[draft.id] {
+      state = "opened " + ShellText.shortClock(opened)
+    } else {
+      state = QueueStateStore.reasonText(.notRendered)
+    }
+    return reason + " \u{00B7} " + state
   }
 
   /// The Triage and Needs You keys' claim: a new value whenever the list
@@ -832,6 +843,10 @@ private struct SidebarView: View {
           .accessibilityLabel(FirstRowStamp.label(TestHooks.firstRow.ms))
         }
         .scrollIndicators(.never)
+      }
+      // D-UI-191: a write the daemon did not take, at the queue foot.
+      if let line = model.queue.failureLine {
+        ThreadStateFailureLine(text: line, palette: palette)
       }
       Text(model.connectionLine)
         .font(.system(size: ProvisionalUI.connectionFontSize))

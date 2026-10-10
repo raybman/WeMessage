@@ -130,6 +130,13 @@ public actor InMemoryThreadStateSync: ThreadStateSync {
     public var act: ThreadAct?
     public var expected: String?
     public var restore: Bool
+
+    public init(guid: String, act: ThreadAct?, expected: String?, restore: Bool) {
+      self.guid = guid
+      self.act = act
+      self.expected = expected
+      self.restore = restore
+    }
   }
 
   public struct Unreachable: Error, Equatable, Sendable {}

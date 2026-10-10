@@ -342,4 +342,114 @@ describe('chatdb-builder (Scenario 6)', () => {
       f.addMessage({ chatId, handleId, text: 'dup', guid: m.guid }),
     ).toThrow(/UNIQUE/i);
   });
+
+  describe('v2 F4: rich-turn options', () => {
+    it('writes delivery columns on an outbound message', () => {
+      const f = freshDb();
+      const chatId = f.addChat();
+      const m = f.addMessage({
+        chatId,
+        text: 'x',
+        isFromMe: true,
+        error: 22,
+        isSent: true,
+        isDelivered: true,
+        dateDelivered: '2026-01-02T06:00:00Z',
+        dateRead: '2026-01-02T06:01:00Z',
+      });
+      const row = f.db
+        .prepare(
+          'SELECT error, is_sent, is_delivered, date_delivered, date_read FROM message WHERE ROWID = ?',
+        )
+        .safeIntegers()
+        .get(m.rowid) as Record<string, bigint>;
+      expect(row).toEqual({
+        error: 22n,
+        is_sent: 1n,
+        is_delivered: 1n,
+        date_delivered: appleEpochNs('2026-01-02T06:00:00Z'),
+        date_read: appleEpochNs('2026-01-02T06:01:00Z'),
+      });
+    });
+
+    it('leaves delivery columns at chat.db defaults when not asked', () => {
+      const f = freshDb();
+      const chatId = f.addChat();
+      const m = f.addMessage({ chatId, text: 'x', isFromMe: true });
+      const row = f.db
+        .prepare(
+          'SELECT error, is_sent, is_delivered, date_delivered, date_read FROM message WHERE ROWID = ?',
+        )
+        .get(m.rowid);
+      expect(row).toEqual({
+        error: 0,
+        is_sent: 0,
+        is_delivered: 0,
+        date_delivered: 0,
+        date_read: 0,
+      });
+    });
+
+    it('writes sticker, hidden and a NULL transfer name on an attachment', () => {
+      const f = freshDb();
+      const chatId = f.addChat();
+      const m = f.addMessage({ chatId, text: null });
+      const a = f.addAttachment(m.rowid, {
+        isSticker: true,
+        hidden: true,
+        transferName: null,
+      });
+      const row = f.db
+        .prepare(
+          'SELECT is_sticker, hide_attachment, transfer_name FROM attachment WHERE ROWID = ?',
+        )
+        .get(a);
+      expect(row).toEqual({
+        is_sticker: 1,
+        hide_attachment: 1,
+        transfer_name: null,
+      });
+    });
+
+    it('writes a tapback with a part index, a bp: prefix, or from me', () => {
+      const f = freshDb();
+      const chatId = f.addChat();
+      const target = f.addMessage({ chatId, text: 'said' });
+      const part = f.addTapback(target.guid, 2001, { chatId, part: 2 });
+      const bp = f.addTapback(target.guid, 2002, { chatId, bp: true });
+      const mine = f.addTapback(target.guid, 3001, { chatId, isFromMe: true });
+      const rows = f.db
+        .prepare(
+          'SELECT ROWID AS rowid, associated_message_guid AS g, is_from_me AS me FROM message WHERE ROWID IN (?, ?, ?) ORDER BY ROWID',
+        )
+        .all(part.rowid, bp.rowid, mine.rowid);
+      expect(rows).toEqual([
+        { rowid: part.rowid, g: `p:2/${target.guid}`, me: 0 },
+        { rowid: bp.rowid, g: `bp:${target.guid}`, me: 0 },
+        { rowid: mine.rowid, g: `p:0/${target.guid}`, me: 1 },
+      ]);
+    });
+
+    it('carries the chat.db indexes the page reader ranges over', () => {
+      const f = freshDb();
+      const index = (table: string) =>
+        f.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+          )
+          .all(table)
+          .map((r) => (r as { name: string }).name)
+          .flatMap((name) =>
+            f.db
+              .prepare(`PRAGMA index_info(${name})`)
+              .all()
+              .map((c) => (c as { name: string }).name)
+              .join(','),
+          );
+      expect(index('chat_message_join')).toContain(
+        'chat_id,message_date,message_id',
+      );
+      expect(index('message_attachment_join')).toContain('message_id');
+    });
+  });
 });

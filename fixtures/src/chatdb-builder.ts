@@ -172,6 +172,10 @@ CREATE TABLE message_attachment_join (
   message_id INTEGER,
   attachment_id INTEGER
 );
+CREATE INDEX chat_message_join_idx_message_date_id_chat_id
+  ON chat_message_join (chat_id, message_date, message_id);
+CREATE INDEX message_attachment_join_idx_message_id
+  ON message_attachment_join (message_id);
 `;
 
 export interface AddMessageOptions {
@@ -195,6 +199,16 @@ export interface AddMessageOptions {
   associatedMessageType?: number;
   isAudioMessage?: boolean;
   cacheHasAttachments?: boolean;
+  /** v2 F4: message.error, the raw Messages error code (0 = none). */
+  error?: number;
+  /** v2 F4: message.is_sent. */
+  isSent?: boolean;
+  /** v2 F4: message.is_delivered. */
+  isDelivered?: boolean;
+  /** v2 F4: ISO instant, stored as Apple-epoch ns in date_delivered. */
+  dateDelivered?: string;
+  /** v2 F4: ISO instant, stored as Apple-epoch ns in date_read. */
+  dateRead?: string;
 }
 
 export interface MessageRef {
@@ -206,8 +220,26 @@ export interface AttachmentOptions {
   filename?: string;
   uti?: string;
   mimeType?: string;
-  transferName?: string;
+  /** v2 F4: null writes a NULL transfer_name. */
+  transferName?: string | null;
   totalBytes?: number;
+  /** v2 F4: attachment.is_sticker. */
+  isSticker?: boolean;
+  /** v2 F4: attachment.hide_attachment. */
+  hidden?: boolean;
+}
+
+/** v2 F4: how a tapback row is written. */
+export interface TapbackOptions {
+  chatId: number;
+  handleId?: number;
+  at?: string;
+  /** The part index in `p:<part>/<guid>`; 0 by default. */
+  part?: number;
+  /** Write `bp:<guid>` instead of `p:<part>/<guid>`. */
+  bp?: boolean;
+  /** A tapback I sent. */
+  isFromMe?: boolean;
 }
 
 export interface ChatDbFixture {
@@ -249,7 +281,7 @@ export interface ChatDbFixture {
   addTapback(
     targetGuid: string,
     type: number,
-    opts: { chatId: number; handleId?: number; at?: string },
+    opts: TapbackOptions,
   ): MessageRef;
   editMessage(guid: string, newText: string, opts?: { at?: string }): void;
   unsendMessage(guid: string, opts?: { at?: string }): void;
@@ -300,12 +332,14 @@ export function createChatDb(path: string): ChatDbFixture {
        guid, text, attributedBody, handle_id, service, date, is_from_me,
        is_audio_message, cache_has_attachments, cache_roomnames,
        associated_message_guid, associated_message_type,
-       thread_originator_guid
+       thread_originator_guid, error, is_sent, is_delivered,
+       date_delivered, date_read
      ) VALUES (
        @guid, @text, @attributedBody, @handle_id, @service, @date, @is_from_me,
        @is_audio_message, @cache_has_attachments, @cache_roomnames,
        @associated_message_guid, @associated_message_type,
-       @thread_originator_guid
+       @thread_originator_guid, @error, @is_sent, @is_delivered,
+       @date_delivered, @date_read
      )`,
   );
   const insertChatMessageJoin = db.prepare(
@@ -401,6 +435,15 @@ export function createChatDb(path: string): ChatDbFixture {
         associated_message_guid: opts.associatedMessageGuid ?? null,
         associated_message_type: opts.associatedMessageType ?? 0,
         thread_originator_guid: opts.threadOriginatorGuid ?? null,
+        error: opts.error ?? 0,
+        is_sent: opts.isSent === true ? 1 : 0,
+        is_delivered: opts.isDelivered === true ? 1 : 0,
+        date_delivered:
+          opts.dateDelivered !== undefined
+            ? appleEpochNs(opts.dateDelivered)
+            : 0,
+        date_read:
+          opts.dateRead !== undefined ? appleEpochNs(opts.dateRead) : 0,
       });
       const rowid = Number(info.lastInsertRowid);
       insertChatMessageJoin.run(opts.chatId, rowid, date);
@@ -412,8 +455,12 @@ export function createChatDb(path: string): ChatDbFixture {
         chatId: opts.chatId,
         ...(opts.handleId !== undefined ? { handleId: opts.handleId } : {}),
         ...(opts.at !== undefined ? { at: opts.at } : {}),
+        ...(opts.isFromMe === true ? { isFromMe: true } : {}),
         text: null,
-        associatedMessageGuid: `p:0/${targetGuid}`,
+        associatedMessageGuid:
+          opts.bp === true
+            ? `bp:${targetGuid}`
+            : `p:${String(opts.part ?? 0)}/${targetGuid}`,
         associatedMessageType: type,
       });
     },
@@ -465,16 +512,20 @@ export function createChatDb(path: string): ChatDbFixture {
     addAttachment(messageRowid, opts) {
       const info = db
         .prepare(
-          `INSERT INTO attachment (guid, filename, uti, mime_type, transfer_name, total_bytes)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO attachment (guid, filename, uti, mime_type, transfer_name, total_bytes, is_sticker, hide_attachment)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           randomUUID().toUpperCase(),
           opts?.filename ?? '~/Library/Messages/Attachments/00/fixture.png',
           opts?.uti ?? 'public.png',
           opts?.mimeType ?? 'image/png',
-          opts?.transferName ?? 'fixture.png',
+          opts?.transferName === null
+            ? null
+            : (opts?.transferName ?? 'fixture.png'),
           opts?.totalBytes ?? 1024,
+          opts?.isSticker === true ? 1 : 0,
+          opts?.hidden === true ? 1 : 0,
         );
       const attachmentId = Number(info.lastInsertRowid);
       db.prepare(

@@ -11,7 +11,13 @@
 // and owns its own cursor: the cursor is opaque to everything above it, so
 // a source whose natural order is not a date can still page.
 
-import type { ChatGuid, Handle, IsoUtc, MessageGuid } from '../domain/types.js';
+import type {
+  ChatGuid,
+  Handle,
+  IsoUtc,
+  MessageGuid,
+  Service,
+} from '../domain/types.js';
 
 /** The channels a source can be. Phase B widens this union, nothing else. */
 export type ChannelName = 'imessage';
@@ -94,7 +100,64 @@ export interface TranscriptTurn {
   unsentAt?: IsoUtc;
   /** How many attachments it carries. Counted, never opened. */
   attachments: number;
+  /**
+   * v2 F4: the service it went over. A source that cannot say leaves it
+   * absent; the iMessage source always says, `unknown` included.
+   */
+  service?: Service;
+  /**
+   * v2 F4: how far an outbound turn is proven to have got. Only ever on a
+   * turn `from: 'me'`; null means the source cannot prove any rung.
+   */
+  delivery?: TurnDelivery | null;
+  /**
+   * v2 F4: the reactions standing on it, one per sender. Absent means the
+   * source does not say; `[]` means none.
+   */
+  reactions?: TurnReaction[];
+  /**
+   * v2 F4: metadata for each attachment, never a path. Absent means the
+   * source does not say. At most {@link FILES_PER_TURN_MAX} entries, while
+   * `attachments` stays the true count.
+   */
+  files?: TurnFile[];
 }
+
+/** v2 F4: what a tapback says. 2006 (emoji) and 2007 (sticker) are `other`. */
+export type ReactionKind =
+  'love' | 'like' | 'dislike' | 'laugh' | 'emphasize' | 'question' | 'other';
+
+/** v2 F4: one sender's reaction standing on a turn. */
+export interface TurnReaction {
+  kind: ReactionKind;
+  from: 'me' | 'them';
+  /** Who reacted, for a reaction from someone else when the source knows. */
+  handle?: Handle;
+}
+
+/**
+ * v2 F4: the delivery ladder, claimed only as far as the source proves it.
+ * There is no `sending`: in flight and stuck look the same from chat.db.
+ */
+export type TurnDelivery =
+  | { state: 'sent'; at: null }
+  | { state: 'delivered'; at: IsoUtc | null }
+  | { state: 'read'; at: IsoUtc }
+  | { state: 'failed'; at: null; errorCode: number };
+
+/** v2 F4: one attachment's metadata. A name is a basename, never a path. */
+export interface TurnFile {
+  name: string | null;
+  mime: string | null;
+  uti: string | null;
+  /** Null when the source records no size (chat.db's 0). */
+  bytes: number | null;
+  sticker: boolean;
+  hidden: boolean;
+}
+
+/** v2 F4: the most file entries one turn carries; the count stays true. */
+export const FILES_PER_TURN_MAX = 20;
 
 /** One page of a transcript, oldest turn first so it reads top to bottom. */
 export interface TurnsPage {

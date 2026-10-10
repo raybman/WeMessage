@@ -9,6 +9,7 @@ export {
   type AddMessageOptions,
   type MessageRef,
   type AttachmentOptions,
+  type TapbackOptions,
 } from './chatdb-builder.js';
 
 // s7 Scenario 3: the JSON Schema checker Scenario 2 wrote for the protocol

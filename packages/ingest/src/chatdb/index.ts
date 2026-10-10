@@ -26,24 +26,34 @@ import type {
   MutatedMessage,
   Service,
   TranscriptTurn,
+  TurnFile,
   TurnKind,
+  TurnReaction,
   TurnsPage,
   TurnsQuery,
 } from '@wemessage/core';
 import {
+  FILES_PER_TURN_MAX,
   InvalidCursorError,
   UnknownChatError,
   normalizeHandle,
   parseChatGuid,
 } from '@wemessage/core';
 import {
-  appleNsToIso,
   isoToAppleNs,
   mapService,
   normalizeRow,
   type DecodeFailedSignal,
   type RawMessageRow,
 } from '../normalize/index.js';
+import {
+  chatDbDateToIso,
+  deliveryOf,
+  fileOf,
+  foldReactions,
+  type FileDbRow,
+  type ReactionRow,
+} from './rich-turns.js';
 import {
   decodeSummaryInfoLatestText,
   decodeTypedstreamText,
@@ -297,11 +307,29 @@ const LIST_CHATS_SQL = `
   ORDER BY p.lastDate DESC, p.chatRowid DESC
 `;
 
-/** SECONDS_ERA_LIMIT as a SQL literal (see below). */
+/** SECONDS_ERA_LIMIT (chatdb/rich-turns.ts) as a SQL literal. */
 const SECONDS_ERA_LIMIT_SQL = '100000000000';
 
 /** v2 A2: a chat's ROWID by its guid, or nothing for a chat never seen. */
-const CHAT_ROWID_SQL = `SELECT ROWID AS chatRowid FROM chat WHERE guid = ?`;
+const CHAT_ROWID_SQL = `SELECT ROWID AS chatRowid, style AS style FROM chat WHERE guid = ?`;
+
+/** chat.style for a group conversation (45 is one-to-one). */
+const CHAT_STYLE_GROUP = 43n;
+
+/**
+ * The turn test, the keyset and the `until` window over one candidate
+ * \`d\` expression (see CHAT_PAGE_SQL). Shared by its two halves.
+ */
+const pageWindow = (d: string): string => `
+      AND m.item_type = 0
+      AND NOT (m.associated_message_guid IS NOT NULL
+               AND m.associated_message_type != 0)
+      AND (@beforeDate IS NULL
+           OR ${d} < @beforeDate
+           OR (${d} = @beforeDate AND cmj.message_id < @beforeRowid))
+      AND (@untilNs IS NULL
+           OR (${d} < ${SECONDS_ERA_LIMIT_SQL} AND ${d} <= @untilSeconds)
+           OR (${d} >= ${SECONDS_ERA_LIMIT_SQL} AND ${d} <= @untilNs))`;
 
 /**
  * readChatPage (v2 A2): one page of one conversation, newest first.
@@ -311,16 +339,24 @@ const CHAT_ROWID_SQL = `SELECT ROWID AS chatRowid FROM chat WHERE guid = ?`;
  * (\`item_type != 0\`). Paging is keyset on (date DESC, message ROWID DESC)
  * over the chat's own join rows, the way LIST_CHATS_SQL pages chats, so a
  * boundary inside a tie neither repeats a turn nor skips one and a message
- * arriving mid-walk never shifts an older page. The date is clamped once
- * (NULL or negative sorts as 0) and that one expression orders, filters,
- * dates the turn and mints the cursor.
+ * arriving mid-walk never shifts an older page. The date is clamped (NULL
+ * or negative sorts as 0) and that one value orders, filters, dates the
+ * turn and mints the cursor.
  *
  * \`until\` compares RAW, per era: a seconds-era row against the instant in
  * seconds, a nanosecond-era row against it in nanoseconds. Every
  * seconds-era value is below every nanosecond-era one, so the ordering is
  * chronological across the two.
  *
- * Attachments are counted, never opened.
+ * Attachments are not counted here: v2 F4 reads them once per page
+ * (FILES_FOR_PAGE_SQL), and the count is the number of rows that read
+ * returns for the turn. A COUNT per row was A2's perf cliff.
+ *
+ * v2 F4: the clamp is split in two halves so the positive-date half walks
+ * the cmj (chat_id, message_date, message_id) index newest first and stops
+ * at the LIMIT, instead of materialising and sorting the whole chat. The
+ * other half is every row the clamp sends to 0 (NULL or <= 0). Same rows,
+ * same order, same cursor as the single clamped expression.
  */
 const CHAT_PAGE_SQL = `
   SELECT
@@ -335,31 +371,92 @@ const CHAT_PAGE_SQL = `
     m.is_audio_message         AS isAudioMessage,
     m.message_summary_info     AS summaryInfo,
     h.id                       AS handle,
-    (SELECT COUNT(*)
-       FROM message_attachment_join maj
-      WHERE maj.message_id = p.rowid) AS attachments
+    m.service                  AS service,
+    m.error                    AS error,
+    m.is_sent                  AS isSent,
+    m.is_delivered             AS isDelivered,
+    m.date_delivered           AS dateDelivered,
+    m.date_read                AS dateRead
   FROM (
-    SELECT
-      cmj.message_id AS rowid,
-      MAX(COALESCE(cmj.message_date, 0), 0) AS d
-    FROM chat_message_join cmj
-    JOIN message m ON m.ROWID = cmj.message_id
-    WHERE cmj.chat_id = @chatRowid
-      AND m.item_type = 0
-      AND NOT (m.associated_message_guid IS NOT NULL
-               AND m.associated_message_type != 0)
+    SELECT rowid, d FROM (
+      SELECT cmj.message_id AS rowid, cmj.message_date AS d
+      FROM chat_message_join cmj
+      JOIN message m ON m.ROWID = cmj.message_id
+      WHERE cmj.chat_id = @chatRowid
+        AND cmj.message_date > 0${pageWindow('cmj.message_date')}
+      ORDER BY cmj.message_date DESC, cmj.message_id DESC
+      LIMIT @limit
+    )
+    UNION ALL
+    SELECT rowid, d FROM (
+      SELECT cmj.message_id AS rowid, 0 AS d
+      FROM chat_message_join cmj
+      JOIN message m ON m.ROWID = cmj.message_id
+      WHERE cmj.chat_id = @chatRowid
+        AND (cmj.message_date IS NULL OR cmj.message_date <= 0)${pageWindow('0')}
+      ORDER BY cmj.message_id DESC
+      LIMIT @limit
+    )
   ) p
   JOIN message m ON m.ROWID = p.rowid
   LEFT JOIN handle h ON h.ROWID = m.handle_id
-  WHERE (@beforeDate IS NULL
-         OR p.d < @beforeDate
-         OR (p.d = @beforeDate AND p.rowid < @beforeRowid))
-    AND (@untilNs IS NULL
-         OR (p.d < ${SECONDS_ERA_LIMIT_SQL} AND p.d <= @untilSeconds)
-         OR (p.d >= ${SECONDS_ERA_LIMIT_SQL} AND p.d <= @untilNs))
   ORDER BY p.d DESC, p.rowid DESC
   LIMIT @limit
 `;
+
+/**
+ * v2 F4: the file metadata of every turn on one page, in one read. Never
+ * \`filename\`: that column is a path into the user's Library, and the
+ * reader has no use for one. \`@rowids\` is a JSON array of message ROWIDs.
+ */
+const FILES_FOR_PAGE_SQL = `
+  SELECT
+    maj.message_id   AS messageRowid,
+    a.transfer_name  AS transferName,
+    a.mime_type      AS mimeType,
+    a.uti            AS uti,
+    a.total_bytes    AS totalBytes,
+    a.is_sticker     AS isSticker,
+    a.hide_attachment AS hidden
+  FROM message_attachment_join maj
+  JOIN attachment a ON a.ROWID = maj.attachment_id
+  WHERE maj.message_id IN (SELECT value FROM json_each(@rowids))
+  ORDER BY maj.message_id, maj.attachment_id
+`;
+
+/**
+ * v2 F4: every tapback row in the chat at or after the page's oldest turn,
+ * in one read. A tapback is never older than the turn it reacts to, so the
+ * cmj (chat_id, message_date) range bounds the scan to rows newer than the
+ * page; the target filter (the page's own guids) runs in JS.
+ */
+const REACTIONS_FOR_PAGE_SQL = `
+  SELECT
+    m.ROWID                    AS rowid,
+    MAX(COALESCE(cmj.message_date, 0), 0) AS date,
+    m.associated_message_type  AS type,
+    m.associated_message_guid  AS target,
+    m.is_from_me               AS isFromMe,
+    h.id                       AS handle
+  FROM chat_message_join cmj
+  JOIN message m ON m.ROWID = cmj.message_id
+  LEFT JOIN handle h ON h.ROWID = m.handle_id
+  WHERE cmj.chat_id = @chatRowid
+    AND cmj.message_date >= @oldestD
+    AND m.associated_message_guid IS NOT NULL
+    AND (m.associated_message_type BETWEEN 2000 AND 2007
+         OR m.associated_message_type BETWEEN 3000 AND 3007)
+`;
+
+/**
+ * The three statements one transcript page runs, by name. Exported so the
+ * perf spec can EXPLAIN each one and check none of them names \`filename\`.
+ */
+export const CHAT_PAGE_STATEMENTS = {
+  page: CHAT_PAGE_SQL,
+  files: FILES_FOR_PAGE_SQL,
+  reactions: REACTIONS_FOR_PAGE_SQL,
+} as const;
 
 /** The most turns one transcript page holds, whatever the caller asks for. */
 const CHAT_PAGE_MAX = 200;
@@ -373,11 +470,6 @@ const TURN_CURSOR_RE = /^t\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const LIST_CHATS_MAX = 200;
 /** SQLite INTEGER is a signed 64-bit value; a cursor beyond it was not minted. */
 const INT64_MAX = 9_223_372_036_854_775_807n;
-/**
- * Below this a chat.db date is SECONDS since 2001, not nanoseconds: 1e11
- * seconds is the year 5170, and 1e11 nanoseconds is 100 seconds into 2001.
- */
-const SECONDS_ERA_LIMIT = 100_000_000_000n;
 /** The attachment placeholder Messages writes into `text`. */
 const OBJECT_REPLACEMENT = /\uFFFC/g;
 /** A cursor's decoded form: two canonical non-negative integers. */
@@ -397,13 +489,6 @@ interface ListChatsDbRow {
   dateEdited: bigint | null;
   dateRetracted: bigint | null;
   summaryInfo: Uint8Array | null;
-}
-
-/** A chat.db date (seconds or nanoseconds since 2001) as ISO-8601 UTC. */
-function chatDbDateToIso(raw: bigint): string {
-  return raw < SECONDS_ERA_LIMIT
-    ? appleNsToIso(raw * 1_000_000_000n)
-    : appleNsToIso(raw);
 }
 
 /** The opaque cursor for "everything after this row". */
@@ -479,7 +564,19 @@ interface ChatPageDbRow {
   isAudioMessage: bigint | null;
   summaryInfo: Uint8Array | null;
   handle: string | null;
-  attachments: bigint;
+  service: string | null;
+  error: bigint | null;
+  isSent: bigint | null;
+  isDelivered: bigint | null;
+  dateDelivered: bigint | null;
+  dateRead: bigint | null;
+}
+
+/** What one page read adds to each row: from the chat and the per-page reads. */
+interface PageContext {
+  isGroup: boolean;
+  files: ReadonlyMap<bigint, TurnFile[]>;
+  reactions: ReadonlyMap<string, TurnReaction[]>;
 }
 
 /**
@@ -490,7 +587,7 @@ interface ChatPageDbRow {
  * to decode is no text: it is NOT reported, because a page view is a read
  * and the decode-failure sink writes audit rows.
  */
-function turnOf(r: ChatPageDbRow): TranscriptTurn {
+function turnOf(r: ChatPageDbRow, ctx: PageContext): TranscriptTurn {
   const unsent = (r.dateRetracted ?? 0n) > 0n;
   const edited = (r.dateEdited ?? 0n) > 0n;
   let text: string | null = null;
@@ -509,8 +606,20 @@ function turnOf(r: ChatPageDbRow): TranscriptTurn {
       text = line.length > 0 ? line : null;
     }
   }
-  const attachments = Number(r.attachments);
+  const allFiles = ctx.files.get(r.rowid) ?? [];
+  const attachments = allFiles.length;
   const fromMe = r.isFromMe === 1n;
+  const service = mapService(r.service);
+  const delivery = deliveryOf({
+    isFromMe: r.isFromMe,
+    service,
+    isGroup: ctx.isGroup,
+    error: r.error,
+    isSent: r.isSent,
+    isDelivered: r.isDelivered,
+    dateDelivered: r.dateDelivered,
+    dateRead: r.dateRead,
+  });
   const kind: TurnKind =
     r.isAudioMessage === 1n
       ? 'audio'
@@ -529,6 +638,10 @@ function turnOf(r: ChatPageDbRow): TranscriptTurn {
       : {}),
     ...(unsent ? { unsentAt: chatDbDateToIso(r.dateRetracted ?? 0n) } : {}),
     attachments,
+    service,
+    ...(delivery !== undefined ? { delivery } : {}),
+    reactions: ctx.reactions.get(r.guid) ?? [],
+    files: allFiles.slice(0, FILES_PER_TURN_MAX),
   };
 }
 
@@ -650,6 +763,10 @@ export function createChatDbReader(
   chatRowidStmt.safeIntegers(true);
   const chatPageStmt = db.prepare(CHAT_PAGE_SQL);
   chatPageStmt.safeIntegers(true);
+  const filesForPageStmt = db.prepare(FILES_FOR_PAGE_SQL);
+  filesForPageStmt.safeIntegers(true);
+  const reactionsForPageStmt = db.prepare(REACTIONS_FOR_PAGE_SQL);
+  reactionsForPageStmt.safeIntegers(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -864,7 +981,7 @@ export function createChatDbReader(
           untilNs = isoToAppleNs(new Date(ms).toISOString());
         }
         const chat = chatRowidStmt.get(q.chatGuid) as
-          { chatRowid: bigint } | undefined;
+          { chatRowid: bigint; style: bigint | null } | undefined;
         if (chat === undefined) throw new UnknownChatError();
         const rows = chatPageStmt.all({
           chatRowid: chat.chatRowid,
@@ -886,10 +1003,38 @@ export function createChatDbReader(
           rows.length > limit && oldest !== undefined
             ? mintTurnCursor(oldest.d, oldest.rowid)
             : null;
+        // v2 F4: files and reactions for the whole page, one read each.
+        const files = new Map<bigint, TurnFile[]>();
+        const reactions = new Map<string, TurnReaction[]>();
+        if (oldest !== undefined) {
+          const fileRows = filesForPageStmt.all({
+            rowids: `[${pageRows.map((r) => r.rowid.toString()).join(',')}]`,
+          }) as FileDbRow[];
+          for (const f of fileRows) {
+            const list = files.get(f.messageRowid) ?? [];
+            list.push(fileOf(f));
+            files.set(f.messageRowid, list);
+          }
+          const reactionRows = reactionsForPageStmt.all({
+            chatRowid: chat.chatRowid,
+            oldestD: oldest.d,
+          }) as ReactionRow[];
+          for (const [guid, list] of foldReactions(
+            reactionRows,
+            new Set(pageRows.map((r) => r.guid)),
+          )) {
+            reactions.set(guid, list);
+          }
+        }
+        const ctx: PageContext = {
+          isGroup: chat.style === CHAT_STYLE_GROUP,
+          files,
+          reactions,
+        };
         // Fetched newest first so the LIMIT bites on the newest rows; read
         // top to bottom, so handed back oldest first.
         return Promise.resolve({
-          turns: pageRows.reverse().map(turnOf),
+          turns: pageRows.reverse().map((r) => turnOf(r, ctx)),
           nextBefore,
         });
       } catch (err) {

@@ -135,6 +135,9 @@ describe('readChatPage (v2 A2)', () => {
         at: at(1),
         handle: '+15550002001',
         attachments: 0,
+        service: 'imessage',
+        reactions: [],
+        files: [],
       },
       {
         guid: b.guid,
@@ -143,6 +146,10 @@ describe('readChatPage (v2 A2)', () => {
         text: 'yes, what is up',
         at: at(2),
         attachments: 0,
+        service: 'imessage',
+        delivery: null,
+        reactions: [],
+        files: [],
       },
     ]);
   });
@@ -291,6 +298,277 @@ describe('readChatPage (v2 A2)', () => {
 
       expect(turn).toMatchObject({ guid: m.guid, text: null, kind: 'text' });
       expect(sink).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rich turns (v2 F4)', () => {
+    it('reactionsFoldedNotTurns: a tapback rides its target, mine included', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002301');
+      const said = f.addMessage({
+        chatId: c.chatId,
+        handleId: c.handleId,
+        text: 'said',
+        at: at(1),
+      });
+      f.addTapback(said.guid, 2000, {
+        chatId: c.chatId,
+        handleId: c.handleId,
+        at: at(2),
+      });
+      f.addTapback(said.guid, 2001, {
+        chatId: c.chatId,
+        isFromMe: true,
+        part: 1,
+        at: at(3),
+      });
+
+      const page = await readerOver(f).readChatPage({
+        chatGuid: c.guid,
+        limit: 50,
+      });
+
+      expect(page.turns.map((t) => t.guid)).toEqual([said.guid]);
+      expect(page.turns[0]?.reactions).toEqual([
+        { kind: 'love', from: 'them', handle: '+15550002301' },
+        { kind: 'like', from: 'me' },
+      ]);
+    });
+
+    it('cursorUnchangedByReactions: 450 turns and 300 tapbacks walk as the 450', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002311');
+      const turns = f.db.transaction(() => {
+        const out: string[] = [];
+        for (let i = 0; i < 450; i += 1) {
+          const m = f.addMessage({ chatId: c.chatId, text: `t${String(i)}` });
+          out.push(m.guid);
+          if (i % 3 === 0) {
+            f.addTapback(m.guid, 2000 + (i % 6), {
+              chatId: c.chatId,
+              handleId: c.handleId,
+            });
+            if (i % 9 === 0) {
+              f.addTapback(m.guid, 3000 + (i % 6), {
+                chatId: c.chatId,
+                handleId: c.handleId,
+              });
+            }
+          }
+        }
+        return out;
+      })();
+      const tapbacks = f.db
+        .prepare(
+          'SELECT COUNT(*) AS n FROM message WHERE associated_message_type != 0',
+        )
+        .get() as { n: number };
+      expect(tapbacks.n).toBe(150 + 50);
+      // Top up to 300 tapbacks with removals that clear nothing.
+      f.db.transaction(() => {
+        for (let i = 0; i < 100; i += 1) {
+          f.addTapback(turns[i * 4 + 1] ?? '', 3003, {
+            chatId: c.chatId,
+            handleId: c.handleId,
+          });
+        }
+      })();
+
+      const { guids, pages } = await walkAll(readerOver(f), c.guid, 50);
+
+      expect(pages).toBe(9);
+      expect(guids).toEqual(turns);
+    });
+
+    it('reactionOnOlderPageArrivesWithIt', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002321');
+      const old = f.addMessage({ chatId: c.chatId, text: 'old', at: at(1) });
+      for (let i = 0; i < 5; i += 1) {
+        f.addMessage({ chatId: c.chatId, text: 'newer', at: at(2 + i) });
+      }
+      f.addTapback(old.guid, 2003, {
+        chatId: c.chatId,
+        handleId: c.handleId,
+        at: at(20),
+      });
+      const reader = readerOver(f);
+
+      const head = await reader.readChatPage({ chatGuid: c.guid, limit: 5 });
+      const older = await reader.readChatPage({
+        chatGuid: c.guid,
+        limit: 5,
+        before: head.nextBefore ?? 'missing',
+      });
+
+      expect(head.turns.every((t) => t.reactions?.length === 0)).toBe(true);
+      expect(older.turns.map((t) => [t.guid, t.reactions])).toEqual([
+        [old.guid, [{ kind: 'laugh', from: 'them', handle: '+15550002321' }]],
+      ]);
+    });
+
+    it('filesEqualCount: names are transfer names, never the stored path', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002331');
+      const three = f.addMessage({ chatId: c.chatId, text: null, at: at(1) });
+      for (const [name, mime, uti] of [
+        ['Quarterly plan.pdf', 'application/pdf', 'com.adobe.pdf'],
+        ['IMG_0412.heic', 'image/heic', 'public.heic'],
+        ['clip.mov', 'video/quicktime', 'com.apple.quicktime-movie'],
+      ] as const) {
+        f.addAttachment(three.rowid, {
+          transferName: name,
+          filename: `~/Library/Messages/Attachments/ab/12/F00D-${name}.bin`,
+          mimeType: mime,
+          uti,
+          totalBytes: 2048,
+        });
+      }
+      const many = f.addMessage({ chatId: c.chatId, text: null, at: at(2) });
+      for (let i = 0; i < 25; i += 1) f.addAttachment(many.rowid);
+
+      const turns = (
+        await readerOver(f).readChatPage({ chatGuid: c.guid, limit: 5 })
+      ).turns;
+
+      expect(turns[0]?.attachments).toBe(3);
+      expect(turns[0]?.files).toEqual([
+        {
+          name: 'Quarterly plan.pdf',
+          mime: 'application/pdf',
+          uti: 'com.adobe.pdf',
+          bytes: 2048,
+          sticker: false,
+          hidden: false,
+        },
+        {
+          name: 'IMG_0412.heic',
+          mime: 'image/heic',
+          uti: 'public.heic',
+          bytes: 2048,
+          sticker: false,
+          hidden: false,
+        },
+        {
+          name: 'clip.mov',
+          mime: 'video/quicktime',
+          uti: 'com.apple.quicktime-movie',
+          bytes: 2048,
+          sticker: false,
+          hidden: false,
+        },
+      ]);
+      expect(turns[1]?.attachments).toBe(25);
+      expect(turns[1]?.files).toHaveLength(20);
+      expect(JSON.stringify(turns)).not.toMatch(/Library|F00D/);
+    });
+
+    it('hiddenAndStickerFlagged, and a NULL name or size is null', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002341');
+      const m = f.addMessage({ chatId: c.chatId, text: null, at: at(1) });
+      f.addAttachment(m.rowid, {
+        isSticker: true,
+        transferName: 'sticker.heic',
+      });
+      f.addAttachment(m.rowid, {
+        hidden: true,
+        transferName: null,
+        totalBytes: 0,
+      });
+
+      const [turn] = (
+        await readerOver(f).readChatPage({ chatGuid: c.guid, limit: 5 })
+      ).turns;
+
+      expect(
+        turn?.files?.map((x) => [x.name, x.bytes, x.sticker, x.hidden]),
+      ).toEqual([
+        ['sticker.heic', 1024, true, false],
+        [null, null, false, true],
+      ]);
+    });
+
+    it('serviceUnknownWhenNull; SMS and RCS read as themselves', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002351');
+      const none = f.addMessage({ chatId: c.chatId, text: 'a', at: at(1) });
+      f.db
+        .prepare('UPDATE message SET service = NULL WHERE ROWID = ?')
+        .run(none.rowid);
+      f.addSmsMessage({ chatId: c.chatId, text: 'b', at: at(2) });
+      const rcs = f.addMessage({ chatId: c.chatId, text: 'c', at: at(3) });
+      // Apple's raw column casing, set in SQL: the input side of mapService.
+      f.db
+        .prepare("UPDATE message SET service = 'RCS' WHERE ROWID = ?")
+        .run(rcs.rowid);
+      f.addMessage({ chatId: c.chatId, text: 'd', at: at(4) });
+
+      const turns = (
+        await readerOver(f).readChatPage({ chatGuid: c.guid, limit: 5 })
+      ).turns;
+
+      expect(turns.map((t) => t.service)).toEqual([
+        'unknown',
+        'sms',
+        'rcs',
+        'imessage',
+      ]);
+    });
+
+    it('delivery rides outbound turns only, and a group never reaches read', async () => {
+      const f = freshFixture();
+      const c = oneToOne(f, '+15550002361');
+      f.addMessage({
+        chatId: c.chatId,
+        handleId: c.handleId,
+        text: 'in',
+        at: at(1),
+      });
+      f.addMessage({
+        chatId: c.chatId,
+        text: 'read',
+        isFromMe: true,
+        isSent: true,
+        isDelivered: true,
+        dateDelivered: at(3),
+        dateRead: at(4),
+        at: at(2),
+      });
+      f.addMessage({
+        chatId: c.chatId,
+        text: 'failed',
+        isFromMe: true,
+        error: 22,
+        at: at(5),
+      });
+      const h2 = f.addHandle('+15550002362');
+      const group = f.addGroupChat([c.handleId, h2]);
+      f.addMessage({
+        chatId: group,
+        text: 'to the group',
+        isFromMe: true,
+        isSent: true,
+        dateDelivered: at(7),
+        dateRead: at(8),
+        at: at(6),
+      });
+      const reader = readerOver(f);
+
+      const turns = (await reader.readChatPage({ chatGuid: c.guid, limit: 5 }))
+        .turns;
+      const [groupTurn] = (
+        await reader.readChatPage({ chatGuid: guidOf(f, group), limit: 5 })
+      ).turns;
+
+      expect(
+        turns.map((t) => ('delivery' in t ? t.delivery : 'absent')),
+      ).toEqual([
+        'absent',
+        { state: 'read', at: at(4) },
+        { state: 'failed', at: null, errorCode: 22 },
+      ]);
+      expect(groupTurn?.delivery).toEqual({ state: 'delivered', at: at(7) });
     });
   });
 

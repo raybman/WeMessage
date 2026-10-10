@@ -18,11 +18,21 @@ export {
   type RawMessageRow,
 } from './normalize/index.js';
 export {
+  CHAT_PAGE_STATEMENTS,
   createChatDbReader,
   type ChatDbOpenMode,
   type ChatDbReaderOptions,
   type IngestChatDbReader,
 } from './chatdb/index.js';
+export {
+  deliveryOf,
+  fileOf,
+  foldReactions,
+  reactionKind,
+  type DeliveryInput,
+  type FileDbRow,
+  type ReactionRow,
+} from './chatdb/rich-turns.js';
 export {
   createScanLoop,
   type ScanLoop,

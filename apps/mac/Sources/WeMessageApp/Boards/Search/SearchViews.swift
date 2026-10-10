@@ -356,7 +356,10 @@ struct CoverageBlock: View {
         }
       }
     }
+    // One element, read as text: ignored alone a stack is role Other, which
+    // the audit fails as "Unknown role" (run 38091495239).
     .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(.isStaticText)
     .accessibilityLabel(results.coverageLines.joined(separator: " "))
     .accessibilityIdentifier(ShellID.searchCoverage)
   }

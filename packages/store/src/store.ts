@@ -170,9 +170,20 @@ function isIndexable(kind: string, text: string | null): text is string {
   return SEARCHABLE_KINDS.includes(kind) && text !== null && text !== '';
 }
 
-interface MirrorSearchRow extends InboundRow {
+/** Only the columns a MirrorMatch is built from: no meta, no received_at. */
+type MirrorSearchRow = Pick<
+  InboundRow,
+  | 'guid'
+  | 'chat_guid'
+  | 'handle'
+  | 'is_from_me'
+  | 'is_group'
+  | 'kind'
+  | 'text'
+  | 'sent_at'
+> & {
   n_att: number | null;
-}
+};
 
 interface CompiledMirror {
   sql: string;
@@ -239,7 +250,9 @@ function compileMirror(q: MirrorQuery): CompiledMirror | null {
     shortWhere.push('instr(lower(m.text), lower(?)) > 0');
     shortParams.push(term);
   }
-  const cols = "m.*, json_array_length(m.meta, '$.attachments') AS n_att";
+  const cols =
+    'm.guid, m.chat_guid, m.handle, m.is_from_me, m.is_group, m.kind, ' +
+    "m.text, m.sent_at, json_array_length(m.meta, '$.attachments') AS n_att";
   const limit = q.cap + 1;
 
   if (q.ftsMatch !== null) {
@@ -2027,7 +2040,9 @@ export class SqliteStore implements Store {
     ) as MirrorSearchRow[];
     const capped = rows.length > q.cap;
     const matches = rows.slice(0, q.cap).map(mirrorMatchFromRow);
-    matches.sort(bySentDescGuidAsc);
+    // 'filter' and 'short-window' rows already arrive in this order (their
+    // SQL orders by it); only index-driven 'fts' rows need the sort.
+    if (compiled.mode === 'fts') matches.sort(bySentDescGuidAsc);
     return {
       matches,
       capped,

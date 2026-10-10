@@ -20,7 +20,7 @@
  *
  * Plus the EXPLAIN rows, which do not depend on the runner's speed: no
  * term query scans `inbound_messages`, and a filter-only query walks
- * `inbound_sent`.
+ * `inbound_sent` in order, with no temp B-tree sort.
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -365,5 +365,8 @@ describe('search perf on a synthetic 530k mirror (v2 F2a)', () => {
     );
     expect(filterOnly.join('\n')).toMatch(/inbound_sent/u);
     expect(filterOnly.join('\n')).not.toMatch(/^SCAN (m|inbound_messages)$/mu);
+    // The index is in the search order, so a filter-only query streams its
+    // rows and never sorts them: no temp B-tree for the guid tie-break.
+    expect(filterOnly.join('\n')).not.toMatch(/TEMP B-TREE/u);
   });
 });

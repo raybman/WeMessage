@@ -19,6 +19,12 @@ CREATE TABLE search_doc (doc_id INTEGER PRIMARY KEY, guid TEXT NOT NULL UNIQUE);
 -- The mirror's first indexes (C-8 kept it index-free until search needed
 -- them): newest-first filter-only queries, in: by chat, and the backfill's
 -- walk in chat.db ROWID order.
-CREATE INDEX inbound_sent ON inbound_messages(sent_at, guid);
+--
+-- inbound_sent is shaped for the search order (sent_at DESC, guid ASC):
+-- `guid DESC` read backwards is exactly that order, so a filter-only query
+-- streams its first cap+1 rows with no sort. is_from_me and kind ride along
+-- so the from:me and searchable-kind tests reject a row from the index
+-- without touching the table.
+CREATE INDEX inbound_sent ON inbound_messages(sent_at, guid DESC, is_from_me, kind);
 CREATE INDEX inbound_chat_sent ON inbound_messages(chat_guid, sent_at);
 CREATE INDEX inbound_rowid_src ON inbound_messages(rowid_src);

@@ -27,6 +27,10 @@ public enum Endpoint: Sendable {
   case setThreadState(guid: String, ThreadStateInput)
   /// v2 F3: every stored conversation record.
   case listThreadStates
+  /// v2 F2: one page of matches over the daemon's index.
+  case search(SearchParams)
+  /// v2 F2: one conversation's turns counted by year in the zone `tz`.
+  case threadYears(guid: String, tz: String)
   case updateAdapter(id: String, AdapterPatch)
   case updateRule(id: String, RulePatch)
   case updateSchedule(id: String, SchedulePatch)
@@ -69,7 +73,7 @@ public enum Endpoint: Sendable {
     switch self {
     case .health, .status, .doctor, .verifyAudit, .listAdapters, .listContacts, .settings, .listRules,
       .listSchedules, .listAudit, .listDrafts, .dryRunRule, .readThread, .listThreads, .events, .getDraft,
-      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle, .listThreadStates:
+      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle, .listThreadStates, .search, .threadYears:
       return "GET"
     case .updateAdapter, .updateRule, .updateSchedule, .setSettings:
       return "PATCH"
@@ -120,6 +124,8 @@ public enum Endpoint: Sendable {
     case .resolveHandle: return "/v1/threads/by-handle/:handle"
     case .setThreadState: return "/v1/threads/:guid/state"
     case .listThreadStates: return "/v1/threads/state"
+    case .threadYears: return "/v1/threads/:guid/years"
+    case .search: return "/v1/search"
     case .disconnect: return "/v1/disconnect"
     case .send: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
@@ -137,7 +143,7 @@ public enum Endpoint: Sendable {
       .deleteAdapter(let id), .getAdapter(let id), .deleteRule(let id), .getRule(let id), .deleteSchedule(let id),
       .getSchedule(let id), .batchReport(let id):
       return id
-    case .readThread(let guid, _, _, _), .setThreadState(let guid, _):
+    case .readThread(let guid, _, _, _), .setThreadState(let guid, _), .threadYears(let guid, _):
       return guid
     case .setContactPolicy(let handle, _, _), .deleteContactPolicy(let handle), .resolveHandle(let handle):
       return handle
@@ -182,6 +188,10 @@ public enum Endpoint: Sendable {
     case .listThreads(let limit, let cursor):
       add("limit", limit.map(String.init))
       add("cursor", cursor)
+    case .search(let params):
+      items = params.queryItems
+    case .threadYears(_, let tz):
+      add("tz", tz)
     case .events(let filter):
       if let filter, !filter.isEmpty {
         add("events", filter.map(\.rawValue).joined(separator: ","))

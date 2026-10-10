@@ -184,7 +184,12 @@ public enum GatewayError: Error, Equatable, Sendable {
       return .failure(.forbidden(body: json))
     case 404:
       if code == "not-found" { return .failure(.notFound) }
-      if case .readThread = endpoint, code == "unknown-chat" { return .failure(.unknownChat) }
+      if code == "unknown-chat" {
+        switch endpoint {
+        case .readThread, .threadYears: return .failure(.unknownChat)
+        default: break
+        }
+      }
       return .failure(.request(status: 404, body: json))
     case 409:
       if let code { return .failure(.conflict(ConflictDetail(error: code, body: json))) }

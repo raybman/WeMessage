@@ -220,6 +220,19 @@ public actor GatewayClient {
     try await outcome(.readThread(guid: guid, limit: limit, before: before, until: until))
   }
 
+  /// v2 F2: one page of matches. A query the daemon will not run is a
+  /// thrown `.request(status: 400, ...)`; an index it cannot read is
+  /// refused as `.sourceUnavailable`.
+  public func search(_ params: SearchParams) async throws -> Outcome<SearchPage> {
+    try await outcome(.search(params))
+  }
+
+  /// v2 F2: one conversation's turns by year in `tz`, newest first. A
+  /// conversation chat.db never held is `.unknownChat`.
+  public func threadYears(_ guid: String, tz: String) async throws -> Outcome<ThreadYears> {
+    try await outcome(.threadYears(guid: guid, tz: tz))
+  }
+
   /// v2 F5: which conversation `handle` would be written to. A null
   /// conversation is an answer (nothing to write to yet), not a refusal; an
   /// unreadable chat.db is refused as `.sourceUnavailable`.

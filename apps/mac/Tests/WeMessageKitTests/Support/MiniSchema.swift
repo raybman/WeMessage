@@ -13,7 +13,7 @@ enum MiniSchema {
 
   static let keywords: Set<String> = [
     "$schema", "additionalProperties", "anyOf", "const", "default", "enum",
-    "exclusiveMinimum", "format", "items", "maxLength", "maximum", "minItems",
+    "exclusiveMinimum", "format", "items", "maxItems", "maxLength", "maximum", "minItems",
     "minLength", "minimum", "pattern", "properties", "propertyNames", "required", "type",
   ]
 
@@ -147,6 +147,9 @@ enum MiniSchema {
       if let min = rules["minItems"]?.intValue, items.count < min {
         out.append("\(path): \(items.count) items below minItems \(min)")
       }
+      if let max = rules["maxItems"]?.intValue, items.count > max {
+        out.append("\(path): \(items.count) items above maxItems \(max)")
+      }
       if let itemSchema = rules["items"] {
         for (index, item) in items.enumerated() {
           out += try violations(of: item, against: itemSchema, at: "\(path)[\(index)]")
@@ -168,14 +171,17 @@ enum MiniSchema {
 
   /// A query string as the daemon's validator sees it: an object of strings,
   /// except that a property the schema types as integer or number is coerced
-  /// (zod's z.coerce), so `limit=50` checks as 50, not "50".
+  /// (zod's z.coerce), so `limit=50` checks as 50, not "50"; and a property
+  /// typed array collects every repeat of its key (`term=a&term=b`), in order.
   static func queryInstance(_ items: [URLQueryItem], schema: JSONValue) -> JSONValue {
     let props = schema["properties"]?.objectValue ?? [:]
     var fields: [String: JSONValue] = [:]
     for item in items {
       let raw = item.value ?? ""
       let type = props[item.name]?["type"]?.stringValue
-      if type == "integer" || type == "number", let number = Double(raw) {
+      if type == "array" {
+        fields[item.name] = .array((fields[item.name]?.arrayValue ?? []) + [.string(raw)])
+      } else if type == "integer" || type == "number", let number = Double(raw) {
         fields[item.name] = .number(number)
       } else {
         fields[item.name] = .string(raw)

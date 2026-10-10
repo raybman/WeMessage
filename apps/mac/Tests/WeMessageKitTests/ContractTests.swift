@@ -56,7 +56,7 @@ struct ContractTests {
   @Test("every responses/*.json decodes strictly into its DTO")
   func responsesDecode() throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 54, "responses on disk: \(names.count)")
+    #expect(names.count == 57, "responses on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.response(name)
       do {
@@ -85,7 +85,7 @@ struct ContractTests {
       #expect(again == fixture.body, "\(name):\n want \(want)\n got  \(got)")
       compared += 1
     }
-    #expect(compared == 51, "non-204 responses compared: \(compared)")
+    #expect(compared == 54, "non-204 responses compared: \(compared)")
   }
 
   @Test(
@@ -129,7 +129,7 @@ struct ContractTests {
   @Test("every errors/*.json maps to the expected GatewayError")
   func errors() throws {
     let names = try Fixtures.errorNames()
-    #expect(names.count == 18, "errors on disk: \(names.count)")
+    #expect(names.count == 20, "errors on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.error(name)
       guard let (endpoint, expected) = Self.expectation(for: fixture) else {
@@ -153,6 +153,9 @@ struct ContractTests {
       return (.resolveHandle("+15550100001;x"), .request(status: 400, body: fixture.body))
     case "400.invalid-thread-state":
       return (.setThreadState(guid: chat, ThreadStateInput(act: "snoozed")), .request(status: 400, body: fixture.body))
+    case "400.empty-search", "400.invalid-search":
+      // A query the daemon will not run is the caller's bug: thrown, never a refusal.
+      return (.search(SearchParams(tz: "UTC")), .request(status: 400, body: fixture.body))
     case "400.settings-refusal":
       return (.setSettings(["unknownKey": .int(1)]), .settingsRefused(.unknownKey(key: "unknownKey")))
     case "400.unknown-event":
@@ -195,7 +198,7 @@ struct ContractTests {
   )
   func requestSchemas() throws {
     let names = Set(try Fixtures.schemaNames())
-    #expect(names.count == 27, "request schemas on disk: \(names.count)")
+    #expect(names.count == 30, "request schemas on disk: \(names.count)")
     for name in names.sorted() { try MiniSchema.audit(try Fixtures.schema(name), at: name) }
 
     var seenKeys: [String: Set<String>] = [:]
@@ -294,6 +297,14 @@ struct ContractTests {
       .listThreads(limit: 25, cursor: "cursor-1"),
       .listThreads(limit: nil, cursor: nil),
       .resolveHandle("+15551234567"),
+      .search(
+        SearchParams(
+          terms: ["dinner", "friday"], fromName: "Sam", inThread: chat, channels: ["imessage", "email"],
+          has: ["attachment", "link"], before: Date(timeIntervalSince1970: 1_767_323_045),
+          after: Date(timeIntervalSince1970: 1_704_096_000), tz: "America/Los_Angeles", limit: 25,
+          cursor: "cursor-1")),
+      .search(SearchParams(terms: ["dinner"], fromMe: true, tz: "UTC")),
+      .threadYears(guid: chat, tz: "America/Los_Angeles"),
       .updateAdapter(id: "echo", AdapterPatch(enabled: false, displayName: "Echo", config: ["url": "http://127.0.0.1:9"])),
       .updateRule(
         id: "rule-1",
@@ -404,6 +415,8 @@ extension Fixtures {
     case "settings.list": return try trip(SettingsEnvelope.self)
     case "settings.patch": return try trip(SettingsPatchResult.self)
     case "status": return try trip(StatusPayload.self)
+    case "search", "search.partial": return try trip(SearchPage.self)
+    case "threads.years": return try trip(ThreadYears.self)
     case "threads.list": return try trip(ThreadsPage.self)
     case "threads.messages", "threads.messages.rich": return try trip(ThreadMessagesPage.self)
     case "threads.by-handle.found", "threads.by-handle.none": return try trip(HandleResolution.self)

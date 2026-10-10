@@ -297,6 +297,13 @@ jobs:
         run: |
           awk '/FROST\|/ { print; n++ } END { if (n == 0) print "no FROST lines in the raw log" }' \
             "$RUNNER_TEMP/xcodebuild-raw.log" || true
+      # v2 S7a: the audit, sweep and perf lines the tests print, kept out of
+      # xcbeautify's filter, on every outcome so a red audit names its element.
+      - name: audit and perf evidence
+        if: always()
+        run: |
+          awk '/audit (issue|detail|tree)|BOARD00\||SWEEP\||UNLABELED\||HAIRLINE\|/ { print; n++ } END { if (n == 0) print "no evidence lines in the raw log" }' \
+            "$RUNNER_TEMP/xcodebuild-raw.log" || true
       # v2 S7a: Board00PerfTests runs in shard a only, so only shard a has
       # G2 rows. Its report is written on every outcome and is red on a hard
       # row over its limit or never measured.

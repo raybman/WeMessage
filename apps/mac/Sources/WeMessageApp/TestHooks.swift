@@ -28,6 +28,10 @@ enum TestHooks {
   /// The window geometry the delegate computed, published on the shell
   /// root's accessibility value under the UI-test flag only.
   static let geometry = PublishedGeometry()
+  /// v2 S7a (D-S7a-7): when the first thread row appeared, under the
+  /// UI-test flag only, spoken on the thread list's label so
+  /// Board00PerfTests times the app and not its own queries.
+  static let firstRow = FirstRowStamp()
   /// WEMESSAGE_UI_REDUCE_TRANSPARENCY and its two siblings, parsed, under
   /// the UI-test flag only: the opaque snapshot legs force Reduce
   /// Transparency on without touching the runner's settings.
@@ -152,6 +156,35 @@ enum TestHooks {
   static func avatarProvider() -> any AvatarProvider {
     if isUITest { return FixtureAvatarProvider() }
     return ContactsAvatarProvider(fetching: SystemContacts())
+  }
+}
+
+/// The wall-clock moment the first thread row appeared, in whole
+/// milliseconds since 1970: set once, and only when `enabled` (the UI-test
+/// flag), so a shipped window never carries it.
+@MainActor
+@Observable
+final class FirstRowStamp {
+  private(set) var ms: Int? = nil
+
+  func mark(enabled: Bool? = nil, now: Date = Date()) {
+    guard enabled ?? TestHooks.isUITest, ms == nil else { return }
+    ms = Int((now.timeIntervalSince1970 * 1_000).rounded(.down))
+  }
+
+  static let listLabel = "Threads"
+  static let stampWords = ", first row drawn at "
+
+  /// The thread list's label: "Threads", or under the flag once a row has
+  /// appeared "Threads, first row drawn at <ms>".
+  static func label(_ ms: Int?) -> String {
+    ms.map { listLabel + stampWords + String($0) } ?? listLabel
+  }
+
+  /// The stamp back out of a label; nil for any other label.
+  static func parse(_ label: String) -> Int? {
+    guard label.hasPrefix(listLabel + stampWords) else { return nil }
+    return Int(label.dropFirst((listLabel + stampWords).count))
   }
 }
 

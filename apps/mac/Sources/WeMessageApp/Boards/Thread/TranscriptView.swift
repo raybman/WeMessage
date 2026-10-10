@@ -77,6 +77,13 @@ struct TranscriptView: View {
           .padding(.horizontal, TranscriptLayout.horizontalPadding)
           .padding(.bottom, bottomInset)
           .frame(maxWidth: .infinity)
+          // D-S7a-8: a short thread fills the pane and sits at its foot by
+          // layout, not by the scroll anchor's alignment, so the lazy rows'
+          // accessibility frames are where they are drawn; and the lazy
+          // stack is a named container, as the thread list is.
+          .frame(minHeight: geometry.size.height, alignment: .bottom)
+          .accessibilityElement(children: .contain)
+          .accessibilityLabel("Messages")
         }
         .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(.bottom, for: .initialOffset)

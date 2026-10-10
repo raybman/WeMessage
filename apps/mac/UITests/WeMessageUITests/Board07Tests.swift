@@ -30,6 +30,10 @@ import XCTest
 /// The light launch also runs the accessibility audit. CI only.
 final class Board07Tests: XCTestCase {
   override func setUp() async throws {
+    // D-S7a-9: the light launch walks every state and runs the audit, whose
+    // contrast probe screenshots each flagged element; board 07 light passed 120 s and was restarted in run 38017941867.
+    // Under ci-swift's 300 s maximum.
+    executionTimeAllowance = 240
     try await FakeDaemon.reset()
   }
 

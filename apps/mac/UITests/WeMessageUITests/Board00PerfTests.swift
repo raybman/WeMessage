@@ -8,8 +8,11 @@ import XCTest
 /// gathers into G2-REPORT.md.
 ///
 /// Hard rows, from G2Limits (pinned by the kit's G2PerfTests):
-///   first paint: the first thread row hittable within firstPaintMs of
-///   `app.launch()` returning;
+///   first paint: the first thread row drawn within firstPaintMs of
+///   `app.launch()` returning, by the app's own clock (D-S7a-7: one XCUI
+///   query costs about 250 ms on the runner, run 38015494450, so a polled
+///   number measures the query). The row must also become hittable; the
+///   polled time is reported soft as first-paint-xcui;
 ///   mounted rows: the 2,000-turn thread, read at its 200-turn page, mounts
 ///   at most mountedTranscriptRows transcript rows (the lazy stack).
 /// Soft rows, measured and reported, never failed: launch time, the app's
@@ -33,14 +36,31 @@ final class Board00PerfTests: XCTestCase {
     let launchStart = ContinuousClock.now
     app.launch()
     let launched = ContinuousClock.now
+    let launchedAt = Date()
     defer { app.terminate() }
     report("launch", ms(launched - launchStart), "ms", nil, .soft)
 
-    // First paint: polled tight, so the wait adds little to the number.
+    // First paint, the app's clock: the thread list speaks the moment its
+    // first row appeared (FirstRowStamp, UI-test flag only).
     let first = element(app, ID.rowPrefix + Self.long)
-    let paint = try XCTUnwrap(firstHittable(first, since: launched), "the first thread row never became hittable")
-    report("first-paint", ms(paint), "ms", G2Limits.firstPaintMs, .hard)
-    XCTAssertLessThanOrEqual(ms(paint), Double(G2Limits.firstPaintMs), "first paint over the G2 limit")
+    let polled = try XCTUnwrap(firstHittable(first, since: launched), "the first thread row never became hittable")
+    report("first-paint-xcui", ms(polled), "ms", nil, .soft)
+    let list = app.descendants(matching: .any)
+      .matching(NSPredicate(format: "label BEGINSWITH %@", Self.listLabel + Self.stampWords)).firstMatch
+    XCTAssertTrue(waitUntil { list.exists }, "the thread list never spoke its first-row stamp")
+    let stamp = try XCTUnwrap(Self.stamp(list.label), "no stamp in the list's label: \(list.label)")
+    let drawn = Double(stamp) - (launchedAt.timeIntervalSince1970 * 1_000)
+    // A row drawn before launch() returned is drawn at 0 ms after it.
+    let paint = max(0, drawn)
+    report("first-paint", paint, "ms", G2Limits.firstPaintMs, .hard)
+    // The cost of one poll, measured once the row is there: how much of the
+    // polled number is the query, not the app.
+    let probeStart = ContinuousClock.now
+    _ = first.exists && first.isHittable
+    print(
+      "BOARD00| first row drawn \(drawn) ms after launch returned, polled hittable at \(ms(polled)) ms, one hittable poll costs \(ms(ContinuousClock.now - probeStart)) ms"
+    )
+    XCTAssertLessThanOrEqual(paint, Double(G2Limits.firstPaintMs), "first paint over the G2 limit")
 
     // Mounted rows: open the long thread at its full page.
     first.click()
@@ -99,6 +119,17 @@ final class Board00PerfTests: XCTestCase {
     return rc == 0 ? info.ri_resident_size : nil
   }
 
+  /// FirstRowStamp's words, restated: the UI test target does not link the
+  /// app. FirstRowStampTests holds the app's side; a drift here leaves the
+  /// list unfound and the row red, never green.
+  static let listLabel = "Threads"
+  static let stampWords = ", first row drawn at "
+
+  static func stamp(_ label: String) -> Int? {
+    guard label.hasPrefix(listLabel + stampWords) else { return nil }
+    return Int(label.dropFirst((listLabel + stampWords).count))
+  }
+
   static func encoded(_ guid: String) -> String {
     var allowed = CharacterSet.urlPathAllowed
     allowed.remove(charactersIn: ";+/")
@@ -121,8 +152,17 @@ final class Board00PerfTests: XCTestCase {
   @MainActor
   private func firstHittable(_ element: XCUIElement, since: ContinuousClock.Instant) -> Duration? {
     let deadline = since + .seconds(UITestApp.timeout)
+    var polls = 0
+    var existed: Duration?
     while ContinuousClock.now < deadline {
-      if element.exists && element.isHittable { return ContinuousClock.now - since }
+      polls += 1
+      let exists = element.exists
+      if exists && existed == nil { existed = ContinuousClock.now - since }
+      if exists && element.isHittable {
+        let at = ContinuousClock.now - since
+        print("BOARD00| first row: \(polls) polls, exists at \(existed.map { ms($0) } ?? -1) ms, hittable at \(ms(at)) ms")
+        return at
+      }
       Thread.sleep(forTimeInterval: 0.01)
     }
     return nil

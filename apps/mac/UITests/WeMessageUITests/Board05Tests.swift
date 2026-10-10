@@ -26,6 +26,10 @@ import XCTest
 /// sent and no other write. CI only.
 final class Board05Tests: XCTestCase {
   override func setUp() async throws {
+    // D-S7a-9: the light launch walks every state and runs the audit, whose
+    // contrast probe screenshots each flagged element; board 05 light ran 111.6 s of 120 in run 38017941867.
+    // Under ci-swift's 300 s maximum.
+    executionTimeAllowance = 240
     try await FakeDaemon.reset()
   }
 

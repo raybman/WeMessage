@@ -109,15 +109,30 @@ public struct ChannelStatusPayload: Codable, Equatable, Sendable {
   public var state: String
   /// Optional and absent (not null) when the channel is connected.
   public var reason: String?
+  /// v2 F7: the live facts, present only on a connected iMessage entry and
+  /// absent everywhere else. `today` is the marker: when it is present the
+  /// daemon sent all three, so lastSyncAt and handle re-encode as null rather
+  /// than vanish. lastSyncAt is the daemon-clock end of the last chat.db read
+  /// (null before the first); handle is the operator's own iMessage address
+  /// as chat.db stores it (null when unknown).
+  public var lastSyncAt: String?
+  public var today: Int?
+  public var handle: String?
 
-  public init(channel: String, state: String, reason: String? = nil) {
+  public init(
+    channel: String, state: String, reason: String? = nil,
+    lastSyncAt: String? = nil, today: Int? = nil, handle: String? = nil
+  ) {
     self.channel = channel
     self.state = state
     self.reason = reason
+    self.lastSyncAt = lastSyncAt
+    self.today = today
+    self.handle = handle
   }
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case channel, state, reason
+    case channel, state, reason, lastSyncAt, today, handle
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -125,6 +140,14 @@ public struct ChannelStatusPayload: Codable, Equatable, Sendable {
     try c.encode(channel, forKey: .channel)
     try c.encode(state, forKey: .state)
     try c.encodeIfPresent(reason, forKey: .reason)
+    if let today {
+      try c.encode(lastSyncAt, forKey: .lastSyncAt)
+      try c.encode(today, forKey: .today)
+      try c.encode(handle, forKey: .handle)
+    } else {
+      try c.encodeIfPresent(lastSyncAt, forKey: .lastSyncAt)
+      try c.encodeIfPresent(handle, forKey: .handle)
+    }
   }
 }
 
@@ -134,6 +157,73 @@ extension ChannelStatusPayload {
     channel = try c.decode(String.self, forKey: .channel)
     state = try c.decode(String.self, forKey: .state)
     reason = try c.decodeIfPresent(String.self, forKey: .reason)
+    lastSyncAt = try c.decodeIfPresent(String.self, forKey: .lastSyncAt)
+    today = try c.decodeIfPresent(Int.self, forKey: .today)
+    handle = try c.decodeIfPresent(String.self, forKey: .handle)
+  }
+}
+
+/// v2 F7: the local copy as the daemon counted it. `path` is ~-abbreviated,
+/// never absolute; `bytes` is wemessage.db plus its WAL; `phase` is `empty`,
+/// `indexing` (indexed < eligible) or `current`, kept a string so a phase
+/// this version does not know never fails a decode.
+public struct MirrorStatusPayload: Codable, Equatable, Sendable {
+  public var path: String
+  public var bytes: Int
+  public var messages: Int
+  public var chats: Int
+  /// Required and nullable: the oldest sent time copied, null when empty.
+  public var historyFrom: String?
+  public var phase: String
+  public var indexed: Int
+  public var eligible: Int
+  public var countedAt: String
+
+  public init(
+    path: String, bytes: Int, messages: Int, chats: Int, historyFrom: String?,
+    phase: String, indexed: Int, eligible: Int, countedAt: String
+  ) {
+    self.path = path
+    self.bytes = bytes
+    self.messages = messages
+    self.chats = chats
+    self.historyFrom = historyFrom
+    self.phase = phase
+    self.indexed = indexed
+    self.eligible = eligible
+    self.countedAt = countedAt
+  }
+
+  enum CodingKeys: String, CodingKey, CaseIterable {
+    case path, bytes, messages, chats, historyFrom, phase, indexed, eligible, countedAt
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(path, forKey: .path)
+    try c.encode(bytes, forKey: .bytes)
+    try c.encode(messages, forKey: .messages)
+    try c.encode(chats, forKey: .chats)
+    try c.encode(historyFrom, forKey: .historyFrom)
+    try c.encode(phase, forKey: .phase)
+    try c.encode(indexed, forKey: .indexed)
+    try c.encode(eligible, forKey: .eligible)
+    try c.encode(countedAt, forKey: .countedAt)
+  }
+}
+
+extension MirrorStatusPayload {
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    path = try c.decode(String.self, forKey: .path)
+    bytes = try c.decode(Int.self, forKey: .bytes)
+    messages = try c.decode(Int.self, forKey: .messages)
+    chats = try c.decode(Int.self, forKey: .chats)
+    historyFrom = try c.decode(String?.self, forKey: .historyFrom)
+    phase = try c.decode(String.self, forKey: .phase)
+    indexed = try c.decode(Int.self, forKey: .indexed)
+    eligible = try c.decode(Int.self, forKey: .eligible)
+    countedAt = try c.decode(String.self, forKey: .countedAt)
   }
 }
 
@@ -154,9 +244,15 @@ public struct StatusPayload: Codable, Equatable, Sendable {
   /// meta.voice). Only the fake daemon's preview-* scenarios send it; the
   /// real daemon never does. Absent means none.
   public var meta: [String: JSONValue]?
+  /// v2 F7: the daemon's clock when it built this status. The app judges a
+  /// read's age against it, never against its own wall clock. Absent from a
+  /// store-less daemon and from older daemons.
+  public var asOf: String?
+  /// v2 F7: the local copy's size and counts. Absent means not reported.
+  public var mirror: MirrorStatusPayload?
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case connectionState, cursor, counts, adapters, killSwitch, armed, channels, meta
+    case connectionState, cursor, counts, adapters, killSwitch, armed, channels, meta, asOf, mirror
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -169,6 +265,8 @@ public struct StatusPayload: Codable, Equatable, Sendable {
     try c.encode(armed, forKey: .armed)
     try c.encode(channels, forKey: .channels)
     try c.encodeIfPresent(meta, forKey: .meta)
+    try c.encodeIfPresent(asOf, forKey: .asOf)
+    try c.encodeIfPresent(mirror, forKey: .mirror)
   }
 }
 
@@ -183,6 +281,8 @@ extension StatusPayload {
     armed = try c.decode(ArmingStatePayload?.self, forKey: .armed)
     channels = try c.decode([ChannelStatusPayload].self, forKey: .channels)
     meta = try c.decodeIfPresent([String: JSONValue].self, forKey: .meta)
+    asOf = try c.decodeIfPresent(String.self, forKey: .asOf)
+    mirror = try c.decodeIfPresent(MirrorStatusPayload.self, forKey: .mirror)
   }
 }
 

@@ -376,8 +376,10 @@ final class Board02Tests: XCTestCase {
 
   @MainActor
   private func label(_ app: XCUIApplication, _ id: String) -> String {
+    // A SwiftUI Text (and a combined chip) on macOS reaches XCUI with its
+    // words as the value and the label empty: QueueUI.words reads either.
     let e = element(app, id)
-    return e.exists ? e.label : "(missing)"
+    return e.exists ? QueueUI.words(e) : "(missing)"
   }
 
   /// The outbox counts down: its label leads with the countdown.

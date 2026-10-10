@@ -173,4 +173,57 @@ describe('v2 A2 client: readThread', () => {
       error: 'invalid-cursor',
     });
   });
+
+  it('v2 F4: a rich page (service, delivery, reactions, files) comes back untouched', async () => {
+    const rich: ThreadMessagesPage = {
+      ...PAGE,
+      turns: [
+        {
+          guid: 'msg-0002',
+          from: 'me',
+          kind: 'attachment-only',
+          text: null,
+          at: '2026-09-01T11:55:00.000Z',
+          attachments: 1,
+          service: 'imessage',
+          delivery: { state: 'read', at: '2026-09-01T11:57:00.000Z' },
+          reactions: [{ kind: 'love', from: 'them', handle: '+15550100001' }],
+          files: [
+            {
+              name: 'IMG_0412.heic',
+              mime: 'image/heic',
+              uti: 'public.heic',
+              bytes: 2_400_000,
+              sticker: false,
+              hidden: false,
+            },
+          ],
+        },
+        {
+          guid: 'msg-0003',
+          from: 'me',
+          kind: 'text',
+          text: 'are you there?',
+          at: '2026-09-01T12:00:00.000Z',
+          attachments: 0,
+          service: 'rcs',
+          delivery: { state: 'failed', at: null, errorCode: 22 },
+          reactions: [{ kind: 'other', from: 'me' }],
+          files: [],
+        },
+        {
+          guid: 'msg-0004',
+          from: 'me',
+          kind: 'text',
+          text: 'see you soon',
+          at: '2026-09-01T12:00:40.000Z',
+          attachments: 0,
+          service: 'unknown',
+          delivery: null,
+        },
+      ],
+    };
+    respond(200, JSON.stringify(rich));
+    expect(await client().readThread(GUID)).toEqual(rich);
+  });
 });

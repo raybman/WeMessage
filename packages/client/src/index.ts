@@ -1038,6 +1038,44 @@ export interface ThreadTurn {
   attachments: number;
   /** v2 Phase B: per-board fixture detail; fake daemon preview-* only. */
   meta?: Record<string, unknown>;
+  /** v2 F4: the transport it went over. Absent: the source does not say. */
+  service?: 'imessage' | 'sms' | 'rcs' | 'unknown';
+  /**
+   * v2 F4: an outbound turn's delivery, claimed only as far as the source
+   * proves it. Null: no rung proven. Never present on a turn from them.
+   */
+  delivery?: ThreadTurnDelivery | null;
+  /** v2 F4: one standing reaction per sender. `[]` is none; absent, unknown. */
+  reactions?: ThreadTurnReaction[];
+  /** v2 F4: file metadata, at most 20. `[]` is none; absent, unknown. */
+  files?: ThreadTurnFile[];
+}
+
+/** v2 F4: where an outbound turn is. There is no "sending" on this wire. */
+export type ThreadTurnDelivery =
+  | { state: 'sent'; at: null }
+  | { state: 'delivered'; at: string | null }
+  | { state: 'read'; at: string }
+  | { state: 'failed'; at: null; errorCode: number };
+
+/** v2 F4: a tapback; `other` is an emoji or sticker tapback. */
+export interface ThreadTurnReaction {
+  kind:
+    'love' | 'like' | 'dislike' | 'laugh' | 'emphasize' | 'question' | 'other';
+  from: 'me' | 'them';
+  /** Who left it, on a reaction from them when the source knows. */
+  handle?: string;
+}
+
+/** v2 F4: a file as metadata. A basename at most, never a path. */
+export interface ThreadTurnFile {
+  name: string | null;
+  mime: string | null;
+  uti: string | null;
+  /** Null when the size is unknown. */
+  bytes: number | null;
+  sticker: boolean;
+  hidden: boolean;
 }
 
 /** One page, oldest turn first, dated by the daemon's clock. */

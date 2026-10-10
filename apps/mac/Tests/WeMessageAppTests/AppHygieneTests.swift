@@ -432,8 +432,9 @@ struct AppHygieneTests {
   /// 186..189 (the compose lookup's words, plan rows D-F5-2..5), and v2
   /// F3's 190..194 (the reason line, the failure and conflict lines, the
   /// silent save). v2 F3 retires D-UI-51: queue state is no longer
-  /// memory-only, the daemon keeps it.
-  static let dUINumbers = Array(1...50) + Array(52...131) + [132, 135, 140, 185] + Array(186...194)
+  /// memory-only, the daemon keeps it. v2 F4's 195..202: the rich turns'
+  /// glyphs, delivery words and file lines.
+  static let dUINumbers = Array(1...50) + Array(52...131) + [132, 135, 140, 185] + Array(186...194) + [200]
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.

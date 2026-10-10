@@ -1,0 +1,183 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100001",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "msg-0101",
+        "from": "them",
+        "kind": "text",
+        "text": "can you send the photo?",
+        "at": "2026-09-01T11:50:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "imessage",
+        "reactions": [
+          {
+            "kind": "like",
+            "from": "me"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "msg-0102",
+        "from": "me",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T11:55:00.000Z",
+        "attachments": 1,
+        "service": "imessage",
+        "delivery": {
+          "state": "read",
+          "at": "2026-09-01T11:57:00.000Z"
+        },
+        "reactions": [
+          {
+            "kind": "love",
+            "from": "them",
+            "handle": "+15550100001"
+          }
+        ],
+        "files": [
+          {
+            "name": "IMG_0412.heic",
+            "mime": "image/heic",
+            "uti": "public.heic",
+            "bytes": 2400000,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "guid": "msg-0103",
+        "from": "me",
+        "kind": "text",
+        "text": "on my way",
+        "at": "2026-09-01T11:58:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "delivered",
+          "at": "2026-09-01T11:58:30.000Z"
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "msg-0104",
+        "from": "me",
+        "kind": "text",
+        "text": "running five late",
+        "at": "2026-09-01T11:59:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "sent",
+          "at": null
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "msg-0105",
+        "from": "me",
+        "kind": "text",
+        "text": "are you there?",
+        "at": "2026-09-01T12:00:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "failed",
+          "at": null,
+          "errorCode": 22
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "msg-0106",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T12:00:10.000Z",
+        "handle": "+15550100001",
+        "attachments": 2,
+        "service": "imessage",
+        "reactions": [
+          {
+            "kind": "emphasize",
+            "from": "them",
+            "handle": "+15550100001"
+          },
+          {
+            "kind": "other",
+            "from": "me"
+          }
+        ],
+        "files": [
+          {
+            "name": "itinerary.pdf",
+            "mime": "application/pdf",
+            "uti": "com.adobe.pdf",
+            "bytes": 88000,
+            "sticker": false,
+            "hidden": false
+          },
+          {
+            "name": null,
+            "mime": null,
+            "uti": null,
+            "bytes": null,
+            "sticker": false,
+            "hidden": true
+          }
+        ]
+      },
+      {
+        "guid": "msg-0107",
+        "from": "me",
+        "kind": "text",
+        "text": "sent as text message",
+        "at": "2026-09-01T12:00:20.000Z",
+        "attachments": 0,
+        "service": "sms",
+        "delivery": {
+          "state": "delivered",
+          "at": null
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "msg-0108",
+        "from": "them",
+        "kind": "text",
+        "text": "got it over RCS",
+        "at": "2026-09-01T12:00:30.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "rcs",
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "msg-0109",
+        "from": "me",
+        "kind": "text",
+        "text": "see you soon",
+        "at": "2026-09-01T12:00:40.000Z",
+        "attachments": 0,
+        "service": "unknown",
+        "delivery": null,
+        "reactions": [],
+        "files": []
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

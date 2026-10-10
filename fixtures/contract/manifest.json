@@ -104,6 +104,7 @@
     "responses/threads.by-handle.none.json",
     "responses/threads.list.json",
     "responses/threads.messages.json",
+    "responses/threads.messages.rich.json",
     "responses/threads.state.list.json",
     "responses/threads.state.put.cleared.json",
     "responses/threads.state.put.snoozed.json",

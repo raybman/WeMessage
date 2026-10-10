@@ -35,6 +35,7 @@ import {
   type ChannelSource,
   type ChatsQuery,
   type DraftState,
+  type TranscriptTurn,
   type TurnsQuery,
 } from '@wemessage/core';
 import {
@@ -176,6 +177,7 @@ export const RESPONSE_NAMES = [
   'send',
   'threads.list',
   'threads.messages',
+  'threads.messages.rich',
   'threads.by-handle.found',
   'threads.by-handle.none',
   'threads.state.put.snoozed',
@@ -389,6 +391,160 @@ function readWire(): ContractWire {
 
 const OTHER_CHAT = 'iMessage;-;+15557654321';
 
+/**
+ * v2 F4: what a chat.db source says about every turn of the plain chat:
+ * the service, and no reactions or files.
+ */
+const PLAIN_RICH = {
+  service: 'imessage' as const,
+  reactions: [],
+  files: [],
+};
+
+/**
+ * v2 F4: a second chat whose page carries every rich fact the wire knows,
+ * after board 08's specimens: every delivery rung chat.db proves (08.G),
+ * reactions from them and from me (08.C), files, and SMS, RCS and an
+ * unknown service (08.I).
+ */
+const RICH_CHAT = 'iMessage;-;+15550100001';
+const RICH_HANDLE = '+15550100001';
+
+function richTurns(): TranscriptTurn[] {
+  const them = { from: 'them' as const, handle: RICH_HANDLE };
+  const none = { reactions: [], files: [] };
+  return [
+    {
+      ...them,
+      ...none,
+      guid: 'msg-0101',
+      kind: 'text',
+      text: 'can you send the photo?',
+      at: '2026-09-01T11:50:00.000Z',
+      attachments: 0,
+      service: 'imessage',
+      reactions: [{ kind: 'like', from: 'me' }],
+    },
+    {
+      guid: 'msg-0102',
+      from: 'me',
+      kind: 'attachment-only',
+      text: null,
+      at: '2026-09-01T11:55:00.000Z',
+      attachments: 1,
+      service: 'imessage',
+      delivery: { state: 'read', at: '2026-09-01T11:57:00.000Z' },
+      reactions: [{ kind: 'love', from: 'them', handle: RICH_HANDLE }],
+      files: [
+        {
+          name: 'IMG_0412.heic',
+          mime: 'image/heic',
+          uti: 'public.heic',
+          bytes: 2_400_000,
+          sticker: false,
+          hidden: false,
+        },
+      ],
+    },
+    {
+      ...none,
+      guid: 'msg-0103',
+      from: 'me',
+      kind: 'text',
+      text: 'on my way',
+      at: '2026-09-01T11:58:00.000Z',
+      attachments: 0,
+      service: 'imessage',
+      delivery: { state: 'delivered', at: '2026-09-01T11:58:30.000Z' },
+    },
+    {
+      ...none,
+      guid: 'msg-0104',
+      from: 'me',
+      kind: 'text',
+      text: 'running five late',
+      at: '2026-09-01T11:59:00.000Z',
+      attachments: 0,
+      service: 'imessage',
+      delivery: { state: 'sent', at: null },
+    },
+    {
+      ...none,
+      guid: 'msg-0105',
+      from: 'me',
+      kind: 'text',
+      text: 'are you there?',
+      at: '2026-09-01T12:00:00.000Z',
+      attachments: 0,
+      service: 'imessage',
+      delivery: { state: 'failed', at: null, errorCode: 22 },
+    },
+    {
+      ...them,
+      guid: 'msg-0106',
+      kind: 'attachment-only',
+      text: null,
+      at: '2026-09-01T12:00:10.000Z',
+      attachments: 2,
+      service: 'imessage',
+      reactions: [
+        { kind: 'emphasize', from: 'them', handle: RICH_HANDLE },
+        { kind: 'other', from: 'me' },
+      ],
+      files: [
+        {
+          name: 'itinerary.pdf',
+          mime: 'application/pdf',
+          uti: 'com.adobe.pdf',
+          bytes: 88_000,
+          sticker: false,
+          hidden: false,
+        },
+        {
+          name: null,
+          mime: null,
+          uti: null,
+          bytes: null,
+          sticker: false,
+          hidden: true,
+        },
+      ],
+    },
+    {
+      ...none,
+      guid: 'msg-0107',
+      from: 'me',
+      kind: 'text',
+      text: 'sent as text message',
+      at: '2026-09-01T12:00:20.000Z',
+      attachments: 0,
+      service: 'sms',
+      delivery: { state: 'delivered', at: null },
+    },
+    {
+      ...them,
+      ...none,
+      guid: 'msg-0108',
+      kind: 'text',
+      text: 'got it over RCS',
+      at: '2026-09-01T12:00:30.000Z',
+      attachments: 0,
+      service: 'rcs',
+    },
+    {
+      ...none,
+      guid: 'msg-0109',
+      from: 'me',
+      kind: 'text',
+      text: 'see you soon',
+      at: '2026-09-01T12:00:40.000Z',
+      attachments: 0,
+      service: 'unknown',
+      delivery: null,
+    },
+  ];
+}
+
 function stubSource(): ChannelSource & { down: boolean } {
   const state = { down: false };
   return {
@@ -428,6 +584,9 @@ function stubSource(): ChannelSource & { down: boolean } {
     },
     readChatPage(q: TurnsQuery) {
       if (state.down) return Promise.reject(new Error('source is down'));
+      if (q.chatGuid === RICH_CHAT) {
+        return Promise.resolve({ turns: richTurns(), nextBefore: null });
+      }
       if (q.chatGuid !== CHAT) return Promise.reject(new UnknownChatError());
       return Promise.resolve({
         turns: [
@@ -439,6 +598,7 @@ function stubSource(): ChannelSource & { down: boolean } {
             at: '2026-09-01T11:50:00.000Z',
             handle: HANDLE,
             attachments: 0,
+            ...PLAIN_RICH,
           },
           {
             guid: 'msg-0002',
@@ -447,6 +607,11 @@ function stubSource(): ChannelSource & { down: boolean } {
             text: 'yes, see you there',
             at: '2026-09-01T11:55:00.000Z',
             attachments: 0,
+            ...PLAIN_RICH,
+            delivery: {
+              state: 'delivered' as const,
+              at: '2026-09-01T11:56:00.000Z',
+            },
           },
           {
             guid: 'msg-0003',
@@ -456,6 +621,7 @@ function stubSource(): ChannelSource & { down: boolean } {
             at: '2026-09-01T11:58:00.000Z',
             handle: HANDLE,
             attachments: 0,
+            ...PLAIN_RICH,
           },
         ],
         nextBefore: null,
@@ -987,6 +1153,12 @@ async function recordMain(
   await ok('threads.messages', 200, {
     method: 'GET',
     url: `/v1/threads/${encodeURIComponent(CHAT)}/messages`,
+    route: 'GET /v1/threads/:guid/messages',
+  });
+  // v2 F4: every rich fact the wire knows, on one page.
+  await ok('threads.messages.rich', 200, {
+    method: 'GET',
+    url: `/v1/threads/${encodeURIComponent(RICH_CHAT)}/messages`,
     route: 'GET /v1/threads/:guid/messages',
   });
   await err('404.unknown-chat', 404, {

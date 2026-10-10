@@ -56,7 +56,7 @@ struct ContractTests {
   @Test("every responses/*.json decodes strictly into its DTO")
   func responsesDecode() throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 53, "responses on disk: \(names.count)")
+    #expect(names.count == 54, "responses on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.response(name)
       do {
@@ -85,7 +85,7 @@ struct ContractTests {
       #expect(again == fixture.body, "\(name):\n want \(want)\n got  \(got)")
       compared += 1
     }
-    #expect(compared == 50, "non-204 responses compared: \(compared)")
+    #expect(compared == 51, "non-204 responses compared: \(compared)")
   }
 
   @Test(
@@ -405,7 +405,7 @@ extension Fixtures {
     case "settings.patch": return try trip(SettingsPatchResult.self)
     case "status": return try trip(StatusPayload.self)
     case "threads.list": return try trip(ThreadsPage.self)
-    case "threads.messages": return try trip(ThreadMessagesPage.self)
+    case "threads.messages", "threads.messages.rich": return try trip(ThreadMessagesPage.self)
     case "threads.by-handle.found", "threads.by-handle.none": return try trip(HandleResolution.self)
     case "threads.state.list": return try trip(ThreadStatesPage.self)
     case "threads.state.put.cleared", "threads.state.put.snoozed": return try trip(ThreadStateEnvelope.self)

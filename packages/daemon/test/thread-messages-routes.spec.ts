@@ -43,6 +43,17 @@ interface WireTurn {
   editedAt?: string;
   unsentAt?: string;
   attachments: number;
+  service?: string;
+  delivery?: { state: string; at: string | null; errorCode?: number } | null;
+  reactions?: { kind: string; from: string; handle?: string }[];
+  files?: {
+    name: string | null;
+    mime: string | null;
+    uti: string | null;
+    bytes: number | null;
+    sticker: boolean;
+    hidden: boolean;
+  }[];
 }
 interface MessagesBody {
   chatGuid: string;
@@ -132,6 +143,9 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       at: at(1),
       handle: 'friend@example.com',
       attachments: 0,
+      service: 'imessage',
+      reactions: [],
+      files: [],
     });
     expect(body.turns[1]).toEqual({
       guid: guids[1],
@@ -140,6 +154,10 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       text: 'sure',
       at: at(2),
       attachments: 0,
+      service: 'imessage',
+      delivery: null,
+      reactions: [],
+      files: [],
     });
   });
 
@@ -402,6 +420,212 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       'kind',
       'text',
     ]);
+  });
+
+  describe('rich turns (v2 F4)', () => {
+    /** A source answering one page of exactly these turns. */
+    const pageOf = (turns: TurnsPage['turns']) =>
+      fakeSource(() => Promise.resolve({ turns, nextBefore: null }));
+    const file = {
+      name: 'IMG_0412.heic',
+      mime: 'image/heic',
+      uti: 'public.heic',
+      bytes: 2_400_000,
+      sticker: false,
+      hidden: false,
+    };
+
+    it('wireCarriesServiceDeliveryReactionsFiles, from a real chat.db', async () => {
+      const h = await boot({ threads: true });
+      const handleId = h.fixture.addHandle('+15550100001');
+      const chatId = h.fixture.addChat({
+        identifier: '+15550100001',
+        handleIds: [handleId],
+      });
+      const mine = h.fixture.addAttachmentOnly({
+        chatId,
+        isFromMe: true,
+        at: at(55),
+        isSent: true,
+        isDelivered: true,
+        dateDelivered: at(56),
+        dateRead: at(57),
+        filename: '~/Library/Messages/Attachments/ab/12/F00D/IMG_0412.heic',
+        transferName: 'IMG_0412.heic',
+        mimeType: 'image/heic',
+        uti: 'public.heic',
+        totalBytes: 2_400_000,
+      });
+      h.fixture.addTapback(mine.guid, 2000, {
+        chatId,
+        handleId,
+        at: at(58),
+      });
+
+      const body = (
+        await get(h, pathOf(guidOf(h, chatId)))
+      ).json() as MessagesBody;
+
+      expect(body.turns).toEqual([
+        {
+          guid: mine.guid,
+          from: 'me',
+          kind: 'attachment-only',
+          text: null,
+          at: at(55),
+          attachments: 1,
+          service: 'imessage',
+          delivery: { state: 'read', at: at(57) },
+          reactions: [{ kind: 'love', from: 'them', handle: '+15550100001' }],
+          files: [file],
+        },
+      ]);
+    });
+
+    it('inboundNeverHasDelivery, even when a source hands one over', async () => {
+      const h = await boot({
+        threads: pageOf([
+          {
+            guid: 'G1',
+            from: 'them',
+            kind: 'text',
+            text: 'hi',
+            at: at(1),
+            attachments: 0,
+            service: 'sms',
+            delivery: { state: 'read', at: at(2) },
+          },
+          {
+            guid: 'G2',
+            from: 'me',
+            kind: 'text',
+            text: 'yo',
+            at: at(3),
+            attachments: 0,
+            service: 'sms',
+            delivery: { state: 'failed', at: null, errorCode: 22 },
+          },
+        ]),
+      });
+
+      const body = (
+        await get(h, pathOf('any;-;+15550000350'))
+      ).json() as MessagesBody;
+
+      expect(body.turns[0]).not.toHaveProperty('delivery');
+      expect(body.turns[1]?.delivery).toEqual({
+        state: 'failed',
+        at: null,
+        errorCode: 22,
+      });
+    });
+
+    it('a source that does not say stays silent: no key is invented', async () => {
+      const h = await boot({
+        threads: pageOf([
+          {
+            guid: 'G1',
+            from: 'me',
+            kind: 'text',
+            text: 'hi',
+            at: at(1),
+            attachments: 0,
+          },
+        ]),
+      });
+      const body = (
+        await get(h, pathOf('any;-;+15550000351'))
+      ).json() as MessagesBody;
+      expect(Object.keys(body.turns[0] ?? {}).sort()).toEqual([
+        'at',
+        'attachments',
+        'from',
+        'guid',
+        'kind',
+        'text',
+      ]);
+    });
+
+    it('fileNameControlStrippedAndCapped, and reaction handles are stripped', async () => {
+      const h = await boot({
+        threads: pageOf([
+          {
+            guid: 'G1',
+            from: 'them',
+            kind: 'attachment-only',
+            text: null,
+            at: at(1),
+            attachments: 4,
+            reactions: [
+              { kind: 'like', from: 'them', handle: '+1555\u001b0100002' },
+            ],
+            files: [
+              {
+                ...file,
+                name: 'a\u0000b\nc\t\u001b.pdf',
+                mime: 'app\u0007/pdf',
+              },
+              { ...file, name: `${'n'.repeat(400)}.pdf` },
+              { ...file, name: '\u0001\u0002' },
+              { ...file, name: null, mime: null, uti: null, bytes: null },
+            ],
+          },
+        ]),
+      });
+
+      const body = (
+        await get(h, pathOf('any;-;+15550000352'))
+      ).json() as MessagesBody;
+      const names = body.turns[0]?.files?.map((f) => f.name);
+
+      expect(names?.[0]).toBe('abc.pdf');
+      expect(body.turns[0]?.files?.[0]?.mime).toBe('app/pdf');
+      expect(names?.[1]).toHaveLength(255);
+      expect(names?.[2]).toBeNull();
+      expect(body.turns[0]?.files?.[3]).toEqual({
+        name: null,
+        mime: null,
+        uti: null,
+        bytes: null,
+        sticker: false,
+        hidden: false,
+      });
+      expect(body.turns[0]?.reactions).toEqual([
+        { kind: 'like', from: 'them', handle: '+15550100002' },
+      ]);
+    });
+
+    it('noPathOnWire: no "/" and no "Library" in any file name', async () => {
+      const h = await boot({
+        threads: pageOf([
+          {
+            guid: 'G1',
+            from: 'them',
+            kind: 'attachment-only',
+            text: null,
+            at: at(1),
+            attachments: 2,
+            files: [
+              {
+                ...file,
+                name: '~/Library/Messages/Attachments/ab/12/F00D/x.pdf',
+              },
+              { ...file, name: 'a/b/../' },
+            ],
+          },
+        ]),
+      });
+
+      const body = (
+        await get(h, pathOf('any;-;+15550000353'))
+      ).json() as MessagesBody;
+      const names = (body.turns[0]?.files ?? []).map((f) => f.name);
+
+      expect(names).toEqual(['x.pdf', null]);
+      for (const n of names) {
+        expect(n ?? '').not.toMatch(/\/|Library/);
+      }
+    });
   });
 
   it('reads and only reads: no audit row and no broadcast follow a page view', async () => {

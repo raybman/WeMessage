@@ -26,8 +26,10 @@ import Foundation
 // the rest until the words are final; D-UI-186..189: the v2 F5 compose
 // lookup's words, plan rows D-F5-2..5, batched to Eric; D-UI-190..194:
 // the v2 F3 thread state build, the queue row's reason and the one line a
-// write the daemon refused draws. D-UI-51 is retired: the daemon keeps
-// Done, Snooze and Mute since v2 F3).
+// write the daemon refused draws; D-UI-195..202: the v2 F4 rich turns,
+// the reaction glyphs, the delivery words and the file lines the daemon now
+// serves. D-UI-51 is retired: the daemon keeps Done, Snooze and Mute since
+// v2 F3).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -1273,4 +1275,11 @@ public enum ProvisionalUI {
   public static func agentFlagExcerpt(_ text: String) -> String {
     text.count <= agentFlagLimit ? text : String(text.prefix(agentFlagLimit)) + "\u{2026}"
   }
+
+  // v2 F4, rich turns (docs/plans/v2-F4-rich-turns.md). The daemon serves
+  // service, delivery, reactions and file metadata; these are the words.
+
+  // D-UI-200: a file the source did not name. With no size, the size is
+  // left out rather than guessed.
+  public static let untitledFile = "Untitled file"
 }

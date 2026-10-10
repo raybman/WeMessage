@@ -97,9 +97,15 @@ enum SpecimenText {
     }
   }
 
+  /// v2 F4: a file's name, or the words for one the source did not name
+  /// (D-UI-200).
+  static func fileName(_ attachment: MessageTurn.Attachment) -> String {
+    attachment.name ?? ProvisionalUI.untitledFile
+  }
+
   /// A file's badge: its type's short name ("PDF", "ZIP").
   static func badge(_ attachment: MessageTurn.Attachment) -> String {
-    let sub = attachment.mime.split(separator: "/").last.map(String.init) ?? ""
+    let sub = (attachment.mime ?? "").split(separator: "/").last.map(String.init) ?? ""
     let short = sub.split(separator: "-").last.map(String.init) ?? sub
     return String(short.prefix(4)).uppercased()
   }
@@ -108,14 +114,14 @@ enum SpecimenText {
   static func spoken(_ kind: MessageTurn.Kind, text: String?) -> String? {
     switch kind {
     case .media(let items):
-      let what = items.count == 1 ? (items[0].mime.hasPrefix("video/") ? "Video" : "Photo") : "Album of \(items.count)"
+      let what = items.count == 1 ? ((items[0].mime ?? "").hasPrefix("video/") ? "Video" : "Photo") : "Album of \(items.count)"
       return [what, text].compactMap { $0 }.joined(separator: ", ")
     case .voice(let transcript, let seconds):
       guard let transcript else { return nil }
       return "Voice note" + (seconds.map { " " + duration($0) } ?? "") + ", transcript: " + transcript
     case .file(let file):
       if file.expired == true { return "Photo unavailable, expired on the server" }
-      var parts = ["File " + file.name]
+      var parts = ["File " + fileName(file)]
       if let bytes = file.bytes {
         parts.append(file.received.map { progress(received: $0, of: bytes) } ?? size(bytes))
       }
@@ -209,7 +215,7 @@ struct MediaBody: View {
   }
 
   @ViewBuilder private func single(_ item: MessageTurn.Attachment) -> some View {
-    if item.mime.hasPrefix("video/") {
+    if (item.mime ?? "").hasPrefix("video/") {
       ZStack(alignment: .bottomTrailing) {
         MediaCell(label: "", width: 184, height: 128, palette: palette)
           .overlay {
@@ -338,7 +344,7 @@ struct FileBody: View {
           .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(ink, lineWidth: 1))
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 3) {
-          Text(file.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(ink)
+          Text(SpecimenText.fileName(file)).font(.system(size: 11, weight: .semibold)).foregroundStyle(ink)
           if let bytes = file.bytes {
             if let received = file.received {
               Text(SpecimenText.progress(received: received, of: bytes)).font(.system(size: 9)).foregroundStyle(dim)

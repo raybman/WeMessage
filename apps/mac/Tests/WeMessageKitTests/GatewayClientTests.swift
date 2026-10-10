@@ -46,7 +46,7 @@ struct GatewayClientTests {
   @Test("every Endpoint hits the ROUTE_TABLE method+path (read from responses fixtures)")
   func routes() async throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 53)
+    #expect(names.count == 54)
     var exercised = 0
     for name in names {
       let fixture = try Fixtures.response(name)
@@ -66,7 +66,7 @@ struct GatewayClientTests {
       #expect(Self.matches(path, template: fixture.pathTemplate), "\(name): \(path) is not \(fixture.pathTemplate)")
       exercised += 1
     }
-    #expect(exercised == 53, "fixtures exercised: \(exercised)")
+    #expect(exercised == 54, "fixtures exercised: \(exercised)")
   }
 
   static func matches(_ path: String, template: String) -> Bool {
@@ -129,6 +129,7 @@ struct GatewayClientTests {
     case "status": _ = try await client.status()
     case "threads.list": try await Self.ok(client.listThreads())
     case "threads.messages": try await Self.ok(client.readThread(chat))
+    case "threads.messages.rich": try await Self.ok(client.readThread("iMessage;-;+15550100001"))
     case "threads.by-handle.found", "threads.by-handle.none":
       try await Self.ok(client.resolveHandle("+15551234567"))
     case "threads.state.list": try await Self.ok(client.listThreadStates())

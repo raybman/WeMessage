@@ -9,24 +9,31 @@ import Foundation
 /// Board 08's richer kinds (media, files, links, polls, system lines, the
 /// unsupported fallback) and its per-message facts (service, delivery,
 /// reactions, effect) are Codable here, so the specimen sheet's golden
-/// (fixtures/atlas) decodes into the same type the thread draws. The daemon
-/// serves none of them yet (gap G-08a): `init(turn:)` leaves them empty.
+/// (fixtures/atlas) decodes into the same type the thread draws. v2 F4: the
+/// daemon now serves service, delivery, reactions and file metadata, and
+/// `init(turn:)` maps them; links, polls, effects and the rest it still
+/// does not serve.
 public struct MessageTurn: Equatable, Sendable {
   public enum Direction: String, Codable, Equatable, Sendable {
     case inbound, outbound
   }
 
   /// The transport one message went over. An SMS in an iMessage chat is
-  /// the fallback board 08.I draws without green.
+  /// the fallback board 08.I draws without green; RCS takes the same rail
+  /// (D-UI-199). `unknown` is a turn whose source did not say: never
+  /// guessed to be iMessage.
   public enum Service: String, Codable, Equatable, Sendable {
-    case imessage, sms
+    case imessage, sms, rcs, unknown
   }
 
   /// A file the message carries, as metadata only: the window never holds
-  /// the bytes.
+  /// the bytes. v2 F4: a name or a type the source does not know is nil.
   public struct Attachment: Codable, Equatable, Sendable {
-    public let name: String
-    public let mime: String
+    public let name: String?
+    public let mime: String?
+    public var uti: String?
+    /// A sticker, drawn as the word (D-UI-202).
+    public var sticker: Bool?
     public var bytes: Int?
     public var seconds: Int?
     public var width: Int?
@@ -37,11 +44,13 @@ public struct MessageTurn: Equatable, Sendable {
     public var expired: Bool?
 
     public init(
-      name: String, mime: String, bytes: Int? = nil, seconds: Int? = nil, width: Int? = nil, height: Int? = nil,
-      received: Int? = nil, expired: Bool? = nil
+      name: String?, mime: String?, uti: String? = nil, sticker: Bool? = nil, bytes: Int? = nil, seconds: Int? = nil,
+      width: Int? = nil, height: Int? = nil, received: Int? = nil, expired: Bool? = nil
     ) {
       self.name = name
       self.mime = mime
+      self.uti = uti
+      self.sticker = sticker
       self.bytes = bytes
       self.seconds = seconds
       self.width = width
@@ -51,16 +60,24 @@ public struct MessageTurn: Equatable, Sendable {
     }
   }
 
-  /// A tapback or emoji reaction someone else left: read where it exists,
-  /// never written on iMessage (08.C).
+  /// A tapback or emoji reaction: read where it exists, never written on
+  /// iMessage (08.C). v2 F4: one chip per kind, `name` the accessible word
+  /// ("Loved") and `mine` when one of the count is my own (D-UI-196).
   public struct Reaction: Codable, Equatable, Sendable {
     public let glyph: String
     public let count: Int
+    public var name: String?
+    public var mine: Bool?
 
-    public init(glyph: String, count: Int) {
+    public init(glyph: String, count: Int, name: String? = nil, mine: Bool? = nil) {
       self.glyph = glyph
       self.count = count
+      self.name = name
+      self.mine = mine
     }
+
+    /// Mine, with the optional read as false.
+    public var isMine: Bool { mine == true }
   }
 
   public struct LinkPreview: Codable, Equatable, Sendable {
@@ -174,34 +191,122 @@ public struct MessageTurn: Equatable, Sendable {
   }
 
   /// The daemon's turn, or nil when it is a kind, side or time this build
-  /// does not know.
-  public init?(turn: ThreadTurn) {
+  /// does not know. v2 F4: service, delivery, reactions and files map too;
+  /// an absent service is `unknown`, never assumed iMessage.
+  public init?(turn: ThreadTurn, glyphs: ReactionGlyphs = .kindNames) {
     let direction: Direction
     switch turn.from {
     case "me": direction = .outbound
     case "them": direction = .inbound
     default: return nil
     }
-    let kind: Kind
-    switch turn.kind {
-    case "text": kind = .text
-    case "attachment-only": kind = .attachments(count: turn.attachments)
-    case "audio": kind = .voice(transcript: nil)
-    default: return nil
-    }
+    guard let kind = Self.kind(turn) else { return nil }
     guard let at = WireDate.parse(turn.at) else { return nil }
     self.init(
       guid: turn.guid, direction: direction, kind: kind, text: turn.text, sentAt: at, handle: turn.handle,
-      isEdited: turn.editedAt != nil, isUnsent: turn.unsentAt != nil, attachments: turn.attachments)
+      isEdited: turn.editedAt != nil, isUnsent: turn.unsentAt != nil, attachments: turn.attachments,
+      service: Self.service(turn.service), delivery: turn.delivery.flatMap { $0 }.flatMap(Self.delivery),
+      reactions: Self.reactions(turn.reactions ?? [], glyphs: glyphs))
+  }
+
+  /// v2 F4: the wire's service. Absent, or a value this build does not
+  /// know, is `unknown`.
+  public static func service(_ wire: String?) -> Service {
+    wire.flatMap(Service.init(rawValue:)) ?? .unknown
+  }
+
+  /// v2 F4: the wire's delivery on the ladder. A read with no time is
+  /// claimed only as delivered; a failure names its Messages error code
+  /// (D-UI-197). A state this build does not know draws nothing.
+  public static func delivery(_ wire: WireDelivery) -> Delivery? {
+    switch wire.state {
+    case "sent": return .sent(at: wire.at.flatMap(WireDate.parse))
+    case "delivered": return .delivered
+    case "read":
+      guard let at = wire.at.flatMap(WireDate.parse) else { return .delivered }
+      return .read(at: at)
+    case "failed":
+      return .notDelivered(reason: wire.errorCode.map { "Messages error \($0)" } ?? "Messages error")
+    default: return nil
+    }
+  }
+
+  /// v2 F4: the turn's kind. An attachment-only turn whose visible files
+  /// are all images or video is media; one other visible file is a file;
+  /// anything else (no file list, several mixed, all hidden) stays a count.
+  /// Hidden files are never drawn. Nil for a kind this build does not know.
+  public static func kind(_ turn: ThreadTurn) -> Kind? {
+    switch turn.kind {
+    case "text": return .text
+    case "audio": return .voice(transcript: nil)
+    case "attachment-only": break
+    default: return nil
+    }
+    let visible = (turn.files ?? []).filter { !$0.hidden }.map(attachment)
+    if !visible.isEmpty, visible.allSatisfy(isMedia) { return .media(visible) }
+    if visible.count == 1, let only = visible.first { return .file(only) }
+    return .attachments(count: turn.attachments)
+  }
+
+  static func attachment(_ f: WireFile) -> Attachment {
+    Attachment(name: f.name, mime: f.mime, uti: f.uti, sticker: f.sticker ? true : nil, bytes: f.bytes)
+  }
+
+  static func isMedia(_ a: Attachment) -> Bool {
+    guard a.sticker != true, let mime = a.mime else { return false }
+    return mime.hasPrefix("image/") || mime.hasPrefix("video/")
+  }
+
+  /// v2 F4: one chip per kind, in the order each kind first stands, with
+  /// its count and whether one of them is mine.
+  public static func reactions(_ wire: [WireReaction], glyphs: ReactionGlyphs = .kindNames) -> [Reaction] {
+    var order: [String] = []
+    var count: [String: Int] = [:]
+    var mine: Set<String> = []
+    for r in wire {
+      if count[r.kind] == nil { order.append(r.kind) }
+      count[r.kind, default: 0] += 1
+      if r.from == "me" { mine.insert(r.kind) }
+    }
+    return order.map {
+      Reaction(
+        glyph: glyphs.glyph($0), count: count[$0] ?? 0, name: glyphs.name($0),
+        mine: mine.contains($0) ? true : nil)
+    }
   }
 
   /// Every turn of `page` this build can draw, oldest first, in the page's
   /// own order otherwise.
-  public static func turns(_ page: ThreadMessagesPage) -> [MessageTurn] {
-    page.turns.compactMap(MessageTurn.init(turn:)).enumerated()
+  public static func turns(_ page: ThreadMessagesPage, glyphs: ReactionGlyphs = .kindNames) -> [MessageTurn] {
+    page.turns.compactMap { MessageTurn(turn: $0, glyphs: glyphs) }.enumerated()
       .sorted { $0.element.sentAt == $1.element.sentAt ? $0.offset < $1.offset : $0.element.sentAt < $1.element.sentAt }
       .map(\.element)
   }
+}
+
+/// v2 F4: how a reaction kind is drawn and spoken. The Kit holds no copy:
+/// the app passes its table in (D-UI-195, ProvisionalUI). A kind the table
+/// does not name is drawn as `other`.
+public struct ReactionGlyphs: Equatable, Sendable {
+  /// The wire's kinds, in the order a chip row reads them.
+  public static let kinds = ["love", "like", "dislike", "laugh", "emphasize", "question", "other"]
+
+  public let glyphs: [String: String]
+  public let names: [String: String]
+
+  public init(glyphs: [String: String], names: [String: String]) {
+    self.glyphs = glyphs
+    self.names = names
+  }
+
+  /// No table: the kind is its own glyph and name. What the Kit maps with
+  /// when nobody passed the app's.
+  public static let kindNames = ReactionGlyphs(
+    glyphs: Dictionary(uniqueKeysWithValues: kinds.map { ($0, $0) }),
+    names: Dictionary(uniqueKeysWithValues: kinds.map { ($0, $0) }))
+
+  public func glyph(_ kind: String) -> String { glyphs[kind] ?? glyphs["other"] ?? kind }
+  public func name(_ kind: String) -> String { names[kind] ?? names["other"] ?? kind }
 }
 
 extension MessageTurn.Kind: Codable {

@@ -43,7 +43,10 @@ import {
   type Handle,
   type Service,
   type TranscriptTurn,
+  type TurnDelivery,
+  type TurnFile,
   type TurnKind,
+  type TurnReaction,
   type TurnsPage,
   type TurnsQuery,
 } from '@wemessage/core';
@@ -145,9 +148,88 @@ interface WireTurn {
   editedAt?: string;
   unsentAt?: string;
   attachments: number;
+  service?: Service;
+  delivery?: TurnDelivery | null;
+  reactions?: TurnReaction[];
+  files?: TurnFile[];
 }
 
-/** Field by field, as for a list row; a text of only controls is none. */
+/** v2 F4: the longest file name the wire carries. */
+const WIRE_FILE_NAME_MAX = 255;
+
+/**
+ * Every control character, \n and \t included: a file name is one line,
+ * unlike a message text.
+ */
+const ALL_CONTROLS = /[\u0000-\u001F\u007F-\u009F]/g;
+
+/**
+ * v2 F4: a file name as the wire carries it. The last path component only
+ * (a source may hand back a path; the wire never carries one), every
+ * control character stripped, capped at 255. What is left empty, `.` or
+ * `..` is no name.
+ */
+function fileNameToWire(raw: string | null): string | null {
+  if (raw === null) return null;
+  const last = raw.replace(ALL_CONTROLS, '').split('/').pop() ?? '';
+  if (last.length === 0 || last === '.' || last === '..') return null;
+  return last.slice(0, WIRE_FILE_NAME_MAX);
+}
+
+/** A free-text metadata field: controls stripped, empty is none. */
+function metaToWire(raw: string | null): string | null {
+  if (raw === null) return null;
+  const v = raw.replace(ALL_CONTROLS, '');
+  return v.length > 0 ? v : null;
+}
+
+/** v2 F4: one file's metadata, copied field by field. Never a path. */
+function fileToWire(f: TurnFile): TurnFile {
+  return {
+    name: fileNameToWire(f.name),
+    mime: metaToWire(f.mime),
+    uti: metaToWire(f.uti),
+    bytes: f.bytes,
+    sticker: f.sticker,
+    hidden: f.hidden,
+  };
+}
+
+/** v2 F4: one reaction, copied field by field; the handle stripped. */
+function reactionToWire(r: TurnReaction): TurnReaction {
+  return {
+    kind: r.kind,
+    from: r.from,
+    ...(r.from === 'them' && r.handle !== undefined
+      ? { handle: stripControlChars(r.handle) }
+      : {}),
+  };
+}
+
+/**
+ * v2 F4: a delivery, copied by state so nothing else rides along. Only an
+ * outbound turn carries one: an inbound turn's is dropped, whatever the
+ * source said.
+ */
+function deliveryToWire(d: TurnDelivery | null): TurnDelivery | null {
+  if (d === null) return null;
+  switch (d.state) {
+    case 'sent':
+      return { state: 'sent', at: null };
+    case 'delivered':
+      return { state: 'delivered', at: d.at };
+    case 'read':
+      return { state: 'read', at: d.at };
+    case 'failed':
+      return { state: 'failed', at: null, errorCode: d.errorCode };
+  }
+}
+
+/**
+ * Field by field, as for a list row; a text of only controls is none.
+ * v2 F4: a key the source left out stays out (absent is "the source does
+ * not say"); `[]` is "none".
+ */
 function turnToWire(turn: TranscriptTurn): WireTurn {
   const text = turn.text === null ? null : stripControlChars(turn.text);
   return {
@@ -162,6 +244,14 @@ function turnToWire(turn: TranscriptTurn): WireTurn {
     ...(turn.editedAt !== undefined ? { editedAt: turn.editedAt } : {}),
     ...(turn.unsentAt !== undefined ? { unsentAt: turn.unsentAt } : {}),
     attachments: turn.attachments,
+    ...(turn.service !== undefined ? { service: turn.service } : {}),
+    ...(turn.from === 'me' && turn.delivery !== undefined
+      ? { delivery: deliveryToWire(turn.delivery) }
+      : {}),
+    ...(turn.reactions !== undefined
+      ? { reactions: turn.reactions.map(reactionToWire) }
+      : {}),
+    ...(turn.files !== undefined ? { files: turn.files.map(fileToWire) } : {}),
   };
 }
 

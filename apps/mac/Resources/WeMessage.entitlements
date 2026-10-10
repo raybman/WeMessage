@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The Swift host's entitlements: one. The host runs no JIT and loads no
+  The Swift host's entitlements: two. The host runs no JIT and loads no
   foreign library; it drives nothing itself. automation.apple-events is here
   because TCC attributes the Messages automation grant to the responsible
-  process, which is the app. Signed onto Contents/MacOS/WeMessage and the app
-  by tools/swift/sign.sh (S5a).
+  process, which is the app. personal-information.addressbook is here (S5e)
+  because the released app is hardened (sign.sh passes the runtime option),
+  and a hardened app is refused Contacts without this resource-access
+  entitlement, whatever Info.plist says. Contacts is optional: it only puts
+  names and photos on avatars, and a refusal shows initials instead. Signed
+  onto Contents/MacOS/WeMessage and the app by tools/swift/sign.sh (S5a).
 -->
 <plist version="1.0">
   <dict>
     <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <key>com.apple.security.personal-information.addressbook</key>
     <true/>
   </dict>
 </plist>

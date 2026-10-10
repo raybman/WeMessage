@@ -38,16 +38,7 @@ final class Board00PerfTests: XCTestCase {
 
     // First paint: polled tight, so the wait adds little to the number.
     let first = element(app, ID.rowPrefix + Self.long)
-    var painted: Duration?
-    let paintDeadline = launched + .seconds(UITestApp.timeout)
-    while ContinuousClock.now < paintDeadline {
-      if first.exists && first.isHittable {
-        painted = ContinuousClock.now - launched
-        break
-      }
-      Thread.sleep(forTimeInterval: 0.01)
-    }
-    let paint = try XCTUnwrap(painted, "the first thread row never became hittable")
+    let paint = try XCTUnwrap(firstHittable(first, since: launched), "the first thread row never became hittable")
     report("first-paint", ms(paint), "ms", G2Limits.firstPaintMs, .hard)
     XCTAssertLessThanOrEqual(ms(paint), Double(G2Limits.firstPaintMs), "first paint over the G2 limit")
 
@@ -123,6 +114,19 @@ final class Board00PerfTests: XCTestCase {
   }
 
   // MARK: Helpers
+
+  /// Time from `since` until `element` is hittable, polled every 10 ms; nil
+  /// when the wait runs out. Synchronous on purpose: Thread.sleep is not
+  /// allowed in the async test body.
+  @MainActor
+  private func firstHittable(_ element: XCUIElement, since: ContinuousClock.Instant) -> Duration? {
+    let deadline = since + .seconds(UITestApp.timeout)
+    while ContinuousClock.now < deadline {
+      if element.exists && element.isHittable { return ContinuousClock.now - since }
+      Thread.sleep(forTimeInterval: 0.01)
+    }
+    return nil
+  }
 
   @MainActor
   private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

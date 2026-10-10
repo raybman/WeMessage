@@ -968,7 +968,8 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     //
     // v2 A1 (ratchet #26) added `GET /v1/threads` and its twin, +2, 67 -> 69.
     // v2 A2 (#27) added `GET /v1/threads/:guid/messages` and its twin, 71.
-    expect(ROUTE_TABLE).toHaveLength(71);
+    // v2 F5 (#28) added `GET /v1/threads/by-handle/:handle` and its twin, 73.
+    expect(ROUTE_TABLE).toHaveLength(73);
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/pause');
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/global-mode');
   });

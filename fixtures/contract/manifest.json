@@ -7,6 +7,7 @@
     "Refinements are dropped by toJSONSchema; the following are enforced by the daemon but absent from the request schemas.",
     "POST /v1/drafts/bulk: exactly one of ids or filter (both, or neither, is 400).",
     "GET /v1/threads/:guid/messages: before and until are mutually exclusive (both is 400).",
+    "GET /v1/threads/by-handle/:handle: a handle containing ';' is refused with 400 invalid-handle.",
     "POST /v1/rules and PATCH /v1/rules/:id: outsideWindow 'queue' is refused with 400 unsupported-outside-window.",
     "PATCH /v1/settings is an open object by design: the closed key list is enforced by a typed refusal (unknown-key, read-only-key, wrong-type, below-floor, above-ceiling).",
     "Stabilised values: every 64-hex run is the null digest, minted ulids and message guids are id-NNNN in first-seen order (chosen ids such as test-adapter are kept), and the config dir is <configDir>."
@@ -14,6 +15,7 @@
   "files": [
     "errors/400.invalid-body.json",
     "errors/400.invalid-cursor.json",
+    "errors/400.invalid-handle.json",
     "errors/400.settings-refusal.json",
     "errors/400.unknown-event.json",
     "errors/401.missing.json",
@@ -30,6 +32,7 @@
     "requests/get.v1.audit.schema.json",
     "requests/get.v1.drafts.schema.json",
     "requests/get.v1.rules.id.dry-run.schema.json",
+    "requests/get.v1.threads.by-handle.handle.params.schema.json",
     "requests/get.v1.threads.guid.messages.params.schema.json",
     "requests/get.v1.threads.guid.messages.schema.json",
     "requests/get.v1.threads.schema.json",
@@ -92,6 +95,8 @@
     "responses/settings.list.json",
     "responses/settings.patch.json",
     "responses/status.json",
+    "responses/threads.by-handle.found.json",
+    "responses/threads.by-handle.none.json",
     "responses/threads.list.json",
     "responses/threads.messages.json",
     "responses/toggles.globalmode.json",

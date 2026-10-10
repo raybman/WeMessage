@@ -120,6 +120,7 @@ export const CONTRACT_NOTES: readonly string[] = [
   'Refinements are dropped by toJSONSchema; the following are enforced by the daemon but absent from the request schemas.',
   'POST /v1/drafts/bulk: exactly one of ids or filter (both, or neither, is 400).',
   'GET /v1/threads/:guid/messages: before and until are mutually exclusive (both is 400).',
+  "GET /v1/threads/by-handle/:handle: a handle containing ';' is refused with 400 invalid-handle.",
   "POST /v1/rules and PATCH /v1/rules/:id: outsideWindow 'queue' is refused with 400 unsupported-outside-window.",
   'PATCH /v1/settings is an open object by design: the closed key list is enforced by a typed refusal (unknown-key, read-only-key, wrong-type, below-floor, above-ceiling).',
   'Stabilised values: every 64-hex run is the null digest, minted ulids and message guids are id-NNNN in first-seen order (chosen ids such as test-adapter are kept), and the config dir is <configDir>.',
@@ -174,6 +175,8 @@ export const RESPONSE_NAMES = [
   'send',
   'threads.list',
   'threads.messages',
+  'threads.by-handle.found',
+  'threads.by-handle.none',
 ] as const;
 
 export const ERROR_NAMES = [
@@ -189,6 +192,7 @@ export const ERROR_NAMES = [
   '404.unknown-chat',
   '503.source-unavailable',
   '400.invalid-cursor',
+  '400.invalid-handle',
   '400.invalid-body',
   '400.settings-refusal',
   '400.unknown-event',
@@ -988,6 +992,23 @@ async function recordMain(
     method: 'GET',
     url: '/v1/threads?cursor=nope',
     route: 'GET /v1/threads',
+  });
+  // v2 F5: the harness's 1:1 chat for HANDLE is found; a handle with no
+  // chat on this Mac is a 200 with a null conversation, not an error.
+  await ok('threads.by-handle.found', 200, {
+    method: 'GET',
+    url: `/v1/threads/by-handle/${encodeURIComponent(HANDLE)}`,
+    route: 'GET /v1/threads/by-handle/:handle',
+  });
+  await ok('threads.by-handle.none', 200, {
+    method: 'GET',
+    url: `/v1/threads/by-handle/${encodeURIComponent('+15550100099')}`,
+    route: 'GET /v1/threads/by-handle/:handle',
+  });
+  await err('400.invalid-handle', 400, {
+    method: 'GET',
+    url: `/v1/threads/by-handle/${encodeURIComponent('+15550100001;x')}`,
+    route: 'GET /v1/threads/by-handle/:handle',
   });
   source.down = true;
   await err('503.source-unavailable', 503, {

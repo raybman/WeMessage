@@ -189,6 +189,68 @@ describe('resolveChat (Scenario 3)', () => {
     });
   });
 
+  it('v2 F5: an older 1:1 beats a newer group with the same handle', async () => {
+    const fixture = freshFixture();
+    const h = fixture.addHandle('+15554440000');
+    const other = fixture.addHandle('+15554440001');
+    const solo = fixture.addChat({
+      identifier: '+15554440000',
+      handleIds: [h],
+    });
+    const group = fixture.addGroupChat([h, other]);
+    fixture.addMessage({
+      chatId: solo,
+      handleId: h,
+      text: 'one to one, older',
+      at: '2026-01-01T00:00:00Z',
+    });
+    fixture.addMessage({
+      chatId: group,
+      handleId: h,
+      text: 'group, newer',
+      at: '2026-01-03T00:00:00Z',
+    });
+    const reader = readerOver(fixture);
+
+    const result = await reader.resolveChat('+15554440000');
+
+    expect(result).toEqual({
+      chatGuid: chatGuidOf(fixture, solo),
+      service: 'imessage',
+      isGroup: false,
+    });
+  });
+
+  it('v2 F5: a handle that is only in groups resolves to the newest group, isGroup:true', async () => {
+    const fixture = freshFixture();
+    const h = fixture.addHandle('+15554450000');
+    const a = fixture.addHandle('+15554450001');
+    const b = fixture.addHandle('+15554450002');
+    const olderGroup = fixture.addGroupChat([h, a]);
+    const newerGroup = fixture.addGroupChat([h, b]);
+    fixture.addMessage({
+      chatId: olderGroup,
+      handleId: h,
+      text: 'older group',
+      at: '2026-01-01T00:00:00Z',
+    });
+    fixture.addMessage({
+      chatId: newerGroup,
+      handleId: h,
+      text: 'newer group',
+      at: '2026-01-02T00:00:00Z',
+    });
+    const reader = readerOver(fixture);
+
+    const result = await reader.resolveChat('+15554450000');
+
+    expect(result).toEqual({
+      chatGuid: chatGuidOf(fixture, newerGroup),
+      service: 'imessage',
+      isGroup: true,
+    });
+  });
+
   it('connection stays read-only URI mode: an INSERT through the reader throws (existing invariant re-asserted)', async () => {
     const fixture = freshFixture();
     const h = fixture.addHandle('+15551234567');

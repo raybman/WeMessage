@@ -204,6 +204,21 @@ export const ROUTE_TABLE: readonly string[] = [
   //
   // NO port importer moves, enforced as for #26: `routes/threads.ts` still
   // receives its reader as a closure from `daemon.ts`.
+  //
+  // #28 deliberate (v2 F5): `GET /v1/threads/by-handle/:handle`, the
+  // conversation a new draft to that handle would land in, 71 -> 73.
+  //   1 route + 1 auto-HEAD twin = +2; 71 + 2 = 73.
+  // A read under every rule #26 set: behind the operator bearer (an adapter
+  // token is a 401), no audit row, dated by the daemon clock. It asks the
+  // send path's own `resolveChat`, so compose refuses a handle with no 1:1
+  // before the draft instead of failing as `no-conversation` at dispatch.
+  // A handle carrying `;` is a 400; a source that throws is a 503.
+  //
+  // NO WS event moves and NO frame moves: a lookup pushes nothing.
+  //
+  // NO port importer moves, enforced as for #26: `routes/threads.ts`
+  // receives `resolveChat` as a closure from `daemon.ts` and never names
+  // the port as a value, so PORT_IMPORTER_ALLOWLIST stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -230,6 +245,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/status',
   'GET /v1/threads',
   'GET /v1/threads/:guid/messages',
+  'GET /v1/threads/by-handle/:handle',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
   'HEAD /v1/agent',
@@ -252,6 +268,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/status',
   'HEAD /v1/threads',
   'HEAD /v1/threads/:guid/messages',
+  'HEAD /v1/threads/by-handle/:handle',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
   'PATCH /v1/schedules/:id',
@@ -536,8 +553,10 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
  * for them, so a HEAD route is covered by whatever covers its GET twin.
  *
  * Path params are not bodies. `/:id`, `/:handle` and `/:guid` are read raw
- * by every route except one, `GET /v1/threads/:guid/messages`, whose params
- * schema is pinned separately in `PARAM_SCHEMAS`.
+ * by every route except two, `GET /v1/threads/:guid/messages` and
+ * `GET /v1/threads/by-handle/:handle`, whose params schemas are pinned
+ * separately in `PARAM_SCHEMAS`. The second parses params and nothing else,
+ * so it is listed here.
  *
  * `GET /v1/events` and `GET /v1/events/sse` read an `events` filter from the
  * query, but by hand (events-filter.ts), not through zod: its refusal is
@@ -567,6 +586,7 @@ export const NO_BODY_ROUTES: readonly string[] = [
   'GET /v1/schedules/:id',
   'GET /v1/settings',
   'GET /v1/status',
+  'GET /v1/threads/by-handle/:handle',
   'POST /v1/adapters/:id/token',
   'POST /v1/connect',
   'POST /v1/drafts/:id/recall',

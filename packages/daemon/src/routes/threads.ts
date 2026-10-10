@@ -2,6 +2,10 @@
  * v2 A1: `GET /v1/threads`, the conversations list the v2 messenger opens on.
  * v2 A2: `GET /v1/threads/:guid/messages`, one page of one conversation,
  * under every rule below; the list's cursor becomes the page's `before`.
+ * v2 F5: `GET /v1/threads/by-handle/:handle`, the conversation a new draft
+ * to that handle would land in, or null. The same lookup the send path
+ * makes (the reader's `resolveChat`), asked before the draft rather than
+ * after, so compose can refuse up front instead of failing at dispatch.
  *
  * A read, and only a read. The route asks the channel source it was handed
  * for one page, copies that source's channel tag onto every row, strips
@@ -27,13 +31,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   InvalidCursorError,
+  normalizeHandle,
   UnknownChatError,
   type ChannelName,
   type ChannelSource,
   type ChatSummary,
   type ChatsPage,
+  type ChatGuid,
   type ChatsQuery,
   type Clock,
+  type Handle,
+  type Service,
   type TranscriptTurn,
   type TurnKind,
   type TurnsPage,
@@ -41,9 +49,22 @@ import {
 } from '@wemessage/core';
 import { stripControlChars } from '../sanitize.js';
 
+/** v2 F5: what the send path's lookup answers, by shape alone. */
+export interface ResolvedChat {
+  chatGuid: ChatGuid;
+  service: Service;
+  isGroup: boolean;
+}
+
 export interface ThreadRouteDeps {
   source: ChannelSource;
   clock: Clock;
+  /**
+   * v2 F5: the send path's own lookup, handed in as a closure so the route
+   * never holds a reader (the port importer scan holds it to that). Read
+   * only: it never mints a chat.
+   */
+  resolveChat: (handle: Handle) => Promise<ResolvedChat | null>;
 }
 
 // strictObject: an unknown query param is surface too (fail closed, the
@@ -100,6 +121,18 @@ const pageQuery = z
 
 // A chat guid is the source's to judge; the route only bounds its size.
 const pageParams = z.strictObject({ guid: z.string().min(1).max(512) });
+
+// v2 F5. 320 bounds an email address with room to spare. A `;` is the chat
+// guid's own separator: a handle carrying one is a guid smuggled in as a
+// handle, and is refused rather than looked up.
+const handleParams = z.strictObject({
+  handle: z
+    .string()
+    .trim()
+    .min(1)
+    .max(320)
+    .refine((h) => !h.includes(';'), { message: 'a handle has no ";"' }),
+});
 
 /** One transcript turn as the wire carries it. */
 interface WireTurn {
@@ -215,6 +248,40 @@ export function registerThreadRoutes(
       asOf: clock.now(),
     };
   });
+  // GET, and fastify's auto-HEAD twin (route ratchet #28). No audit row: a
+  // lookup is a read, like the list. The answer's `handle` is the
+  // normalized form, so "+1 (555) 010-0001" and "+15550100001" are one
+  // handle on the wire as they are to the send path.
+  app.get('/v1/threads/by-handle/:handle', async (req, reply) => {
+    const params = handleParams.safeParse(req.params);
+    if (!params.success) {
+      return reply.code(400).send({
+        error: 'invalid-handle',
+        detail: { issues: params.error.issues },
+      });
+    }
+    const handle = normalizeHandle(params.data.handle);
+
+    let found: ResolvedChat | null;
+    try {
+      found = await Promise.resolve().then(() => deps.resolveChat(handle));
+    } catch {
+      return reply.code(503).send({ error: 'source-unavailable' });
+    }
+
+    return {
+      handle,
+      conversation:
+        found === null
+          ? null
+          : {
+              chatGuid: found.chatGuid,
+              service: found.service,
+              isGroup: found.isGroup,
+            },
+      asOf: clock.now(),
+    };
+  });
 }
 
 /**
@@ -227,4 +294,5 @@ export const threadSchemas = {
   listQuery,
   pageQuery,
   pageParams,
+  handleParams,
 } as const;

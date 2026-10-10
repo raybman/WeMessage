@@ -19,6 +19,7 @@ import type {
   AuditEvent,
   Autonomy,
   ChannelSource,
+  ChatDbReader,
   Clock,
   Draft,
   Ulid,
@@ -163,6 +164,12 @@ export interface BootOptions {
    */
   threads?: boolean | ChannelSource;
   /**
+   * v2 F5: what `GET /v1/threads/by-handle/:handle` asks. Defaults to this
+   * harness's own reader, composed as `daemon.ts` composes it; a suite hands
+   * in a fake to reach the 503, or to pin what the route forwards.
+   */
+  resolveChat?: ChatDbReader['resolveChat'];
+  /**
    * v2 A0p: the park. Suites here exercise autonomy, so the harness lifts the
    * park by default; `park.spec` passes 'parked' to prove the default build.
    * `null` composes exactly as production does, with the field absent.
@@ -232,6 +239,10 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const lateVerify = (draftId: Ulid) =>
     verifyLate({ store, reader, clock: clockCtl.clock }, draftId);
 
+  // v2 F5: the by-handle lookup, from this reader unless a suite overrides.
+  const resolveChat: ChatDbReader['resolveChat'] =
+    opts.resolveChat ?? ((h) => reader.resolveChat(h));
+
   const server = await buildServer({
     ...autonomyOpt,
     configDir: dir,
@@ -259,10 +270,17 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
                 reader.readChatPage(q),
             },
             clock: clockCtl.clock,
+            resolveChat,
           },
         }
       : opts.threads !== undefined && opts.threads !== false
-        ? { threads: { source: opts.threads, clock: clockCtl.clock } }
+        ? {
+            threads: {
+              source: opts.threads,
+              clock: clockCtl.clock,
+              resolveChat,
+            },
+          }
         : {}),
     ...(opts.rules === true
       ? { rules: { store, clock: clockCtl.clock, sink } }

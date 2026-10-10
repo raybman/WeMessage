@@ -1,0 +1,9 @@
+{
+  "route": "GET /v1/threads/by-handle/:handle",
+  "status": 200,
+  "body": {
+    "handle": "+15550100099",
+    "conversation": null,
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

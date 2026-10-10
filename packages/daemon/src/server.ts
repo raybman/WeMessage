@@ -201,7 +201,12 @@ export interface DaemonOptions {
    * Optional on the same terms as every other surface here. `daemon.ts`
    * passes the iMessage source.
    */
-  threads?: { source: ChannelSource; clock: Clock };
+  threads?: {
+    source: ChannelSource;
+    clock: Clock;
+    /** v2 F5: `GET /v1/threads/by-handle/:handle`, the send path's lookup. */
+    resolveChat: ChatDbReader['resolveChat'];
+  };
 
   /**
    * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they

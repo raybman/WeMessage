@@ -627,6 +627,9 @@ export async function startDaemon(
         readChatPage: (q) => sendReaderHandle.reader.readChatPage(q),
       },
       clock: options.clock,
+      // v2 F5: the lookup compose asks before a new conversation's draft,
+      // the same one dispatch makes, through the same handle.
+      resolveChat: (h) => sendReaderHandle.reader.resolveChat(h),
     },
     // greeting frame (§3.4 connection.state): proves the stream is live.
     //

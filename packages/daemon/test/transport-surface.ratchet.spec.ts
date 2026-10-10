@@ -135,6 +135,11 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
           },
         },
         clock,
+        resolveChat: () => {
+          throw new Error(
+            'resolveChat must not be called: route-table test only',
+          );
+        },
       },
       send: {
         store,

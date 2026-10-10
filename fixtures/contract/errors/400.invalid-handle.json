@@ -1,0 +1,18 @@
+{
+  "route": "GET /v1/threads/by-handle/:handle",
+  "status": 400,
+  "body": {
+    "error": "invalid-handle",
+    "detail": {
+      "issues": [
+        {
+          "code": "custom",
+          "path": [
+            "handle"
+          ],
+          "message": "a handle has no \";\""
+        }
+      ]
+    }
+  }
+}

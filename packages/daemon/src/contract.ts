@@ -12,10 +12,11 @@
  * the enforced shape are the same object and cannot drift apart.
  *
  * What JSON Schema cannot carry: `.refine` and `.superRefine` are dropped by
- * `z.toJSONSchema` without a word. Two are load-bearing and are recorded as
+ * `z.toJSONSchema` without a word. The load-bearing ones are recorded as
  * prose in `fixtures/contract/manifest.json` notes instead:
  *  - POST /v1/drafts/bulk takes exactly one of `ids` or `filter`;
  *  - GET /v1/threads/:guid/messages takes at most one of `before` or `until`;
+ *  - GET /v1/threads/by-handle/:handle refuses a handle containing `;`;
  *  - rules refuse `outsideWindow: 'queue'` with a typed 400.
  */
 import { z } from 'zod';
@@ -63,11 +64,12 @@ export const REQUEST_SCHEMAS = {
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;
 
 /**
- * Path-parameter schemas. Only one route validates its params with zod; the
- * rest take a bare string id and answer 404 for one they do not know.
+ * Path-parameter schemas. Only two routes validate their params with zod;
+ * the rest take a bare string id and answer 404 for one they do not know.
  */
 export const PARAM_SCHEMAS = {
   'GET /v1/threads/:guid/messages': threadSchemas.pageParams,
+  'GET /v1/threads/by-handle/:handle': threadSchemas.handleParams,
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;
 
 const JSON_SCHEMA_OPTS = {

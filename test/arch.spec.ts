@@ -1935,6 +1935,10 @@ describe('arch invariants (dependency-cruiser)', () => {
     const APPLE_SERVICE_CASING_ALLOWLIST: readonly string[] = [
       'packages/ingest/test/normalize-edge.spec.ts',
       'packages/ingest/test/resolve-chat.spec.ts',
+      // v2 F5: the by-handle route spec builds an SMS-only 1:1 through the
+      // same fixture builder, so it too spells Apple's raw column casing on
+      // the input side and asserts the normalised 'sms' on the wire.
+      'packages/daemon/test/thread-by-handle-routes.spec.ts',
     ];
     function misCasedServiceOffenders(): string[] {
       return s7ListFiles(join(repoRoot, 'packages'))
@@ -3838,9 +3842,11 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // 67 at S7 close; 69 since v2 A1 (#26): `GET /v1/threads`, the v2
     // conversations list, plus its auto-HEAD twin. 71 since v2 A2 (#27):
     // `GET /v1/threads/:guid/messages`, one conversation's page, plus its
-    // twin. Reads behind the operator bearer; the frame table and the port
-    // allowlist did not move.
-    expect(ROUTE_TABLE.length).toBe(71);
+    // twin. 73 since v2 F5 (#28): `GET /v1/threads/by-handle/:handle`, the
+    // conversation a new draft would land in, plus its twin. Reads behind
+    // the operator bearer; the frame table and the port allowlist did not
+    // move.
+    expect(ROUTE_TABLE.length).toBe(73);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -5793,13 +5799,15 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged, except the route table (#26, #27)', () => {
+    it('the S8-close counts are unchanged, except the route table (#26, #27, #28)', () => {
       // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
       // twin), the conversations list the v2 messenger opens on: 67 -> 69.
       // v2 A2 minted #27 for `GET /v1/threads/:guid/messages` (+ HEAD
-      // twin), one conversation's page: 69 -> 71. No WS event, no frame and
-      // no port importer moved with either.
-      expect(ROUTE_TABLE.length).toBe(71);
+      // twin), one conversation's page: 69 -> 71. v2 F5 minted #28 for
+      // `GET /v1/threads/by-handle/:handle` (+ HEAD twin), the lookup
+      // compose asks before a new conversation's draft: 71 -> 73. No WS
+      // event, no frame and no port importer moved with any of them.
+      expect(ROUTE_TABLE.length).toBe(73);
       expect(WS_EVENT_VOCABULARY.length).toBe(21);
       expect(GATEWAY_EVENT_NAMES.length).toBe(21);
       expect(EMITTED_WS_EVENTS.length).toBe(21);
@@ -5813,21 +5821,23 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26) and v2 A2 (#27), and #28 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27) and v2 F5 (#28), and #29 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
-      // one read route, `GET /v1/threads`, and v2 A2 #27 for one more,
-      // `GET /v1/threads/:guid/messages`, and nothing else on the wire: the
-      // event and frame counts in the row above are S8's. #28 is the next
-      // tooth.
+      // one read route, `GET /v1/threads`, v2 A2 #27 for one more,
+      // `GET /v1/threads/:guid/messages`, and v2 F5 #28 for a third,
+      // `GET /v1/threads/by-handle/:handle`, and nothing else on the wire:
+      // the event and frame counts in the row above are S8's. #29 is the
+      // next tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(27);
-      expect(seen).not.toContain(28);
+      expect(Math.max(...seen)).toBe(28);
+      expect(seen).not.toContain(29);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
       expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
+      expect(text).toMatch(/#28 deliberate \(v2 F5\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {

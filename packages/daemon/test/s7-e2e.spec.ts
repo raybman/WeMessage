@@ -1695,7 +1695,8 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // where the numbers went. v2 A1 (ratchet #26) then added the first v2
     // route, `GET /v1/threads` and its twin: 67 -> 69, no frame, no event.
     // v2 A2 (#27) added `GET /v1/threads/:guid/messages` and its twin: 71.
-    expect(ROUTE_TABLE).toHaveLength(71);
+    // v2 F5 (#28) added `GET /v1/threads/by-handle/:handle` and its twin: 73.
+    expect(ROUTE_TABLE).toHaveLength(73);
     expect(WS_EVENT_VOCABULARY).toHaveLength(21);
     expect(EMITTED_WS_EVENTS).toHaveLength(21);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);

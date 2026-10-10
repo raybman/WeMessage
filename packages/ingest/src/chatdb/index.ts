@@ -726,30 +726,38 @@ export function createChatDbReader(
       );
       if (matches.length === 0) return Promise.resolve(null);
 
+      // v2 F5: the newest 1:1 wins; a group is the answer only when the
+      // handle has no 1:1 at all. "Newest chat containing the handle" would
+      // hand a draft to the group the person last spoke in.
       const seenChats = new Set<number>();
-      let best: ResolveCandidateRow | null = null;
-      let bestDate = -1n;
+      let best: { row: ResolveCandidateRow; date: bigint; n: number } | null =
+        null;
       for (const candidate of matches) {
         if (seenChats.has(candidate.chatRowid)) continue;
         seenChats.add(candidate.chatRowid);
         const row = lastMessageDateStmt.get(candidate.chatRowid) as {
           lastDate: bigint | null;
         };
-        const lastDate = row.lastDate ?? 0n;
-        if (best === null || lastDate > bestDate) {
-          best = candidate;
-          bestDate = lastDate;
+        const date = row.lastDate ?? 0n;
+        const { n } = participantCountStmt.get(candidate.chatRowid) as {
+          n: number;
+        };
+        const solo = n <= 1;
+        const bestSolo = best !== null && best.n <= 1;
+        if (
+          best === null ||
+          (solo && !bestSolo) ||
+          (solo === bestSolo && date > best.date)
+        ) {
+          best = { row: candidate, date, n };
         }
       }
       if (best === null) return Promise.resolve(null);
 
-      const countRow = participantCountStmt.get(best.chatRowid) as {
-        n: number;
-      };
       return Promise.resolve({
-        chatGuid: best.chatGuid,
-        service: mapService(best.service),
-        isGroup: countRow.n > 1,
+        chatGuid: best.row.chatGuid,
+        service: mapService(best.row.service),
+        isGroup: best.n > 1,
       });
     },
 

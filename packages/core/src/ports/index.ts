@@ -48,6 +48,13 @@ export interface Clock {
 }
 
 /** Persisted cursor position over chat.db ROWIDs (§2.3 `cursor`). */
+/** v2 F7a: what the mirror holds (status `mirror`). */
+export interface MirrorCounts {
+  messages: number;
+  chats: number;
+  historyFrom: IsoUtc | null;
+}
+
 export interface CursorState {
   lastRowid: number;
   lastScanAt: IsoUtc;
@@ -71,8 +78,18 @@ export interface Store {
   hasInboundMessage(guid: string): boolean;
   /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
   insertInboundMessage(message: Message): void;
-  /** Mirror rows received at/after `since` — F-5 status `counts.messagesToday`. */
-  countInboundMessagesSince(since: IsoUtc): number;
+  /**
+   * v2 F7a: mirror rows SENT at/after `since` (status "today"). Counts by
+   * `sent_at`, never `received_at`: the received stamp is the copy time, so
+   * right after a first copy every row in the history was "received today".
+   * A range count over `inbound_sent`, whose leading column is `sent_at`.
+   */
+  countSentSince(since: IsoUtc): number;
+  /**
+   * v2 F7a: the mirror's size in rows and conversations, and its oldest
+   * sent instant (null on an empty mirror). Status `mirror`.
+   */
+  mirrorCounts(): MirrorCounts;
   /**
    * s4 Scenario 7 (§1.5 extension): attempts already burned against this
    * draft, 0 when it has never been dispatched. The retry route needs to

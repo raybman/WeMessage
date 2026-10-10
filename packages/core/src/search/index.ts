@@ -450,6 +450,25 @@ export function yearStartInZone(year: number, tz: string): Date {
   return new Date(t);
 }
 
+/**
+ * v2 F7a: the instant local midnight of the day `now` falls on in `tz`.
+ * Same two-pass offset search as yearStartInZone, so a DST change between
+ * the guess and the answer settles (no zone moves its clocks at midnight by
+ * more than that). Status "today" counts from here, never from UTC midnight.
+ */
+export function dayStartInZone(now: Date, tz: string): Date {
+  const ms = now.getTime();
+  const local = new Date(ms + offsetAt(ms, tz));
+  const wall = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+  );
+  let t = wall - offsetAt(wall, tz);
+  t = wall - offsetAt(t, tz);
+  return new Date(t);
+}
+
 export interface YearFacet {
   year: number;
   count: number;

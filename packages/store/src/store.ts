@@ -26,6 +26,7 @@ import type {
   IsoUtc,
   Message,
   MessageGuid,
+  MirrorCounts,
   MirrorCoverage,
   MirrorMatch,
   MirrorQuery,
@@ -43,6 +44,16 @@ import type {
 } from '@wemessage/core';
 import { applyMigrations } from './migrate.js';
 import { verifyAdapterToken } from './token-hash.js';
+
+/** v2 F7a: status "today", one statement shared with its EXPLAIN. */
+const COUNT_SENT_SINCE_SQL =
+  'SELECT COUNT(*) AS n FROM inbound_messages WHERE sent_at >= ?';
+/** v2 F7a: distinct conversations in the mirror, by index skip-scan. */
+const COUNT_MIRROR_CHATS_SQL =
+  'WITH RECURSIVE c(g) AS (SELECT MIN(chat_guid) FROM inbound_messages ' +
+  'UNION ALL SELECT (SELECT MIN(chat_guid) FROM inbound_messages ' +
+  'WHERE chat_guid > c.g) FROM c WHERE c.g IS NOT NULL) ' +
+  'SELECT COUNT(g) AS n FROM c';
 
 /** The FK anchor for human-held drafts (F-22). Never an addressable adapter. */
 const RESERVED_HUMAN_ADAPTER = 'human';
@@ -565,7 +576,10 @@ export class SqliteStore implements Store {
   readonly #setSetting: Database.Statement;
   readonly #hasInbound: Database.Statement;
   readonly #insertInbound: Database.Statement;
-  readonly #countInboundSince: Database.Statement;
+  readonly #countSentSince: Database.Statement;
+  readonly #countMirrorRows: Database.Statement;
+  readonly #countMirrorChats: Database.Statement;
+  readonly #oldestSent: Database.Statement;
   readonly #listRules: Database.Statement;
   readonly #getRule: Database.Statement;
   readonly #insertRule: Database.Statement;
@@ -725,8 +739,19 @@ export class SqliteStore implements Store {
         'edited_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(guid) DO NOTHING',
     );
-    this.#countInboundSince = this.db.prepare(
-      'SELECT COUNT(*) AS n FROM inbound_messages WHERE received_at >= ?',
+    // v2 F7a: by SENT time over `inbound_sent` (leading column sent_at), a
+    // covering range count. Never received_at: that is the copy time.
+    this.#countSentSince = this.db.prepare(COUNT_SENT_SINCE_SQL);
+    this.#countMirrorRows = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM inbound_messages',
+    );
+    // A skip-scan over inbound_chat_sent (leading column chat_guid): one
+    // index seek per conversation. COUNT(DISTINCT) walks every row of the
+    // index instead, ~30 ms on a 530k mirror against ~2 ms for this.
+    this.#countMirrorChats = this.db.prepare(COUNT_MIRROR_CHATS_SQL);
+    // MIN over the leading column of inbound_sent: one index seek.
+    this.#oldestSent = this.db.prepare(
+      'SELECT MIN(sent_at) AS at FROM inbound_messages',
     );
     // Deterministic order: priority ASC, id ASC tiebreak (s2 §1.5, F-12).
     this.#listRules = this.db.prepare(
@@ -1258,9 +1283,30 @@ export class SqliteStore implements Store {
     this.#deleteSetting.run(key);
   }
 
-  countInboundMessagesSince(since: IsoUtc): number {
-    const row = this.#countInboundSince.get(since) as { n: number };
+  countSentSince(since: IsoUtc): number {
+    const row = this.#countSentSince.get(since) as { n: number };
     return row.n;
+  }
+
+  mirrorCounts(): MirrorCounts {
+    const messages = (this.#countMirrorRows.get() as { n: number }).n;
+    const chats = (this.#countMirrorChats.get() as { n: number }).n;
+    const oldest = (this.#oldestSent.get() as { at: string | null }).at;
+    return { messages, chats, historyFrom: oldest };
+  }
+
+  /** v2 F7a: the query plans the status counts run. For the perf spec. */
+  explainStatusCounts(since: IsoUtc): { today: string[]; chats: string[] } {
+    const plan = (sql: string, ...params: string[]): string[] =>
+      (
+        this.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as {
+          detail: string;
+        }[]
+      ).map((p) => p.detail);
+    return {
+      today: plan(COUNT_SENT_SINCE_SQL, since),
+      chats: plan(COUNT_MIRROR_CHATS_SQL),
+    };
   }
 
   listSendingDrafts(): SendingDraft[] {

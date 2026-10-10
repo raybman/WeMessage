@@ -639,7 +639,7 @@ export async function startDaemon(
       connectionState: readConnectionState(store),
       cursor: store.getCursor(),
       counts: {
-        messagesToday: store.countInboundMessagesSince(utcMidnight()),
+        messagesToday: store.countSentSince(utcMidnight()),
       },
       // s5 Sc14: F-5's adapter list, filled in by the slice that made
       // adapter health a real column. `AdapterRecord` carries `hasToken`

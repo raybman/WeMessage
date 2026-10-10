@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compileSearch,
+  dayStartInZone,
   ftsPhrase,
   InvalidCursorError,
   isAfterKey,
@@ -319,6 +320,39 @@ describe('time zones and facets (v2 F2b)', () => {
     expect(yearStartInZone(2025, 'Pacific/Chatham').toISOString()).toBe(
       '2024-12-31T10:15:00.000Z',
     );
+  });
+
+  it('dayStartInZone is local midnight of the day now falls on (v2 F7a)', () => {
+    // 09-02 09:00 UTC is 09-02 02:00 in Los Angeles (PDT, -7).
+    expect(
+      dayStartInZone(
+        new Date('2026-09-02T09:00:00.000Z'),
+        'America/Los_Angeles',
+      ).toISOString(),
+    ).toBe('2026-09-02T07:00:00.000Z');
+    // 09-02 06:30 UTC is still 09-01 23:30 in Los Angeles.
+    expect(
+      dayStartInZone(
+        new Date('2026-09-02T06:30:00.000Z'),
+        'America/Los_Angeles',
+      ).toISOString(),
+    ).toBe('2026-09-01T07:00:00.000Z');
+    expect(
+      dayStartInZone(new Date('2026-09-02T23:59:59.999Z'), 'UTC').toISOString(),
+    ).toBe('2026-09-02T00:00:00.000Z');
+    expect(
+      dayStartInZone(
+        new Date('2026-09-02T20:00:00.000Z'),
+        'Asia/Kolkata',
+      ).toISOString(),
+    ).toBe('2026-09-02T18:30:00.000Z');
+    // The DST spring-forward day in Los Angeles: midnight is still PST (-8).
+    expect(
+      dayStartInZone(
+        new Date('2026-03-08T20:00:00.000Z'),
+        'America/Los_Angeles',
+      ).toISOString(),
+    ).toBe('2026-03-08T08:00:00.000Z');
   });
 
   it('a message at 23:30 on Dec 31 in Los Angeles is that year, not the next', () => {

@@ -282,10 +282,13 @@ describe('WS tail (§3.4, §2.4.5)', () => {
 describe('/v1/status (F-5)', () => {
   it('returns connection state + cursor position + message count', async () => {
     const ctx = await boot();
+    // v2 F7a: "today" counts SENT time, so the burst is sent now (the
+    // fixture's default dates sit in January 2026).
     ctx.fixture.addMessageBurst(3, {
       chatId: ctx.chatId,
       handleId: ctx.handleId,
       text: 'GL-FIX status row',
+      startAt: new Date().toISOString(),
     });
     ctx.watcher.fire();
     const client = createClient({ baseUrl: ctx.baseUrl, token: ctx.token });

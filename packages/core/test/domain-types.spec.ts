@@ -366,6 +366,10 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       setContactPolicy: () => undefined,
       deleteContactPolicy: () => false,
       listContactPolicies: () => [],
+      // v2 F3a: thread state.
+      getThreadState: () => null,
+      listThreadStates: () => [],
+      putThreadState: () => null,
       getSettingVersion: () => -1,
       // s5 Scenario 3: adapter registry additions to the Store port.
       listAdapters: () => [],

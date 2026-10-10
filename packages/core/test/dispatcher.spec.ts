@@ -242,6 +242,9 @@ function makeStore(cfg: {
     setContactPolicy: () => undefined,
     deleteContactPolicy: () => false,
     listContactPolicies: () => [],
+    getThreadState: () => null,
+    listThreadStates: () => [],
+    putThreadState: () => null,
     getSettingVersion: () => -1,
     // s5 Scenario 3: adapter registry additions to the Store port.
     listAdapters: () => [],

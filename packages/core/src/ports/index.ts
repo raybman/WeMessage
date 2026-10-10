@@ -28,6 +28,8 @@ import type {
 import type {
   ChatsPage,
   ChatsQuery,
+  ThreadStateRecord,
+  ThreadStateWrite,
   TurnsPage,
   TurnsQuery,
 } from '../threads/index.js';
@@ -386,6 +388,17 @@ export interface Store {
   /** Back to unknown (= deny-all). False when the handle had no policy. */
   deleteContactPolicy(handle: Handle): boolean;
   listContactPolicies(): ContactPolicy[];
+  // v2 F3 (G-06a): thread state over 0002's `thread_state`, one lazy row
+  // per conversation; absence is the default.
+  getThreadState(chatGuid: ChatGuid): ThreadStateRecord | null;
+  /** Every row, ordered by chat guid. */
+  listThreadStates(): ThreadStateRecord[];
+  /**
+   * Upsert keyed on the chat guid, `updatedAt` stamped by the store's
+   * clock. `act === null && attention === null` DELETES the row (absence =
+   * default) and returns null; otherwise returns the row as written.
+   */
+  putThreadState(rec: ThreadStateWrite): ThreadStateRecord | null;
   /** Per-key write counter (C-7); -1 when the key has never been set. */
   getSettingVersion(key: string): number;
 

@@ -116,6 +116,15 @@ const EXPECTED_COLUMNS: Record<string, string[]> = {
   audit_log: ['seq', 'at', 'event', 'actor', 'prev_hash', 'hash'],
   theme_cache: ['message_guid', 'theme', 'confidence', 'model', 'at'],
   rate_counters: ['scope', 'bucket_start', 'count'],
+  // v2 F3a: 0002_thread_state.sql, the first table after §2.3.
+  thread_state: [
+    'chat_guid',
+    'act',
+    'act_at',
+    'snoozed_until',
+    'attention',
+    'updated_at',
+  ],
 };
 
 describe('store migrations (§2.3 schema)', () => {
@@ -233,6 +242,7 @@ describe('store migrations (§2.3 schema)', () => {
         .all() as Array<{ id: string; applied_at: string }>;
       expect(applied).toEqual([
         { id: '0001_init.sql', applied_at: '2026-09-01T12:00:00.000Z' },
+        { id: '0002_thread_state.sql', applied_at: '2026-09-01T12:00:00.000Z' },
       ]);
     } finally {
       reopened.close();
@@ -242,8 +252,11 @@ describe('store migrations (§2.3 schema)', () => {
   it('records migration timestamps from the injected Clock, not wall time', () => {
     const applied = store.db
       .prepare('SELECT applied_at FROM _migrations')
-      .get() as { applied_at: string };
-    expect(applied.applied_at).toBe('2026-09-01T12:00:00.000Z');
+      .all() as Array<{ applied_at: string }>;
+    expect(applied.map((r) => r.applied_at)).toEqual([
+      '2026-09-01T12:00:00.000Z',
+      '2026-09-01T12:00:00.000Z',
+    ]);
   });
 
   it('refuses to open a store written by a newer build', () => {
@@ -309,6 +322,6 @@ describe('store migrations (§2.3 schema)', () => {
       readdirSync(migrations)
         .filter((f) => f.endsWith('.sql'))
         .sort(),
-    ).toEqual(['0001_init.sql']);
+    ).toEqual(['0001_init.sql', '0002_thread_state.sql']);
   });
 });

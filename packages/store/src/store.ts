@@ -27,6 +27,8 @@ import type {
   SendingDraft,
   SendLedgerView,
   Store,
+  ThreadStateRecord,
+  ThreadStateWrite,
   Ulid,
 } from '@wemessage/core';
 import { applyMigrations } from './migrate.js';
@@ -241,6 +243,27 @@ function contactPolicyFromRow(row: ContactPolicyRow): ContactPolicy {
   };
 }
 
+interface ThreadStateRow {
+  chat_guid: string;
+  act: string | null;
+  act_at: string | null;
+  snoozed_until: string | null;
+  attention: string | null;
+  updated_at: string;
+}
+
+/** v2 F3: 0002's row, every column present (null is meaningful here). */
+function threadStateFromRow(row: ThreadStateRow): ThreadStateRecord {
+  return {
+    chatGuid: row.chat_guid,
+    act: row.act as ThreadStateRecord['act'],
+    actAt: row.act_at,
+    snoozedUntil: row.snoozed_until,
+    attention: row.attention as ThreadStateRecord['attention'],
+    updatedAt: row.updated_at,
+  };
+}
+
 interface AuditLogRow {
   seq: number;
   at: string;
@@ -417,6 +440,11 @@ export class SqliteStore implements Store {
   readonly #setContactPolicy: Database.Statement;
   readonly #deleteContactPolicy: Database.Statement;
   readonly #listContactPolicies: Database.Statement;
+  // --- v2 F3: thread state over 0002's `thread_state` ---
+  readonly #getThreadState: Database.Statement;
+  readonly #listThreadStates: Database.Statement;
+  readonly #upsertThreadState: Database.Statement;
+  readonly #deleteThreadState: Database.Statement;
   readonly #getSettingVersion: Database.Statement;
   readonly #applyDraftTransitionTxn: Database.Transaction<
     (input: {
@@ -796,6 +824,22 @@ export class SqliteStore implements Store {
     );
     this.#getSettingVersion = this.db.prepare(
       'SELECT version FROM settings WHERE key = ?',
+    );
+    this.#getThreadState = this.db.prepare(
+      'SELECT * FROM thread_state WHERE chat_guid = ?',
+    );
+    this.#listThreadStates = this.db.prepare(
+      'SELECT * FROM thread_state ORDER BY chat_guid ASC',
+    );
+    this.#upsertThreadState = this.db.prepare(
+      'INSERT INTO thread_state (chat_guid, act, act_at, snoozed_until, ' +
+        'attention, updated_at) VALUES (?, ?, ?, ?, ?, ?) ' +
+        'ON CONFLICT(chat_guid) DO UPDATE SET act = excluded.act, ' +
+        'act_at = excluded.act_at, snoozed_until = excluded.snoozed_until, ' +
+        'attention = excluded.attention, updated_at = excluded.updated_at',
+    );
+    this.#deleteThreadState = this.db.prepare(
+      'DELETE FROM thread_state WHERE chat_guid = ?',
     );
 
     // Roadmap risk #1: `from` is re-asserted INSIDE the transaction. Two
@@ -1665,6 +1709,44 @@ export class SqliteStore implements Store {
     return (this.#listContactPolicies.all() as ContactPolicyRow[]).map(
       contactPolicyFromRow,
     );
+  }
+
+  getThreadState(chatGuid: ChatGuid): ThreadStateRecord | null {
+    const row = this.#getThreadState.get(chatGuid) as
+      ThreadStateRow | undefined;
+    return row ? threadStateFromRow(row) : null;
+  }
+
+  listThreadStates(): ThreadStateRecord[] {
+    return (this.#listThreadStates.all() as ThreadStateRow[]).map(
+      threadStateFromRow,
+    );
+  }
+
+  putThreadState(rec: ThreadStateWrite): ThreadStateRecord | null {
+    // Absence is the default: a record that says nothing is no row at all.
+    if (rec.act === null && rec.attention === null) {
+      this.#deleteThreadState.run(rec.chatGuid);
+      return null;
+    }
+    const written: ThreadStateRecord = {
+      chatGuid: rec.chatGuid,
+      act: rec.act,
+      actAt: rec.actAt,
+      snoozedUntil: rec.snoozedUntil,
+      attention: rec.attention,
+      // The concurrency token: from the injected clock, never the caller.
+      updatedAt: this.#clock.now(),
+    };
+    this.#upsertThreadState.run(
+      written.chatGuid,
+      written.act,
+      written.actAt,
+      written.snoozedUntil,
+      written.attention,
+      written.updatedAt,
+    );
+    return written;
   }
 
   getSettingVersion(key: string): number {

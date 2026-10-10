@@ -8265,3 +8265,55 @@ describe('v2 S6b: macOS floor files name 26', () => {
     expect(FLOOR[0]?.[2].test(planted)).toBe(true);
   });
 });
+
+describe('v2 F3: thread state rides a new table, never a changed one', () => {
+  /*
+   * C-3: the §2.3 tables are not altered. Until F3 the store had one
+   * migration, so the rule was enforced by there being nothing to enforce it
+   * on. 0002_thread_state.sql is the first file after it, and the rule now
+   * has a reader: every migration after 0001 may only ADD (a table, an
+   * index). An ALTER, a DROP or a rename of an existing table would change a
+   * schema every store in the field already relies on, and the runner is
+   * forward-only, so there is no taking it back.
+   */
+  const migrationsDir = join(repoRoot, 'packages/store/migrations');
+  const later = (): string[] =>
+    readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql') && f !== '0001_init.sql')
+      .sort();
+  const offences = (sql: string): string[] => {
+    const code = sql.replace(/--[^\n]*/g, '');
+    return [
+      ...code.matchAll(/\b(ALTER\s+TABLE|DROP\s+TABLE|DROP\s+INDEX)\b/gi),
+    ].map((m) => m[1] ?? '');
+  };
+
+  it('C-3: no migration after 0001 alters or drops anything', () => {
+    // NOT VACUOUS: F3 ships 0002, so the list has something in it.
+    expect(later()).toContain('0002_thread_state.sql');
+    for (const f of later()) {
+      const sql = readFileSync(join(migrationsDir, f), 'utf8');
+      expect([f, offences(sql)]).toEqual([f, []]);
+    }
+  });
+
+  it('PLANTED: an ALTER of drafts is caught', () => {
+    expect(offences('ALTER TABLE drafts ADD COLUMN thread_act TEXT;')).toEqual([
+      'ALTER TABLE',
+    ]);
+    // A comment that mentions the word is not an offence.
+    expect(
+      offences('-- never ALTER TABLE drafts\nCREATE TABLE t (a);'),
+    ).toEqual([]);
+  });
+
+  it('0002 creates exactly one table, thread_state', () => {
+    const sql = readFileSync(
+      join(migrationsDir, '0002_thread_state.sql'),
+      'utf8',
+    ).replace(/--[^\n]*/g, '');
+    expect(
+      [...sql.matchAll(/CREATE\s+TABLE\s+(\w+)/gi)].map((m) => m[1]),
+    ).toEqual(['thread_state']);
+  });
+});

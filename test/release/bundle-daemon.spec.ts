@@ -216,6 +216,7 @@ describe('s9 Sc5 row 1: the bundle is an exact listing, not a directory that gre
       'daemon/node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
       'daemon/wemessaged.mjs',
       'migrations/0001_init.sql',
+      'migrations/0002_thread_state.sql',
     ]);
   });
 
@@ -227,9 +228,10 @@ describe('s9 Sc5 row 1: the bundle is an exact listing, not a directory that gre
   });
 
   /*
-   * The exact listing above pins ONE migration BY NAME, deliberately: a second
+   * The exact listing above pins every migration BY NAME, deliberately: a new
    * file in `packages/store/migrations` should be a conscious edit to this
-   * bundle, not a silent inheritance. This row is the load-bearing half: the
+   * bundle, not a silent inheritance (v2 F3 made that edit for
+   * 0002_thread_state.sql). This row is the load-bearing half: the
    * shipped SQL is byte-identical to the SQL the suite migrates against.
    */
   it('ships the store migrations byte-for-byte, not a stale copy', () => {

@@ -72,6 +72,7 @@ const TREE: readonly string[] = [
   'Contents/Resources/daemon/node_modules/better-sqlite3/lib/index.js',
   'Contents/Resources/daemon/node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
   'Contents/Resources/migrations/0001_init.sql',
+  'Contents/Resources/migrations/0002_thread_state.sql',
   'Contents/Resources/bin/wemessage',
   'Contents/Resources/bin/wemessage.mjs',
   'Contents/Resources/bin/wemessaged',

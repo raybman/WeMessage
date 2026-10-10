@@ -940,9 +940,21 @@ describe('s9 Sc15 row 7: the seams are byte-clean, and the audit union only grew
     expect(Number(deleted)).toBe(0);
   });
 
-  it('the migrations directory gained no file', () => {
-    const now = tracked().filter((f) =>
-      f.startsWith('packages/store/migrations/'),
+  /**
+   * Files a LATER reviewed plan added on purpose. S9's promise is that S9
+   * planted no migration; v2 F3 (G-06a) is the first plan to ship one, and
+   * names it here rather than loosening the row: anything else that appears
+   * is still a migration nobody planned.
+   */
+  const PLANNED_SINCE_S9: readonly string[] = [
+    'packages/store/migrations/0002_thread_state.sql',
+  ];
+
+  it('the migrations directory gained no file a plan did not name', () => {
+    const now = tracked().filter(
+      (f) =>
+        f.startsWith('packages/store/migrations/') &&
+        !PLANNED_SINCE_S9.includes(f),
     );
     const then = git(
       'ls-tree',

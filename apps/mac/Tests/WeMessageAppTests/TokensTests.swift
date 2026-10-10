@@ -155,4 +155,27 @@ struct TokensTests {
     #expect(Tokens.Hairline.light.alpha == 0.08)
     #expect(Tokens.Hairline.dark.alpha == 0.09)
   }
+
+  /// v2 S7b: the UI test target cannot compile Tokens.swift (it needs
+  /// WeMessageKit), so BoardSweep.swift restates the two opaque hairline
+  /// values. This row reads them back from the file and holds them to the
+  /// tokens, so the sweep can never probe for a colour the app stopped
+  /// drawing.
+  @Test("the sweep's hairline probe reads the opaque hairline tokens")
+  func sweepProbePinned() throws {
+    let text = try Repo.text("apps/mac/UITests/WeMessageUITests/Support/BoardSweep.swift")
+    func restated(_ name: String) throws -> Tokens.RGB? {
+      let pattern = "static let \(name): Pixel = \\(0x([0-9A-F]{2}), 0x([0-9A-F]{2}), 0x([0-9A-F]{2})\\)"
+      let regex = try NSRegularExpression(pattern: pattern)
+      let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+      guard matches.count == 1, let m = matches.first else { return nil }
+      let parts = (1...3).compactMap { i in Range(m.range(at: i), in: text).flatMap { UInt8(text[$0], radix: 16) } }
+      guard parts.count == 3 else { return nil }
+      return Tokens.RGB(parts[0], parts[1], parts[2])
+    }
+    #expect(try restated("opaqueLight") == Tokens.Hairline.opaqueLight)
+    #expect(try restated("opaqueDark") == Tokens.Hairline.opaqueDark)
+    // Non-vacuity: the two tokens differ, so one cannot stand for both.
+    #expect(Tokens.Hairline.opaqueLight != Tokens.Hairline.opaqueDark)
+  }
 }

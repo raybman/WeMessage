@@ -7010,7 +7010,11 @@ describe('v2 S1: the Swift tree', () => {
     const shards = [
       ...text.matchAll(/^ {10}- shard: (\w+)\n {12}classes: ([^\n]+)$/gm),
     ].map((m) => ({ shard: m[1]!, classes: m[2]!.trim().split(/\s+/) }));
-    expect(shards.map((s) => s.shard)).toEqual(['a', 'b']);
+    // v2 S7b: shard c is BoardSweepTests alone.
+    expect(shards.map((s) => s.shard)).toEqual(['a', 'b', 'c']);
+    expect(shards.find((s) => s.shard === 'c')?.classes).toEqual([
+      'BoardSweepTests',
+    ]);
     const classes = trackedUnder(UI_TESTS)
       .filter((f) => f.endsWith('.swift'))
       .flatMap((f) => [
@@ -7046,6 +7050,29 @@ describe('v2 S1: the Swift tree', () => {
     expect(text).toMatch(
       /^ {2}ui:\n(?: {4}[^\n]*\n)*? {4}timeout-minutes: 30$/m,
     );
+  });
+
+  it('every board test has a case in the board sweep (S7b)', () => {
+    // v2 S7b: BoardSweepTests iterates SweptBoard.allCases, so a board is
+    // swept only if it has a case. Every BoardNNTests class (00 is the perf
+    // class, not a board) must have its `case bNN = "NN"`, and no case may
+    // name a board with no test of its own.
+    const sweep = archRead(
+      'apps/mac/UITests/WeMessageUITests/Support/BoardSweep.swift',
+    );
+    const cases = [...sweep.matchAll(/\bb(\d{2}) = "(\d{2})"/g)]
+      .map((m) => {
+        expect(m[1]).toBe(m[2]);
+        return m[1]!;
+      })
+      .sort();
+    const boards = trackedUnder(UI_TESTS)
+      .map((f) => /(?:^|\/)Board(\d{2})Tests\.swift$/.exec(f)?.[1])
+      .filter((n): n is string => n !== undefined && n !== '00')
+      .sort();
+    // Non-vacuity: the seventeen boards the wireframes define.
+    expect(boards).toHaveLength(17);
+    expect(cases).toEqual(boards);
   });
 
   it('the ui job turns Reduce Transparency off before the tests (S4a)', () => {

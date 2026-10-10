@@ -175,6 +175,9 @@ jobs:
   # apps/mac/UITests is in exactly one list; test/arch.spec.ts 'the ui
   # shards cover every XCUITest class once' goes red otherwise, so a new
   # board test cannot silently go unrun. Each shard keeps its own 30 minutes.
+  #
+  # v2 S7b: shard c is the board sweep alone (17 boards x 4 legs, 68
+  # launches), so it adds no time to a or b.
   ui:
     name: ui (${{ matrix.shard }})
     needs: [kit]
@@ -188,6 +191,8 @@ jobs:
             classes: AccessibilityTests Board00PerfTests Board02Tests Board03Tests Board04Tests Board08Tests Board13Tests Board15Tests Board17Tests ConnectionTests LaunchTests
           - shard: b
             classes: Board01Tests Board05Tests Board06Tests Board07Tests Board09Tests Board10Tests Board11Tests Board12Tests Board14Tests Board16Tests FakeDaemonControlTests SnapshotTests
+          - shard: c
+            classes: BoardSweepTests
     env:
       TZ: UTC
       WEMESSAGE_PORT: '47191'

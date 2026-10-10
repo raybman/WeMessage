@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import WeMessageKit
@@ -109,6 +110,43 @@ struct MenuBuilderTests {
       #expect(item?.attributedTitle?.string == spec.title + "\t" + hint)
       #expect(Self.row(id)?[2] == spec.title)
     }
+  }
+
+  /// Every (key, modifier mask) the built menu binds, walked from the
+  /// NSMenu items themselves, submenus included.
+  static func bindings(_ menu: NSMenu, path: String = "") -> [(String, String, UInt)] {
+    menu.items.flatMap { item -> [(String, String, UInt)] in
+      var out: [(String, String, UInt)] = []
+      if !item.keyEquivalent.isEmpty {
+        let mask = item.keyEquivalentModifierMask.intersection([.command, .control, .option, .shift, .function])
+        out.append((item.identifier?.rawValue ?? path + " > " + item.title, item.keyEquivalent.lowercased(), mask.rawValue))
+      }
+      if let sub = item.submenu { out += bindings(sub, path: path + " > " + item.title) }
+      return out
+    }
+  }
+
+  @Test("v2 S7b walk: in every scope, no two built items share a key equivalent, and every one carries command or control")
+  func keyEquivalentWalk() {
+    for scope in AppMenu.scopes.map(\.id) {
+      let walked = Self.bindings(MenuBuilder.build(AppMenu.top(MenuContext(scope: scope, posture: ""))))
+      // Non-vacuity: the 16.G table binds every accelerator in every scope.
+      #expect(walked.count == Self.accelerators.count, "\(scope): \(walked.count) bindings")
+      var seen: [String: String] = [:]
+      for (id, key, mask) in walked {
+        let combo = "\(mask):\(key)"
+        #expect(seen[combo] == nil, "\(scope): \(id) and \(seen[combo] ?? "") both bind \(combo)")
+        seen[combo] = id
+        let flags = NSEvent.ModifierFlags(rawValue: mask)
+        #expect(flags.contains(.command) || flags.contains(.control), "\(scope): \(id) binds a bare \(key)")
+      }
+    }
+    // The walker sees a planted duplicate (the row is not vacuous).
+    let twin = MenuBuilder.build([
+      .init("t:a", "A", key: "k", [.command]), .init("t:b", "B", key: "K", [.command]),
+    ])
+    let combos = Self.bindings(twin).map { "\($0.2):\($0.1)" }
+    #expect(combos.count == 2 && Set(combos).count == 1)
   }
 
   @Test("the kill switch carries no accelerator, in the main menu or the Dock menu")

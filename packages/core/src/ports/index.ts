@@ -33,6 +33,11 @@ import type {
   TurnsPage,
   TurnsQuery,
 } from '../threads/index.js';
+import type {
+  MirrorCoverage,
+  MirrorQuery,
+  MirrorResult,
+} from '../search/index.js';
 
 /** Injected time source — "never Date.now in core" (§3.2 GateContext comment). */
 export interface Clock {
@@ -160,7 +165,8 @@ export interface Store {
    * Derived from `drafts` rather than stored: a draft parked 'failed' already
    * records both the instant and the cause, so a second ledger would be a
    * second source of truth for a fact we have (F-62 — no new table, column or
-   * index; C-8 keeps the repo index-free and a recent-window scan on a
+   * index; C-8 kept the repo index-free until v2 F2's three search indexes, and
+   * a recent-window scan on a
    * single-operator daemon is small).
    *
    * The exclusion is the whole point. A gate denial at the send moment parks a
@@ -213,8 +219,31 @@ export interface Store {
   /** received_at DESC, `Message` fully rebuilt from mirror+meta JSON. */
   listRecentInboundMessages(limit: number): Message[];
   getInboundMessage(guid: MessageGuid): Message | null;
-  /** Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). */
+  /**
+   * Edit/unsend refresh in place (the S1 insert stays DO-NOTHING). v2 F2:
+   * in the same transaction, an indexed row leaves the search index and is
+   * re-added under the same doc id only if it still carries searchable text,
+   * so an unsent message is never findable after this returns.
+   */
   updateInboundMessage(message: Message): void;
+
+  // --- search index over the mirror (v2 F2) ---
+  /**
+   * One backfill step: walk mirror rows past the through-mark in chat.db
+   * ROWID order, at most about `limit` of them, index the searchable ones
+   * not already indexed, and advance the mark. One transaction.
+   */
+  indexPending(limit: number): { indexed: number; throughRowid: number };
+  /** Matches for one compiled query, newest sent first, ties on guid. */
+  searchMirror(q: MirrorQuery): MirrorResult;
+  /** How much of the mirror the index covers, for the coverage line. */
+  searchCoverage(): MirrorCoverage;
+  /**
+   * Lower the through-mark to `rowid` (never raises it). Called when the
+   * cursor heals after a chat.db restore, so rows that arrive under reused
+   * ROWIDs are walked again; a guid already indexed is never indexed twice.
+   */
+  resetIndexThrough(rowid: number): void;
 
   // --- audit (§2.3 `audit_log`; §2.4.4; s2 §1.5) ---
   /**

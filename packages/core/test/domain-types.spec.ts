@@ -327,6 +327,20 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       listRecentInboundMessages: () => [],
       getInboundMessage: () => null,
       updateInboundMessage: () => undefined,
+      // v2 F2: the search index over the mirror.
+      indexPending: () => ({ indexed: 0, throughRowid: 0 }),
+      searchMirror: () => ({
+        matches: [],
+        capped: false,
+        shortTermWindowed: false,
+      }),
+      searchCoverage: () => ({
+        indexed: 0,
+        eligible: 0,
+        throughRowid: 0,
+        mirrorAsOf: null,
+      }),
+      resetIndexThrough: () => undefined,
       appendAudit: () => ({ seq: 1, hash: '0'.repeat(64) }),
       listAudit: () => [],
       readAuditRows: () => [],

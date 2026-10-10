@@ -8324,4 +8324,36 @@ describe('v2 F3: thread state rides a new table, never a changed one', () => {
       [...sql.matchAll(/CREATE\s+TABLE\s+(\w+)/gi)].map((m) => m[1]),
     ).toEqual(['thread_state']);
   });
+
+  it('v2 F2a: 0003 adds the search index and copies no message text', () => {
+    // The migration runs inside open, on every store in the field: it may
+    // add tables and indexes, and the only row it writes is the FTS
+    // secure-delete switch. Text reaches the index through the time-boxed
+    // backfill, never through a migration that could hold open for minutes.
+    const sql = readFileSync(
+      join(migrationsDir, '0003_search.sql'),
+      'utf8',
+    ).replace(/--[^\n]*/g, '');
+    expect(
+      [...sql.matchAll(/CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(\w+)/gi)].map(
+        (m) => m[1],
+      ),
+    ).toEqual(['message_fts', 'search_doc']);
+    expect(
+      [...sql.matchAll(/CREATE\s+INDEX\s+(\w+)\s+ON\s+(\w+)/gi)].map(
+        (m) => `${m[1] ?? ''} ON ${m[2] ?? ''}`,
+      ),
+    ).toEqual([
+      'inbound_sent ON inbound_messages',
+      'inbound_chat_sent ON inbound_messages',
+      'inbound_rowid_src ON inbound_messages',
+    ]);
+    expect(
+      [...sql.matchAll(/INSERT\s+INTO\s+(\w+)\s*\(([^)]*)\)/gi)].map((m) => [
+        m[1],
+        m[2],
+      ]),
+    ).toEqual([['message_fts', 'message_fts, rank']]);
+    expect(sql).not.toMatch(/\bSELECT\b/i);
+  });
 });

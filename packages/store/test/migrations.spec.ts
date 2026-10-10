@@ -125,6 +125,17 @@ const EXPECTED_COLUMNS: Record<string, string[]> = {
     'attention',
     'updated_at',
   ],
+  // v2 F2a: 0003_search.sql. The contentless trigram FTS5 table and the four
+  // shadow tables SQLite creates for it, listed by name so a tokenizer or
+  // content option change that adds or drops one is a reviewed diff here.
+  // There is no `_content` table: the index holds no second copy of the text.
+  message_fts: ['body'],
+  message_fts_config: ['k', 'v'],
+  message_fts_data: ['id', 'block'],
+  message_fts_docsize: ['id', 'sz', 'origin'],
+  message_fts_idx: ['segid', 'term', 'pgno'],
+  // The stable doc-id map: FTS rowid = doc_id, which VACUUM cannot renumber.
+  search_doc: ['doc_id', 'guid'],
 };
 
 describe('store migrations (§2.3 schema)', () => {
@@ -243,6 +254,7 @@ describe('store migrations (§2.3 schema)', () => {
       expect(applied).toEqual([
         { id: '0001_init.sql', applied_at: '2026-09-01T12:00:00.000Z' },
         { id: '0002_thread_state.sql', applied_at: '2026-09-01T12:00:00.000Z' },
+        { id: '0003_search.sql', applied_at: '2026-09-01T12:00:00.000Z' },
       ]);
     } finally {
       reopened.close();
@@ -254,6 +266,7 @@ describe('store migrations (§2.3 schema)', () => {
       .prepare('SELECT applied_at FROM _migrations')
       .all() as Array<{ applied_at: string }>;
     expect(applied.map((r) => r.applied_at)).toEqual([
+      '2026-09-01T12:00:00.000Z',
       '2026-09-01T12:00:00.000Z',
       '2026-09-01T12:00:00.000Z',
     ]);
@@ -322,6 +335,6 @@ describe('store migrations (§2.3 schema)', () => {
       readdirSync(migrations)
         .filter((f) => f.endsWith('.sql'))
         .sort(),
-    ).toEqual(['0001_init.sql', '0002_thread_state.sql']);
+    ).toEqual(['0001_init.sql', '0002_thread_state.sql', '0003_search.sql']);
   });
 });

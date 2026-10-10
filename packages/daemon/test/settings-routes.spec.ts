@@ -751,7 +751,7 @@ describe('s7 Sc4 row 13: no key is minted by the route', () => {
 });
 
 describe('s7 Sc4 row 14: C-8 — no schema moved', () => {
-  it('writes every knob and still declares zero indexes and no new table', async () => {
+  it('writes every knob and declares only the three search indexes and no new table', async () => {
     const h = await boot();
     expect(
       (
@@ -764,7 +764,14 @@ describe('s7 Sc4 row 14: C-8 — no schema moved', () => {
     const declared = h.store.db
       .prepare('SELECT type, name FROM sqlite_master WHERE sql IS NOT NULL')
       .all() as { type: string; name: string }[];
-    expect(declared.filter((o) => o.type === 'index')).toEqual([]);
+    // v2 F2's 0003 added exactly three indexes, all over the message mirror
+    // for search; none is over settings, and a fourth is still red here.
+    expect(
+      declared
+        .filter((o) => o.type === 'index')
+        .map((o) => o.name)
+        .sort(),
+    ).toEqual(['inbound_chat_sent', 'inbound_rowid_src', 'inbound_sent']);
     expect(
       declared.filter((o) => /setting/iu.test(o.name)).map((o) => o.name),
     ).toEqual(['settings']);

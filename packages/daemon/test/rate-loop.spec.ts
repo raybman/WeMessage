@@ -462,11 +462,19 @@ describe('s6 Sc8 row 1: the consecutive-auto streak', () => {
     const declared = a.h.store.db
       .prepare('SELECT type, name FROM sqlite_master WHERE sql IS NOT NULL')
       .all() as { type: string; name: string }[];
-    // C-8: this repo ships zero indexes, and a derived counter does not get
-    // to be the first one. An index here would be the tell that somebody
+    // C-8: this repo shipped zero indexes, and a derived counter does not
+    // get to be the first one. An index here would be the tell that somebody
     // decided the walk was too slow and reached for schema instead of for
-    // the bound.
-    expect(declared.filter((o) => o.type === 'index')).toEqual([]);
+    // the bound. v2 F2's 0003 added exactly three, all over the message
+    // mirror for search and none over drafts or approvals, so the row pins
+    // that exact list: a fourth index, or any index on what this walk reads,
+    // is still red here.
+    expect(
+      declared
+        .filter((o) => o.type === 'index')
+        .map((o) => o.name)
+        .sort(),
+    ).toEqual(['inbound_chat_sent', 'inbound_rowid_src', 'inbound_sent']);
     // And nothing exists to HOLD a streak, a lookback or a send history.
     expect(
       declared.filter((o) => /loop|streak|consecutive|history/iu.test(o.name)),

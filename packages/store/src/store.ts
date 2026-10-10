@@ -1,7 +1,13 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { chainHash, GENESIS_HASH } from '@wemessage/core';
+import {
+  chainHash,
+  GENESIS_HASH,
+  SEARCHABLE_KINDS,
+  SETTING_SEARCH_INDEXED_THROUGH,
+  SHORT_TERM_WINDOW,
+} from '@wemessage/core';
 import type {
   AdapterRecord,
   Actor,
@@ -20,6 +26,10 @@ import type {
   IsoUtc,
   Message,
   MessageGuid,
+  MirrorCoverage,
+  MirrorMatch,
+  MirrorQuery,
+  MirrorResult,
   Rule,
   RuleMatcher,
   Schedule,
@@ -145,6 +155,172 @@ interface InboundRow {
   received_at: string;
   edited_at: string | null;
   meta: string | null;
+}
+
+// --- v2 F2a: search over the mirror ---
+
+/** The SQL twin of SEARCHABLE_KINDS, inlined so the planner sees constants. */
+const SEARCHABLE_KINDS_SQL = SEARCHABLE_KINDS.map(
+  (k) => `'${k.replaceAll("'", "''")}'`,
+).join(', ');
+/** A row the index holds: a searchable kind with non-empty text. */
+const ELIGIBLE_SQL = `m.kind IN (${SEARCHABLE_KINDS_SQL}) AND m.text IS NOT NULL AND m.text != ''`;
+
+function isIndexable(kind: string, text: string | null): text is string {
+  return SEARCHABLE_KINDS.includes(kind) && text !== null && text !== '';
+}
+
+interface MirrorSearchRow extends InboundRow {
+  n_att: number | null;
+}
+
+interface CompiledMirror {
+  sql: string;
+  params: unknown[];
+  /** 'fts' rows arrive newest-indexed first; the others newest-sent first. */
+  mode: 'fts' | 'filter' | 'short-window';
+}
+
+/**
+ * One MirrorQuery to one statement. Returns null when a filter has already
+ * decided the answer is empty (`chatGuids: []`), so nothing runs.
+ *
+ * Every shape aliases inbound_messages as `m`: the perf spec's EXPLAIN row
+ * reads the plan by that name.
+ */
+function compileMirror(q: MirrorQuery): CompiledMirror | null {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (q.fromMe !== undefined) {
+    where.push('m.is_from_me = ?');
+    params.push(q.fromMe ? 1 : 0);
+  }
+  const from: string[] = [];
+  if (q.handleNeedle !== undefined && q.handleNeedle !== '') {
+    from.push('instr(lower(m.handle), lower(?)) > 0');
+    params.push(q.handleNeedle);
+  }
+  if (q.handles !== undefined && q.handles.length > 0) {
+    from.push('m.handle IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(q.handles));
+  }
+  if (from.length > 0)
+    where.push(`m.is_from_me = 0 AND (${from.join(' OR ')})`);
+  if (q.chatGuids !== undefined && q.chatGuids !== null) {
+    if (q.chatGuids.length === 0) return null;
+    where.push('m.chat_guid IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(q.chatGuids));
+  }
+  for (const has of q.has) {
+    if (has === 'attachment') {
+      where.push(
+        "(m.kind = 'attachment-only' OR " +
+          "COALESCE(json_array_length(m.meta, '$.attachments'), 0) > 0)",
+      );
+    } else if (has === 'voice') {
+      where.push("m.kind = 'audio'");
+    } else {
+      where.push(
+        "(instr(lower(m.text), 'http://') > 0 OR instr(lower(m.text), 'https://') > 0)",
+      );
+    }
+  }
+  if (q.before !== undefined) {
+    where.push('m.sent_at < ?');
+    params.push(q.before);
+  }
+  if (q.after !== undefined) {
+    where.push('m.sent_at >= ?');
+    params.push(q.after);
+  }
+  const shortWhere: string[] = [];
+  const shortParams: unknown[] = [];
+  for (const term of q.shortTerms) {
+    shortWhere.push('instr(lower(m.text), lower(?)) > 0');
+    shortParams.push(term);
+  }
+  const cols = "m.*, json_array_length(m.meta, '$.attachments') AS n_att";
+  const limit = q.cap + 1;
+
+  if (q.ftsMatch !== null) {
+    // Driven by the index, newest-indexed first, so a capped result keeps
+    // the newest arrivals and the planner never sorts the whole hit list.
+    const all = [...where, ...shortWhere];
+    return {
+      sql:
+        `SELECT ${cols} FROM message_fts ` +
+        'JOIN search_doc d ON d.doc_id = message_fts.rowid ' +
+        'JOIN inbound_messages m ON m.guid = d.guid ' +
+        `WHERE message_fts MATCH ?${all.map((w) => ` AND ${w}`).join('')} ` +
+        'ORDER BY message_fts.rowid DESC LIMIT ?',
+      params: [q.ftsMatch, ...params, ...shortParams, limit],
+      mode: 'fts',
+    };
+  }
+  const base = [`m.kind IN (${SEARCHABLE_KINDS_SQL})`, ...where];
+  if (shortWhere.length === 0) {
+    return {
+      sql:
+        `SELECT ${cols} FROM inbound_messages m WHERE ${base.join(' AND ')} ` +
+        'ORDER BY m.sent_at DESC, m.guid ASC LIMIT ?',
+      params: [...params, limit],
+      mode: 'filter',
+    };
+  }
+  // D-F2-3: a short term with nothing indexable beside it is matched by
+  // instr() over the newest SHORT_TERM_WINDOW candidates only, and the
+  // result says so. Never handed to MATCH, where it would silently find
+  // nothing.
+  return {
+    sql:
+      `SELECT * FROM (SELECT ${cols} FROM inbound_messages m ` +
+      `WHERE ${base.join(' AND ')} ORDER BY m.sent_at DESC, m.guid ASC LIMIT ?) m ` +
+      `WHERE ${shortWhere.join(' AND ')} ` +
+      'ORDER BY m.sent_at DESC, m.guid ASC LIMIT ?',
+    params: [...params, SHORT_TERM_WINDOW, ...shortParams, limit],
+    mode: 'short-window',
+  };
+}
+
+function inboundUpdateParams(message: Message): unknown[] {
+  return [
+    message.sourceRowid,
+    message.chatGuid,
+    message.handle,
+    message.isFromMe ? 1 : 0,
+    message.isGroup ? 1 : 0,
+    message.service,
+    message.kind,
+    message.text,
+    message.sentAt,
+    message.receivedAt,
+    message.editedAt ?? null,
+    JSON.stringify({
+      tapback: message.tapback ?? null,
+      threadOriginatorGuid: message.threadOriginatorGuid ?? null,
+      attachments: message.attachments,
+    }),
+    message.guid,
+  ];
+}
+
+function mirrorMatchFromRow(r: MirrorSearchRow): MirrorMatch {
+  return {
+    guid: r.guid,
+    chatGuid: r.chat_guid,
+    handle: r.handle,
+    isFromMe: r.is_from_me === 1,
+    isGroup: r.is_group === 1,
+    kind: r.kind,
+    text: r.text,
+    sentAt: r.sent_at,
+    hasAttachment: r.kind === 'attachment-only' || (r.n_att ?? 0) > 0,
+  };
+}
+
+function bySentDescGuidAsc(a: MirrorMatch, b: MirrorMatch): number {
+  if (a.sentAt !== b.sentAt) return a.sentAt < b.sentAt ? 1 : -1;
+  return a.guid < b.guid ? -1 : a.guid > b.guid ? 1 : 0;
 }
 
 interface DraftRow {
@@ -446,6 +622,21 @@ export class SqliteStore implements Store {
   readonly #upsertThreadState: Database.Statement;
   readonly #deleteThreadState: Database.Statement;
   readonly #getSettingVersion: Database.Statement;
+  // --- v2 F2a: search index over 0003's `message_fts` + `search_doc` ---
+  readonly #docOf: Database.Statement;
+  readonly #insertDoc: Database.Statement;
+  readonly #deleteDoc: Database.Statement;
+  readonly #insertFts: Database.Statement;
+  readonly #deleteFts: Database.Statement;
+  readonly #batchBoundary: Database.Statement;
+  readonly #pendingInBatch: Database.Statement;
+  readonly #countDocs: Database.Statement;
+  readonly #countPendingEligible: Database.Statement;
+  readonly #mirrorStatements = new Map<string, Database.Statement>();
+  readonly #indexBatchTxn: Database.Transaction<
+    (through: number, boundary: number) => number
+  >;
+  readonly #updateInboundTxn: Database.Transaction<(message: Message) => void>;
   readonly #applyDraftTransitionTxn: Database.Transaction<
     (input: {
       id: Ulid;
@@ -603,7 +794,7 @@ export class SqliteStore implements Store {
     // subquery per stepped row, so the approval work is bounded by the run
     // length rather than by the chat's whole history. Sorting a joined result
     // instead would cost every send in the chat before the first row came
-    // back. C-8 keeps the repo index-free, so the draft sort is a temp
+    // back. C-8 keeps `drafts` index-free, so the draft sort is a temp
     // b-tree over one chat's sends, which on a single-operator daemon is
     // small.
     //
@@ -825,6 +1016,80 @@ export class SqliteStore implements Store {
     this.#getSettingVersion = this.db.prepare(
       'SELECT version FROM settings WHERE key = ?',
     );
+    // v2 F2a. The FTS rowid is search_doc.doc_id, never the mirror's
+    // implicit rowid (VACUUM may renumber that); the guid is the join key.
+    this.#docOf = this.db.prepare(
+      'SELECT doc_id FROM search_doc WHERE guid = ?',
+    );
+    this.#insertDoc = this.db.prepare(
+      'INSERT INTO search_doc (guid) VALUES (?)',
+    );
+    this.#deleteDoc = this.db.prepare(
+      'DELETE FROM search_doc WHERE doc_id = ?',
+    );
+    this.#insertFts = this.db.prepare(
+      'INSERT INTO message_fts (rowid, body) VALUES (?, ?)',
+    );
+    this.#deleteFts = this.db.prepare(
+      'DELETE FROM message_fts WHERE rowid = ?',
+    );
+    // The batch ends on a chat.db ROWID, never mid-ROWID: after a restore
+    // heal two mirror rows can share one, and a batch that split them would
+    // move the mark past a row it never read.
+    this.#batchBoundary = this.db.prepare(
+      'SELECT MAX(rowid_src) AS b FROM (SELECT rowid_src FROM inbound_messages ' +
+        'WHERE rowid_src > ? ORDER BY rowid_src ASC LIMIT ?)',
+    );
+    this.#pendingInBatch = this.db.prepare(
+      'SELECT m.guid, m.text FROM inbound_messages m ' +
+        `WHERE m.rowid_src > ? AND m.rowid_src <= ? AND ${ELIGIBLE_SQL} ` +
+        'AND NOT EXISTS (SELECT 1 FROM search_doc d WHERE d.guid = m.guid) ' +
+        'ORDER BY m.rowid_src ASC, m.guid ASC',
+    );
+    this.#countDocs = this.db.prepare('SELECT COUNT(*) AS n FROM search_doc');
+    this.#countPendingEligible = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM inbound_messages m ' +
+        `WHERE m.rowid_src > ? AND ${ELIGIBLE_SQL} ` +
+        'AND NOT EXISTS (SELECT 1 FROM search_doc d WHERE d.guid = m.guid)',
+    );
+    this.#indexBatchTxn = this.db.transaction(
+      (through: number, boundary: number): number => {
+        const rows = this.#pendingInBatch.all(through, boundary) as {
+          guid: string;
+          text: string;
+        }[];
+        for (const row of rows) {
+          const docId = Number(this.#insertDoc.run(row.guid).lastInsertRowid);
+          this.#insertFts.run(docId, row.text);
+        }
+        this.#setSetting.run(
+          SETTING_SEARCH_INDEXED_THROUGH,
+          String(boundary),
+          this.#clock.now(),
+        );
+        return rows.length;
+      },
+    );
+    // The row and its index entry move together: an unsend that returned
+    // with the old text still findable would be a lie the operator cannot see.
+    this.#updateInboundTxn = this.db.transaction((message: Message): void => {
+      this.#updateInbound.run(...inboundUpdateParams(message));
+      const doc = this.#docOf.get(message.guid) as
+        { doc_id: number } | undefined;
+      const indexable = isIndexable(message.kind, message.text);
+      if (doc !== undefined) {
+        this.#deleteFts.run(doc.doc_id);
+        if (indexable) this.#insertFts.run(doc.doc_id, message.text);
+        else this.#deleteDoc.run(doc.doc_id);
+        return;
+      }
+      // Not indexed yet. Ahead of the mark the backfill will pick it up with
+      // its new text; behind the mark nothing else ever will.
+      if (indexable && message.sourceRowid <= this.#indexedThrough()) {
+        const docId = Number(this.#insertDoc.run(message.guid).lastInsertRowid);
+        this.#insertFts.run(docId, message.text);
+      }
+    });
     this.#getThreadState = this.db.prepare(
       'SELECT * FROM thread_state WHERE chat_guid = ?',
     );
@@ -1236,25 +1501,7 @@ export class SqliteStore implements Store {
   }
 
   updateInboundMessage(message: Message): void {
-    this.#updateInbound.run(
-      message.sourceRowid,
-      message.chatGuid,
-      message.handle,
-      message.isFromMe ? 1 : 0,
-      message.isGroup ? 1 : 0,
-      message.service,
-      message.kind,
-      message.text,
-      message.sentAt,
-      message.receivedAt,
-      message.editedAt ?? null,
-      JSON.stringify({
-        tapback: message.tapback ?? null,
-        threadOriginatorGuid: message.threadOriginatorGuid ?? null,
-        attachments: message.attachments,
-      }),
-      message.guid,
-    );
+    this.#updateInboundTxn(message);
   }
 
   appendAudit(entry: {
@@ -1747,6 +1994,87 @@ export class SqliteStore implements Store {
       written.updatedAt,
     );
     return written;
+  }
+
+  // --- v2 F2a: search ---
+
+  #indexedThrough(): number {
+    const raw = this.getSetting(SETTING_SEARCH_INDEXED_THROUGH);
+    const n = raw === null ? 0 : Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /**
+   * One backfill step: walks at most `limit` mirror rows past the mark (more
+   * only when the last ROWID is shared), indexes the eligible ones not
+   * already indexed, and moves the mark. One transaction per step.
+   */
+  indexPending(limit: number): { indexed: number; throughRowid: number } {
+    const through = this.#indexedThrough();
+    const row = this.#batchBoundary.get(through, limit) as { b: number | null };
+    if (row.b === null) return { indexed: 0, throughRowid: through };
+    const indexed = this.#indexBatchTxn(through, row.b);
+    return { indexed, throughRowid: row.b };
+  }
+
+  searchMirror(q: MirrorQuery): MirrorResult {
+    const compiled = compileMirror(q);
+    if (compiled === null) {
+      return { matches: [], capped: false, shortTermWindowed: false };
+    }
+    const rows = this.#mirrorStatement(compiled.sql).all(
+      ...compiled.params,
+    ) as MirrorSearchRow[];
+    const capped = rows.length > q.cap;
+    const matches = rows.slice(0, q.cap).map(mirrorMatchFromRow);
+    matches.sort(bySentDescGuidAsc);
+    return {
+      matches,
+      capped,
+      shortTermWindowed: compiled.mode === 'short-window',
+    };
+  }
+
+  /** The query plan `searchMirror` would run. Store-only, for the perf spec. */
+  explainSearch(q: MirrorQuery): string[] {
+    const compiled = compileMirror(q);
+    if (compiled === null) return [];
+    const plan = this.db
+      .prepare(`EXPLAIN QUERY PLAN ${compiled.sql}`)
+      .all(...compiled.params) as { detail: string }[];
+    return plan.map((p) => p.detail);
+  }
+
+  searchCoverage(): MirrorCoverage {
+    const through = this.#indexedThrough();
+    const indexed = (this.#countDocs.get() as { n: number }).n;
+    const pending = (this.#countPendingEligible.get(through) as { n: number })
+      .n;
+    const cursor = this.getCursor();
+    return {
+      indexed,
+      eligible: indexed + pending,
+      throughRowid: through,
+      mirrorAsOf: cursor ? cursor.lastScanAt : null,
+    };
+  }
+
+  /** Lowers the mark only: a heal re-walks, it never skips. */
+  resetIndexThrough(rowid: number): void {
+    if (rowid < this.#indexedThrough()) {
+      this.setSetting(SETTING_SEARCH_INDEXED_THROUGH, String(rowid));
+    }
+  }
+
+  #mirrorStatement(sql: string): Database.Statement {
+    let stmt = this.#mirrorStatements.get(sql);
+    if (stmt === undefined) {
+      // Shapes are finite but term counts are not: keep the cache bounded.
+      if (this.#mirrorStatements.size >= 64) this.#mirrorStatements.clear();
+      stmt = this.db.prepare(sql);
+      this.#mirrorStatements.set(sql, stmt);
+    }
+    return stmt;
   }
 
   getSettingVersion(key: string): number {

@@ -438,6 +438,59 @@ The ladder, run in order and only on a Fail:
 
 Record which rung worked: none, L1, L2, or neither.
 
+### The Contacts experiment
+
+What it tests: the released app is hardened, and a hardened app is refused
+Contacts unless it carries the
+`com.apple.security.personal-information.addressbook` entitlement, whatever
+`Info.plist` says. The CI ui build is not hardened, so only a packed app on a
+real Mac can show that the sheet appears at all. Contacts is optional: it
+puts names and photos on avatars, and a refusal draws initials instead.
+
+Run it after step 10, in the window of the app installed in step 2. The app
+asks once, on the first thread you open (D-UI-54), never when the list first
+draws. Before you open anything, the list shows initials and no sheet.
+
+The sheet's title line is the system's own wording; record it exactly as
+shown. Its explanation is `NSContactsUsageDescription` from
+`apps/mac/Resources/Info.plist`, and must read word for word:
+
+```
+WeMessage shows the names and photos from your Contacts next to messages. Nothing is uploaded. You can say no; initials are shown instead.
+```
+
+The experiment table:
+
+```
+Experiment  When                              Pass                                       Fail
+----------  --------------------------------  -----------------------------------------  ------------------------------------------
+FDA         steps 7 to 10                     see the outcome table above                see the ladder above
+Contacts    first thread opened after         The sheet appears once. Its title names    No sheet at all (the entitlement is
+            step 10                           WeMessage and Contacts (record it          missing from the packed app); a sheet
+                                              exactly), and its body is the sentence     before any thread is opened; a second
+                                              above, word for word. Don't Allow: every   sheet on a later thread or relaunch; any
+                                              avatar shows initials, with no error and   error, blank disc or empty avatar after
+                                              no second sheet. Allow: the photos from    Don't Allow; a body that differs from
+                                              Contacts appear.                           the sentence above.
+```
+
+To run the denial and the grant both, reset the record and relaunch the app
+between them:
+
+```sh
+tccutil reset AddressBook sh.wemessage.gateway
+```
+
+The reset touches only this app's Contacts record. If the sheet never
+appears, check the packed entitlements before anything else:
+
+```sh
+codesign -d --entitlements - --xml ~/Applications/WeMessage.app
+```
+
+Pass shows exactly two keys: `com.apple.security.automation.apple-events`
+and `com.apple.security.personal-information.addressbook`.
+
 ### Double-click while the daemon runs
 
 One executable, two faces: `WeMessage --daemon` is the background host and a
@@ -518,3 +571,151 @@ The Automation prompt names WeMessage                         nothing automated 
 Open Anyway works for a self-signed zip on macOS 26           nothing automated can prove it    yes (step 4)
 A double-click opens a window while the daemon runs           nothing automated can prove it    yes (step 12)
 ```
+
+## Signing custody (S5d, on the maintainer's explicit go)
+
+This section is the procedure S5d runs once, and only when the maintainer
+says go. It is written down here so the run is the same every time; nothing
+in it runs in CI and nothing in this repository runs it. It makes the one
+self-signed identity every release is signed with, puts it in the
+maintainer's password manager, and hands it to the release workflow as two
+repository secrets. Everything below is a placeholder: no secret, no
+fingerprint and no real hash is ever written into this section.
+
+Who runs it and where:
+
+- The maintainer's own Mac, from a fresh temporary directory. The private
+  key never leaves that directory: not to Downloads, not to the Desktop, not
+  to a keychain on that Mac, and the directory is erased at the end.
+- 1Password CLI (`op`) signed in to the vault that holds release secrets,
+  written `<vault>` below.
+- `gh` signed in as an account with admin rights on `raybman/WeMessage`.
+  Setting repository secrets needs admin; a token with push rights alone
+  cannot do it.
+
+The p12 note. The runner imports the p12 with `security import`, which
+refuses the AES and PBKDF2 encryption OpenSSL 3 uses by default. Export with
+`-legacy` under OpenSSL 3, or with LibreSSL (`/usr/bin/openssl` on macOS),
+whose default encryption `security import` accepts. The sequence below
+picks the right form from `openssl version`, then proves the p12 opens
+before anything leaves the directory.
+
+The command sequence, in order:
+
+```sh
+d="$(mktemp -d)"; cd "$d"
+cat > cert.cnf <<'CNF'
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3
+[dn]
+CN = WeMessage Self-Signed
+[v3]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+subjectKeyIdentifier = hash
+CNF
+openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -sha256 -config cert.cnf -keyout key.pem -out cert.pem
+case "$(openssl version)" in "OpenSSL 3"*) legacy=-legacy ;; *) legacy= ;; esac
+pw="$(openssl rand -base64 32)"
+openssl pkcs12 -export $legacy -inkey key.pem -in cert.pem -name "WeMessage Self-Signed" -out identity.p12 -passout "pass:$pw"
+openssl pkcs12 $legacy -in identity.p12 -noout -passin "pass:$pw" && echo "p12 opens"
+leaf="$(openssl x509 -in cert.pem -noout -fingerprint -sha1 | awk -F= '{gsub(":","",$2); print $2}')"
+fp256="$(openssl x509 -in cert.pem -noout -fingerprint -sha256 | awk -F= '{print $2}')"
+notafter="$(openssl x509 -in cert.pem -noout -enddate | awk -F= '{print $2}')"
+op item create --vault "<vault>" --category "Secure Note" --title wemessage-signing-p12 \
+  "p12-base64[password]=$(base64 < identity.p12)" "password[password]=$pw" \
+  "leaf-sha1[text]=$leaf" "sha256-fingerprint[text]=$fp256" "not-after[text]=$notafter" \
+  "cn[text]=WeMessage Self-Signed"
+op read "op://<vault>/wemessage-signing-p12/p12-base64" | gh secret set WEMESSAGE_SIGN_P12 --repo raybman/WeMessage
+op read "op://<vault>/wemessage-signing-p12/password" | gh secret set WEMESSAGE_SIGN_P12_PASSWORD --repo raybman/WeMessage
+cd / && rm -P -rf "$d"
+echo "leaf $leaf"; echo "sha256 $fp256"; echo "not after $notafter"
+```
+
+The secrets go to `gh secret set` on standard input, never as a `--body`
+argument, so they do not appear in the process list.
+
+The 1Password item `wemessage-signing-p12` holds these fields:
+
+```
+Field               Type      Holds
+------------------  --------  ------------------------------------------------
+p12-base64          password  the p12, base64; the only copy of the private key
+password            password  the p12 password
+leaf-sha1           text      <leaf-sha1>, the SHA-1 of the signing certificate
+sha256-fingerprint  text      <sha256-fingerprint>, colon separated
+not-after           text      <not-after>, ten years from creation
+cn                  text      WeMessage Self-Signed
+```
+
+The repository secrets, and nothing else:
+
+```
+Secret                        From
+----------------------------  ---------------------------------------------
+WEMESSAGE_SIGN_P12            op://<vault>/wemessage-signing-p12/p12-base64
+WEMESSAGE_SIGN_P12_PASSWORD   op://<vault>/wemessage-signing-p12/password
+```
+
+The custody commit. One commit follows the run, and it is isolated: it
+touches exactly `RELEASING.md` and `CHANGELOG.md`, nothing else. In
+`RELEASING.md` it replaces the placeholder in the Identity section with
+`<leaf-sha1>` as printed above; in `CHANGELOG.md` it adds one line under
+Unreleased, "Signing identity established: <leaf-sha1>". Write the value in
+the upper case `openssl` prints: the 40-hex sweep in `test/arch.spec.ts`
+refuses a lower case 40-hex run in any file it does not list. Check the
+isolation before pushing:
+
+```sh
+git show --stat --format= HEAD
+```
+
+Pass lists exactly `CHANGELOG.md` and `RELEASING.md`.
+
+The post-run check. After the next tag's release run, download the
+artefact it uploaded and confirm it was signed by the identity in the
+password manager, not by a throwaway. `codesign -dvv` shows who signed it;
+the extracted signing certificate gives the SHA-1 to compare with the
+`leaf-sha1` field:
+
+```sh
+d="$(mktemp -d)"; cd "$d"
+gh release download v<version> --repo raybman/WeMessage --pattern 'WeMessage-<version>-arm64.zip'
+ditto -x -k WeMessage-<version>-arm64.zip .
+codesign -dvv WeMessage.app 2>&1 | awk '/^(Identifier|Authority|TeamIdentifier)=/ || /^CodeDirectory /'
+codesign -d --extract-certificates="$d/cert" WeMessage.app
+got="$(openssl x509 -inform DER -in "$d/cert0" -noout -fingerprint -sha1 | awk -F= '{gsub(":","",$2); print toupper($2)}')"
+want="$(op read "op://<vault>/wemessage-signing-p12/leaf-sha1" | tr 'a-f' 'A-F')"
+[ "$got" = "$want" ] && echo "signing certificate matches leaf-sha1" || echo "MISMATCH: stop and report"
+cd / && rm -rf "$d"
+```
+
+Pass: `Authority=WeMessage Self-Signed`, `Identifier=sh.wemessage.gateway`,
+`flags=` including `runtime`, and the match line. Record the result in the
+post-run checklist of the first install run above.
+
+## Human release smoke (the Swift build)
+
+The last check before a release is published, run by a person on a clean
+macOS user account on a named Mac: `<the Mac the maintainer names>`. Never
+the development laptop: its grants, its Contacts and its earlier builds
+would hide exactly the first-run behaviour this checks. A clean user is a
+new macOS account that has never run any WeMessage build, so no Full Disk
+Access, Automation or Contacts record exists for `sh.wemessage.gateway`.
+
+`<version>` is the release under test. The app goes in `~/Applications`,
+which needs no administrator password.
+
+- [ ] Download `WeMessage-<version>-arm64.dmg` and `SHA256SUMS` from https://github.com/raybman/WeMessage/releases, and check the image with `awk '/arm64[.]dmg$/' SHA256SUMS | shasum -a 256 -c`.
+- [ ] Open the DMG and copy `WeMessage.app` to `~/Applications`.
+- [ ] Open the app from Finder. Gatekeeper refuses it the first time; open System Settings, Privacy and Security, choose Open Anyway, and confirm. Record the wording of both dialogs.
+- [ ] Install the daemon service from the app's own CLI, then check it runs: `~/Applications/WeMessage.app/Contents/Resources/bin/wemessaged service install`, then `~/Applications/WeMessage.app/Contents/Resources/bin/wemessaged service status --json`.
+- [ ] Grant Full Disk Access to `WeMessage.app` (System Settings, Privacy and Security, Full Disk Access), restart the service with `~/Applications/WeMessage.app/Contents/Resources/bin/wemessaged service restart`, and confirm `~/Applications/WeMessage.app/Contents/Resources/bin/wemessage doctor` reports `fda` ok.
+- [ ] The Contacts sheet: the list draws with initials and no sheet; opening the first thread shows the Contacts sheet once, with the body from "The Contacts experiment" word for word.
+- [ ] Choose Don't Allow: every avatar shows the fallback initials, with no error and no blank disc. Open two more threads, quit and relaunch: no second sheet.
+- [ ] Repeat with Allow: run `tccutil reset AddressBook sh.wemessage.gateway`, relaunch, open a thread, choose Allow, and confirm contacts with photos show them.
+- [ ] Upgrading over the Electron app, on a Mac that has it: copy the new app over the old one (both builds use `sh.wemessage.gateway`, and the project never installs them side by side), run `wemessaged service install` once from the new app so the service gets the new shape, then grant Full Disk Access again. The new build has a new designated requirement, so the old grant no longer matches (see "every update re-locks Full Disk Access" in `CHANGELOG.md`).
+- [ ] Record the Mac's model, `sw_vers`, and Pass or Fail for each line, and send it back with the first install post-run checklist.

@@ -3471,6 +3471,9 @@ describe('v2 S6c: the desktop app is deleted, not dormant', () => {
     'packages/daemon/src/launchd/paths.ts':
       'migration: the bundle pair an installed pre-Swift app resolves to',
     'packages/daemon/test/launchd-paths.spec.ts': 'migration rows',
+    // S5e: the human smoke upgrades a Mac that still has the v1 app
+    'RELEASING.md': 'migration: the smoke step that upgrades over a v1 install',
+    'test/release/releasing-s5e.spec.ts': 'migration rows: the upgrade note',
     // S6d's own guards: what the runtime union and the plist variable left
     'packages/daemon/test/doctor.spec.ts':
       'guard: doctor copy never names it; a stray versions key changes nothing',

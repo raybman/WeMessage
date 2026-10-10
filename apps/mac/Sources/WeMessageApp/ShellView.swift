@@ -816,10 +816,11 @@ private struct SidebarView: View {
                 originTag: model.linkedInOriginTag(thread)
               ) { model.open(thread.chatGuid) }
               .accessibilityIdentifier(ShellID.rowPrefix + thread.chatGuid)
+              .onAppear { TestHooks.firstRow.mark() }
             }
           }
           .accessibilityElement(children: .contain)
-          .accessibilityLabel("Threads")
+          .accessibilityLabel(FirstRowStamp.label(TestHooks.firstRow.ms))
         }
         .scrollIndicators(.never)
       }

@@ -54,7 +54,8 @@ final class ThreadStateTests: XCTestCase {
     XCTAssertTrue(
       QueueUI.label(app, danielRow).contains("Snoozed until"), "relaunch: Daniel's row reads \(QueueUI.label(app, danielRow))")
     try await QueueUI.assertJournal("thread state relaunch")
-    XCTAssertEqual(QueueUI.stateWrites(try await FakeDaemon.journal().requests).count, 1, "the relaunch wrote thread state")
+    let afterRelaunch = try await FakeDaemon.journal().requests
+    XCTAssertEqual(QueueUI.stateWrites(afterRelaunch).count, 1, "the relaunch wrote thread state")
   }
 
   @MainActor

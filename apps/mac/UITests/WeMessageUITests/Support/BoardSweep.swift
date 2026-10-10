@@ -93,7 +93,8 @@ enum SweptBoard: String, CaseIterable {
       }
     }
     switch self {
-    case .b02:
+    case .b02, .b07:
+      // Board 07's voice dock draws over Priya's thread (Board07Tests).
       QueueUI.open(app, QueueUI.priya)
     case .b03, .b04, .b05:
       app.typeKey(String(rawValue.suffix(1)), modifierFlags: .command)
@@ -215,6 +216,11 @@ enum Unlabeled {
     /// is what the user typed.
     let value: String
     let frame: CGRect
+    /// Inside a scroll bar: AppKit's scroller and its page areas, which the
+    /// app does not draw and cannot label.
+    var inScrollBar = false
+    /// The parent's element type, for the failure line.
+    var parent: XCUIElement.ElementType? = nil
   }
 
   /// Controls whose value is user content, not a name.
@@ -223,25 +229,31 @@ enum Unlabeled {
     .radioButton, .popUpButton,
   ]
 
-  static func flatten(_ snapshot: any XCUIElementSnapshot) -> [Node] {
+  static func flatten(
+    _ snapshot: any XCUIElementSnapshot, inScrollBar: Bool = false, parent: XCUIElement.ElementType? = nil
+  ) -> [Node] {
+    let inside = inScrollBar || snapshot.elementType == .scrollBar
     var out: [Node] = [
       Node(
         type: snapshot.elementType, identifier: snapshot.identifier, label: snapshot.label, title: snapshot.title,
-        placeholder: snapshot.placeholderValue ?? "", value: (snapshot.value as? String) ?? "", frame: snapshot.frame)
+        placeholder: snapshot.placeholderValue ?? "", value: (snapshot.value as? String) ?? "", frame: snapshot.frame,
+        inScrollBar: inside, parent: parent)
     ]
-    for child in snapshot.children { out += flatten(child) }
+    for child in snapshot.children { out += flatten(child, inScrollBar: inside, parent: snapshot.elementType) }
     return out
   }
 
   /// One line per interactive node with nothing to speak. System window
-  /// chrome (`_XCUI:` identifiers) and zero-size nodes are not reachable.
+  /// chrome (`_XCUI:` identifiers), a scroll bar's parts and zero-size nodes
+  /// are not the app's to label.
   static func offenders(_ nodes: [Node]) -> [String] {
     nodes.compactMap { n in
-      guard interactive.contains(n.type), !n.identifier.hasPrefix("_XCUI:") else { return nil }
+      guard interactive.contains(n.type), !n.identifier.hasPrefix("_XCUI:"), !n.inScrollBar else { return nil }
       guard n.frame.width >= 1, n.frame.height >= 1 else { return nil }
       let names = [n.label, n.title, n.placeholder] + (fields.contains(n.type) ? [] : [n.value])
       let spoken = names.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-      return spoken ? nil : "type \(n.type.rawValue) id '\(n.identifier)' frame \(n.frame)"
+      let under = n.parent.map { " in type \($0.rawValue)" } ?? ""
+      return spoken ? nil : "type \(n.type.rawValue) id '\(n.identifier)' frame \(n.frame)\(under)"
     }
   }
 }

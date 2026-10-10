@@ -80,8 +80,10 @@ final class BoardSweepTests: XCTestCase {
   func testUnlabeledSeesASilentButton() {
     let box = CGRect(x: 0, y: 0, width: 20, height: 20)
     func node(_ type: XCUIElement.ElementType, id: String = "x", label: String = "", title: String = "",
-              placeholder: String = "", value: String = "", frame: CGRect = box) -> Unlabeled.Node {
-      Unlabeled.Node(type: type, identifier: id, label: label, title: title, placeholder: placeholder, value: value, frame: frame)
+              placeholder: String = "", value: String = "", frame: CGRect = box, inScrollBar: Bool = false) -> Unlabeled.Node {
+      Unlabeled.Node(
+        type: type, identifier: id, label: label, title: title, placeholder: placeholder, value: value, frame: frame,
+        inScrollBar: inScrollBar)
     }
     let nodes = [
       node(.button, id: "labelled", label: "Approve"),
@@ -91,6 +93,8 @@ final class BoardSweepTests: XCTestCase {
       node(.button, id: "blank", label: "  "),
       node(.button, id: "_XCUI:CloseWindow"),
       node(.button, id: "hidden", frame: .zero),
+      // Board 15, run 38013822493: a scroller's page area, an 11 x 334 button.
+      node(.button, id: "", frame: CGRect(x: 0, y: 0, width: 11, height: 334), inScrollBar: true),
       node(.textField, id: "hinted", placeholder: "Search"),
       node(.textField, id: "typed", value: "hello"),
       node(.checkBox, id: "valued", value: "1"),

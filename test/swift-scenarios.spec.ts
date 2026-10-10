@@ -91,6 +91,7 @@ const EXPECTED_SCENARIOS = [
   'rich',
   'rich-turns',
   'search',
+  'search-indexing',
   'thread-state',
 ];
 
@@ -158,7 +159,7 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twenty-seven shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty-eight shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
@@ -166,6 +167,7 @@ describe('v2 S4b SC2: loadScenarios', () => {
     expect(map.get('rich')?.parent).toBe(null);
     expect(map.get('rich-turns')?.parent).toBe('rich');
     expect(map.get('thread-state')?.parent).toBe('pending');
+    expect(map.get('search-indexing')?.parent).toBe('search');
     for (const s of map.values()) expect(s.summary.length).toBeGreaterThan(20);
   });
 
@@ -931,6 +933,8 @@ const NULLABLE: Record<string, string[]> = {
     'threads[].displayName',
   ],
   'GET /v1/threads/:guid/messages': ['turns[].text'],
+  // v2 F2c: a year with no turns is kept, its first and last null.
+  'GET /v1/threads/:guid/years': ['years[].first', 'years[].last'],
   'event message.received': ['message.content.text'],
 };
 /**
@@ -1990,5 +1994,270 @@ describe('v2 F5: GET /v1/threads/by-handle/:handle, a read the fake daemon serve
       status: 201,
       chatGuid: 'any;-;+15550100001',
     });
+  });
+});
+
+/**
+ * v2 F2e: GET /v1/search and GET /v1/threads/:guid/years, served from the
+ * scenario chain. A canned page answers the request whose structured query
+ * is the one its own `coverage.tokens` echo (op and value, in the daemon's
+ * order; instants compared as instants): the daemon's echo IS the request,
+ * so the files stay {route, status, body}. Any other query is an empty page
+ * with the scenario's coverage and the tokens echoed as the daemon would.
+ */
+describe('v2 F2e: search and years in the fake daemon', () => {
+  const MAYA = 'iMessage;-;+15550100001';
+  const file = (rel: string) => readJson<Golden>(join(scenariosDir, rel));
+  const error = (name: string) =>
+    readJson<Golden>(join(contract, 'errors', name));
+  const search = (state: State, query: string) =>
+    step(state, { method: 'GET', path: `/v1/search?${query}` }).out;
+  const years = (state: State, guid: string, tz: string) =>
+    step(state, {
+      method: 'GET',
+      path: `/v1/threads/${encodeURIComponent(guid)}/years?tz=${encodeURIComponent(tz)}`,
+    }).out;
+  const guids = (out: { body?: unknown }) =>
+    (body(out).hits as Array<{ guid: string }>).map((h) => h.guid);
+  const AFTER = 'after=2024-06-01T00%3A00%3A00.000Z';
+
+  it('search answers "cabin" with its canned page, exactly', () => {
+    const out = search(switchTo('search'), 'term=cabin&tz=UTC&limit=50');
+    expect(out.status).toBe(200);
+    expect(out.body).toEqual(file('search/responses/search.cabin.json').body);
+    expect(guids(out)).toEqual([
+      'msg-0510',
+      'msg-0505',
+      'msg-0504',
+      'msg-0502',
+    ]);
+  });
+
+  it('a canned page matches on its tokens: order of keys and the offset an instant is written in do not matter', () => {
+    const state = switchTo('search');
+    const want = file('search/responses/search.tokens.json').body;
+    for (const q of [
+      `term=cabin&from=me&${AFTER}&tz=UTC&limit=50`,
+      `tz=UTC&${AFTER}&from=me&term=cabin`,
+      'term=cabin&from=me&after=2024-06-01T02%3A00%3A00%2B02%3A00&tz=UTC',
+    ]) {
+      const out = search(state, q);
+      expect([q, out.status, out.body]).toEqual([q, 200, want]);
+    }
+    const unparsed = search(
+      state,
+      `term=cabin&term=before%3Alast&from=me&${AFTER}&tz=UTC`,
+    );
+    expect(unparsed.body).toEqual(
+      file('search/responses/search.unparsed.json').body,
+    );
+    expect(guids(unparsed)).toEqual([]);
+  });
+
+  it('any other query is an empty page with the scenario coverage, every token echoed as the daemon echoes it', () => {
+    const state = switchTo('search');
+    const canned = file('search/responses/search.cabin.json').body as {
+      coverage: { channels: Json };
+      asOf: string;
+    };
+    const out = search(
+      state,
+      'term=zebra&term=ok&from=jordan&in=Family&channel=imessage&channel=whatsapp&has=link&before=2025-01-01T00%3A00%3A00.000Z&tz=UTC',
+    );
+    expect(out.status).toBe(200);
+    expect(out.body).toEqual({
+      hits: [],
+      total: 0,
+      nextCursor: null,
+      asOf: canned.asOf,
+      facets: { years: [], channels: [], senders: [] },
+      coverage: {
+        channels: canned.coverage.channels,
+        tokens: [
+          { op: 'term', value: 'zebra', applied: 'applied' },
+          { op: 'term', value: 'ok', applied: 'applied' },
+          {
+            op: 'from',
+            value: 'jordan',
+            applied: 'partial',
+            reason: 'handles-and-saved-names',
+          },
+          { op: 'in', value: 'Family', applied: 'applied' },
+          { op: 'channel', value: 'imessage', applied: 'applied' },
+          {
+            op: 'channel',
+            value: 'whatsapp',
+            applied: 'not-applied',
+            reason: 'no-source',
+          },
+          { op: 'has', value: 'link', applied: 'applied' },
+          {
+            op: 'before',
+            value: '2025-01-01T00:00:00.000Z',
+            applied: 'applied',
+          },
+        ],
+        capped: false,
+        deletedHidden: 0,
+        deletionsChecked: true,
+      },
+    });
+    const short = body(search(state, 'term=ok&tz=UTC')).coverage as {
+      tokens: Json[];
+    };
+    expect(short.tokens).toEqual([
+      { op: 'term', value: 'ok', applied: 'partial', reason: 'short-term' },
+    ]);
+    // A WhatsApp-only search asks nothing of iMessage.
+    const wa = body(search(state, 'channel=whatsapp&tz=UTC')).coverage as {
+      channels: Array<Record<string, Json>>;
+    };
+    expect(wa.channels[0]).toEqual({
+      channel: 'imessage',
+      state: 'not-searched',
+      reason: 'not-requested',
+    });
+    // A next page of a canned page is the end: every canned page is one page.
+    const next = search(state, 'term=cabin&tz=UTC&cursor=c1');
+    expect(guids(next)).toEqual([]);
+    expect(body(next).nextCursor).toBeNull();
+  });
+
+  it('the default scenario serves the S0 search golden for its own query', () => {
+    const out = search(controlled(), 'term=cabin&tz=America%2FLos_Angeles');
+    expect(out.body).toEqual(
+      readJson<Golden>(join(contract, 'responses/search.json')).body,
+    );
+  });
+
+  it('search-indexing owns its search: 41% indexed on every page, a from: name partial, nothing inherited from search', () => {
+    const state = switchTo('search-indexing');
+    const cabin = search(state, 'term=cabin&tz=UTC');
+    expect(cabin.body).toEqual(
+      file('search-indexing/responses/search.cabin.json').body,
+    );
+    expect(guids(cabin)).toEqual(['msg-0510', 'msg-0505', 'msg-0504']);
+    const maya = search(state, 'term=cabin&from=maya&tz=UTC');
+    expect(guids(maya)).toEqual(['msg-0504']);
+    const tokens = (body(maya).coverage as { tokens: Json[] }).tokens;
+    expect(tokens[1]).toEqual({
+      op: 'from',
+      value: 'maya',
+      applied: 'partial',
+      reason: 'handles-and-saved-names',
+    });
+    // The search scenario's tokens page is not inherited: the chain's
+    // nearest scenario with any search page owns search.
+    const other = search(state, `term=cabin&from=me&${AFTER}&tz=UTC`);
+    expect(guids(other)).toEqual([]);
+    for (const out of [cabin, maya, other]) {
+      const im = (
+        body(out).coverage as { channels: Array<Record<string, Json>> }
+      ).channels[0];
+      expect([im?.indexed, im?.eligible]).toEqual([217300, 530000]);
+    }
+  });
+
+  it("a request the daemon refuses gets the daemon's 400: no zone or a bad one is invalid-search, nothing to look for is empty-search", () => {
+    const state = switchTo('search');
+    for (const q of [
+      'term=cabin',
+      'term=cabin&tz=Mars%2FOlympus',
+      'term=cabin&tz=',
+    ]) {
+      const out = search(state, q);
+      expect([q, out.status, body(out).error]).toEqual([
+        q,
+        400,
+        'invalid-search',
+      ]);
+    }
+    const empty = search(state, 'tz=UTC&limit=50');
+    expect([empty.status, empty.body]).toEqual([
+      400,
+      error('400.empty-search.json').body,
+    ]);
+    const noBearer = step(state, {
+      method: 'GET',
+      path: '/v1/search?term=cabin&tz=UTC',
+      authorization: '',
+    }).out;
+    expect(noBearer.status).toBe(401);
+  });
+
+  it('years: the canned answer in its zone, and the same counts computed from the transcript', () => {
+    const state = switchTo('search');
+    const canned = file('search/responses/threads.years.maya.json').body;
+    const utc = years(state, MAYA, 'UTC');
+    expect([utc.status, utc.body]).toEqual([200, canned]);
+    // No canned file for this zone: counted from the served transcript,
+    // and Maya's turns fall in the same years in Kolkata as in UTC.
+    const kolkata = years(state, MAYA, 'Asia/Kolkata');
+    expect(kolkata.status).toBe(200);
+    expect(body(kolkata).tz).toBe('Asia/Kolkata');
+    expect(body(kolkata).years).toEqual((canned as { years: Json }).years);
+    // A scenario with no years file counts every turn it serves.
+    const rich = switchTo('rich');
+    const computed = years(rich, MAYA, 'UTC');
+    expect(computed.status).toBe(200);
+    expect(
+      (body(computed).years as Array<{ count: number }>).reduce(
+        (n, y) => n + y.count,
+        0,
+      ),
+    ).toBe(
+      (
+        readJson<Golden>(
+          join(scenariosDir, 'rich/responses/threads.messages.maya.json'),
+        ).body as { turns: Json[] }
+      ).turns.length,
+    );
+  });
+
+  it('years: an unknown chat is 404 unknown-chat; no zone, a bad one or another key is 400 invalid-query', () => {
+    const state = switchTo('search');
+    const unknown = years(state, 'iMessage;-;+15550109999', 'UTC');
+    expect([unknown.status, unknown.body]).toEqual([
+      404,
+      error('404.unknown-chat.json').body,
+    ]);
+    const g = encodeURIComponent(MAYA);
+    for (const q of ['', '?tz=Mars%2FOlympus', '?tz=', '?tz=UTC&limit=5']) {
+      const out = step(state, {
+        method: 'GET',
+        path: `/v1/threads/${g}/years${q}`,
+      }).out;
+      expect([q, out.status, body(out).error]).toEqual([
+        q,
+        400,
+        'invalid-query',
+      ]);
+    }
+  });
+
+  it('search and years are journaled with their query', () => {
+    let state = switchTo('search');
+    state = step(state, {
+      method: 'GET',
+      path: '/v1/search?term=cabin&tz=UTC',
+    }).state;
+    state = step(state, {
+      method: 'GET',
+      path: `/v1/threads/${encodeURIComponent(MAYA)}/years?tz=UTC`,
+    }).state;
+    expect(state.journal.slice(-2)).toEqual([
+      {
+        method: 'GET',
+        path: '/v1/search',
+        query: 'term=cabin&tz=UTC',
+        status: 200,
+      },
+      {
+        method: 'GET',
+        path: `/v1/threads/${encodeURIComponent(MAYA)}/years`,
+        query: 'tz=UTC',
+        status: 200,
+      },
+    ]);
   });
 });

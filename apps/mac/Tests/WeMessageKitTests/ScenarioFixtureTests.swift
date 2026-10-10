@@ -27,6 +27,9 @@ struct ScenarioFixtureTests {
     case "GET /v1/doctor": return "doctor"
     case "GET /v1/settings": return "settings.list"
     case "PATCH /v1/settings": return "settings.patch"
+    // v2 F2e: the search scenarios' canned pages and Maya's years.
+    case "GET /v1/search": return "search"
+    case "GET /v1/threads/:guid/years": return "threads.years"
     default: return nil
     }
   }

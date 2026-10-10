@@ -1,0 +1,124 @@
+{
+  "route": "GET /v1/search",
+  "status": 200,
+  "body": {
+    "hits": [
+      {
+        "guid": "msg-0510",
+        "chatGuid": "iMessage;-;+15550100001",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "me",
+        "handle": null,
+        "text": "already looking at cabins",
+        "sentAt": "2025-05-20T13:00:00.000Z",
+        "hasAttachment": false
+      },
+      {
+        "guid": "msg-0505",
+        "chatGuid": "iMessage;-;+15550100001",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "me",
+        "handle": null,
+        "text": "same cabin next summer then",
+        "sentAt": "2024-06-16T20:11:00.000Z",
+        "hasAttachment": false
+      },
+      {
+        "guid": "msg-0504",
+        "chatGuid": "iMessage;-;+15550100001",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "them",
+        "handle": "+15550100001",
+        "text": "the cabin had a canoe, we have to go back",
+        "sentAt": "2024-06-16T20:05:00.000Z",
+        "hasAttachment": false
+      },
+      {
+        "guid": "msg-0502",
+        "chatGuid": "iMessage;-;+15550100001",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "me",
+        "handle": null,
+        "text": "yes, booked the cabin for june",
+        "sentAt": "2024-01-01T10:03:00.000Z",
+        "hasAttachment": false
+      }
+    ],
+    "total": 4,
+    "nextCursor": null,
+    "asOf": "2026-09-01T12:00:43.000Z",
+    "facets": {
+      "years": [
+        {
+          "year": 2025,
+          "count": 1
+        },
+        {
+          "year": 2024,
+          "count": 3
+        }
+      ],
+      "channels": [
+        {
+          "channel": "imessage",
+          "count": 4
+        }
+      ],
+      "senders": [
+        {
+          "handle": "me",
+          "count": 3
+        },
+        {
+          "handle": "+15550100001",
+          "count": 1
+        }
+      ]
+    },
+    "coverage": {
+      "channels": [
+        {
+          "channel": "imessage",
+          "state": "searched",
+          "indexed": 45,
+          "eligible": 45,
+          "indexedThroughRowid": 45,
+          "mirrorAsOf": "2026-09-01T12:00:43.000Z"
+        },
+        {
+          "channel": "whatsapp",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "linkedin",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "email",
+          "state": "not-searched",
+          "reason": "no-source"
+        }
+      ],
+      "tokens": [
+        {
+          "op": "term",
+          "value": "cabin",
+          "applied": "applied"
+        }
+      ],
+      "capped": false,
+      "deletedHidden": 0,
+      "deletionsChecked": true
+    }
+  }
+}

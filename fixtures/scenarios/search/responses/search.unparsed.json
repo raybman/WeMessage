@@ -1,0 +1,67 @@
+{
+  "route": "GET /v1/search",
+  "status": 200,
+  "body": {
+    "hits": [],
+    "total": 0,
+    "nextCursor": null,
+    "asOf": "2026-09-01T12:00:43.000Z",
+    "facets": {
+      "years": [],
+      "channels": [],
+      "senders": []
+    },
+    "coverage": {
+      "channels": [
+        {
+          "channel": "imessage",
+          "state": "searched",
+          "indexed": 45,
+          "eligible": 45,
+          "indexedThroughRowid": 45,
+          "mirrorAsOf": "2026-09-01T12:00:43.000Z"
+        },
+        {
+          "channel": "whatsapp",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "linkedin",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "email",
+          "state": "not-searched",
+          "reason": "no-source"
+        }
+      ],
+      "tokens": [
+        {
+          "op": "term",
+          "value": "cabin",
+          "applied": "applied"
+        },
+        {
+          "op": "term",
+          "value": "before:last",
+          "applied": "applied"
+        },
+        {
+          "op": "from",
+          "value": "me",
+          "applied": "applied"
+        },
+        {
+          "op": "after",
+          "value": "2024-06-01T00:00:00.000Z",
+          "applied": "applied"
+        }
+      ],
+      "capped": false,
+      "deletedHidden": 0,
+      "deletionsChecked": true
+    }
+  }
+}

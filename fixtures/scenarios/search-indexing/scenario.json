@@ -1,0 +1,4 @@
+{
+  "summary": "The search scenario while the daemon is still building its index: 41% of iMessage indexed, newest first, so older matches are not found yet, and a from: name that is matched on handles and saved names only.",
+  "extends": "search"
+}

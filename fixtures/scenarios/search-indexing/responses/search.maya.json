@@ -1,0 +1,86 @@
+{
+  "route": "GET /v1/search",
+  "status": 200,
+  "body": {
+    "hits": [
+      {
+        "guid": "msg-0504",
+        "chatGuid": "iMessage;-;+15550100001",
+        "title": "Maya Okafor",
+        "isGroup": false,
+        "channel": "imessage",
+        "from": "them",
+        "handle": "+15550100001",
+        "text": "the cabin had a canoe, we have to go back",
+        "sentAt": "2024-06-16T20:05:00.000Z",
+        "hasAttachment": false
+      }
+    ],
+    "total": 1,
+    "nextCursor": null,
+    "asOf": "2026-09-01T12:00:43.000Z",
+    "facets": {
+      "years": [
+        {
+          "year": 2024,
+          "count": 1
+        }
+      ],
+      "channels": [
+        {
+          "channel": "imessage",
+          "count": 1
+        }
+      ],
+      "senders": [
+        {
+          "handle": "+15550100001",
+          "count": 1
+        }
+      ]
+    },
+    "coverage": {
+      "channels": [
+        {
+          "channel": "imessage",
+          "state": "searched",
+          "indexed": 217300,
+          "eligible": 530000,
+          "indexedThroughRowid": 312700,
+          "mirrorAsOf": "2026-09-01T12:00:43.000Z"
+        },
+        {
+          "channel": "whatsapp",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "linkedin",
+          "state": "not-searched",
+          "reason": "no-source"
+        },
+        {
+          "channel": "email",
+          "state": "not-searched",
+          "reason": "no-source"
+        }
+      ],
+      "tokens": [
+        {
+          "op": "term",
+          "value": "cabin",
+          "applied": "applied"
+        },
+        {
+          "op": "from",
+          "value": "maya",
+          "applied": "partial",
+          "reason": "handles-and-saved-names"
+        }
+      ],
+      "capped": false,
+      "deletedHidden": 0,
+      "deletionsChecked": true
+    }
+  }
+}

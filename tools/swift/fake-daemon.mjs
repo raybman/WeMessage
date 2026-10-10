@@ -41,6 +41,17 @@
 // other board's queue moves; writes live until a scenario switch or reset,
 // so a relaunched app reads back what it wrote. A write is journaled with
 // its sorted body keys (never values) so a UI test can ban seenAt.
+//
+// v2 F2e: GET /v1/search and GET /v1/threads/:guid/years. A scenario's
+// responses/search.*.json pages answer the query their own
+// `coverage.tokens` echo (op and value in the daemon's order, instants
+// compared as instants): the daemon's echo of a request IS the request, so
+// the files stay {route, status, body}. The nearest scenario in the chain
+// with any search page owns search (S0's goldens without one); any other
+// query is an empty page with that coverage and its tokens echoed as
+// core's compileSearch echoes them. Every canned page is one page, so a
+// cursor is answered with the empty page. Years are a canned answer for the
+// chat and zone, else counted from the served transcript in the zone.
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -96,6 +107,25 @@ const DRAFT_ACTION = /^POST \/v1\/drafts\/([^/]+)\/(approve|reject|recall)$/;
  */
 const BY_HANDLE = /^GET \/v1\/threads\/by-handle\/([^/]*)$/;
 const BY_HANDLE_ROUTE = 'GET /v1/threads/by-handle/:handle';
+/** v2 F2e: message search and a thread's years. */
+const SEARCH = 'GET /v1/search';
+const YEARS = /^GET \/v1\/threads\/([^/]+)\/years$/;
+const YEARS_ROUTE = 'GET /v1/threads/:guid/years';
+const SEARCH_KEYS = new Set([
+  'term',
+  'from',
+  'in',
+  'channel',
+  'has',
+  'before',
+  'after',
+  'tz',
+  'limit',
+  'cursor',
+]);
+const SEARCH_CHANNELS = ['imessage', 'whatsapp', 'linkedin', 'email'];
+/** core's TRIGRAM_MIN: a shorter term alone is matched in a window only. */
+const TRIGRAM_MIN = 3;
 /** v2 F3d: the thread-state pair. */
 const THREAD_STATES = 'GET /v1/threads/state';
 const THREAD_STATE = /^PUT \/v1\/threads\/([^/]+)\/state$/;
@@ -240,6 +270,34 @@ function indexHandles(dir) {
   return map;
 }
 
+/** v2 F2e: every search page in a directory, in file-name order. */
+function indexSearches(dir) {
+  const list = [];
+  for (const name of readdirSync(dir)
+    .filter((n) => n.endsWith('.json'))
+    .sort()) {
+    const golden = readJson(join(dir, name));
+    if (golden.route === SEARCH)
+      list.push({ status: golden.status, body: golden.body });
+  }
+  return list;
+}
+
+/** v2 F2e: years answers keyed by `chatGuid` and `tz` in each body. */
+function indexYears(dir) {
+  const map = new Map();
+  for (const name of readdirSync(dir)
+    .filter((n) => n.endsWith('.json'))
+    .sort()) {
+    const golden = readJson(join(dir, name));
+    if (golden.route !== YEARS_ROUTE) continue;
+    const key = `${golden.body?.chatGuid}\n${golden.body?.tz}`;
+    if (!map.has(key))
+      map.set(key, { status: golden.status, body: golden.body });
+  }
+  return map;
+}
+
 /** The frames of one sse/ directory, in file-name order, or null without one. */
 function readFrames(dir) {
   if (!existsSync(dir)) return null;
@@ -284,6 +342,8 @@ export function loadScenarios(dir = SCENARIOS) {
       responses: has ? indexDir(responses) : new Map(),
       messages: has ? indexMessages(responses) : new Map(),
       handles: has ? indexHandles(responses) : new Map(),
+      searches: has ? indexSearches(responses) : [],
+      years: has ? indexYears(responses) : new Map(),
       frames: readFrames(join(dir, name, 'sse')),
     });
   }
@@ -300,6 +360,8 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
     responses: indexDir(join(root, 'responses')),
     messages: indexMessages(join(root, 'responses')),
     handles: indexHandles(join(root, 'responses')),
+    searches: indexSearches(join(root, 'responses')),
+    years: indexYears(join(root, 'responses')),
     noConversation: byName(
       join(root, 'responses'),
       'threads.by-handle.none.json',
@@ -315,6 +377,8 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
       invalidHandle: byName(errors, '400.invalid-handle.json'),
       invalidThreadState: byName(errors, '400.invalid-thread-state.json'),
       threadStateConflict: byName(errors, '409.thread-state-conflict.json'),
+      invalidSearch: byName(errors, '400.invalid-search.json'),
+      emptySearch: byName(errors, '400.empty-search.json'),
     },
     sse: {
       headers: readJson(join(sse, 'headers.json')),
@@ -650,6 +714,253 @@ function resolveHandle(goldens, state, raw) {
   );
 }
 
+/** An IANA zone this runtime knows, as the daemon's isValidTimeZone. */
+function isZone(tz) {
+  if (typeof tz !== 'string' || tz === '') return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** An instant written the one way the daemon writes it: UTC, milliseconds. */
+function toUtc(iso) {
+  return new Date(iso).toISOString();
+}
+
+/**
+ * The daemon's structured query from a search query string, or the error
+ * golden it would answer. Only the refusals a UI test can reach are
+ * mirrored: a missing or unknown zone, an unknown key, a bad instant, and
+ * nothing to look for.
+ */
+function parseSearch(goldens, query) {
+  const params = new URLSearchParams(query);
+  const invalid = { error: goldens.errors.invalidSearch };
+  for (const key of params.keys()) if (!SEARCH_KEYS.has(key)) return invalid;
+  if (!isZone(params.get('tz'))) return invalid;
+  const one = (key) => {
+    const v = params.get(key);
+    return v === null ? undefined : v.trim();
+  };
+  const p = {
+    terms: params.getAll('term').map((t) => t.trim()),
+    from: one('from'),
+    in: one('in'),
+    channels: [...new Set(params.getAll('channel'))],
+    has: [...new Set(params.getAll('has'))],
+    before: undefined,
+    after: undefined,
+    cursor: params.get('cursor'),
+  };
+  if (p.terms.some((t) => t === '') || p.from === '' || p.in === '')
+    return invalid;
+  if (p.channels.some((c) => !SEARCH_CHANNELS.includes(c))) return invalid;
+  for (const key of ['before', 'after']) {
+    const v = params.get(key);
+    if (v === null) continue;
+    if (!isInstant(v)) return invalid;
+    p[key] = toUtc(v);
+  }
+  const empty =
+    p.terms.length === 0 &&
+    p.from === undefined &&
+    p.in === undefined &&
+    p.channels.length === 0 &&
+    p.has.length === 0 &&
+    p.before === undefined &&
+    p.after === undefined;
+  return empty ? { error: goldens.errors.emptySearch } : { params: p };
+}
+
+/** core's compileSearch echo: every token, applied, partial or not, in its order. */
+function echoTokens(p) {
+  const tokens = [];
+  const long = p.terms.filter((t) => [...t].length >= TRIGRAM_MIN);
+  for (const t of p.terms) {
+    tokens.push(
+      [...t].length >= TRIGRAM_MIN || long.length > 0
+        ? { op: 'term', value: t, applied: 'applied' }
+        : { op: 'term', value: t, applied: 'partial', reason: 'short-term' },
+    );
+  }
+  if (p.from === 'me')
+    tokens.push({ op: 'from', value: 'me', applied: 'applied' });
+  else if (p.from !== undefined)
+    tokens.push({
+      op: 'from',
+      value: p.from,
+      applied: 'partial',
+      reason: 'handles-and-saved-names',
+    });
+  if (p.in !== undefined)
+    tokens.push({ op: 'in', value: p.in, applied: 'applied' });
+  for (const c of p.channels)
+    tokens.push(
+      c === 'imessage'
+        ? { op: 'channel', value: c, applied: 'applied' }
+        : {
+            op: 'channel',
+            value: c,
+            applied: 'not-applied',
+            reason: 'no-source',
+          },
+    );
+  for (const h of p.has)
+    tokens.push({ op: 'has', value: h, applied: 'applied' });
+  if (p.before !== undefined)
+    tokens.push({ op: 'before', value: p.before, applied: 'applied' });
+  if (p.after !== undefined)
+    tokens.push({ op: 'after', value: p.after, applied: 'applied' });
+  return tokens;
+}
+
+/** A token list as one comparable string: op and value, instants as instants. */
+function tokenKey(tokens) {
+  return (tokens ?? [])
+    .map((t) =>
+      t.op === 'before' || t.op === 'after'
+        ? `${t.op}=${Date.parse(t.value)}`
+        : `${t.op}=${t.value}`,
+    )
+    .join('\n');
+}
+
+/** The search pages of the nearest scenario in the chain with any, else S0's. */
+function searchPages(goldens, state) {
+  for (const scenario of chainOf(goldens, state.scenario))
+    if (scenario.searches.length > 0) return scenario.searches;
+  return goldens.searches;
+}
+
+/** GET /v1/search over the scenario: a canned page, else an honest empty one. */
+function searchFor(goldens, state, query) {
+  const parsed = parseSearch(goldens, query);
+  if (parsed.error) return answer(parsed.error);
+  const p = parsed.params;
+  const pages = searchPages(goldens, state);
+  const tokens = echoTokens(p);
+  const key = tokenKey(tokens);
+  const hit = pages.find((g) => tokenKey(g.body?.coverage?.tokens) === key);
+  if (hit && p.cursor === null) return answer(hit);
+  const base = pages[0]?.body ?? goldens.responses.get(SEARCH)?.body;
+  const imessageAsked =
+    p.channels.length === 0 || p.channels.includes('imessage');
+  const channels = (base?.coverage?.channels ?? []).map((c) =>
+    c.channel === 'imessage' && !imessageAsked
+      ? { channel: 'imessage', state: 'not-searched', reason: 'not-requested' }
+      : c,
+  );
+  return {
+    status: 200,
+    headers: JSON_HEADERS,
+    body: {
+      hits: [],
+      total: 0,
+      nextCursor: null,
+      asOf: base?.asOf,
+      facets: { years: [], channels: [], senders: [] },
+      coverage: {
+        channels,
+        tokens: hit ? hit.body.coverage.tokens : tokens,
+        capped: false,
+        deletedHidden: 0,
+        deletionsChecked: true,
+      },
+    },
+  };
+}
+
+/** The year `iso` falls in, in `tz`. */
+function yearIn(iso, tz) {
+  return Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric' }).format(
+      new Date(iso),
+    ),
+  );
+}
+
+/** Turns by year in `tz`, newest first, empty years between kept, as the daemon counts. */
+function countYears(turns, tz) {
+  const by = new Map();
+  for (const t of turns) {
+    const y = yearIn(t.at, tz);
+    const e = by.get(y) ?? [];
+    e.push(t.at);
+    by.set(y, e);
+  }
+  if (by.size === 0) return [];
+  const ys = [...by.keys()];
+  const out = [];
+  for (let y = Math.max(...ys); y >= Math.min(...ys); y -= 1) {
+    const ats = (by.get(y) ?? []).sort();
+    out.push({
+      year: y,
+      count: ats.length,
+      first: ats[0] ?? null,
+      last: ats[ats.length - 1] ?? null,
+    });
+  }
+  return out;
+}
+
+/** GET /v1/threads/:guid/years over the scenario. */
+function yearsFor(goldens, state, raw, query) {
+  let chatGuid = '';
+  try {
+    chatGuid = decodeURIComponent(raw);
+  } catch {
+    return answer(goldens.errors.unknownChat);
+  }
+  const params = new URLSearchParams(query);
+  const tz = params.get('tz');
+  if ([...params.keys()].some((k) => k !== 'tz') || !isZone(tz)) {
+    return {
+      status: 400,
+      headers: JSON_HEADERS,
+      body: {
+        error: 'invalid-query',
+        detail: {
+          issues: [
+            {
+              code: 'custom',
+              path: ['tz'],
+              message: 'tz is not an IANA time zone',
+            },
+          ],
+        },
+      },
+    };
+  }
+  const key = `${chatGuid}\n${tz}`;
+  for (const scenario of chainOf(goldens, state.scenario)) {
+    const hit = scenario.years.get(key);
+    if (hit) return answer(hit);
+  }
+  const generated = generatedFor(goldens, state);
+  let turns = null;
+  let asOf = null;
+  if (generated) {
+    turns = generated.turns(chatGuid) ?? null;
+    asOf = generated.asOf;
+  } else {
+    if (goldens.years.has(key)) return answer(goldens.years.get(key));
+    const transcript = resolveMessages(goldens, state, chatGuid);
+    if (transcript.status === 200) {
+      turns = transcript.body.turns ?? [];
+      asOf = transcript.body.asOf;
+    }
+  }
+  if (turns === null) return answer(goldens.errors.unknownChat);
+  return {
+    status: 200,
+    headers: JSON_HEADERS,
+    body: { chatGuid, tz, years: countYears(turns, tz), asOf },
+  };
+}
+
 /** The stored fields of a record, without the computed `awake`. */
 function stored(record) {
   const rest = { ...record };
@@ -860,7 +1171,9 @@ function dispatch(req, token, goldens, state, key, query) {
     BY_HANDLE.test(key) ||
     DRAFT_ACTION.test(key) ||
     key === THREAD_STATES ||
-    THREAD_STATE.test(key);
+    THREAD_STATE.test(key) ||
+    key === SEARCH ||
+    YEARS.test(key);
   if (!known) return answer(goldens.errors.notFound);
 
   const header = req.authorization ?? '';
@@ -899,6 +1212,7 @@ function dispatch(req, token, goldens, state, key, query) {
     }
     return answer(resolveMessages(goldens, state, guid));
   }
+  if (key === SEARCH) return searchFor(goldens, state, query);
   if (key === THREAD_STATES) return listThreadStates(goldens, state, req.now);
   const threadState = THREAD_STATE.exec(key);
   if (threadState)
@@ -911,6 +1225,8 @@ function dispatch(req, token, goldens, state, key, query) {
     );
   const byHandle = BY_HANDLE.exec(key);
   if (byHandle) return answer(resolveHandle(goldens, state, byHandle[1] ?? ''));
+  const years = YEARS.exec(key);
+  if (years) return yearsFor(goldens, state, years[1] ?? '', query);
   const action = DRAFT_ACTION.exec(key);
   if (action) {
     const id = decodeURIComponent(action[1] ?? '');

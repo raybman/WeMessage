@@ -56,7 +56,7 @@ struct ContractTests {
   @Test("every responses/*.json decodes strictly into its DTO")
   func responsesDecode() throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 48, "responses on disk: \(names.count)")
+    #expect(names.count == 50, "responses on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.response(name)
       do {
@@ -85,7 +85,7 @@ struct ContractTests {
       #expect(again == fixture.body, "\(name):\n want \(want)\n got  \(got)")
       compared += 1
     }
-    #expect(compared == 45, "non-204 responses compared: \(compared)")
+    #expect(compared == 47, "non-204 responses compared: \(compared)")
   }
 
   @Test(
@@ -129,7 +129,7 @@ struct ContractTests {
   @Test("every errors/*.json maps to the expected GatewayError")
   func errors() throws {
     let names = try Fixtures.errorNames()
-    #expect(names.count == 15, "errors on disk: \(names.count)")
+    #expect(names.count == 16, "errors on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.error(name)
       guard let (endpoint, expected) = Self.expectation(for: fixture) else {
@@ -149,6 +149,8 @@ struct ContractTests {
       return (.createDraft(DraftCreateInput(chatGuid: chat, body: "hi")), .request(status: 400, body: fixture.body))
     case "400.invalid-cursor":
       return (.listThreads(limit: nil, cursor: "nope"), .request(status: 400, body: fixture.body))
+    case "400.invalid-handle":
+      return (.resolveHandle("+15550100001;x"), .request(status: 400, body: fixture.body))
     case "400.settings-refusal":
       return (.setSettings(["unknownKey": .int(1)]), .settingsRefused(.unknownKey(key: "unknownKey")))
     case "400.unknown-event":
@@ -186,7 +188,7 @@ struct ContractTests {
   )
   func requestSchemas() throws {
     let names = Set(try Fixtures.schemaNames())
-    #expect(names.count == 24, "request schemas on disk: \(names.count)")
+    #expect(names.count == 25, "request schemas on disk: \(names.count)")
     for name in names.sorted() { try MiniSchema.audit(try Fixtures.schema(name), at: name) }
 
     var seenKeys: [String: Set<String>] = [:]
@@ -284,6 +286,7 @@ struct ContractTests {
       .readThread(guid: chat, limit: nil, before: nil, until: iso),
       .listThreads(limit: 25, cursor: "cursor-1"),
       .listThreads(limit: nil, cursor: nil),
+      .resolveHandle("+15551234567"),
       .updateAdapter(id: "echo", AdapterPatch(enabled: false, displayName: "Echo", config: ["url": "http://127.0.0.1:9"])),
       .updateRule(
         id: "rule-1",
@@ -390,6 +393,7 @@ extension Fixtures {
     case "status": return try trip(StatusPayload.self)
     case "threads.list": return try trip(ThreadsPage.self)
     case "threads.messages": return try trip(ThreadMessagesPage.self)
+    case "threads.by-handle.found", "threads.by-handle.none": return try trip(HandleResolution.self)
     case "toggles.globalmode": return try trip(GlobalModeResult.self)
     case "toggles.killswitch", "toggles.killswitch.off": return try trip(KillSwitchResult.self)
     case "toggles.pause", "toggles.resume": return try trip(PauseResult.self)

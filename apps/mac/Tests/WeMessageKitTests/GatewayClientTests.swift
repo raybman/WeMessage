@@ -46,7 +46,7 @@ struct GatewayClientTests {
   @Test("every Endpoint hits the ROUTE_TABLE method+path (read from responses fixtures)")
   func routes() async throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 48)
+    #expect(names.count == 50)
     var exercised = 0
     for name in names {
       let fixture = try Fixtures.response(name)
@@ -66,7 +66,7 @@ struct GatewayClientTests {
       #expect(Self.matches(path, template: fixture.pathTemplate), "\(name): \(path) is not \(fixture.pathTemplate)")
       exercised += 1
     }
-    #expect(exercised == 48, "fixtures exercised: \(exercised)")
+    #expect(exercised == 50, "fixtures exercised: \(exercised)")
   }
 
   static func matches(_ path: String, template: String) -> Bool {
@@ -129,6 +129,8 @@ struct GatewayClientTests {
     case "status": _ = try await client.status()
     case "threads.list": try await Self.ok(client.listThreads())
     case "threads.messages": try await Self.ok(client.readThread(chat))
+    case "threads.by-handle.found", "threads.by-handle.none":
+      try await Self.ok(client.resolveHandle("+15551234567"))
     case "toggles.globalmode": _ = try await client.setGlobalMode(.draftOnly)
     case "toggles.killswitch": _ = try await client.setKillSwitch(true)
     case "toggles.killswitch.off": _ = try await client.setKillSwitch(false)
@@ -152,6 +154,38 @@ struct GatewayClientTests {
     let schedules = FakeTransport { _, _ in Reply.json(200, scheduleText) }
     let gotSchedule = try await GatewayClient.testing(schedules).getSchedule("id-0001")
     #expect(try JSONValue.parse(JSONEncoder().encode(gotSchedule)) == schedule)
+  }
+
+  @Test("v2 F5: resolveHandle decodes both goldens, refuses an unreadable source, throws the 400")
+  func resolveHandle() async throws {
+    let found = FakeTransport { _, _ in try Reply.response("threads.by-handle.found") }
+    let got = try await GatewayClient.testing(found).resolveHandle("+15551234567")
+    let conversation = try #require(got.value?.conversation)
+    #expect(conversation.chatGuid == "iMessage;-;+15551234567")
+    #expect(conversation.service == "imessage")
+    #expect(conversation.isGroup == false)
+    let path = found.requests.first?.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+    #expect(path?.percentEncodedPath == "/v1/threads/by-handle/%2B15551234567")
+
+    let none = FakeTransport { _, _ in try Reply.response("threads.by-handle.none") }
+    let empty = try await GatewayClient.testing(none).resolveHandle("+15550100099")
+    #expect(empty.value?.handle == "+15550100099")
+    #expect(empty.value != nil && empty.value?.conversation == nil)
+
+    let email = FakeTransport { _, _ in try Reply.response("threads.by-handle.none") }
+    _ = try await GatewayClient.testing(email).resolveHandle("sam@example.com")
+    let emailPath = email.requests.first?.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+    #expect(emailPath?.percentEncodedPath == "/v1/threads/by-handle/sam%40example.com")
+
+    let bad = FakeTransport { _, _ in try Reply.error("400.invalid-handle") }
+    let fixture = try Fixtures.error("400.invalid-handle")
+    await #expect(throws: GatewayError.request(status: 400, body: fixture.body)) {
+      try await GatewayClient.testing(bad).resolveHandle("+15550100001;x")
+    }
+
+    let down = FakeTransport { _, _ in try Reply.error("503.source-unavailable") }
+    let refused = try await GatewayClient.testing(down).resolveHandle("+15551234567")
+    #expect(refused.refusal == .sourceUnavailable)
   }
 
   // MARK: bearer

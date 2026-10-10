@@ -21,6 +21,8 @@ public enum Endpoint: Sendable {
   case dryRunRule(id: String, limit: Int?)
   case readThread(guid: String, limit: Int?, before: String?, until: String?)
   case listThreads(limit: Int?, cursor: String?)
+  /// v2 F5: the conversation a typed handle would land in, if any.
+  case resolveHandle(String)
   case updateAdapter(id: String, AdapterPatch)
   case updateRule(id: String, RulePatch)
   case updateSchedule(id: String, SchedulePatch)
@@ -63,7 +65,7 @@ public enum Endpoint: Sendable {
     switch self {
     case .health, .status, .doctor, .verifyAudit, .listAdapters, .listContacts, .settings, .listRules,
       .listSchedules, .listAudit, .listDrafts, .dryRunRule, .readThread, .listThreads, .events, .getDraft,
-      .getAdapter, .getRule, .getSchedule, .batchReport:
+      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle:
       return "GET"
     case .updateAdapter, .updateRule, .updateSchedule, .setSettings:
       return "PATCH"
@@ -111,6 +113,7 @@ public enum Endpoint: Sendable {
     case .batchReport: return "/v1/batches/:id"
     case .listThreads: return "/v1/threads"
     case .readThread: return "/v1/threads/:guid/messages"
+    case .resolveHandle: return "/v1/threads/by-handle/:handle"
     case .disconnect: return "/v1/disconnect"
     case .send: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
@@ -130,7 +133,7 @@ public enum Endpoint: Sendable {
       return id
     case .readThread(let guid, _, _, _):
       return guid
-    case .setContactPolicy(let handle, _, _), .deleteContactPolicy(let handle):
+    case .setContactPolicy(let handle, _, _), .deleteContactPolicy(let handle), .resolveHandle(let handle):
       return handle
     default:
       return nil

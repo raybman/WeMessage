@@ -220,6 +220,13 @@ public actor GatewayClient {
     try await outcome(.readThread(guid: guid, limit: limit, before: before, until: until))
   }
 
+  /// v2 F5: which conversation `handle` would be written to. A null
+  /// conversation is an answer (nothing to write to yet), not a refusal; an
+  /// unreadable chat.db is refused as `.sourceUnavailable`.
+  public func resolveHandle(_ handle: String) async throws -> Outcome<HandleResolution> {
+    try await outcome(.resolveHandle(handle))
+  }
+
   // MARK: the event stream
 
   /// GET /v1/events/sse as raw frames. Opening it follows the same per-call

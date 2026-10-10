@@ -162,3 +162,67 @@ extension ThreadMessagesPage {
     asOf = try c.decode(String.self, forKey: .asOf)
   }
 }
+
+/// v2 F5: the conversation `GET /v1/threads/by-handle/:handle` found: the
+/// newest 1:1 holding the handle, else the newest group (isGroup true).
+public struct ResolvedConversation: Codable, Equatable, Sendable {
+  /// The daemon's guid, which may be "any;-;..." on macOS 26. Drafts use it
+  /// as given; the client never synthesises one.
+  public var chatGuid: String
+  /// "imessage", "sms", "rcs" or "unknown".
+  public var service: String
+  public var isGroup: Bool
+
+  public init(chatGuid: String, service: String, isGroup: Bool) {
+    self.chatGuid = chatGuid
+    self.service = service
+    self.isGroup = isGroup
+  }
+
+  enum CodingKeys: String, CodingKey, CaseIterable {
+    case chatGuid, service, isGroup
+  }
+}
+
+extension ResolvedConversation {
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    chatGuid = try c.decode(String.self, forKey: .chatGuid)
+    service = try c.decode(String.self, forKey: .service)
+    isGroup = try c.decode(Bool.self, forKey: .isGroup)
+  }
+}
+
+/// v2 F5: the answer for one handle, in the daemon's normalised form.
+public struct HandleResolution: Codable, Equatable, Sendable {
+  public var handle: String
+  /// Required and nullable: null when this Mac has no conversation with it.
+  public var conversation: ResolvedConversation?
+  public var asOf: String
+
+  public init(handle: String, conversation: ResolvedConversation?, asOf: String) {
+    self.handle = handle
+    self.conversation = conversation
+    self.asOf = asOf
+  }
+
+  enum CodingKeys: String, CodingKey, CaseIterable {
+    case handle, conversation, asOf
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(handle, forKey: .handle)
+    try c.encode(conversation, forKey: .conversation)
+    try c.encode(asOf, forKey: .asOf)
+  }
+}
+
+extension HandleResolution {
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    handle = try c.decode(String.self, forKey: .handle)
+    conversation = try c.decode(ResolvedConversation?.self, forKey: .conversation)
+    asOf = try c.decode(String.self, forKey: .asOf)
+  }
+}

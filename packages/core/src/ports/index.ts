@@ -499,8 +499,9 @@ export interface ChatDbReader {
    * chat). `null` means no existing conversation, which the send path
    * fails fast as `no-conversation` (§2.2.2) — AppleScript cannot start a
    * new-recipient conversation. Multiple chats sharing one handle resolve
-   * to the most-recently-active 1:1 chat (by last message date); a group is
-   * the answer only when the handle has no 1:1 at all (v2 F5).
+   * to the most-recently-active chat (by last message date).
+   * v2 F5: among those, the most recent 1:1 wins over a newer group; a
+   * group is the answer only when the handle has no 1:1 at all.
    */
   resolveChat(
     handle: Handle,

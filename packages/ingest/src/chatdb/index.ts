@@ -100,6 +100,14 @@ export interface IngestChatDbReader extends ChatDbReader {
    * Throws UnknownChatError for a chat chat.db does not hold.
    */
   yearCounts(chatGuid: string, tz: string): YearCount[];
+  /**
+   * v2 F7b: the operator's own iMessage handle, raw as chat.db stores it:
+   * the destination_caller_id of the newest row they SENT over iMessage
+   * with a non-empty one. Null when there is no such row, or when this
+   * chat.db has no destination_caller_id column (probed, never assumed).
+   * Never Contacts. The caller holds it in memory only.
+   */
+  ownHandle(): string | null;
   close(): void;
 }
 
@@ -375,6 +383,20 @@ const pageWindow = (d: string): string => `${TURN_TEST}
  * nanoseconds after; chatDbDateToIso in SQL). Counting by year is done in
  * JS (yearCountsOf) because a zone's New Year is not a SQL expression.
  */
+// v2 F7b: newest first by ROWID (the primary key, so no sort). Inbound rows
+// are skipped: their caller id is the alias the row ARRIVED on. SMS rows
+// are skipped: theirs is a phone line, not the iMessage identity.
+const OWN_HANDLE_SQL = `
+  SELECT destination_caller_id
+  FROM message
+  WHERE is_from_me = 1
+    AND service = 'iMessage'
+    AND destination_caller_id IS NOT NULL
+    AND destination_caller_id <> ''
+  ORDER BY ROWID DESC
+  LIMIT 1
+`;
+
 const YEARS_SQL = `
   SELECT
     CASE WHEN d < ${SECONDS_ERA_LIMIT_SQL} THEN d * 1000 ELSE d / 1000000 END
@@ -865,6 +887,14 @@ export function createChatDbReader(
   existingGuidsStmt.pluck(true);
   const yearsStmt = db.prepare(YEARS_SQL);
   yearsStmt.pluck(true);
+  // v2 F7b: the column is in Apple's schema but unverified on every macOS
+  // this runs on, so it is probed once at open; absent means null, never a
+  // prepare error.
+  const hasCallerIdColumn = (
+    db.prepare('PRAGMA table_info(message)').all() as { name: string }[]
+  ).some((c) => c.name === 'destination_caller_id');
+  const ownHandleStmt = hasCallerIdColumn ? db.prepare(OWN_HANDLE_SQL) : null;
+  ownHandleStmt?.pluck(true);
 
   const readAttachments = (messageRowid: bigint): AttachmentRef[] =>
     (attachmentsStmt.all(messageRowid) as DbAttachmentRow[]).map((a) => ({
@@ -1176,6 +1206,12 @@ export function createChatDbReader(
         { chatRowid: bigint; style: bigint | null } | undefined;
       if (chat === undefined) throw new UnknownChatError();
       return yearCountsOf(yearsStmt.all(chat.chatRowid) as number[], tz);
+    },
+
+    ownHandle(): string | null {
+      if (ownHandleStmt === null) return null;
+      const v = ownHandleStmt.get();
+      return typeof v === 'string' && v.length > 0 ? v : null;
     },
 
     close() {

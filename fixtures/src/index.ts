@@ -6,6 +6,7 @@ export {
   typedstreamWithText,
   APPLE_EPOCH_OFFSET_SECONDS,
   type ChatDbFixture,
+  type CreateChatDbOptions,
   type AddMessageOptions,
   type MessageRef,
   type AttachmentOptions,

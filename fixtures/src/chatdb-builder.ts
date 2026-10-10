@@ -121,7 +121,8 @@ CREATE TABLE message (
   thread_originator_guid TEXT,
   thread_originator_part TEXT,
   date_retracted INTEGER DEFAULT 0,
-  date_edited INTEGER DEFAULT 0
+  date_edited INTEGER DEFAULT 0,
+  destination_caller_id TEXT
 );
 CREATE TABLE chat (
   ROWID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,6 +210,21 @@ export interface AddMessageOptions {
   dateDelivered?: string;
   /** v2 F4: ISO instant, stored as Apple-epoch ns in date_read. */
   dateRead?: string;
+  /**
+   * v2 F7b: message.destination_caller_id, the operator's own account the
+   * row went out on (or arrived on). Synthetic only: +1555... or
+   * example.com. Throws on a fixture built without the column.
+   */
+  callerId?: string;
+}
+
+/** v2 F7b: how the synthetic chat.db is shaped. */
+export interface CreateChatDbOptions {
+  /**
+   * False builds a message table without destination_caller_id, the shape
+   * of a chat.db that predates the column. Default true.
+   */
+  callerIdColumn?: boolean;
 }
 
 export interface MessageRef {
@@ -317,10 +333,24 @@ export interface ChatDbFixture {
   close(): void;
 }
 
-export function createChatDb(path: string): ChatDbFixture {
+export function createChatDb(
+  path: string,
+  options?: CreateChatDbOptions,
+): ChatDbFixture {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
-  db.exec(SCHEMA);
+  const callerIdColumn = options?.callerIdColumn !== false;
+  db.exec(
+    callerIdColumn
+      ? SCHEMA
+      : SCHEMA.replace(
+          'date_edited INTEGER DEFAULT 0,\n  destination_caller_id TEXT\n',
+          'date_edited INTEGER DEFAULT 0\n',
+        ),
+  );
+  const setCallerId = callerIdColumn
+    ? db.prepare('UPDATE message SET destination_caller_id = ? WHERE ROWID = ?')
+    : null;
   let clockNs = appleEpochNs('2026-01-01T00:00:00Z');
   const nextDate = (): bigint => {
     clockNs += 1_000_000_000n;
@@ -446,6 +476,14 @@ export function createChatDb(path: string): ChatDbFixture {
           opts.dateRead !== undefined ? appleEpochNs(opts.dateRead) : 0,
       });
       const rowid = Number(info.lastInsertRowid);
+      if (opts.callerId !== undefined) {
+        if (setCallerId === null) {
+          throw new Error(
+            'callerId on a fixture built without destination_caller_id',
+          );
+        }
+        setCallerId.run(opts.callerId, rowid);
+      }
       insertChatMessageJoin.run(opts.chatId, rowid, date);
       return { rowid, guid };
     },

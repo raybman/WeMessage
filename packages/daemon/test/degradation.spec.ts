@@ -154,6 +154,8 @@ function controllableOpenReader(): ControllableOpenReader {
         existingGuids: boom,
         // v2 F2c: and so do the year counts.
         yearCounts: boom,
+        // v2 F7b: and the operator's own handle.
+        ownHandle: boom,
         close: () => undefined,
       };
     },

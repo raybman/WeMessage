@@ -201,11 +201,13 @@ attribute, so the Gatekeeper steps below are the same for a tap install.
 
 ### Identity
 
-Signing identity, certificate leaf SHA-1: `0000000000000000000000000000000000000000`
+Signing identity, certificate leaf SHA-1: `9fab99a3b773042b7b1d3c2061c7308444f8220c`
 
 That line names the one self-signed identity every Swift release is signed
 with, by the 40-hex SHA-1 of its certificate leaf, never by its common name.
-It is a placeholder of zeros until S5d writes the real leaf in its place.
+S5d established it on 2026-10-10; the certificate is valid until
+2036-10-07, and the identity lives only in 1Password and two repository
+secrets (see the custody section below).
 The release workflow's `compare-leaf-with-releasing` step reads this line,
 in the selfsigned lane only, so the placeholder never fails a throwaway run.
 

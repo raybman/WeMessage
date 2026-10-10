@@ -10,13 +10,54 @@ public struct QueueWindow: Equatable, Sendable {
   }
 }
 
-/// Why something is waiting on the user.
+/// Why something is waiting on the user, only as far as a draft proves it
+/// (v2 F3, G-06b). There is no direct-question or mention reason: nothing in
+/// the daemon detects either, and a reason nobody proved is a guess.
 public enum QueueReason: Equatable, Sendable {
-  case directQuestion
-  case mention
-  case ruleFired(String)
-  case agentFlag
+  /// The draft carries a rule id. The rule's name when the shell has it,
+  /// else nil (the app then says "a rule").
+  case ruleFired(String?)
+  /// The draft is proactive. The agent's own words, as one sanitised line:
+  /// shown as what the agent said, never as a verdict.
+  case agentFlag(String)
+  /// A draft is ready, and nothing says more than that.
   case pendingDraft
+}
+
+/// The one place a queue reason is decided.
+public enum QueueReasons {
+  /// A rule id outranks a proactive reason (the rule is what produced the
+  /// draft); a proactive reason that sanitises to nothing proves nothing.
+  public static func derive(_ draft: DraftPayload, ruleName: (String) -> String? = { _ in nil }) -> QueueReason {
+    if let id = draft.ruleId { return .ruleFired(ruleName(id)) }
+    if let raw = draft.proactiveReason {
+      let line = oneLine(raw)
+      if !line.isEmpty { return .agentFlag(line) }
+    }
+    return .pendingDraft
+  }
+
+  /// Agent-supplied text as one line: control and format characters (line
+  /// breaks, tabs, bidi overrides) become spaces, runs of whitespace become
+  /// one space, and the ends are trimmed. Truncation is the view's (D-UI-194).
+  public static func oneLine(_ raw: String) -> String {
+    var out = ""
+    var pendingSpace = false
+    for scalar in raw.unicodeScalars {
+      let props = scalar.properties
+      let blank =
+        props.isWhitespace || props.generalCategory == .control || props.generalCategory == .format
+        || props.generalCategory == .lineSeparator || props.generalCategory == .paragraphSeparator
+      if blank {
+        pendingSpace = !out.isEmpty
+        continue
+      }
+      if pendingSpace { out.unicodeScalars.append(" ") }
+      pendingSpace = false
+      out.unicodeScalars.append(scalar)
+    }
+    return out
+  }
 }
 
 /// One thing waiting on the user.
@@ -87,9 +128,11 @@ public enum QueueRules {
   /// channel, carrying the newest draft and arrived when it was made, in the
   /// order the threads first appear. Drafts in any other state, drafts whose
   /// creation time does not parse, and drafts `excluding` names (held, or
-  /// cleared by an act) are not waiting on anyone.
+  /// cleared by an act) are not waiting on anyone. Each item's reason is the
+  /// newest draft's, from QueueReasons.derive.
   public static func items(
-    drafts: [DraftPayload], threads: [ThreadSummary], excluding: Set<String> = []
+    drafts: [DraftPayload], threads: [ThreadSummary], excluding: Set<String> = [],
+    ruleName: (String) -> String? = { _ in nil }
   ) -> [QueueItem] {
     var channelOf: [String: String] = [:]
     for thread in threads { channelOf[thread.chatGuid] = thread.channel }
@@ -99,7 +142,7 @@ public enum QueueRules {
       guard draft.state == .pending, !excluding.contains(draft.id), let at = WireDate.parse(draft.createdAt)
       else { continue }
       let item = QueueItem(
-        threadGuid: draft.chatGuid, channel: channelOf[draft.chatGuid] ?? "imessage", reason: .pendingDraft,
+        threadGuid: draft.chatGuid, channel: channelOf[draft.chatGuid] ?? "imessage", reason: QueueReasons.derive(draft, ruleName: ruleName),
         arrivedAt: at, draftId: draft.id)
       if let seen = newest[draft.chatGuid] {
         if at >= seen.arrivedAt { newest[draft.chatGuid] = item }

@@ -67,7 +67,10 @@ struct QueueRulesTests {
     let threads = try Self.rich("threads.list.json", ThreadsPage.self).threads
     let items = QueueRules.items(drafts: drafts, threads: threads)
     #expect(items.map(\.draftId) == ["drf-0101", "drf-0102", "drf-0103", "drf-0104"])
-    #expect(items.allSatisfy { $0.reason == .pendingDraft && $0.channel == "imessage" })
+    #expect(items.allSatisfy { $0.channel == "imessage" })
+    // v2 F3c: each reason is what its draft proves. Three carry a rule id the
+    // shell could not name here; the fourth is only a ready draft.
+    #expect(items.map(\.reason) == [.ruleFired(nil), .ruleFired(nil), .ruleFired(nil), .pendingDraft])
     let scan = try #require(WireDate.parse("2026-09-01T12:00:42.000Z"))
     #expect(scan == Self.now)
     #expect(QueueRules.queueCount(items: items, now: scan) == 4)

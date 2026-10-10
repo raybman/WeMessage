@@ -49,8 +49,9 @@ public struct ThreadFacts: Equatable, Sendable {
   public var pendingDraftAt: Date?
   public var act: ThreadAct?
   public var mode: ThreadMode
-  /// A direct question, a mention, a fired rule or an agent flag: what lets a
-  /// Stream thread's inbound enter the queue (06.B).
+  /// Something addressed to you, as far as anything proves it (a fired rule
+  /// or an agent flag): what lets a Stream thread's inbound enter the queue
+  /// (06.B).
   public var directToYou: Bool
 
   public init(

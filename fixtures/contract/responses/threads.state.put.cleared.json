@@ -1,0 +1,7 @@
+{
+  "route": "PUT /v1/threads/:guid/state",
+  "status": 200,
+  "body": {
+    "state": null
+  }
+}

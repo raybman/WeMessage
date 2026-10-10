@@ -57,6 +57,7 @@ import { ruleSchemas } from '../src/routes/rules.js';
 import { scheduleSchemas } from '../src/routes/schedules.js';
 import { sendSchemas } from '../src/routes/send.js';
 import { settingsSchemas } from '../src/routes/settings.js';
+import { threadStateSchemas } from '../src/routes/thread-state.js';
 import { threadSchemas } from '../src/routes/threads.js';
 import { toggleSchemas } from '../src/routes/toggles.js';
 import {
@@ -197,6 +198,7 @@ describe('S0 requests: every schema is public', () => {
       sendSchemas,
       settingsSchemas,
       threadSchemas,
+      threadStateSchemas,
       toggleSchemas,
     ].flatMap((group) => Object.values(group) as z.ZodType[]);
     const used = [
@@ -409,12 +411,12 @@ describe('S0 sse: wire bytes', () => {
 /* ------------------------------------------------------------------------ */
 
 describe('S0 manifest', () => {
-  it('wire.json pins WIRE_VERSION 1, the 21 names, the 9 draft states, BACKOFF_MS/JITTER/AUDIT_GAP_LIMIT, keepalive 15000, port 47100, token file daemon.token', () => {
+  it('wire.json pins WIRE_VERSION 1, the 22 names, the 9 draft states, BACKOFF_MS/JITTER/AUDIT_GAP_LIMIT, keepalive 15000, port 47100, token file daemon.token', () => {
     const w = bundle.wire;
     expect(w.wireVersion).toBe(WIRE_VERSION);
     expect(w.wireVersion).toBe(1);
     expect(w.eventNames).toEqual([...GATEWAY_EVENT_NAMES]);
-    expect(w.eventNames).toHaveLength(21);
+    expect(w.eventNames).toHaveLength(22);
     expect(w.draftStates).toHaveLength(9);
     expect(new Set(w.draftStates).size).toBe(9);
     expect(w.backoff.steps).toHaveLength(5);

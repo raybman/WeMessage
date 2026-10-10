@@ -1,0 +1,18 @@
+{
+  "route": "PUT /v1/threads/:guid/state",
+  "status": 400,
+  "body": {
+    "error": "invalid-thread-state",
+    "detail": {
+      "issues": [
+        {
+          "code": "custom",
+          "path": [
+            "snoozedUntil"
+          ],
+          "message": "snoozedUntil is required for a snooze and refused otherwise"
+        }
+      ]
+    }
+  }
+}

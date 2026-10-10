@@ -46,7 +46,7 @@ struct GatewayClientTests {
   @Test("every Endpoint hits the ROUTE_TABLE method+path (read from responses fixtures)")
   func routes() async throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 50)
+    #expect(names.count == 53)
     var exercised = 0
     for name in names {
       let fixture = try Fixtures.response(name)
@@ -66,7 +66,7 @@ struct GatewayClientTests {
       #expect(Self.matches(path, template: fixture.pathTemplate), "\(name): \(path) is not \(fixture.pathTemplate)")
       exercised += 1
     }
-    #expect(exercised == 50, "fixtures exercised: \(exercised)")
+    #expect(exercised == 53, "fixtures exercised: \(exercised)")
   }
 
   static func matches(_ path: String, template: String) -> Bool {
@@ -131,6 +131,11 @@ struct GatewayClientTests {
     case "threads.messages": try await Self.ok(client.readThread(chat))
     case "threads.by-handle.found", "threads.by-handle.none":
       try await Self.ok(client.resolveHandle("+15551234567"))
+    case "threads.state.list": try await Self.ok(client.listThreadStates())
+    case "threads.state.put.cleared":
+      try await Self.ok(client.setThreadState(chat, ThreadStateInput(act: nil, ifUpdatedAt: .value("2026-09-01T12:00:43.000Z"))))
+    case "threads.state.put.snoozed":
+      try await Self.ok(client.setThreadState(chat, ThreadStateInput(act: "snoozed", snoozedUntil: "2026-09-01T23:00:00.000Z")))
     case "toggles.globalmode": _ = try await client.setGlobalMode(.draftOnly)
     case "toggles.killswitch": _ = try await client.setKillSwitch(true)
     case "toggles.killswitch.off": _ = try await client.setKillSwitch(false)

@@ -29,6 +29,7 @@
         "message.received",
         "message.unsent",
         "rule.matched",
+        "thread.state",
         "toggle.changed"
       ]
     },
@@ -82,9 +83,7 @@
     "status": {
       "type": "string"
     },
-    "state": {
-      "type": "string"
-    },
+    "state": {},
     "correlation": {
       "type": "object"
     },

@@ -21,6 +21,7 @@
     "message.received",
     "message.unsent",
     "rule.matched",
+    "thread.state",
     "toggle.changed"
   ],
   "draftStates": [

@@ -32,7 +32,7 @@ struct SSEDecoderTests {
     #expect(event == .connectionState(ConnectionStateEvent(state: "fully-connected")))
   }
 
-  @Test("all 21 sse/<event>.txt decode and payload == fixtures/events")
+  @Test("all 22 sse/<event>.txt decode and payload == fixtures/events")
   func allEvents() throws {
     var ids: [Int] = []
     for name in EventName.allCases.map(\.rawValue) {
@@ -52,7 +52,7 @@ struct SSEDecoderTests {
       let again = try JSONValue.parse(try JSONEncoder().encode(event))
       #expect(again == want, "\(name): the typed event re-encodes as \(again)")
     }
-    #expect(ids == Array(2...22), "frame ids: \(ids)")
+    #expect(ids == Array(2...23), "frame ids: \(ids)")
   }
 
   @Test("every known event refuses an unknown key at any depth and an event field that disagrees with the frame")

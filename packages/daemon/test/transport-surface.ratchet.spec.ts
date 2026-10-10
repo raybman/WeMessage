@@ -288,7 +288,8 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
    * still have a home.
    */
   it('protocol vocabulary and allowed snapshot agree exactly', () => {
-    expect([...GATEWAY_EVENT_NAMES]).toHaveLength(21);
+    // v2 F3 (#29): 21 -> 22, `thread.state`.
+    expect([...GATEWAY_EVENT_NAMES]).toHaveLength(22);
     expect([...WS_EVENT_VOCABULARY]).toEqual([...GATEWAY_EVENT_NAMES]);
   });
 
@@ -331,7 +332,7 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
 
     // And the arithmetic, stated so a reader of a failure sees the shape of
     // the drift rather than a 21-element diff.
-    expect(EMITTED_WS_EVENTS).toHaveLength(21);
+    expect(EMITTED_WS_EVENTS).toHaveLength(22);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);
   });
 

@@ -58,6 +58,7 @@ import { registerDraftRoutes } from './routes/drafts.js';
 import { registerToggleRoutes } from './routes/toggles.js';
 import { registerContactRoutes } from './routes/contacts.js';
 import { registerSettingsRoutes } from './routes/settings.js';
+import { registerThreadStateRoutes } from './routes/thread-state.js';
 import { registerSendRoutes } from './routes/send.js';
 import { registerConnectionRoutes } from './routes/connection.js';
 import { registerThreadRoutes } from './routes/threads.js';
@@ -526,6 +527,13 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // is registered AFTER the toggle routes so the `use:` pointers this
     // route hands back always name routes that exist in the same server.
     registerSettingsRoutes(app, {
+      store: opts.drafts.store,
+      clock: opts.drafts.clock,
+      sink,
+    });
+    // v2 F3 (G-06a): Done, Snooze and Mute, stored per conversation. Same
+    // store, clock and sink as settings; operator bearer only. Ratchet #29.
+    registerThreadStateRoutes(app, {
       store: opts.drafts.store,
       clock: opts.drafts.clock,
       sink,

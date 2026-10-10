@@ -416,6 +416,7 @@ const AUDIT_EVENT_TYPES = {
   'service.uninstalled': true,
   'service.unload_requested': true,
   'setting.changed': true,
+  'thread.state-changed': true,
   'toggle.changed': true,
 } as const satisfies Record<AuditEventType, true>;
 
@@ -424,9 +425,10 @@ describe('C-7: the AuditEvent union is pinned in both directions', () => {
     const pinned = Object.keys(AUDIT_EVENT_TYPES).sort();
     // Non-vacuity: an empty map would satisfy nothing, but a map that had
     // silently lost its contents to a bad merge would still typecheck if the
-    // union had also been emptied. Fifty-four is the count at s9 Sc4, which
-    // added `service.unload_requested` to the two `service.` rows Sc3 added.
-    expect(pinned).toHaveLength(54);
+    // union had also been emptied. Fifty-four was the count at s9 Sc4, which
+    // added `service.unload_requested` to the two `service.` rows Sc3 added;
+    // v2 F3 made it fifty-five with `thread.state-changed`.
+    expect(pinned).toHaveLength(55);
     expect(new Set(pinned).size).toBe(pinned.length);
     // Every key really is a usable AuditEvent discriminant.
     for (const t of pinned) {

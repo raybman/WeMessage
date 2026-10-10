@@ -969,7 +969,9 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     // v2 A1 (ratchet #26) added `GET /v1/threads` and its twin, +2, 67 -> 69.
     // v2 A2 (#27) added `GET /v1/threads/:guid/messages` and its twin, 71.
     // v2 F5 (#28) added `GET /v1/threads/by-handle/:handle` and its twin, 73.
-    expect(ROUTE_TABLE).toHaveLength(73);
+    // v2 F3 (#29) added `GET /v1/threads/state`, its twin and
+    // `PUT /v1/threads/:guid/state`, 76.
+    expect(ROUTE_TABLE).toHaveLength(76);
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/pause');
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/global-mode');
   });
@@ -986,8 +988,9 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     // what keep that honest. What this row still pins, unchanged, is S6's
     // actual claim: `arming.changed` is in BOTH lists, because S6 declared
     // and emitted it in one diff — and the two lengths agreeing again is
-    // the state that claim was written in.
-    expect(WS_EVENT_VOCABULARY).toHaveLength(21);
-    expect(EMITTED_WS_EVENTS).toHaveLength(21);
+    // the state that claim was written in. v2 F3 (#29) declared and emitted
+    // `thread.state` in one diff the same way: both lists 22.
+    expect(WS_EVENT_VOCABULARY).toHaveLength(22);
+    expect(EMITTED_WS_EVENTS).toHaveLength(22);
   });
 });

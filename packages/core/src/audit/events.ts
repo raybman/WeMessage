@@ -31,6 +31,7 @@
 import type {
   Actor,
   ArmingState,
+  ChatGuid,
   ConnectionState,
   ContactMode,
   Draft,
@@ -48,6 +49,7 @@ import type {
 } from '../domain/types.js';
 import type { CursorHealReason } from '../drafts/recovery.js';
 import type { DraftEvent } from '../drafts/transitions.js';
+import type { ThreadStateRecord } from '../threads/state.js';
 
 export type AuditEvent =
   | {
@@ -352,7 +354,27 @@ export type AuditEvent =
    * REQUESTED, not "unloaded". The daemon cannot observe its own successful
    * unload, so the row claims only the thing it knows: that a human asked.
    */
-  | { type: 'service.unload_requested'; label: string };
+  | { type: 'service.unload_requested'; label: string }
+  /**
+   * v2 F3 (G-06a). The operator did, or undid, Done, Snooze or Mute on a
+   * conversation, or changed its attention mode, through
+   * `PUT /v1/threads/:guid/state`.
+   *
+   * Both whole records, not just the act: an undo restores the PRIOR record
+   * exactly, and a reader asking "what was this before" should find the
+   * answer in the row rather than reconstruct it from earlier rows that a
+   * later write may have overtaken. `null` on either side means no record
+   * (the derived default), which is not the same fact as an act of `null`
+   * with an attention set.
+   *
+   * Reading a conversation never writes this row (06.A).
+   */
+  | {
+      type: 'thread.state-changed';
+      chatGuid: ChatGuid;
+      from: ThreadStateRecord | null;
+      to: ThreadStateRecord | null;
+    };
 
 export type AuditEventType = AuditEvent['type'];
 

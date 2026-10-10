@@ -61,6 +61,8 @@ export const GATEWAY_EVENT_NAMES = [
   'message.received',
   'message.unsent',
   'rule.matched',
+  // v2 F3 (G-06a): sorted position, as for the s8 four.
+  'thread.state',
   'toggle.changed',
 ] as const;
 
@@ -139,7 +141,7 @@ type EventSpecTable = {
  * cannot see.
  *
  * `event` is deliberately absent from every row: it is the discriminant, it
- * lives in `FRAME_SPECS.event.required`, and listing it twenty-one times would
+ * lives in `FRAME_SPECS.event.required`, and listing it twenty-two times would
  * push it into the derived `optional` union where it does not belong.
  */
 export const EVENT_SPECS = {
@@ -175,6 +177,7 @@ export const EVENT_SPECS = {
     required: ['guid', 'ruleId', 'adapterId'],
     optional: [],
   },
+  'thread.state': { required: ['chatGuid', 'state'], optional: [] },
   'toggle.changed': { required: ['key', 'value', 'actor'], optional: [] },
 } as const satisfies EventSpecTable;
 

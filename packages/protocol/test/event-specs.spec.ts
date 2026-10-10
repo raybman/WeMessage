@@ -70,15 +70,16 @@ function fixture(name: GatewayEventName): Record<string, unknown> {
 }
 
 describe('gateway event vocabulary as data (s7 Scenario 2, F-83)', () => {
-  it('exports 21 distinct names, sorted, with a runtime membership guard', () => {
+  it('exports 22 distinct names, sorted, with a runtime membership guard', () => {
     // s8 Scenario 2 (F-107): 17 -> 21. The four `draft.*` lifecycle names
     // S4's F-39 deferred, S5 Scenario 7 re-deferred, and the ratchet's own
     // comment #17 assigned to S8 BY NAME. They are DECLARED here and emitted
     // by nothing until Sc 3; the gap is enumerated and asserted in
     // `packages/daemon/test/transport-surface.ratchet.spec.ts` rather than
     // tolerated, so "declared" cannot quietly mean "forgotten".
-    expect(GATEWAY_EVENT_NAMES).toHaveLength(21);
-    expect(new Set(GATEWAY_EVENT_NAMES).size).toBe(21);
+    // v2 F3: 21 -> 22, `thread.state` (operator transport only).
+    expect(GATEWAY_EVENT_NAMES).toHaveLength(22);
+    expect(new Set(GATEWAY_EVENT_NAMES).size).toBe(22);
     // Sorted because the daemon ratchet snapshot is sorted and the two are
     // asserted deepEqual over there: an unsorted list here would make that
     // pin a diff-ordering puzzle instead of a review.
@@ -199,7 +200,7 @@ describe('gateway event vocabulary as data (s7 Scenario 2, F-83)', () => {
     }
   });
 
-  it('keeps event.json a closed enum over the 21, and refuses a stranger', () => {
+  it('keeps event.json a closed enum over the 22, and refuses a stranger', () => {
     const frameSchema = readJson(join(frameSchemaDir, 'event.json'));
     expect([...(frameSchema.properties?.['event']?.enum ?? [])].sort()).toEqual(
       [...GATEWAY_EVENT_NAMES],
@@ -285,6 +286,7 @@ describe('the four owed draft lifecycle events (s8 Scenario 2, F-107)', () => {
       'message.received',
       'message.unsent',
       'rule.matched',
+      'thread.state',
       'toggle.changed',
     ]);
     for (const name of OWED) {

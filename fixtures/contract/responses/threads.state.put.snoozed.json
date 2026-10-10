@@ -1,0 +1,15 @@
+{
+  "route": "PUT /v1/threads/:guid/state",
+  "status": 200,
+  "body": {
+    "state": {
+      "chatGuid": "iMessage;-;+15551234567",
+      "act": "snoozed",
+      "actAt": "2026-09-01T12:00:43.000Z",
+      "snoozedUntil": "2026-09-01T23:00:00.000Z",
+      "attention": null,
+      "updatedAt": "2026-09-01T12:00:43.000Z",
+      "awake": false
+    }
+  }
+}

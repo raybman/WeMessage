@@ -219,6 +219,22 @@ export const ROUTE_TABLE: readonly string[] = [
   // NO port importer moves, enforced as for #26: `routes/threads.ts`
   // receives `resolveChat` as a closure from `daemon.ts` and never names
   // the port as a value, so PORT_IMPORTER_ALLOWLIST stays at 16.
+  //
+  // #29 deliberate (v2 F3, G-06a): `GET /v1/threads/state` and
+  // `PUT /v1/threads/:guid/state`, the stored Done, Snooze and Mute, 73 -> 76.
+  //   1 read + 1 auto-HEAD twin + 1 write = +3; 73 + 3 = 76.
+  // Both sit behind the operator bearer (an adapter token is a 401). The
+  // write validates the whole body, refuses a stale `ifUpdatedAt` with a 409
+  // that hands back the winner, appends `thread.state-changed`, and only then
+  // broadcasts. Wake is computed against the daemon clock on every read; no
+  // timer, no sweep. No path says seen, read or mark: reading is never an act.
+  //
+  // ONE WS event moves: `thread.state`, operator transport only, declared and
+  // emitted in this same diff so UNEMITTED_WS_EVENTS stays empty.
+  //
+  // NO port importer moves: `routes/thread-state.ts` takes the Store by a
+  // `Pick`, never ChatDbReader or SendBackend, so PORT_IMPORTER_ALLOWLIST
+  // stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -246,6 +262,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/threads',
   'GET /v1/threads/:guid/messages',
   'GET /v1/threads/by-handle/:handle',
+  'GET /v1/threads/state',
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
   'HEAD /v1/agent',
@@ -269,6 +286,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/threads',
   'HEAD /v1/threads/:guid/messages',
   'HEAD /v1/threads/by-handle/:handle',
+  'HEAD /v1/threads/state',
   'PATCH /v1/adapters/:id',
   'PATCH /v1/rules/:id',
   'PATCH /v1/schedules/:id',
@@ -292,6 +310,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'POST /v1/toggles/kill-switch',
   'POST /v1/toggles/pause',
   'PUT /v1/contacts/:handle',
+  'PUT /v1/threads/:guid/state',
 ];
 
 /**
@@ -364,6 +383,8 @@ export const WS_EVENT_VOCABULARY: readonly string[] = [
   'message.received',
   'message.unsent',
   'rule.matched', // §1.6 post-S2 vocabulary; emission wired in Scenario 9
+  // #29 deliberate (v2 F3): Done/Snooze/Mute changes, operator transport only.
+  'thread.state',
   // #12 deliberate (s4 Scenario 9): kill-switch flips ride the existing
   // toggle.changed frame; §1.6 already reserves it, no protocol addition.
   'toggle.changed',
@@ -436,6 +457,9 @@ export const EMITTED_WS_EVENTS: readonly string[] = [
   'message.received',
   'message.unsent',
   'rule.matched',
+  // #29 deliberate (v2 F3): constructed in routes/thread-state.ts, after
+  // the `thread.state-changed` append.
+  'thread.state',
   // #12 deliberate (s4 Scenario 9): kill-switch flips broadcast on the
   // pre-existing toggle.changed frame — no protocol addition (F-3).
   'toggle.changed',
@@ -587,6 +611,7 @@ export const NO_BODY_ROUTES: readonly string[] = [
   'GET /v1/settings',
   'GET /v1/status',
   'GET /v1/threads/by-handle/:handle',
+  'GET /v1/threads/state',
   'POST /v1/adapters/:id/token',
   'POST /v1/connect',
   'POST /v1/drafts/:id/recall',

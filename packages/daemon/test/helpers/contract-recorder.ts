@@ -122,6 +122,7 @@ export const CONTRACT_NOTES: readonly string[] = [
   'GET /v1/threads/:guid/messages: before and until are mutually exclusive (both is 400).',
   "GET /v1/threads/by-handle/:handle: a handle containing ';' is refused with 400 invalid-handle.",
   "POST /v1/rules and PATCH /v1/rules/:id: outsideWindow 'queue' is refused with 400 unsupported-outside-window.",
+  "PUT /v1/threads/:guid/state: snoozedUntil is required when act is 'snoozed' and refused otherwise; actAt is refused when act is null or when it is later than the daemon clock (all 400 invalid-thread-state).",
   'PATCH /v1/settings is an open object by design: the closed key list is enforced by a typed refusal (unknown-key, read-only-key, wrong-type, below-floor, above-ceiling).',
   'Stabilised values: every 64-hex run is the null digest, minted ulids and message guids are id-NNNN in first-seen order (chosen ids such as test-adapter are kept), and the config dir is <configDir>.',
 ];
@@ -177,6 +178,9 @@ export const RESPONSE_NAMES = [
   'threads.messages',
   'threads.by-handle.found',
   'threads.by-handle.none',
+  'threads.state.put.snoozed',
+  'threads.state.put.cleared',
+  'threads.state.list',
 ] as const;
 
 export const ERROR_NAMES = [
@@ -195,6 +199,8 @@ export const ERROR_NAMES = [
   '400.invalid-handle',
   '400.invalid-body',
   '400.settings-refusal',
+  '400.invalid-thread-state',
+  '409.thread-state-conflict',
   '400.unknown-event',
 ] as const;
 
@@ -1009,6 +1015,46 @@ async function recordMain(
     method: 'GET',
     url: `/v1/threads/by-handle/${encodeURIComponent('+15550100001;x')}`,
     route: 'GET /v1/threads/by-handle/:handle',
+  });
+
+  // --- thread state (v2 F3) -----------------------------------------------
+  const stateUrl = `/v1/threads/${encodeURIComponent(CHAT)}/state`;
+  const snoozed = await ok('threads.state.put.snoozed', 200, {
+    method: 'PUT',
+    url: stateUrl,
+    route: 'PUT /v1/threads/:guid/state',
+    payload: {
+      act: 'snoozed',
+      snoozedUntil: '2026-09-01T23:00:00.000Z',
+      ifUpdatedAt: null,
+    },
+  });
+  await ok('threads.state.list', 200, {
+    method: 'GET',
+    url: '/v1/threads/state',
+    route: 'GET /v1/threads/state',
+  });
+  await err('409.thread-state-conflict', 409, {
+    method: 'PUT',
+    url: stateUrl,
+    route: 'PUT /v1/threads/:guid/state',
+    payload: { act: 'done', ifUpdatedAt: null },
+  });
+  await err('400.invalid-thread-state', 400, {
+    method: 'PUT',
+    url: stateUrl,
+    route: 'PUT /v1/threads/:guid/state',
+    payload: { act: 'snoozed' },
+  });
+  await ok('threads.state.put.cleared', 200, {
+    method: 'PUT',
+    url: stateUrl,
+    route: 'PUT /v1/threads/:guid/state',
+    payload: {
+      act: null,
+      attention: null,
+      ifUpdatedAt: idAt(snoozed.body, 'state', 'updatedAt'),
+    },
   });
   source.down = true;
   await err('503.source-unavailable', 503, {

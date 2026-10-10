@@ -17,7 +17,9 @@
  *  - POST /v1/drafts/bulk takes exactly one of `ids` or `filter`;
  *  - GET /v1/threads/:guid/messages takes at most one of `before` or `until`;
  *  - GET /v1/threads/by-handle/:handle refuses a handle containing `;`;
- *  - rules refuse `outsideWindow: 'queue'` with a typed 400.
+ *  - rules refuse `outsideWindow: 'queue'` with a typed 400;
+ *  - PUT /v1/threads/:guid/state takes `snoozedUntil` exactly when `act` is
+ *    `snoozed`, and refuses an `actAt` in the future or beside a null act.
  */
 import { z } from 'zod';
 import { adapterSchemas } from './routes/adapters.js';
@@ -29,6 +31,7 @@ import { ruleSchemas } from './routes/rules.js';
 import { scheduleSchemas } from './routes/schedules.js';
 import { sendSchemas } from './routes/send.js';
 import { settingsSchemas } from './routes/settings.js';
+import { threadStateSchemas } from './routes/thread-state.js';
 import { threadSchemas } from './routes/threads.js';
 import { toggleSchemas } from './routes/toggles.js';
 
@@ -58,18 +61,20 @@ export const REQUEST_SCHEMAS = {
   'PATCH /v1/settings': settingsSchemas.patchBody,
   'GET /v1/threads': threadSchemas.listQuery,
   'GET /v1/threads/:guid/messages': threadSchemas.pageQuery,
+  'PUT /v1/threads/:guid/state': threadStateSchemas.putStateBody,
   'POST /v1/toggles/kill-switch': toggleSchemas.toggleBody,
   'POST /v1/toggles/pause': toggleSchemas.pauseBody,
   'POST /v1/toggles/global-mode': toggleSchemas.globalModeBody,
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;
 
 /**
- * Path-parameter schemas. Only two routes validate their params with zod;
+ * Path-parameter schemas. Only three routes validate their params with zod;
  * the rest take a bare string id and answer 404 for one they do not know.
  */
 export const PARAM_SCHEMAS = {
   'GET /v1/threads/:guid/messages': threadSchemas.pageParams,
   'GET /v1/threads/by-handle/:handle': threadSchemas.handleParams,
+  'PUT /v1/threads/:guid/state': threadStateSchemas.stateParams,
 } as const satisfies Readonly<Record<RequestSchemaKey, z.ZodType>>;
 
 const JSON_SCHEMA_OPTS = {

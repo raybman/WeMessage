@@ -163,7 +163,7 @@ struct ReducerTests {
     let start = try Self.synced()
     let passive = [
       "adapter.health", "arming.changed", "connection.state", "draft.delta", "gate.denied", "gateway.disconnected",
-      "message.edited", "message.received", "message.unsent", "rule.matched", "toggle.changed",
+      "message.edited", "message.received", "message.unsent", "rule.matched", "thread.state", "toggle.changed",
     ]
     for name in passive {
       let (next, effects) = Self.apply(start, try Self.event(name, draftId: Self.first))

@@ -17,6 +17,7 @@ import type {
   IsoUtc,
   MessageGuid,
   Service,
+  ThreadStateRecord,
   Ulid,
 } from '@wemessage/core';
 // s7 Scenario 2 (F-83): the §3.4 vocabulary as runtime data. The import is a
@@ -98,7 +99,14 @@ export type GatewayEventPayload =
   // core and this is the same set by construction.
   | { event: 'arming.changed'; armed: boolean; until: IsoUtc | null;
       reason: ArmingReason }
-  | { event: 'gateway.disconnected'; reason: 'user-disconnect' };
+  | { event: 'gateway.disconnected'; reason: 'user-disconnect' }
+  // v2 F3 (G-06a): Done, Snooze or Mute changed on one conversation, so a
+  // second window or the CLI stays in step without polling. `state` is the
+  // whole record plus `awake`, computed against the daemon clock when the
+  // frame was built; `null` means no record (the derived default). Operator
+  // transports only: an adapter never sees what the operator did.
+  | { event: 'thread.state'; chatGuid: ChatGuid;
+      state: (ThreadStateRecord & { awake: boolean }) | null };
 
 export interface DraftSummary {
   id: Ulid; chatGuid: ChatGuid; handle: Handle; displayName?: string;

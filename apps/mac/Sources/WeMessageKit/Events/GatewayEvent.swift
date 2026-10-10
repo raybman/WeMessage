@@ -25,6 +25,7 @@ public enum GatewayEvent: Equatable, Sendable, Encodable {
   case messageReceived(MessageReceivedEvent)
   case messageUnsent(MessageUnsentEvent)
   case ruleMatched(RuleMatchedEvent)
+  case threadState(ThreadStateEvent)
   case toggleChanged(ToggleChangedEvent)
   case unknown(name: String)
 
@@ -57,6 +58,7 @@ public enum GatewayEvent: Equatable, Sendable, Encodable {
     case .messageReceived: return .messageReceived
     case .messageUnsent: return .messageUnsent
     case .ruleMatched: return .ruleMatched
+    case .threadState: return .threadState
     case .toggleChanged: return .toggleChanged
     case .unknown: return nil
     }
@@ -113,6 +115,7 @@ public enum GatewayEvent: Equatable, Sendable, Encodable {
     case .messageReceived: return .messageReceived(try payload(MessageReceivedEvent.self))
     case .messageUnsent: return .messageUnsent(try payload(MessageUnsentEvent.self))
     case .ruleMatched: return .ruleMatched(try payload(RuleMatchedEvent.self))
+    case .threadState: return .threadState(try payload(ThreadStateEvent.self))
     case .toggleChanged: return .toggleChanged(try payload(ToggleChangedEvent.self))
     }
   }
@@ -140,6 +143,7 @@ public enum GatewayEvent: Equatable, Sendable, Encodable {
     case .messageReceived(let payload): try payload.encode(to: encoder)
     case .messageUnsent(let payload): try payload.encode(to: encoder)
     case .ruleMatched(let payload): try payload.encode(to: encoder)
+    case .threadState(let payload): try payload.encode(to: encoder)
     case .toggleChanged(let payload): try payload.encode(to: encoder)
     case .unknown: break
     }

@@ -21,15 +21,15 @@ struct ContractTests {
     #expect(listed.count > 100, "the manifest is suspiciously short: \(listed.count)")
   }
 
-  @Test("wire.json: 21 EventName cases, 9 DraftState cases, version 1")
+  @Test("wire.json: 22 EventName cases, 9 DraftState cases, version 1")
   func wire() throws {
     let wire = try Fixtures.wire()
     #expect(WireVersion.current == 1)
     #expect(wire["wireVersion"]?.intValue == WireVersion.current)
 
     let names = try #require(wire["eventNames"]?.arrayValue).compactMap(\.stringValue)
-    #expect(names.count == 21)
-    #expect(EventName.allCases.count == 21)
+    #expect(names.count == 22)
+    #expect(EventName.allCases.count == 22)
     #expect(EventName.allCases.map(\.rawValue) == names)
 
     let states = try #require(wire["draftStates"]?.arrayValue).compactMap(\.stringValue)
@@ -56,7 +56,7 @@ struct ContractTests {
   @Test("every responses/*.json decodes strictly into its DTO")
   func responsesDecode() throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 50, "responses on disk: \(names.count)")
+    #expect(names.count == 53, "responses on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.response(name)
       do {
@@ -85,7 +85,7 @@ struct ContractTests {
       #expect(again == fixture.body, "\(name):\n want \(want)\n got  \(got)")
       compared += 1
     }
-    #expect(compared == 47, "non-204 responses compared: \(compared)")
+    #expect(compared == 50, "non-204 responses compared: \(compared)")
   }
 
   @Test(
@@ -129,7 +129,7 @@ struct ContractTests {
   @Test("every errors/*.json maps to the expected GatewayError")
   func errors() throws {
     let names = try Fixtures.errorNames()
-    #expect(names.count == 16, "errors on disk: \(names.count)")
+    #expect(names.count == 18, "errors on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.error(name)
       guard let (endpoint, expected) = Self.expectation(for: fixture) else {
@@ -151,6 +151,8 @@ struct ContractTests {
       return (.listThreads(limit: nil, cursor: "nope"), .request(status: 400, body: fixture.body))
     case "400.invalid-handle":
       return (.resolveHandle("+15550100001;x"), .request(status: 400, body: fixture.body))
+    case "400.invalid-thread-state":
+      return (.setThreadState(guid: chat, ThreadStateInput(act: "snoozed")), .request(status: 400, body: fixture.body))
     case "400.settings-refusal":
       return (.setSettings(["unknownKey": .int(1)]), .settingsRefused(.unknownKey(key: "unknownKey")))
     case "400.unknown-event":
@@ -169,6 +171,11 @@ struct ContractTests {
       return (.recallDraft(id: "id-0001"), .conflict(ConflictDetail(error: "illegal-transition", from: "pending", requested: "recall")))
     case "409.not-armed":
       return (.pause(until: "2026-01-02T03:04:05.000Z"), .conflict(ConflictDetail(error: "not-armed")))
+    case "409.thread-state-conflict":
+      return (
+        .setThreadState(guid: chat, ThreadStateInput(act: "done", ifUpdatedAt: .null)),
+        .conflict(ConflictDetail(error: "conflict", detail: fixture.body["detail"]))
+      )
     case "409.parked":
       let input = ScheduleInput(name: "Work", timezone: "America/Los_Angeles", windows: [ScheduleWindow(days: [.mon], start: "09:00", end: "17:00")])
       return (.createSchedule(input), .conflict(ConflictDetail(error: "parked", detail: fixture.body["detail"])))
@@ -188,7 +195,7 @@ struct ContractTests {
   )
   func requestSchemas() throws {
     let names = Set(try Fixtures.schemaNames())
-    #expect(names.count == 25, "request schemas on disk: \(names.count)")
+    #expect(names.count == 27, "request schemas on disk: \(names.count)")
     for name in names.sorted() { try MiniSchema.audit(try Fixtures.schema(name), at: name) }
 
     var seenKeys: [String: Set<String>] = [:]
@@ -326,6 +333,12 @@ struct ContractTests {
       .resume,
       .setContactPolicy(handle: "+15551234567", mode: .draftOnly, displayName: "Sam"),
       .setContactPolicy(handle: "+15551234567", mode: .deny, displayName: nil),
+      .setThreadState(
+        guid: chat,
+        ThreadStateInput(
+          act: "snoozed", actAt: iso, snoozedUntil: "2026-01-02T09:00:00.000Z", attention: .value("stream"),
+          ifUpdatedAt: .value(iso))),
+      .setThreadState(guid: chat, ThreadStateInput(act: nil, attention: .null, ifUpdatedAt: .null)),
     ]
   }
 
@@ -394,6 +407,8 @@ extension Fixtures {
     case "threads.list": return try trip(ThreadsPage.self)
     case "threads.messages": return try trip(ThreadMessagesPage.self)
     case "threads.by-handle.found", "threads.by-handle.none": return try trip(HandleResolution.self)
+    case "threads.state.list": return try trip(ThreadStatesPage.self)
+    case "threads.state.put.cleared", "threads.state.put.snoozed": return try trip(ThreadStateEnvelope.self)
     case "toggles.globalmode": return try trip(GlobalModeResult.self)
     case "toggles.killswitch", "toggles.killswitch.off": return try trip(KillSwitchResult.self)
     case "toggles.pause", "toggles.resume": return try trip(PauseResult.self)

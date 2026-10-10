@@ -118,6 +118,8 @@ const EVENT_NOTES: Record<string, string> = {
   'message.unsent': 'An inbound message was unsent at the source.',
   'rule.matched':
     'An inbound message matched a rule and was routed to an adapter.',
+  'thread.state':
+    'An operator marked a conversation Done, snoozed it, muted it, or cleared that. `state` is the stored record with a computed `awake`, or null when the record was removed. Operator transport only, never the adapter socket.',
   'toggle.changed': 'An operator setting changed.',
 };
 

@@ -67,7 +67,7 @@ public enum AppReducer {
     case .unknown(let name):
       return [.log(.droppedEvent(name: name))]
     case .adapterHealth, .armingChanged, .connectionState, .draftDelta, .gateDenied, .gatewayDisconnected,
-      .messageEdited, .messageReceived, .messageUnsent, .ruleMatched, .toggleChanged:
+      .messageEdited, .messageReceived, .messageUnsent, .ruleMatched, .threadState, .toggleChanged:
       return []
     }
   }

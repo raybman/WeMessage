@@ -163,7 +163,7 @@ schema   https://wemessage.dev/schemas/v1/ping.json
 
 ## Events
 
-The `event` frame carries one of 21 named events. The name is the `event` key of the payload; the rest of the payload is listed per event below. An adapter subscribes to what it wants and ignores the rest.
+The `event` frame carries one of 22 named events. The name is the `event` key of the payload; the rest of the payload is listed per event below. An adapter subscribes to what it wants and ignores the rest.
 
 ### `adapter.health`
 
@@ -363,6 +363,16 @@ An inbound message matched a rule and was routed to an adapter.
 required guid, ruleId, adapterId
 optional (none)
 schema   https://wemessage.dev/schemas/v1/events/rule.matched.json
+```
+
+### `thread.state`
+
+An operator marked a conversation Done, snoozed it, muted it, or cleared that. `state` is the stored record with a computed `awake`, or null when the record was removed. Operator transport only, never the adapter socket.
+
+```text
+required chatGuid, state
+optional (none)
+schema   https://wemessage.dev/schemas/v1/events/thread.state.json
 ```
 
 ### `toggle.changed`

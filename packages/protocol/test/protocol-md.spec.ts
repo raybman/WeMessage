@@ -131,7 +131,8 @@ describe('s7 Sc12 row 2: the document enumerates what the runtime enumerates', (
   it('carries a section per event, with its keys and schema $id', () => {
     const body = doc();
     // s8 Sc 2 (F-107): 17 -> 21, the four owed `draft.*` lifecycle names.
-    expect(GATEWAY_EVENT_NAMES).toHaveLength(21);
+    // v2 F3: 21 -> 22, `thread.state`.
+    expect(GATEWAY_EVENT_NAMES).toHaveLength(22);
     for (const name of GATEWAY_EVENT_NAMES) {
       expect(body, `no section for event ${name}`).toContain(`### \`${name}\``);
       for (const key of EVENT_SPECS[name].required)

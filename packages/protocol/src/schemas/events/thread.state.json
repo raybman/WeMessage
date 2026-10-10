@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wemessage.dev/schemas/v1/events/thread.state.json",
+  "title": "thread.state event payload (wire v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "chatGuid", "state"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "thread.state"
+    },
+    "chatGuid": {
+      "type": "string"
+    },
+    "state": {}
+  }
+}

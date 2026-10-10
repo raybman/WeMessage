@@ -1696,9 +1696,11 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // route, `GET /v1/threads` and its twin: 67 -> 69, no frame, no event.
     // v2 A2 (#27) added `GET /v1/threads/:guid/messages` and its twin: 71.
     // v2 F5 (#28) added `GET /v1/threads/by-handle/:handle` and its twin: 73.
-    expect(ROUTE_TABLE).toHaveLength(73);
-    expect(WS_EVENT_VOCABULARY).toHaveLength(21);
-    expect(EMITTED_WS_EVENTS).toHaveLength(21);
+    // v2 F3 (#29) added `GET /v1/threads/state`, its twin and the PUT: 76,
+    // and `thread.state`, declared and emitted together: 22 and 22.
+    expect(ROUTE_TABLE).toHaveLength(76);
+    expect(WS_EVENT_VOCABULARY).toHaveLength(22);
+    expect(EMITTED_WS_EVENTS).toHaveLength(22);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);
     // 16 since s10 Slice 2 (#25, late-verify.ts).
     expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16);

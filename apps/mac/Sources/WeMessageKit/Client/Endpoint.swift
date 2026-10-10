@@ -23,6 +23,10 @@ public enum Endpoint: Sendable {
   case listThreads(limit: Int?, cursor: String?)
   /// v2 F5: the conversation a typed handle would land in, if any.
   case resolveHandle(String)
+  /// v2 F3: write one conversation's Done, Snooze or Mute record.
+  case setThreadState(guid: String, ThreadStateInput)
+  /// v2 F3: every stored conversation record.
+  case listThreadStates
   case updateAdapter(id: String, AdapterPatch)
   case updateRule(id: String, RulePatch)
   case updateSchedule(id: String, SchedulePatch)
@@ -65,11 +69,11 @@ public enum Endpoint: Sendable {
     switch self {
     case .health, .status, .doctor, .verifyAudit, .listAdapters, .listContacts, .settings, .listRules,
       .listSchedules, .listAudit, .listDrafts, .dryRunRule, .readThread, .listThreads, .events, .getDraft,
-      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle:
+      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle, .listThreadStates:
       return "GET"
     case .updateAdapter, .updateRule, .updateSchedule, .setSettings:
       return "PATCH"
-    case .setContactPolicy:
+    case .setContactPolicy, .setThreadState:
       return "PUT"
     case .deleteContactPolicy, .deleteAdapter, .deleteRule, .deleteSchedule:
       return "DELETE"
@@ -114,6 +118,8 @@ public enum Endpoint: Sendable {
     case .listThreads: return "/v1/threads"
     case .readThread: return "/v1/threads/:guid/messages"
     case .resolveHandle: return "/v1/threads/by-handle/:handle"
+    case .setThreadState: return "/v1/threads/:guid/state"
+    case .listThreadStates: return "/v1/threads/state"
     case .disconnect: return "/v1/disconnect"
     case .send: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
@@ -131,7 +137,7 @@ public enum Endpoint: Sendable {
       .deleteAdapter(let id), .getAdapter(let id), .deleteRule(let id), .getRule(let id), .deleteSchedule(let id),
       .getSchedule(let id), .batchReport(let id):
       return id
-    case .readThread(let guid, _, _, _):
+    case .readThread(let guid, _, _, _), .setThreadState(let guid, _):
       return guid
     case .setContactPolicy(let handle, _, _), .deleteContactPolicy(let handle), .resolveHandle(let handle):
       return handle
@@ -255,6 +261,8 @@ public enum Endpoint: Sendable {
       var fields: [String: JSONValue] = ["on": .bool(on)]
       if let circuit { fields["circuit"] = .bool(circuit) }
       return .object(fields)
+    case .setThreadState(_, let input):
+      return input.json
     case .setContactPolicy(_, let mode, let displayName):
       var fields: [String: JSONValue] = ["mode": .string(mode.rawValue)]
       if let displayName { fields["displayName"] = .string(displayName) }

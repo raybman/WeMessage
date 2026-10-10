@@ -28,6 +28,8 @@ public enum EventName: String, CaseIterable, Codable, Hashable, Sendable {
   case messageReceived = "message.received"
   case messageUnsent = "message.unsent"
   case ruleMatched = "rule.matched"
+  /// v2 F3: a conversation's Done, Snooze or Mute record changed.
+  case threadState = "thread.state"
   case toggleChanged = "toggle.changed"
 }
 

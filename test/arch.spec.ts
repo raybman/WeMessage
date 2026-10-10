@@ -3830,7 +3830,8 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // exists in the vocabulary and comes out of nothing is a name a client
     // can wait for forever.
     expect([...UNEMITTED_WS_EVENTS]).toEqual([]);
-    expect(GATEWAY_EVENT_NAMES.length).toBe(21);
+    // 21 at S7 close; 22 since v2 F3 (#29), `thread.state`.
+    expect(GATEWAY_EVENT_NAMES.length).toBe(22);
   });
 
   it('the route table, the frame table and the port allowlist are S7’s', () => {
@@ -3845,8 +3846,9 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // twin. 73 since v2 F5 (#28): `GET /v1/threads/by-handle/:handle`, the
     // conversation a new draft would land in, plus its twin. Reads behind
     // the operator bearer; the frame table and the port allowlist did not
-    // move.
-    expect(ROUTE_TABLE.length).toBe(73);
+    // move. 76 since v2 F3 (#29): `GET /v1/threads/state`, its twin and
+    // `PUT /v1/threads/:guid/state`, the stored Done, Snooze and Mute.
+    expect(ROUTE_TABLE.length).toBe(76);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -5799,18 +5801,22 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged, except the route table (#26, #27, #28)', () => {
+    it('the S8-close counts are unchanged, except the route table (#26, #27, #28, #29) and thread.state (#29)', () => {
       // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
       // twin), the conversations list the v2 messenger opens on: 67 -> 69.
       // v2 A2 minted #27 for `GET /v1/threads/:guid/messages` (+ HEAD
       // twin), one conversation's page: 69 -> 71. v2 F5 minted #28 for
       // `GET /v1/threads/by-handle/:handle` (+ HEAD twin), the lookup
       // compose asks before a new conversation's draft: 71 -> 73. No WS
-      // event, no frame and no port importer moved with any of them.
-      expect(ROUTE_TABLE.length).toBe(73);
-      expect(WS_EVENT_VOCABULARY.length).toBe(21);
-      expect(GATEWAY_EVENT_NAMES.length).toBe(21);
-      expect(EMITTED_WS_EVENTS.length).toBe(21);
+      // event, no frame and no port importer moved with any of them. v2 F3
+      // minted #29 for `GET /v1/threads/state` (+ HEAD twin) and
+      // `PUT /v1/threads/:guid/state`: 73 -> 76, and for ONE event,
+      // `thread.state`, declared and emitted together: 21 -> 22. No frame
+      // and no port importer moved.
+      expect(ROUTE_TABLE.length).toBe(76);
+      expect(WS_EVENT_VOCABULARY.length).toBe(22);
+      expect(GATEWAY_EVENT_NAMES.length).toBe(22);
+      expect(EMITTED_WS_EVENTS.length).toBe(22);
       expect(UNEMITTED_WS_EVENTS).toEqual([]);
       // 15 at S8 close. s10 Slice 2 (#25) added core late-verify.ts, a
       // chat.db reader with no send port; every wire count above is S8's.
@@ -5821,23 +5827,25 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27) and v2 F5 (#28), and #29 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28) and v2 F3 (#29), and #30 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
       // one read route, `GET /v1/threads`, v2 A2 #27 for one more,
       // `GET /v1/threads/:guid/messages`, and v2 F5 #28 for a third,
       // `GET /v1/threads/by-handle/:handle`, and nothing else on the wire:
-      // the event and frame counts in the row above are S8's. #29 is the
-      // next tooth.
+      // the event and frame counts in the row above are S8's. v2 F3 minted
+      // #29 for the thread-state pair and the `thread.state` event. #30 is
+      // the next tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(28);
-      expect(seen).not.toContain(29);
+      expect(Math.max(...seen)).toBe(29);
+      expect(seen).not.toContain(30);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
       expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
       expect(text).toMatch(/#28 deliberate \(v2 F5\)/);
+      expect(text).toMatch(/#29 deliberate \(v2 F3/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {

@@ -227,6 +227,20 @@ public actor GatewayClient {
     try await outcome(.resolveHandle(handle))
   }
 
+  /// v2 F3: writes one conversation's record. A 409 (another window acted
+  /// first) is refused as `.conflict(code: "conflict")`; the record that won
+  /// is in the error fixture's detail and is re-read with listThreadStates.
+  public func setThreadState(_ guid: String, _ input: ThreadStateInput) async throws
+    -> Outcome<ThreadStateEnvelope>
+  {
+    try await outcome(.setThreadState(guid: guid, input))
+  }
+
+  /// v2 F3: every stored record, with `awake` judged on the daemon clock.
+  public func listThreadStates() async throws -> Outcome<ThreadStatesPage> {
+    try await outcome(.listThreadStates)
+  }
+
   // MARK: the event stream
 
   /// GET /v1/events/sse as raw frames. Opening it follows the same per-call

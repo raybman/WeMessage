@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated 4,000-conversation scenario, and publishes them as a G2 report
   (`G2-REPORT-kit.md`, `G2-REPORT-ui.md`). First paint over 300 ms or more
   than 120 mounted transcript rows fails the build.
+- A board sweep for the Mac app. CI opens every wireframe board (01 to 17)
+  in light and dark, with the frost on and with Reduce Transparency, and
+  fails on any green pixel, a blank or wrong-appearance window, an
+  interactive control with no spoken label, or an opaque pane divider that is
+  not the design token. The screenshots are kept as build artifacts.
+- Every colour value in the Mac sources must live in `Tokens.swift`; a test
+  fails on a colour spelled anywhere else.
+- Menu keyboard shortcuts are checked to be unique in every menu context.
 
 ### Changed
 

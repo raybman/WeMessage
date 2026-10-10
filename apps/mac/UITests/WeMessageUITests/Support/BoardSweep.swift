@@ -143,14 +143,14 @@ enum HairlineProbe {
   /// True when `p` is `token`, or `token` composited 50% over a neighbour
   /// that `p` is visibly not (so a plain background never counts).
   static func matches(_ p: Pixel, token: Pixel, neighbours: [Pixel]) -> Bool {
-    if distance(p, token) <= tolerance { return true }
-    return neighbours.contains { n in
+    distance(p, token) <= tolerance
+      || neighbours.contains { n in
       let half: Pixel = (
         UInt8((Int(token.0) + Int(n.0)) / 2), UInt8((Int(token.1) + Int(n.1)) / 2),
         UInt8((Int(token.2) + Int(n.2)) / 2)
       )
-      return distance(p, half) <= tolerance && distance(p, n) >= 2
-    }
+        return distance(p, half) <= tolerance && distance(p, n) >= 2
+      }
   }
 
   private static func rgb(_ px: NoGreen.Pixels, _ x: Int, _ y: Int) -> Pixel {

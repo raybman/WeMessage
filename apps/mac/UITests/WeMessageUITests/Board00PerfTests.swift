@@ -40,6 +40,11 @@ final class Board00PerfTests: XCTestCase {
     let first = element(app, ID.rowPrefix + Self.long)
     let paint = try XCTUnwrap(firstHittable(first, since: launched), "the first thread row never became hittable")
     report("first-paint", ms(paint), "ms", G2Limits.firstPaintMs, .hard)
+    // The cost of one poll, measured once the row is there: how much of the
+    // number above is the query, not the app.
+    let probeStart = ContinuousClock.now
+    _ = first.exists && first.isHittable
+    print("BOARD00| first paint \(ms(paint)) ms, one hittable poll costs \(ms(ContinuousClock.now - probeStart)) ms")
     XCTAssertLessThanOrEqual(ms(paint), Double(G2Limits.firstPaintMs), "first paint over the G2 limit")
 
     // Mounted rows: open the long thread at its full page.
@@ -121,8 +126,17 @@ final class Board00PerfTests: XCTestCase {
   @MainActor
   private func firstHittable(_ element: XCUIElement, since: ContinuousClock.Instant) -> Duration? {
     let deadline = since + .seconds(UITestApp.timeout)
+    var polls = 0
+    var existed: Duration?
     while ContinuousClock.now < deadline {
-      if element.exists && element.isHittable { return ContinuousClock.now - since }
+      polls += 1
+      let exists = element.exists
+      if exists && existed == nil { existed = ContinuousClock.now - since }
+      if exists && element.isHittable {
+        let at = ContinuousClock.now - since
+        print("BOARD00| first row: \(polls) polls, exists at \(existed.map { ms($0) } ?? -1) ms, hittable at \(ms(at)) ms")
+        return at
+      }
       Thread.sleep(forTimeInterval: 0.01)
     }
     return nil

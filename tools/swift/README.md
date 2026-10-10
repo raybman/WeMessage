@@ -108,7 +108,10 @@ sse/NN-<event>.txt   one frame each, replayed after the greeting, ids from 2
 
 A route is answered by the scenario, then its `extends` chain, then the S0
 goldens; transcripts (`GET /v1/threads/:guid/messages`) are keyed by the
-`chatGuid` in each body. The stream sends the greeting (saying the
+`chatGuid` in each body, and `GET /v1/threads/by-handle/:handle` (v2 F5)
+by the `handle` in each body; a handle no file names gets the S0 `none`
+golden with that handle, and an empty handle, a `;` or more than 320
+characters is the S0 400 invalid-handle. The stream sends the greeting (saying the
 scenario's own `connectionState`), then the first scenario in the chain
 that has frames, one per 250 ms, skipping ids at or below `Last-Event-ID`.
 `POST /v1/drafts/:id/{approve,reject,recall}` walks the draft state machine
@@ -127,6 +130,8 @@ empty-earned  rich, with the queue emptied
 quiet         nothing yet: no threads, drafts, people or adapters
 fda-denied    disconnected; threads 503 source-unavailable; doctor says FDA
 search        rich plus 2 threads and a transcript spanning 2024 to 2026
+compose-new   rich, and by-handle: Maya's 1:1 is any;-;, +1 555 010 0003
+              is SMS only, every other handle has no conversation (v2 F5)
 ```
 
 ### Control routes (`--control` only)
@@ -138,7 +143,8 @@ answers only a `127.0.0.1` peer and none is journaled.
 POST /v1/_scenario {"name"}  switch scenario; the journal is kept;
                              400 unknown-scenario (with the known list)
 POST /v1/_reset              back to "default", draft moves and journal cleared
-GET  /v1/_journal            {scenario, requests: [{method, path, query, status}]}
+GET  /v1/_journal            {scenario, requests: [{method, path, query, status}]};
+                             a POST /v1/drafts entry adds the chatGuid its body named
 ```
 
 The UI tests reach them through `UITests/WeMessageUITests/Support/FakeDaemon.swift`

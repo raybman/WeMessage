@@ -1,0 +1,13 @@
+{
+  "route": "GET /v1/threads/by-handle/:handle",
+  "status": 200,
+  "body": {
+    "handle": "+15550100001",
+    "conversation": {
+      "chatGuid": "any;-;+15550100001",
+      "service": "imessage",
+      "isGroup": false
+    },
+    "asOf": "2026-09-01T12:00:43.000Z"
+  }
+}

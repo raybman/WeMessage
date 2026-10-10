@@ -66,6 +66,7 @@ const FIXTURE_STATE = '"state": "preview"';
 
 const EXPECTED_SCENARIOS = [
   'bulk',
+  'compose-new',
   'degraded',
   'empty-earned',
   'fda-denied',
@@ -1852,5 +1853,89 @@ describe('v2 S7a: a scenario may name only a known generator', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('v2 F5: GET /v1/threads/by-handle/:handle, a read the fake daemon serves', () => {
+  const byHandle = (state: State, raw: string, auth = true) =>
+    step(state, {
+      method: 'GET',
+      path: `/v1/threads/by-handle/${raw}`,
+      ...(auth ? {} : { authorization: undefined }),
+    });
+  const none = readJson<Golden>(
+    join(contract, 'responses/threads.by-handle.none.json'),
+  );
+  const invalid = readJson<Golden>(
+    join(contract, 'errors/400.invalid-handle.json'),
+  );
+
+  it("compose-new: Maya's 1:1 is the any;-; iMessage chat", () => {
+    const { out } = byHandle(switchTo('compose-new'), '%2B15550100001');
+    expect(out.status).toBe(200);
+    expect(out.body).toEqual({
+      handle: '+15550100001',
+      conversation: {
+        chatGuid: 'any;-;+15550100001',
+        service: 'imessage',
+        isGroup: false,
+      },
+      asOf: '2026-09-01T12:00:43.000Z',
+    });
+  });
+
+  it('compose-new: +1 555 010 0003 has only an SMS thread', () => {
+    const { out } = byHandle(switchTo('compose-new'), '%2B15550100003');
+    expect(out.status).toBe(200);
+    expect((body(out).conversation as Record<string, Json>).service).toBe(
+      'sms',
+    );
+  });
+
+  it('a handle no scenario names has no conversation: the S0 none golden, renamed', () => {
+    const { out, state } = byHandle(switchTo('compose-new'), '%2B15550100099');
+    expect(out.status).toBe(200);
+    expect(out.body).toEqual({
+      ...(none.body as Record<string, Json>),
+      handle: '+15550100099',
+    });
+    expect(state.journal.at(-1)).toEqual({
+      method: 'GET',
+      path: '/v1/threads/by-handle/%2B15550100099',
+      query: '',
+      status: 200,
+    });
+  });
+
+  it('rich alone names no conversation for Maya: compose-new is what answers it', () => {
+    const { out } = byHandle(switchTo('rich'), '%2B15550100001');
+    expect(body(out).conversation).toBeNull();
+  });
+
+  it("a ';', an empty handle or one over 320 characters is the S0 400 invalid-handle", () => {
+    for (const raw of ['a%3Bb', '', '%20', 'x'.repeat(321), '%E0%A4%A']) {
+      const { out } = byHandle(switchTo('compose-new'), raw);
+      expect([raw, out.status, out.body]).toEqual([raw, 400, invalid.body]);
+    }
+  });
+
+  it('without the bearer it is 401, like every app route', () => {
+    const { out } = byHandle(switchTo('compose-new'), '%2B15550100001', false);
+    expect(out.status).toBe(401);
+  });
+
+  it('a draft create is journaled with the chatGuid its body names', () => {
+    const { state } = step(switchTo('compose-new'), {
+      method: 'POST',
+      path: '/v1/drafts',
+      body: JSON.stringify({ chatGuid: 'any;-;+15550100001', body: 'hi' }),
+    });
+    expect(state.journal.at(-1)).toEqual({
+      method: 'POST',
+      path: '/v1/drafts',
+      query: '',
+      status: 201,
+      chatGuid: 'any;-;+15550100001',
+    });
   });
 });

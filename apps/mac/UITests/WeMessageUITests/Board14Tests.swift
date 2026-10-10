@@ -4,7 +4,9 @@ import XCTest
 
 /// v2 S4j: board 14, compose. One launch per appearance (the UI job's time
 /// budget): WEMESSAGE_UI_BOARD=14 opens the compose window over the fake
-/// daemon's rich scenario. The launch walks 14.A to 14.F, a shot per state:
+/// daemon's compose-new scenario (rich, plus the v2 F5 by-handle answers:
+/// Maya's 1:1 is an any;-; iMessage chat). The launch walks 14.A to 14.F, a
+/// shot per state:
 /// - empty: one field, To, and no channel, banner, input or Send at all;
 /// - resolve: "ma" resolves to rows ordered by last exchange;
 /// - person: Maya chosen; iMessage is the default and the banner names it,
@@ -13,7 +15,9 @@ import XCTest
 /// - handoff: Approve moves the text down into the input;
 /// - undo: Send opens the 4 s window; Undo inside it writes nothing;
 /// - drafted: Send again, the window runs out, and one draft is created;
-/// - states: the six 14.F specimens.
+/// - states: the six 14.F specimens;
+/// - refusal (v2 F5, D-UI-186): relaunched, a typed handle the daemon names
+///   no conversation for is refused in words, with no composer and no Send.
 /// The light launch runs the accessibility audit. Every launch ends on the
 /// journal: no POST /v1/send, exactly one POST /v1/drafts (201), and no
 /// other write. Shots are board-14-<state>-<appearance>.png. CI only.
@@ -42,7 +46,7 @@ final class Board14Tests: XCTestCase {
 
   @MainActor
   private func compose(appearance: String) async throws {
-    try await FakeDaemon.scenario("rich")
+    try await FakeDaemon.scenario("compose-new")
     let app = UITestApp.make(appearance: appearance, reduceTransparency: false, board: "14")
     app.launch()
     defer { app.terminate() }
@@ -87,7 +91,10 @@ final class Board14Tests: XCTestCase {
     XCTAssertTrue(
       QueueUI.waitUntil { QueueUI.value(app, ID.composeRecipient) == "maya" },
       "the chip reads \(QueueUI.value(app, ID.composeRecipient))")
-    XCTAssertEqual(QueueUI.value(app, ID.composeChannelPrefix + "imessage"), "default")
+    // v2 F5: the card is "checking" until the daemon names Maya's 1:1.
+    XCTAssertTrue(
+      QueueUI.waitUntil { QueueUI.value(app, ID.composeChannelPrefix + "imessage") == "default" },
+      "the iMessage card reads \(QueueUI.value(app, ID.composeChannelPrefix + "imessage"))")
     for channel in Self.channels.dropFirst() {
       XCTAssertEqual(QueueUI.value(app, ID.composeChannelPrefix + channel), "not connected", "\(channel) card")
     }
@@ -156,11 +163,31 @@ final class Board14Tests: XCTestCase {
     shot("states")
     if light { try audit(app, window: "audit-board-14-states") }
 
+    // v2 F5 (D-UI-186, D-UI-187): relaunched, a typed handle the daemon names
+    // no conversation for is refused in words, before any draft exists.
+    app.terminate()
+    app.launch()
+    let typedTo = QueueUI.element(app, ID.composeTo)
+    XCTAssertTrue(typedTo.waitForExistence(timeout: UITestApp.timeout), "no To field after the relaunch")
+    typedTo.click()
+    typedTo.typeText("+15550100099")
+    let typed = QueueUI.element(app, ID.composeResultTyped)
+    XCTAssertTrue(typed.waitForExistence(timeout: UITestApp.timeout), "a typed handle got no row")
+    typed.click()
+    XCTAssertTrue(
+      QueueUI.element(app, ID.composeRefusal).waitForExistence(timeout: UITestApp.timeout),
+      "no refusal for a handle with no conversation")
+    XCTAssertEqual(QueueUI.value(app, ID.composeChannelPrefix + "imessage"), "no conversation")
+    for id in [ID.composeBanner, ID.composeField, ID.composeSend] {
+      XCTAssertFalse(QueueUI.element(app, id).exists, "\(id) is drawn beside a refusal")
+    }
+    shot("refusal")
+
     // The journal: one draft created, nothing sent, nothing else written.
     let requests = try await FakeDaemon.journal().requests
     XCTAssertEqual(requests.filter { $0.path.hasPrefix("/v1/send") }, [], "compose asked to send")
     seen = try await Self.writes()
     XCTAssertEqual(seen, ["POST /v1/drafts 201"], "compose wrote more than one draft")
-    print("BOARD14| \(appearance) states=8 seconds=\(Int(Date().timeIntervalSince(started)))")
+    print("BOARD14| \(appearance) states=9 seconds=\(Int(Date().timeIntervalSince(started)))")
   }
 }

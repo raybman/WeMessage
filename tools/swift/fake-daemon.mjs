@@ -79,6 +79,14 @@ const STREAM = 'GET /v1/events/sse';
 const MESSAGES = /^GET \/v1\/threads\/([^/]+)\/messages$/;
 const MESSAGES_ROUTE = 'GET /v1/threads/:guid/messages';
 const DRAFT_ACTION = /^POST \/v1\/drafts\/([^/]+)\/(approve|reject|recall)$/;
+/**
+ * v2 F5: which conversation a handle has, a read. A scenario answers a
+ * handle with a responses/ file on this route whose body names it; any
+ * other handle is the S0 "none" golden, renamed. Like the daemon, an empty
+ * handle, one with a ';' or one over 320 characters is 400 invalid-handle.
+ */
+const BY_HANDLE = /^GET \/v1\/threads\/by-handle\/([^/]*)$/;
+const BY_HANDLE_ROUTE = 'GET /v1/threads/by-handle/:handle';
 /** Auto-send and schedules are parked: 409 for these, whatever the body. */
 const PARKED =
   /^(POST \/v1\/schedules|POST \/v1\/send|PATCH \/v1\/toggles\/.+|POST \/v1\/toggles\/.+)$/;
@@ -193,6 +201,21 @@ function indexMessages(dir) {
   return map;
 }
 
+/** v2 F5: by-handle answers keyed by the handle in each body. */
+function indexHandles(dir) {
+  const map = new Map();
+  for (const name of readdirSync(dir)
+    .filter((n) => n.endsWith('.json'))
+    .sort()) {
+    const golden = readJson(join(dir, name));
+    if (golden.route !== BY_HANDLE_ROUTE) continue;
+    const handle = golden.body?.handle;
+    if (typeof handle === 'string' && !map.has(handle))
+      map.set(handle, { status: golden.status, body: golden.body });
+  }
+  return map;
+}
+
 /** The frames of one sse/ directory, in file-name order, or null without one. */
 function readFrames(dir) {
   if (!existsSync(dir)) return null;
@@ -236,6 +259,7 @@ export function loadScenarios(dir = SCENARIOS) {
       generated: generator === null ? null : GENERATORS[generator](),
       responses: has ? indexDir(responses) : new Map(),
       messages: has ? indexMessages(responses) : new Map(),
+      handles: has ? indexHandles(responses) : new Map(),
       frames: readFrames(join(dir, name, 'sse')),
     });
   }
@@ -251,6 +275,11 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
   return {
     responses: indexDir(join(root, 'responses')),
     messages: indexMessages(join(root, 'responses')),
+    handles: indexHandles(join(root, 'responses')),
+    noConversation: byName(
+      join(root, 'responses'),
+      'threads.by-handle.none.json',
+    ),
     scenarios: loadScenarios(scenarios),
     errors: {
       missing: byName(errors, '401.missing.json'),
@@ -259,6 +288,7 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
       notFound: byName(errors, '404.not-found.json'),
       unknownChat: byName(errors, '404.unknown-chat.json'),
       illegalTransition: byName(errors, '409.illegal-transition.json'),
+      invalidHandle: byName(errors, '400.invalid-handle.json'),
     },
     sse: {
       headers: readJson(join(sse, 'headers.json')),
@@ -292,7 +322,8 @@ function answer(golden) {
  * The state a fresh daemon holds; `control` is fixed for its life.
  * `killSwitch` is null until the kill toggle flips it (v2 S4f).
  * @returns {{ control: boolean, scenario: string, drafts: Record<string, any>,
- *   journal: Array<{ method: string, path: string, query: string, status: number }>,
+ *   journal: Array<{ method: string, path: string, query: string, status: number,
+ *     chatGuid?: string | null }>,
  *   killSwitch: boolean | null }}
  */
 export function initialState({ control = false } = {}) {
@@ -560,6 +591,29 @@ function listDrafts(goldens, state, query) {
   return { status: 200, headers: JSON_HEADERS, body: { ...list.body, drafts } };
 }
 
+/** v2 F5: the scenario chain's answer for `raw`, then S0's, else "none". */
+function resolveHandle(goldens, state, raw) {
+  let handle = '';
+  try {
+    handle = decodeURIComponent(raw).trim();
+  } catch {
+    return goldens.errors.invalidHandle;
+  }
+  if (handle === '' || handle.includes(';') || handle.length > 320)
+    return goldens.errors.invalidHandle;
+  for (const scenario of chainOf(goldens, state.scenario)) {
+    const hit = scenario.handles.get(handle);
+    if (hit) return hit;
+  }
+  const none = goldens.noConversation;
+  return (
+    goldens.handles.get(handle) ?? {
+      status: none.status,
+      body: { ...none.body, handle },
+    }
+  );
+}
+
 /** The S3b table, now over a scenario. -> an Answer and, if it moved, the next state. */
 function dispatch(req, token, goldens, state, key, query) {
   if (
@@ -584,6 +638,7 @@ function dispatch(req, token, goldens, state, key, query) {
     key === STREAM ||
     PARKED.test(key) ||
     MESSAGES.test(key) ||
+    BY_HANDLE.test(key) ||
     DRAFT_ACTION.test(key);
   if (!known) return answer(goldens.errors.notFound);
 
@@ -623,6 +678,8 @@ function dispatch(req, token, goldens, state, key, query) {
     }
     return answer(resolveMessages(goldens, state, guid));
   }
+  const byHandle = BY_HANDLE.exec(key);
+  if (byHandle) return answer(resolveHandle(goldens, state, byHandle[1] ?? ''));
   const action = DRAFT_ACTION.exec(key);
   if (action) {
     const id = decodeURIComponent(action[1] ?? '');
@@ -643,6 +700,16 @@ function dispatch(req, token, goldens, state, key, query) {
   if (key === 'GET /v1/status' || key === 'GET /v1/settings')
     return answer(withKill(goldens, state, key));
   return answer(resolve(goldens, state, key));
+}
+
+/** The chatGuid a draft-create body names, or null. */
+function draftChatGuid(raw) {
+  try {
+    const guid = JSON.parse(String(raw ?? ''))?.chatGuid;
+    return typeof guid === 'string' ? guid : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -669,12 +736,18 @@ export function route(req, token, goldens, state = initialState()) {
   const out = dispatch(req, token, goldens, state, key, query);
   if (path.startsWith(CONTROL_PREFIX)) return out;
   const base = out.next ?? state;
+  // v2 F5: a draft create names the conversation it was written to, so a
+  // UI test can prove compose drafted on the guid the daemon resolved.
+  const entry = {
+    method,
+    path,
+    query,
+    status: out.status,
+    ...(key === 'POST /v1/drafts' ? { chatGuid: draftChatGuid(req.body) } : {}),
+  };
   return {
     ...out,
-    next: {
-      ...base,
-      journal: [...base.journal, { method, path, query, status: out.status }],
-    },
+    next: { ...base, journal: [...base.journal, entry] },
   };
 }
 

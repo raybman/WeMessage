@@ -21,6 +21,8 @@ enum FakeDaemon {
     let path: String
     let query: String
     let status: Int
+    /// v2 F5: the conversation a POST /v1/drafts body named; nil elsewhere.
+    let chatGuid: String?
     var description: String { "\(method) \(path) \(status)" }
   }
 

@@ -251,7 +251,7 @@ struct LinkedInThreadPane: View {
       LinkedInTranscript(model: model, thread: thread, palette: palette)
       LinkedInFoot(model: model, thread: thread, meta: meta, palette: palette)
     }
-    .task(id: model.selectedThread) { await model.thread.open(model.selectedThread) }
+    .task(id: model.threadLoadKey) { await model.loadSelectedThread() }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityElement(children: .contain)
     .accessibilityLabel(thread.title)

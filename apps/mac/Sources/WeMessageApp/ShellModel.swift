@@ -108,7 +108,7 @@ public final class ShellModel {
   public let outbound: Outbound
   /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
   /// find in thread (cmd-F) and the year scrubber (opt-cmd-G). All read;
-  /// none writes (D-UI-79).
+  /// none writes. Search runs on the daemon's index (v2 F2).
   public let search: SearchModel
   public let switcher = QuickSwitcherModel()
   public let find = FindBarModel()
@@ -116,6 +116,21 @@ public final class ShellModel {
   public internal(set) var scrubberYear: Int?
   /// The message a result or a year landed on: outlined 3 pt (11.D).
   public internal(set) var jumpAnchor: String?
+  /// v2 F2: the open thread's years, as the daemon counts them, once read.
+  public internal(set) var threadYears: ThreadYears?
+  /// v2 F2: a hit to show once its thread has read its newest page: if
+  /// that page does not hold it, the window ending at it is read.
+  struct PendingReveal: Equatable {
+    let chatGuid: String
+    let hitId: String
+    let until: String
+  }
+  var pendingReveal: PendingReveal?
+  /// Bumped by every hit opened, so a hit in the thread already open still
+  /// loads (the views key their read on `threadLoadKey`).
+  private var revealSerial = 0
+  var yearsTask: Task<Void, Never>?
+  var revealTask: Task<Void, Never>?
   /// What the human has typed in each thread's composer, by chatGuid. Never
   /// sent from here: only Outbound sends.
   public var composerText: [String: String] = [:]
@@ -668,15 +683,44 @@ public final class ShellModel {
   public func toggleScrubber() {
     guard selected != nil, !searchUp else { return }
     scrubberShown.toggle()
+    if scrubberShown { loadYears() }
   }
 
-  /// The scrubber over what the open thread has loaded.
-  public var scrubber: YearScrubber { YearScrubber(turns: thread.turns) }
+  /// v2 F2: reads the open thread's years (GET /v1/threads/:guid/years),
+  /// once per thread, in the operator's zone (D-F2-8).
+  func loadYears() {
+    guard let guid = selectedThread, threadYears?.chatGuid != guid else { return }
+    let client = self.client
+    yearsTask = Task { [weak self] in
+      let read = try? await client.threadYears(guid, tz: TimeZone.current.identifier)
+      guard let self, self.selectedThread == guid, case .ok(let years)? = read else { return }
+      self.threadYears = years
+    }
+  }
 
-  /// A year row: land on its first message, or the nearest (11.F).
+  /// The scrubber: the daemon's years for the open thread once read, else
+  /// what the thread has loaded.
+  public var scrubber: YearScrubber {
+    if let years = threadYears, years.chatGuid == selectedThread {
+      return YearScrubber(years: years, turns: thread.turns)
+    }
+    return YearScrubber(turns: thread.turns)
+  }
+
+  /// A year row: land on its first message, or the nearest (11.F). A year
+  /// with messages none of the loaded turns holds loads its newest window
+  /// first (D-UI-210), then lands.
   public func jump(toYear year: Int) {
     scrubberYear = year
+    let scrubber = self.scrubber
     jumpAnchor = scrubber.anchor(for: year)
+    guard scrubber.needsLoad(year), let last = scrubber.years.first(where: { $0.year == year })?.last else { return }
+    revealTask?.cancel()
+    revealTask = Task { [weak self] in
+      await self?.thread.reveal(until: last)
+      guard let self, self.scrubberYear == year else { return }
+      self.jumpAnchor = self.scrubber.anchor(for: year)
+    }
   }
 
   /// A result opens its thread at that message (11.D).
@@ -691,7 +735,25 @@ public final class ShellModel {
     calendar.timeZone = .current
     scrubberYear = calendar.component(.year, from: hit.doc.sentAt)
     scrubberShown = true
+    pendingReveal = PendingReveal(chatGuid: hit.doc.threadGuid, hitId: hit.id, until: WireDate.format(hit.doc.sentAt))
+    revealSerial += 1
     userOpenedThread()
+    loadYears()
+  }
+
+  /// What the thread panes key their read on: the selection, and each hit
+  /// opened, so a second hit in the open thread still reads.
+  public var threadLoadKey: String { (selectedThread ?? "") + "#" + String(revealSerial) }
+
+  /// The thread panes' one read: the selected thread's newest page, then,
+  /// for a hit that page does not hold, the window ending at the hit.
+  public func loadSelectedThread() async {
+    let guid = selectedThread
+    await thread.open(guid)
+    guard let pending = pendingReveal, pending.chatGuid == guid, selectedThread == guid else { return }
+    pendingReveal = nil
+    guard !thread.turns.contains(where: { $0.guid == pending.hitId }) else { return }
+    await thread.reveal(until: pending.until)
   }
 
   /// A switcher row: a thread opens, a channel selects its tile.

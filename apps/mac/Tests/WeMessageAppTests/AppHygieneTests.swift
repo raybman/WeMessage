@@ -69,7 +69,7 @@ struct AppHygieneTests {
     // search.result.<guid>, search.facet.<n>, scrubber.year.<year>,
     // switcher.row.<id>).
     "wemessage.search", "wemessage.search.field", "wemessage.search.summary", "wemessage.search.coverage",
-    "wemessage.search.prompt", "wemessage.search.facets", "wemessage.find", "wemessage.find.field",
+    "wemessage.search.prompt", "wemessage.search.facets", "wemessage.search.more", "wemessage.find", "wemessage.find.field",
     "wemessage.find.counter", "wemessage.scrubber", "wemessage.scrubber.line", "wemessage.switcher",
     "wemessage.switcher.field",
     // v2 S4j, board 13 (prefixes: settings.pane.<p>, settings.page.<p>,
@@ -433,8 +433,13 @@ struct AppHygieneTests {
   /// F3's 190..194 (the reason line, the failure and conflict lines, the
   /// silent save). v2 F3 retires D-UI-51: queue state is no longer
   /// memory-only, the daemon keeps it. v2 F4's 195..202: the rich turns'
-  /// glyphs, delivery words and file lines.
-  static let dUINumbers = Array(1...50) + Array(52...131) + [132, 135, 140, 185] + Array(186...194) + Array(195...202)
+  /// glyphs, delivery words and file lines. v2 F2's 203..212: search on
+  /// the daemon's index (coverage, indexing, debounce, chips, notes, the
+  /// scrubber's rows, paging and the daemon-down line). v2 F2 retires
+  /// D-UI-79: search runs on the daemon's index, with no client-side caps.
+  static let dUINumbers =
+    Array(1...50) + Array(52...78) + Array(80...131) + [132, 135, 140, 185] + Array(186...194) + Array(195...202)
+    + Array(203...212)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
@@ -1021,7 +1026,9 @@ struct AppHygieneTests {
   /// build, and takes the panes (and the composer) while it is up.
   static func searchLeaks(_ files: [(String, String)]) -> [String] {
     let searchDir = appDir + "/Boards/Search/"
-    let models = [appDir + "/Models/SearchModel.swift", appDir + "/Models/SearchQuery.swift"]
+    let models = [
+      appDir + "/Models/SearchModel.swift", appDir + "/Models/SearchQuery.swift", appDir + "/Models/SearchWire.swift",
+    ]
     let shell = appDir + "/ShellView.swift"
     let transcript = appDir + "/Boards/Thread/TranscriptView.swift"
     let composer = appDir + "/Boards/Thread/ComposerView.swift"
@@ -1036,16 +1043,17 @@ struct AppHygieneTests {
     let text = { (want: String) in files.first { $0.0 == want }?.1 ?? "" }
     for (path, source) in files where path.hasPrefix(searchDir) || models.contains(path) {
       swept += 1
-      // Code only: the doc comments name the routes they read (D-UI-79).
+      // Code only: the doc comments name the route they read (v2 F2).
       let body = source.split(separator: "\n", omittingEmptySubsequences: false)
         .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
       for token in reads + writes + colours where body.contains(token) { leaks.append("\(path): \(token)") }
-      // The only client calls are the two GETs the corpus is built from.
+      // The only client call is the daemon's search GET (v2 F2): no
+      // client-side corpus, so no listThreads and no readThread here.
       let regex = try? NSRegularExpression(pattern: #"\bclient\.([A-Za-z]+)"#)
       for m in regex?.matches(in: body, range: NSRange(body.startIndex..., in: body)) ?? [] {
         guard let r = Range(m.range(at: 1), in: body) else { continue }
         let call = String(body[r])
-        if call != "listThreads" && call != "readThread" { leaks.append("\(path): client.\(call)") }
+        if call != "search" { leaks.append("\(path): client.\(call)") }
       }
     }
     if swept < 5 { leaks.append("swept \(swept) board 11 files") }
@@ -1110,8 +1118,13 @@ struct AppHygieneTests {
       (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foregroundColor = ." + "green"),
       (views, "run.underlineStyle = .single", "run.background" + "Color = .yellow"),
       (views, "run.underlineStyle = .single", "run.underlineStyle = .single\n        run.foreground" + "Color = Tokens.color(palette.ok)"),
-      (model, "guard case .ok(let page)? = try? await client.listThreads()", "_ = try? await client.send" + "(to: \"x\")"),
-      (model, "public func load() async -> SearchCorpus {", "public func load() async -> SearchCorpus {\n    _ = File" + "Manager.default"),
+      (model, "switch try await client.search(params) {", "_ = try? await client.send" + "(to: \"x\")\n    switch try await client.search(params) {"),
+      (model, "switch try await client.search(params) {", "_ = try? await client.readThread(\"x\")\n    switch try await client.search(params) {"),
+      (
+        model, "public func search(_ query: SearchQuery, zone: TimeZone, cursor: String?) async throws -> SearchPage {",
+        "public func search(_ query: SearchQuery, zone: TimeZone, cursor: String?) async throws -> SearchPage {\n    _ = File"
+          + "Manager.default"
+      ),
       (transcript, ".strokeBorder(Tokens.color(palette.ink), lineWidth: width)", ".strokeBorder(Tokens." + "tint, lineWidth: width)"),
       (shell, "      Board11Keys(model: model)", "      if TestHooks.isUITest { Board11Keys(model: model) }"),
       (shell, "} else if model.search.shown {", "} else if model.search.hidden {"),

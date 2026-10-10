@@ -166,7 +166,7 @@ struct YearRow: View {
           .font(.system(size: 11, weight: current ? .bold : .regular, design: .monospaced))
           .foregroundStyle(ink)
         Spacer(minLength: 4)
-        Text(year.isEmpty ? "none" : "\(year.count)")
+        Text(year.isEmpty ? ProvisionalUI.scrubberEmptyCount : SearchText.grouped(year.count))
           .font(.system(size: 9, design: .monospaced))
           .italic(year.isEmpty)
           .foregroundStyle(year.isEmpty ? ink : Tokens.color(palette.inkDim))

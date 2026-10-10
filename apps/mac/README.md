@@ -287,7 +287,10 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
 - `wemessage.search.group.<channel>`, `wemessage.search.result.<guid>`: a
   channel group and one hit, the cursor's value `selected`
 - `wemessage.search.summary`, `wemessage.search.coverage`: the count line
-  and the coverage strip (`Searched ...`, `Not searched: ...`, D-UI-79)
+  and the coverage strip (`Searched ...`, `Not searched: ...`, `Indexing ...`,
+  D-UI-203 and 204)
+- `wemessage.search.more`: the `Show N more` footer under the results, also
+  cmd-Down (D-UI-211)
 - `wemessage.search.prompt`: the empty query's prompt; a query with no hits
   shows board 10's `wemessage.empty.<case>` instead, case `search`
 - `wemessage.search.facets`, `wemessage.search.facet.<n>`: the facet row

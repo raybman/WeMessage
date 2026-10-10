@@ -73,6 +73,11 @@ public final class ThreadModel {
       load = guid == nil ? .idle : .loading
       turnPages = PagedList(edge: .head, key: { $0.guid })
       anchorTurn = nil
+      windowEnd = nil
+    } else if windowEnd != nil {
+      // Back to the newest turns: a revealed window is not merged under them.
+      turnPages = PagedList(edge: .head, key: { $0.guid })
+      windowEnd = nil
     }
     guard let guid else { return }
     let next: Load
@@ -132,9 +137,31 @@ public final class ThreadModel {
     return out
   }
 
-  /// Reads the shown chat again.
+  /// v2 F2: the instant the shown window ends at, when a search hit or a
+  /// year revealed turns older than the newest page; nil on the newest.
+  public private(set) var windowEnd: String?
+
+  /// v2 F2: shows the window of turns that ends at `until` (a full
+  /// instant): a hit or a year the newest page does not hold. Older pages
+  /// still load above it; a reload re-reads the same window.
+  public func reveal(until: String) async {
+    guard let guid else { return }
+    let read = try? await client.readThread(guid, limit: Self.pageLimit, until: until)
+    guard self.guid == guid, case .ok(let page)? = read else { return }
+    turnPages = PagedList(edge: .head, key: { $0.guid })
+    turnPages.mergeHead(page.turns, next: page.nextBefore)
+    anchorTurn = nil
+    windowEnd = until
+    load = .loaded(merged(page))
+  }
+
+  /// Reads the shown chat again: the newest page, or the revealed window.
   public func reload() async {
-    await open(guid)
+    if let windowEnd {
+      await reveal(until: windowEnd)
+    } else {
+      await open(guid)
+    }
   }
 
   /// Parks an agent draft for later review, here only (D-UI-36).

@@ -36,7 +36,7 @@ struct EmailBoardView: View {
       banner
       if let thread {
         EmailThreadView(model: model, thread: thread, palette: palette)
-          .task(id: model.selectedThread) { await model.thread.open(model.selectedThread) }
+          .task(id: model.threadLoadKey) { await model.loadSelectedThread() }
       } else {
         empty
       }

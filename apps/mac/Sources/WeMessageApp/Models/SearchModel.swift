@@ -5,84 +5,51 @@ import WeMessageKit
 // v2 S4i, board 11: search everything, find in thread, the quick switcher
 // and the year scrubber. Every date shown or compared is sent time (11.C);
 // results order by sent time, newest first, ties broken on id. Every count
-// says what it counted (11.G). Nothing here writes: search reads through the
-// daemon's GETs (D-UI-79) and never touches the Messages database.
+// says what it counted (11.G). Nothing here writes. Since v2 F2 search runs
+// on the daemon's index (GET /v1/search): the app sends the typed tokens and
+// draws what comes back, with the daemon's own account of what it covered.
+// D-UI-79's client-side corpus is retired; it never touches chat.db.
 
-// MARK: - the corpus
+// MARK: - the source
 
-/// What search searched: every doc, and how much of the inbox that is.
-public struct SearchCorpus: Equatable, Sendable {
-  public var docs: [SearchDoc]
-  /// Every listed thread, searched or not: the switcher's rows.
-  public var threads: [ThreadSummary]
-  /// Threads whose transcript was read.
-  public var searchedThreads: Int
-  /// The channels a transcript was read from (SearchChannel raw values).
-  public var channelsSearched: Set<String>
-  /// The daemon's "as of" for the list.
-  public var asOf: Date?
-
-  public init(
-    docs: [SearchDoc], threads: [ThreadSummary], searchedThreads: Int, channelsSearched: Set<String>, asOf: Date?
-  ) {
-    self.docs = docs
-    self.threads = threads
-    self.searchedThreads = searchedThreads
-    self.channelsSearched = channelsSearched
-    self.asOf = asOf
-  }
-
-  public static let empty = SearchCorpus(docs: [], threads: [], searchedThreads: 0, channelsSearched: [], asOf: nil)
-
-  /// One thread's turns as docs.
-  public static func docs(_ turns: [MessageTurn], thread: ThreadSummary) -> [SearchDoc] {
-    turns.map { turn in
-      let outbound = turn.direction == .outbound
-      let sender = outbound ? "You" : (thread.isGroup ? (turn.handle ?? thread.title) : thread.title)
-      let text = turn.text ?? ""
-      var voice = false
-      var link = text.contains("http://") || text.contains("https://")
-      switch turn.kind {
-      case .voice: voice = true
-      case .link: link = true
-      default: break
-      }
-      return SearchDoc(
-        guid: turn.guid, threadGuid: thread.chatGuid, threadTitle: thread.title, isGroup: thread.isGroup,
-        channel: thread.channel, outbound: outbound, sender: sender, handle: outbound ? nil : turn.handle, text: text,
-        sentAt: turn.sentAt, hasAttachment: turn.attachments > 0, hasLink: link, hasVoice: voice)
-    }
-  }
-}
-
-/// Where the corpus comes from. The app's is the daemon (D-UI-79); tests
-/// hand one in.
+/// Where a page of results comes from. The app's is the daemon (D-F2-7:
+/// no client-side fallback); tests hand one in.
 public protocol SearchSource: Sendable {
-  func load() async -> SearchCorpus
+  func search(_ query: SearchQuery, zone: TimeZone, cursor: String?) async throws -> SearchPage
 }
 
-/// D-UI-79: GET /v1/threads, then GET /v1/threads/:guid/messages for each
-/// listed thread, newest window only. Reads, never writes.
+/// The daemon answered, and would not run the search.
+public struct SearchRefused: Error, Equatable, Sendable {
+  public let refusal: Refusal
+}
+
+/// GET /v1/search with the query's tokens (SearchWire), one page at a time.
+/// Reads, never writes.
 public struct DaemonSearchSource: SearchSource {
   let client: GatewayClient
 
   public init(client: GatewayClient) { self.client = client }
 
-  public func load() async -> SearchCorpus {
-    guard case .ok(let page)? = try? await client.listThreads() else { return .empty }
-    var docs: [SearchDoc] = []
-    var searched = 0
-    var channels = Set<String>()
-    for thread in page.threads.prefix(ProvisionalUI.searchThreadCap) {
-      guard case .ok(let messages)? = try? await client.readThread(thread.chatGuid, limit: ProvisionalUI.searchWindow)
-      else { continue }
-      searched += 1
-      channels.insert(thread.channel)
-      docs += SearchCorpus.docs(MessageTurn.turns(messages, glyphs: .provisional), thread: thread)
+  public func search(_ query: SearchQuery, zone: TimeZone, cursor: String?) async throws -> SearchPage {
+    let params = SearchWire.params(query, zone: zone, limit: ProvisionalUI.searchPageSize, cursor: cursor)
+    switch try await client.search(params) {
+    case .ok(let page): return page
+    case .refused(let refusal): throw SearchRefused(refusal: refusal)
     }
-    return SearchCorpus(
-      docs: docs, threads: page.threads, searchedThreads: searched, channelsSearched: channels,
-      asOf: WireDate.parse(page.asOf))
+  }
+}
+
+/// The wait between a keystroke and its search, and before the searching word.
+/// Tests hand in one that only yields.
+public protocol Sleeper: Sendable {
+  func sleep(milliseconds: Int) async throws
+}
+
+public struct TaskSleeper: Sleeper {
+  public init() {}
+
+  public func sleep(milliseconds: Int) async throws {
+    try await Task.sleep(nanoseconds: UInt64(max(0, milliseconds)) * 1_000_000)
   }
 }
 
@@ -123,45 +90,202 @@ public struct SearchFacet: Equatable, Sendable, Identifiable {
   public var id: String { token }
 }
 
+/// What a page (or pages) of the daemon's results draws: the hits, their
+/// groups and facets, and the coverage the daemon reported.
 public struct SearchResults: Equatable, Sendable {
   public let query: SearchQuery
-  /// Every hit, newest sent first, ties on id.
+  /// Every hit read so far, newest sent first, ties on id.
   public let hits: [SearchHit]
   public let groups: [SearchGroup]
-  public let searchedMessages: Int
-  public let searchedThreads: Int
-  public let channelsSearched: [SearchChannel]
+  /// Every match the daemon counted, not only the ones read so far.
+  public let total: Int
+  public let nextCursor: String?
   public let asOf: Date?
+  public let coverage: SearchCoverageDTO
   public let channelFacets: [SearchFacet]
   public let peopleFacets: [SearchFacet]
   public let yearFacets: [SearchFacet]
+  let zone: TimeZone
+  let wireHits: [SearchHitDTO]
+
+  /// The first page.
+  public init(page: SearchPage, query: SearchQuery, zone: TimeZone = .current) {
+    self.init(wireHits: page.hits, page: page, query: query, zone: zone)
+  }
+
+  /// The next page under the ones already read.
+  public func appending(_ page: SearchPage) -> SearchResults {
+    let seen = Set(wireHits.map(\.guid))
+    return SearchResults(
+      wireHits: wireHits + page.hits.filter { !seen.contains($0.guid) }, page: page, query: query, zone: zone)
+  }
+
+  private init(wireHits: [SearchHitDTO], page: SearchPage, query: SearchQuery, zone: TimeZone) {
+    self.query = query
+    self.zone = zone
+    self.wireHits = wireHits
+    self.total = page.total
+    self.nextCursor = page.nextCursor
+    self.asOf = WireDate.parse(page.asOf)
+    self.coverage = page.coverage
+    let docs = SearchEngine.order(wireHits.map(Self.doc))
+    let hits = docs.map { SearchHit(doc: $0, snippet: SearchEngine.snippet($0.text, terms: query.highlightTerms)) }
+    self.hits = hits
+    var groups: [SearchGroup] = []
+    for channel in SearchChannel.allCases {
+      let inChannel = hits.filter { $0.doc.channel == channel.rawValue }
+      if !inChannel.isEmpty { groups.append(SearchGroup(channel: channel, hits: inChannel)) }
+    }
+    self.groups = groups
+    let rail = SearchChannel.allCases.map(\.rawValue)
+    self.channelFacets = page.facets.channels
+      .sorted { (rail.firstIndex(of: $0.channel) ?? rail.count) < (rail.firstIndex(of: $1.channel) ?? rail.count) }
+      .map { SearchFacet(label: SearchChannel(rawValue: $0.channel)?.label ?? $0.channel, count: $0.count, token: "channel:" + $0.channel) }
+    self.peopleFacets = page.facets.senders.map { sender in
+      if sender.handle == "me" { return SearchFacet(label: "You", count: sender.count, token: "from:me") }
+      let named = wireHits.first { !$0.isGroup && $0.from != "me" && $0.handle == sender.handle }?.title
+      return SearchFacet(label: named ?? sender.handle, count: sender.count, token: "from:" + sender.handle)
+    }
+    self.yearFacets = page.facets.years.map {
+      SearchFacet(label: String($0.year), count: $0.count, token: "after:\($0.year) before:\($0.year + 1)")
+    }
+  }
+
+  /// One wire hit as the row draws it. A group's sender is its handle; a
+  /// one-to-one sender is the conversation's title.
+  static func doc(_ hit: SearchHitDTO) -> SearchDoc {
+    let outbound = hit.from == "me"
+    let title = hit.title ?? hit.handle ?? QuickSwitcherModel.handle(hit.chatGuid)
+    let sender = outbound ? "You" : (hit.isGroup ? (hit.handle ?? title) : title)
+    let text = hit.text ?? ""
+    return SearchDoc(
+      guid: hit.guid, threadGuid: hit.chatGuid, threadTitle: title, isGroup: hit.isGroup, channel: hit.channel,
+      outbound: outbound, sender: sender, handle: outbound ? nil : hit.handle, text: text,
+      sentAt: WireDate.parse(hit.sentAt) ?? .distantPast, hasAttachment: hit.hasAttachment,
+      hasLink: text.contains("http://") || text.contains("https://"))
+  }
+
+  /// The channels the daemon searched, in rail order.
+  public var channelsSearched: [SearchChannel] {
+    let searched = Set(coverage.channels.compactMap { if case .searched = $0 { return $0.channel } else { return nil } })
+    return SearchChannel.allCases.filter { searched.contains($0.rawValue) }
+  }
+
+  /// Every channel that was not searched, in rail order: named, never
+  /// silently absent.
+  public var notSearched: [SearchChannel] {
+    let searched = Set(channelsSearched)
+    return SearchChannel.allCases.filter { !searched.contains($0) }
+  }
 
   public var channelsWithHits: Int { groups.count }
-  public var notSearched: [SearchChannel] { SearchChannel.allCases.filter { !channelsSearched.contains($0) } }
+
+  /// iMessage's index: how many messages it holds of how many it will.
+  public var indexed: Int { iMessage?.indexed ?? 0 }
+  public var eligible: Int { iMessage?.eligible ?? 0 }
+  /// The mirror's as-of: how far the index reaches.
+  public var indexedThrough: Date? { (iMessage?.mirrorAsOf).flatMap(WireDate.parse) ?? asOf }
+
+  private var iMessage: (indexed: Int, eligible: Int, mirrorAsOf: String?)? {
+    for channel in coverage.channels {
+      if case .searched(let indexed, let eligible, _, let mirrorAsOf) = channel { return (indexed, eligible, mirrorAsOf) }
+    }
+    return nil
+  }
 
   /// 11.A and 11.G: the count with its coverage, in one line.
   /// "4 results in 1 of 4 channels, as of 12:00".
   public func coverage(zone: TimeZone = .current) -> String {
-    let noun = hits.count == 1 ? "result" : "results"
+    let noun = total == 1 ? "result" : "results"
     let at = asOf.map { ", as of " + ShellText.shortClock($0, zone: zone) } ?? ""
-    return "\(hits.count) \(noun) in \(channelsWithHits) of \(SearchChannel.allCases.count) channels\(at)"
+    return "\(total) \(noun) in \(channelsWithHits) of \(SearchChannel.allCases.count) channels\(at)"
   }
 
-  /// What was searched, and what was not: "Searched 31 messages in 10
-  /// threads on iMessage. Not searched: WhatsApp, LinkedIn, Email."
+  /// D-UI-203: "Searched 41,210 iMessage messages, indexed through Sep 19,
+  /// 2026 · 4:12 PM. Not searched: WhatsApp, LinkedIn, Email."
   public var searchedLine: String {
-    let on = channelsSearched.map(\.label).joined(separator: ", ")
-    var line = "Searched \(searchedMessages) messages in \(searchedThreads) threads"
-    line += on.isEmpty ? "." : " on \(on)."
+    let through = indexedThrough.map { SearchText.stamp($0, zone: zone) } ?? ""
+    var line = String(format: ProvisionalUI.searchedLineFormat, SearchText.grouped(indexed), through)
     let missing = notSearched.map(\.label)
-    if !missing.isEmpty { line += " Not searched: " + missing.joined(separator: ", ") + "." }
+    if !missing.isEmpty {
+      line += String(format: ProvisionalUI.searchNotSearchedFormat, missing.joined(separator: ProvisionalUI.searchNotSearchedJoin))
+    }
     return line
   }
 
-  /// The field's trailing summary: "4 results · 31 messages · 1 of 4
+  /// D-UI-204: how far a still-building index is, or nil once it is whole.
+  public var indexingLine: String? {
+    guard eligible > 0, indexed < eligible else { return nil }
+    return String(
+      format: ProvisionalUI.searchIndexingFormat, indexingPercent, SearchText.grouped(indexed),
+      SearchText.grouped(eligible))
+  }
+
+  /// Rounded down: 99.9% indexed is never drawn as 100%.
+  public var indexingPercent: Int { eligible > 0 ? indexed * 100 / eligible : 100 }
+
+  /// D-UI-206, 208 and 209: what the daemon left out, each in its own words.
+  public var notes: [String] {
+    var out: [String] = []
+    if coverage.capped { out.append(ProvisionalUI.searchCappedLine) }
+    if coverage.tokens.contains(where: { $0.reason == "short-term" && $0.applied != "applied" }) {
+      out.append(ProvisionalUI.searchShortTermLine)
+    }
+    if coverage.deletedHidden == 1 {
+      out.append(ProvisionalUI.searchDeletedOne)
+    } else if coverage.deletedHidden > 1 {
+      out.append(String(format: ProvisionalUI.searchDeletedFormat, coverage.deletedHidden))
+    }
+    if !coverage.deletionsChecked { out.append(ProvisionalUI.searchDeletionsUnchecked) }
+    return out
+  }
+
+  /// Every coverage line, in drawn order: what was searched first.
+  public var coverageLines: [String] { [searchedLine] + (indexingLine.map { [$0] } ?? []) + notes }
+
+  /// The field's trailing summary: "4 results · 45 messages · 1 of 4
   /// channels searched".
   public var fieldSummary: String {
-    "\(hits.count) results · \(searchedMessages) messages · \(channelsSearched.count) of \(SearchChannel.allCases.count) channels searched"
+    "\(total) results · \(SearchText.grouped(indexed)) messages · \(channelsSearched.count) of \(SearchChannel.allCases.count) channels searched"
+  }
+
+  /// D-UI-211: how many the next page can hold, or nil with no next page.
+  public var moreCount: Int? {
+    guard nextCursor != nil else { return nil }
+    return max(0, min(ProvisionalUI.searchPageSize, total - hits.count))
+  }
+
+  /// D-UI-207: what the daemon said about a chip it honoured only in part,
+  /// or not at all: the trailing word, and the reason read out.
+  public func applied(_ chip: TokenChip) -> (word: String, reason: String)? {
+    guard chip.id < query.tokens.count, let wire = Self.wire(query.tokens[chip.id]) else { return nil }
+    guard
+      let token = coverage.tokens.first(where: { $0.op == wire.op && Self.same($0, wire) && $0.applied != "applied" })
+    else { return nil }
+    let reason = token.reason.flatMap { ProvisionalUI.searchChipReasons[$0] } ?? ""
+    if token.applied == "not-applied" { return (ProvisionalUI.searchChipNotApplied, reason) }
+    let word = token.reason.flatMap { ProvisionalUI.searchChipWords[$0] } ?? ProvisionalUI.searchChipPartly
+    return (word, reason)
+  }
+
+  /// A token as the daemon's coverage names it.
+  static func wire(_ token: SearchToken) -> (op: String, value: String, at: Date?)? {
+    switch token {
+    case .term(let word): ("term", word, nil)
+    case .unparsed(let raw, _): ("term", raw, nil)
+    case .from(.me): ("from", "me", nil)
+    case .from(.name(let name)): ("from", name, nil)
+    case .inThread(let thread): ("in", thread, nil)
+    case .channel(let channel): ("channel", channel.rawValue, nil)
+    case .has(let kind): ("has", kind.rawValue, nil)
+    case .before(let date): ("before", "", date.start)
+    case .after(let date): ("after", "", date.start)
+    }
+  }
+
+  static func same(_ token: TokenAppliedDTO, _ wire: (op: String, value: String, at: Date?)) -> Bool {
+    if let at = wire.at { return WireDate.parse(token.value) == at }
+    return token.value.compare(wire.value, options: SearchQuery.fold) == .orderedSame
   }
 }
 
@@ -180,6 +304,17 @@ public enum SearchText {
   public static func direction(outbound: Bool) -> String {
     outbound ? "→ sent" : "← to you"
   }
+
+  /// "530,000": grouped by thousands with commas, whatever the locale.
+  public static func grouped(_ n: Int) -> String {
+    let digits = String(abs(n))
+    var out = ""
+    for (i, c) in digits.enumerated() {
+      if i > 0 && (digits.count - i) % 3 == 0 { out.append(",") }
+      out.append(c)
+    }
+    return (n < 0 ? "-" : "") + out
+  }
 }
 
 public enum SearchEngine {
@@ -187,36 +322,6 @@ public enum SearchEngine {
   /// lands one row off.
   public static func order(_ docs: [SearchDoc]) -> [SearchDoc] {
     docs.sorted { $0.sentAt == $1.sentAt ? $0.guid < $1.guid : $0.sentAt > $1.sentAt }
-  }
-
-  public static func run(_ query: SearchQuery, in corpus: SearchCorpus, zone: TimeZone = .current) -> SearchResults {
-    let matched = query.isEmpty ? [] : order(corpus.docs.filter(query.matches))
-    let hits = matched.map { SearchHit(doc: $0, snippet: snippet($0.text, terms: query.highlightTerms)) }
-    var groups: [SearchGroup] = []
-    for channel in SearchChannel.allCases {
-      let inChannel = hits.filter { $0.doc.channel == channel.rawValue }
-      if !inChannel.isEmpty { groups.append(SearchGroup(channel: channel, hits: inChannel)) }
-    }
-    let channelFacets = groups.map {
-      SearchFacet(label: $0.channel.label, count: $0.hits.count, token: "channel:" + $0.channel.rawValue)
-    }
-    var people: [String: Int] = [:]
-    for hit in hits { people[hit.doc.sender, default: 0] += 1 }
-    let peopleFacets = people.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map {
-      SearchFacet(label: $0.key, count: $0.value, token: $0.key == "You" ? "from:me" : "from:\"\($0.key)\"")
-    }
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = zone
-    var years: [Int: Int] = [:]
-    for hit in hits { years[calendar.component(.year, from: hit.doc.sentAt), default: 0] += 1 }
-    let yearFacets = years.keys.sorted(by: >).map { year in
-      SearchFacet(label: String(year), count: years[year] ?? 0, token: "after:\(year) before:\(year + 1)")
-    }
-    return SearchResults(
-      query: query, hits: hits, groups: groups, searchedMessages: corpus.docs.count,
-      searchedThreads: corpus.searchedThreads,
-      channelsSearched: SearchChannel.allCases.filter { corpus.channelsSearched.contains($0.rawValue) },
-      asOf: corpus.asOf, channelFacets: channelFacets, peopleFacets: peopleFacets, yearFacets: yearFacets)
   }
 
   /// D-UI-87: the sentence holding the first match, cut around it, with
@@ -294,19 +399,39 @@ public enum SearchEngine {
 
 // MARK: - search everything (shift-cmd-F)
 
+/// Why nothing was searched (D-UI-212).
+public enum SearchFailure: Equatable, Sendable {
+  /// The daemon could not be reached.
+  case daemonDown
+  /// The daemon answered and did not run the search.
+  case notRun
+
+  public var line: String {
+    switch self {
+    case .daemonDown: ProvisionalUI.searchDaemonDown
+    case .notRun: ProvisionalUI.searchNotRun
+    }
+  }
+}
+
 @MainActor
 @Observable
 public final class SearchModel {
   public internal(set) var shown = false
-  /// The raw field. Every change re-runs the query.
+  /// The raw field. Every change re-parses at once and searches after a
+  /// pause (D-UI-205).
   public var text = "" {
     didSet { if text != oldValue { rerun() } }
   }
   public internal(set) var query = SearchQuery.parse("")
   public internal(set) var results: SearchResults?
-  public internal(set) var corpus = SearchCorpus.empty
-  public internal(set) var loading = false
-  /// How long the last run took, for the empty state's detail.
+  /// True once a search has been out for longer than D-UI-205's wait.
+  public internal(set) var searching = false
+  /// Nothing was searched, and why. Never drawn beside stale results.
+  public internal(set) var failure: SearchFailure?
+  /// True while the next page is on its way.
+  public internal(set) var loadingMore = false
+  /// How long the last search took, round trip, for the empty state.
   public internal(set) var lastMillis = 0
   /// The highlighted result's guid.
   public var selection: String?
@@ -314,37 +439,37 @@ public final class SearchModel {
   public internal(set) var jumpedFrom: String?
   let source: any SearchSource
   let zone: TimeZone
-  private var loadTask: Task<Void, Never>?
+  let sleeper: any Sleeper
+  private var searchTask: Task<Void, Never>?
+  private var slowTask: Task<Void, Never>?
+  private var moreTask: Task<Void, Never>?
+  /// Bumped by every edit: a response for an older one is never applied.
+  private var generation = 0
 
-  public init(source: any SearchSource, zone: TimeZone = .current) {
+  public init(source: any SearchSource, zone: TimeZone = .current, sleeper: any Sleeper = TaskSleeper()) {
     self.source = source
     self.zone = zone
+    self.sleeper = sleeper
   }
 
-  /// Shift-cmd-F: open with an empty field, and read the corpus fresh.
+  /// Shift-cmd-F: open with an empty field.
   public func open() {
     shown = true
     text = ""
     selection = nil
     query = SearchQuery.parse("", calendar: calendar)
     results = nil
-    loading = true
-    loadTask?.cancel()
-    loadTask = Task { [weak self] in
-      guard let self else { return }
-      let corpus = await self.source.load()
-      self.corpus = corpus
-      self.loading = false
-      self.rerun()
-    }
+    failure = nil
   }
 
-  /// Wait for the corpus (tests).
-  func settled() async { await loadTask?.value }
+  /// Wait for the search in flight and the page in flight (tests).
+  func settled() async {
+    await searchTask?.value
+    await moreTask?.value
+  }
 
   public func close() {
     shown = false
-    loadTask?.cancel()
   }
 
   var calendar: Calendar {
@@ -353,15 +478,88 @@ public final class SearchModel {
     return c
   }
 
+  /// Re-parse now; search after the pause. Every edit cancels the search
+  /// it replaces, so typing a word is one request, not one a letter.
   func rerun() {
     query = SearchQuery.parse(text, calendar: calendar)
-    guard !loading else { return }
-    let began = Date()
-    let next = SearchEngine.run(query, in: corpus, zone: zone)
-    lastMillis = Int(Date().timeIntervalSince(began) * 1000)
-    results = query.isEmpty ? nil : next
-    if let selection, next.hits.contains(where: { $0.id == selection }) { return }
-    selection = next.hits.first?.id
+    searchTask?.cancel()
+    slowTask?.cancel()
+    moreTask?.cancel()
+    moreTask = nil
+    loadingMore = false
+    searching = false
+    generation += 1
+    guard !query.isEmpty else {
+      results = nil
+      failure = nil
+      selection = nil
+      return
+    }
+    let gen = generation
+    let query = self.query
+    let zone = self.zone
+    let source = self.source
+    let sleeper = self.sleeper
+    searchTask = Task { [weak self] in
+      do { try await sleeper.sleep(milliseconds: ProvisionalUI.searchDebounceMillis) } catch { return }
+      self?.slowTask = Task { [weak self] in
+        do { try await sleeper.sleep(milliseconds: ProvisionalUI.searchSlowMillis) } catch { return }
+        guard let self, !Task.isCancelled, self.generation == gen else { return }
+        self.searching = true
+      }
+      let began = Date()
+      let outcome: Result<SearchPage, any Error>
+      do {
+        outcome = .success(try await source.search(query, zone: zone, cursor: nil))
+      } catch {
+        outcome = .failure(error)
+      }
+      // A response for an edit since replaced is never drawn.
+      guard let self, self.generation == gen else { return }
+      self.slowTask?.cancel()
+      self.searching = false
+      self.lastMillis = Int(Date().timeIntervalSince(began) * 1000)
+      self.apply(outcome, query: query)
+    }
+  }
+
+  private func apply(_ outcome: Result<SearchPage, any Error>, query: SearchQuery) {
+    switch outcome {
+    case .success(let page):
+      failure = nil
+      let next = SearchResults(page: page, query: query, zone: zone)
+      results = next
+      if let selection, next.hits.contains(where: { $0.id == selection }) { return }
+      selection = next.hits.first?.id
+    case .failure(let error):
+      // D-UI-212: nothing stale stays on screen.
+      results = nil
+      selection = nil
+      failure = Self.isDown(error) ? .daemonDown : .notRun
+    }
+  }
+
+  static func isDown(_ error: any Error) -> Bool {
+    if case GatewayError.transport? = error as? GatewayError { return true }
+    return error is URLError
+  }
+
+  /// D-UI-211: the next page, under the ones read. cmd-Down or the footer.
+  public func more() {
+    guard let current = results, current.nextCursor != nil, moreTask == nil else { return }
+    let cursor = current.nextCursor
+    let gen = generation
+    let zone = self.zone
+    let source = self.source
+    loadingMore = true
+    moreTask = Task { [weak self] in
+      let page = try? await source.search(current.query, zone: zone, cursor: cursor)
+      guard let self, self.generation == gen else { return }
+      self.loadingMore = false
+      self.moreTask = nil
+      // A page that failed leaves the results read so far, and the footer.
+      if let page, self.results == current { self.results = current.appending(page) }
+    }
   }
 
   /// Up and down arrows: the next or previous result, in drawn order.
@@ -410,21 +608,22 @@ public final class SearchModel {
   /// The empty state's facts (board 10's "Nothing for ..."): what was
   /// searched, so zero results are not a silent nothing.
   public func emptyFacts(asOf: Date) -> EmptyFacts {
-    let index = corpus.asOf ?? asOf
+    let index = results?.indexedThrough ?? asOf
     return EmptyFacts(
       channel: "", cleared: 0, arrived: 0, snoozed: 0, waitingOn: "", asOf: asOf, syncedAt: index, lastArrival: index,
-      query: text, searched: corpus.docs.count, channels: corpus.channelsSearched.count, searchMillis: lastMillis,
-      indexAsOf: index, unconnectedChannel: unsearchedChannel?.label ?? "", newThreadWith: "")
+      query: text, searched: results?.indexed ?? 0, channels: results?.channelsSearched.count ?? 0,
+      searchMillis: lastMillis, indexAsOf: index, unconnectedChannel: unsearchedChannel?.label ?? "", newThreadWith: "")
   }
 
-  /// The third empty (11.G): every channel the query names is one no
-  /// transcript was read from. "channel:whatsapp" is not "nothing found",
-  /// it is "not searched".
+  /// The third empty (11.G): every channel the query names is one the
+  /// daemon did not search. "channel:whatsapp" is not "nothing found", it
+  /// is "not searched".
   public var unsearchedChannel: SearchChannel? {
     let named = query.tokens.compactMap { token -> SearchChannel? in
       if case .channel(let c) = token { return c } else { return nil }
     }
-    guard !named.isEmpty, named.allSatisfy({ !corpus.channelsSearched.contains($0.rawValue) }) else { return nil }
+    let searched = results?.channelsSearched ?? []
+    guard !named.isEmpty, named.allSatisfy({ !searched.contains($0) }) else { return nil }
     return named.first
   }
 
@@ -512,7 +711,7 @@ public final class QuickSwitcherModel {
   }
 
   /// The handle in a chat guid: "iMessage;-;+15550100001" is +15550100001.
-  static func handle(_ chatGuid: String) -> String {
+  nonisolated static func handle(_ chatGuid: String) -> String {
     chatGuid.split(separator: ";", omittingEmptySubsequences: false).last.map(String.init) ?? chatGuid
   }
 
@@ -602,8 +801,24 @@ public struct YearScrubber: Equatable, Sendable {
   public struct Year: Equatable, Sendable, Identifiable {
     public let year: Int
     public let count: Int
+    /// The year's newest message, when the daemon named it: where a year
+    /// none of the loaded turns hold is loaded until (D-UI-210).
+    public let last: String?
     public var id: Int { year }
     public var isEmpty: Bool { count == 0 }
+
+    public init(year: Int, count: Int, last: String? = nil) {
+      self.year = year
+      self.count = count
+      self.last = last
+    }
+
+    /// D-UI-210: the year and its grouped count; an empty year says so.
+    public var label: String {
+      String(
+        format: ProvisionalUI.scrubberRowFormat, year,
+        isEmpty ? ProvisionalUI.scrubberEmptyCount : SearchText.grouped(count))
+    }
   }
 
   /// Newest first; a year with nothing in it stays, muted.
@@ -615,14 +830,12 @@ public struct YearScrubber: Equatable, Sendable {
   let turns: [Mark]
   let calendar: Calendar
 
+  /// Over the loaded turns only: before the daemon's years arrive.
   public init(turns: [MessageTurn], zone: TimeZone = .current) {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = zone
     self.calendar = calendar
-    let marks: [Mark] = turns.map { Mark(guid: $0.guid, sentAt: $0.sentAt) }
-    let sorted = marks.sorted { (a: Mark, b: Mark) -> Bool in
-      a.sentAt == b.sentAt ? a.guid < b.guid : a.sentAt < b.sentAt
-    }
+    let sorted = Self.marks(turns)
     self.turns = sorted
     var counts: [Int: Int] = [:]
     for turn in sorted { counts[calendar.component(.year, from: turn.sentAt), default: 0] += 1 }
@@ -633,12 +846,41 @@ public struct YearScrubber: Equatable, Sendable {
     years = (low...high).reversed().map { Year(year: $0, count: counts[$0] ?? 0) }
   }
 
-  /// Where choosing `year` lands: its first message, or, for an empty
-  /// year, the message nearest its first instant (an earlier one on a tie).
-  public func anchor(for year: Int) -> String? {
+  /// v2 F2: the daemon's years for the whole thread, counted in its zone,
+  /// over the turns loaded so far for the anchors.
+  public init(years: ThreadYears, turns: [MessageTurn]) {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: years.tz) ?? .current
+    self.calendar = calendar
+    self.turns = Self.marks(turns)
+    self.years = years.years.sorted { $0.year > $1.year }.map { Year(year: $0.year, count: $0.count, last: $0.last) }
+  }
+
+  private static func marks(_ turns: [MessageTurn]) -> [Mark] {
+    turns.map { Mark(guid: $0.guid, sentAt: $0.sentAt) }.sorted { (a: Mark, b: Mark) -> Bool in
+      a.sentAt == b.sentAt ? a.guid < b.guid : a.sentAt < b.sentAt
+    }
+  }
+
+  /// True when `year` has messages and none of the loaded turns is one.
+  public func needsLoad(_ year: Int) -> Bool {
+    guard let row = years.first(where: { $0.year == year }), row.count > 0, row.last != nil else { return false }
+    guard let (start, end) = bounds(year) else { return false }
+    return !turns.contains { $0.sentAt >= start && $0.sentAt < end }
+  }
+
+  private func bounds(_ year: Int) -> (Date, Date)? {
     guard let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
       let end = calendar.date(from: DateComponents(year: year + 1, month: 1, day: 1))
     else { return nil }
+    return (start, end)
+  }
+
+  /// Where choosing `year` lands: its first loaded message, or, for a
+  /// year none is in, the loaded message nearest its first instant (an
+  /// earlier one on a tie).
+  public func anchor(for year: Int) -> String? {
+    guard let (start, end) = bounds(year) else { return nil }
     if let first = turns.first(where: { $0.sentAt >= start && $0.sentAt < end }) { return first.guid }
     let before = turns.last { $0.sentAt < start }
     let after = turns.first { $0.sentAt >= start }
@@ -651,12 +893,12 @@ public struct YearScrubber: Equatable, Sendable {
     }
   }
 
-  /// "viewing 2024 · 5 messages in 2024 · 1 older than this".
+  /// "viewing 2024 · 5 messages in 2024 · 1 older than this": counted
+  /// over the years, so older messages not yet loaded are counted too.
   public func line(viewing year: Int) -> String {
     let count = years.first { $0.year == year }?.count ?? 0
-    let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) ?? .distantPast
-    let older = turns.filter { $0.sentAt < start }.count
+    let older = years.filter { $0.year < year }.reduce(0) { $0 + $1.count }
     let noun = count == 1 ? "message" : "messages"
-    return "viewing \(year) · \(count) \(noun) in \(year) · \(older) older than this"
+    return "viewing \(year) · \(SearchText.grouped(count)) \(noun) in \(year) · \(SearchText.grouped(older)) older than this"
   }
 }

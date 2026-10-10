@@ -222,7 +222,7 @@ struct ContentPane: View {
         Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 0.5).accessibilityHidden(true)
         ThreadView(model: model, thread: thread, palette: palette)
       }
-      .task(id: model.selectedThread) { await model.thread.open(model.selectedThread) }
+      .task(id: model.threadLoadKey) { await model.loadSelectedThread() }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .accessibilityElement(children: .contain)
       .accessibilityLabel(thread.title)

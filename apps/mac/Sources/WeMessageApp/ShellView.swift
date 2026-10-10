@@ -343,6 +343,7 @@ enum ShellID {
   static let searchField = "wemessage.search.field"
   static let searchSummary = "wemessage.search.summary"
   static let searchCoverage = "wemessage.search.coverage"
+  static let searchMore = "wemessage.search.more"
   static let searchPrompt = "wemessage.search.prompt"
   static let searchFacets = "wemessage.search.facets"
   static let searchTokenPrefix = "wemessage.search.token."

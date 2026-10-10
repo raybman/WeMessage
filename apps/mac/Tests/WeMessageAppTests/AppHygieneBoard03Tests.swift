@@ -118,7 +118,7 @@ struct AppHygieneBoard03Tests {
     if swept < 4 { out.append("swept \(swept) board 03 files") }
     let views = code(files.first { $0.0 == threadViews }?.1 ?? "")
     let awaits = views.components(separatedBy: "await ").count - 1
-    if awaits != 1 || !views.contains("await model.thread.open(model.selectedThread)") {
+    if awaits != 1 || !views.contains("await model.loadSelectedThread()") {
       out.append("\(threadViews): \(awaits) awaits, not the thread's one read")
     }
     for token in ["Task {", "Task(", ".task {"] where views.contains(token) { out.append("\(threadViews): \(token)") }

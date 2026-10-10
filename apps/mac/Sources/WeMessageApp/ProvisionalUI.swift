@@ -28,8 +28,11 @@ import Foundation
 // the v2 F3 thread state build, the queue row's reason and the one line a
 // write the daemon refused draws; D-UI-195..202: the v2 F4 rich turns,
 // the reaction glyphs, the delivery words and the file lines the daemon now
-// serves. D-UI-51 is retired: the daemon keeps Done, Snooze and Mute since
-// v2 F3).
+// serves; D-UI-203..212: the v2 F2 search on the daemon's index, the
+// coverage and indexing lines, the debounce, the chip words, the scrubber's
+// counts, the page footer and the daemon-down line. D-UI-51 is retired: the
+// daemon keeps Done, Snooze and Mute since v2 F3. D-UI-79 is retired: search
+// runs on the daemon's index since v2 F2, with no client-side caps).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -747,14 +750,6 @@ public enum ProvisionalUI {
   public static let agentPageWidth: Double = 960
   public static let agentSideColumnWidth: Double = 300
 
-  // D-UI-79: the daemon serves no search route (G-11a). Search runs here,
-  // over what the daemon already serves through GETs: the thread list, then
-  // each listed thread's newest window of turns. At most 60 threads, 200
-  // turns each. A channel with no transcript served is named as not searched in
-  // the coverage line, never silently absent. Nothing reads chat.db.
-  public static let searchThreadCap = 60
-  public static let searchWindow = 200
-
   // D-UI-80: a chunk typed like an operator that does not parse (foo:bar,
   // before:last) is drawn as a dashed token and still constrains the search
   // as literal text. It is never dropped and never drawn as parsed.
@@ -785,8 +780,9 @@ public enum ProvisionalUI {
   // 02, 06 and 09 are unchanged. It spans the thread's oldest loaded year
   // to the newest; a year with no message is a muted row, not removed.
   // Choosing an empty year lands on the nearest message (an earlier one on
-  // a tie). The 200-a-window loader is deferred: the scrubber jumps within
-  // the turns the thread already loaded, and says how many are older.
+  // a tie). Since v2 F2 the years and their counts are the daemon's
+  // (GET /v1/threads/:guid/years), and a year with messages none of the
+  // loaded turns hold loads that year's newest window (D-UI-210).
   public enum ScrubberShown: Sendable {
     case onCommandOptionGOrJump
   }
@@ -1332,4 +1328,71 @@ public enum ProvisionalUI {
 
   // D-UI-202: a sticker's file line is the word, not its file name.
   public static let stickerLine = "Sticker"
+
+  // D-UI-203: the coverage line names what was searched, how far the index
+  // reaches, and every channel that was not searched. The count is grouped
+  // with commas; the stamp is the mirror's as-of in the operator's zone.
+  public static let searchedLineFormat = "Searched %@ iMessage messages, indexed through %@."
+  public static let searchNotSearchedFormat = " Not searched: %@."
+  public static let searchNotSearchedJoin = ", "
+
+  // D-UI-204: while the index is still being built, the next line says how
+  // far it is, as a whole percent rounded down, and a 1 pt rule bar in ink
+  // shows the same fraction. No colour.
+  public static let searchIndexingFormat = "Indexing iMessage: %d%% (%@ of %@). Older messages are not searched yet."
+  public static let searchIndexingBarHeight: Double = 1
+
+  // D-UI-205: a query is sent 180 ms after the last keystroke; the field's
+  // summary says "Searching…" only once a search has run 300 ms. No spinner.
+  public static let searchDebounceMillis = 180
+  public static let searchSlowMillis = 300
+  public static let searchingWord = "Searching\u{2026}"
+
+  // D-UI-206: more matches than the daemon sorts.
+  public static let searchCappedLine = "Showing the newest 20,000 matches. Add a word or a date to narrow."
+
+  // D-UI-207: a token the daemon honoured only in part, or not at all,
+  // stays solid (dashed is for unparsed) and carries a trailing word; the
+  // reason is read out in its accessibility label.
+  public static let searchChipWords: [String: String] = [
+    "handles-and-saved-names": "handles only",
+    "short-term": "newest 20,000 only",
+  ]
+  public static let searchChipPartly = "partly applied"
+  public static let searchChipNotApplied = "not applied"
+  public static let searchChipSeparator = " \u{00B7} "
+  public static let searchChipReasons: [String: String] = [
+    "handles-and-saved-names": "matched on handles and saved contact names only",
+    "short-term": "matched in the newest 20,000 messages only",
+    "source-unavailable": "the source could not be read",
+    "no-source": "no source serves this yet",
+  ]
+
+  // D-UI-208: a term under three letters was matched over the newest
+  // 20,000 messages only.
+  public static let searchShortTermLine = "Words under 3 letters were matched in the newest 20,000 messages only."
+
+  // D-UI-209: matches deleted in Messages, still in the mirror, are counted
+  // and not shown. A page whose deletions could not be checked says so
+  // (v2 F2e-2 deviation: the plan names no words for deletionsChecked false).
+  public static let searchDeletedOne = "1 match deleted in Messages is not shown."
+  public static let searchDeletedFormat = "%d matches deleted in Messages are not shown."
+  public static let searchDeletionsUnchecked = "Messages could not be read, so deleted matches may still show."
+
+  // D-UI-210: a scrubber row reads "2019 · 12,930"; an empty year is muted
+  // and kept. Choosing a year none of the loaded turns hold loads its
+  // newest window.
+  public static let scrubberRowFormat = "%d \u{00B7} %@"
+  public static let scrubberEmptyCount = "none"
+
+  // D-UI-211: 50 results a page, and a footer that reads the next page on
+  // a click or cmd-Down. No infinite scroll.
+  public static let searchPageSize = 50
+  public static let searchMoreFormat = "Show %d more"
+
+  // D-UI-212: with the daemon down, nothing is searched and nothing stale
+  // stays on screen. A search the daemon refused says so the same way
+  // (v2 F2e-2 deviation: the plan names only the daemon-down words).
+  public static let searchDaemonDown = "Search needs the WeMessage daemon. Nothing was searched."
+  public static let searchNotRun = "The daemon did not run this search. Nothing was searched."
 }

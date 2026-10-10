@@ -5,7 +5,7 @@ import XCTest
 /// v2 S4i: board 11, search. One launch per appearance, no more (the UI
 /// job's time budget), over the fake daemon's "search" scenario: the rich
 /// inbox plus a Maya transcript from 2022 to today. Search runs over what
-/// the daemon serves through GETs (D-UI-79); nothing reads a chat.db. The
+/// the daemon's index serves (GET /v1/search, v2 F2); nothing reads a chat.db. The
 /// launch never touches the mouse while a key can do it:
 /// - shift-cmd-F opens search with its field holding the keyboard; "cabin"
 ///   is four results, newest first, the first selected (11.A);
@@ -39,6 +39,35 @@ final class Board11Tests: XCTestCase {
   @MainActor
   func testBoard11Dark() async throws {
     try await search(appearance: "dark")
+  }
+
+  /// v2 F2: while the daemon is still building its index, the coverage
+  /// says how far it is, and a token honoured in part says so on its chip
+  /// (D-UI-204, D-UI-207). One light launch, over "search-indexing".
+  @MainActor
+  func testBoard11IndexingLight() async throws {
+    try await FakeDaemon.scenario("search-indexing")
+    let app = UITestApp.make(appearance: "light", reduceTransparency: false)
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let row = QueueUI.element(app, ID.rowPrefix + QueueUI.maya)
+    XCTAssertTrue(row.waitForExistence(timeout: UITestApp.timeout), "the thread list never loaded")
+    app.typeKey("f", modifierFlags: [.command, .shift])
+    XCTAssertTrue(QueueUI.element(app, ID.search).waitForExistence(timeout: UITestApp.timeout), "shift-cmd-F opened no search")
+    type(app, into: ID.searchField, "from:maya cabin")
+    XCTAssertTrue(QueueUI.waitUntil { self.results(app) == 1 }, "from:maya cabin: \(results(app)) results")
+    XCTAssertTrue(selected(app, "msg-0504"), "the one result is not selected")
+    let coverage = QueueUI.label(app, ID.searchCoverage)
+    XCTAssertTrue(coverage.contains("Indexing iMessage: 41%"), "coverage: \(coverage)")
+    XCTAssertTrue(coverage.contains("Not searched: "), "coverage names no unsearched channel: \(coverage)")
+    let chip = ID.searchTokenPrefix + "0"
+    XCTAssertEqual(QueueUI.value(app, chip), "parsed", "a partial token is drawn as parsed")
+    let word = ProvisionalUI.searchChipWords["handles-and-saved-names"] ?? "missing"
+    XCTAssertTrue(QueueUI.label(app, chip).contains(word), "the partial chip says nothing: \(QueueUI.label(app, chip))")
+    QueueUI.settle()
+    glance(app, name: "board-11-indexing-light.png")
+    try await QueueUI.assertJournal("board 11 indexing")
   }
 
   @MainActor

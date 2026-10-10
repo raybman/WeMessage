@@ -24,9 +24,11 @@ struct SearchPane: View {
           TokenRow(search: search, palette: palette)
         }
         if let results = search.results {
-          Text(results.searchedLine)
+          CoverageBlock(results: results, palette: palette)
+        } else if let failure = search.failure {
+          Text(failure.line)
             .font(.system(size: 10))
-            .foregroundStyle(Tokens.color(palette.inkDim))
+            .foregroundStyle(Tokens.color(palette.ink))
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier(ShellID.searchCoverage)
         }
@@ -43,7 +45,7 @@ struct SearchPane: View {
   }
 
   private var summary: String {
-    if search.loading { return "reading threads" }
+    if search.searching { return ProvisionalUI.searchingWord }
     guard let results = search.results else { return "" }
     return results.fieldSummary + " \u{00B7} \(search.lastMillis)ms"
   }
@@ -98,8 +100,8 @@ struct SearchPane: View {
   }
 
   @ViewBuilder private var content: some View {
-    if search.loading {
-      SearchPromptView(line: "Reading the threads the daemon serves\u{2026}", palette: palette)
+    if let failure = search.failure {
+      SearchPromptView(line: failure.line, palette: palette)
     } else if let empty = search.empty {
       // Board 10's "Nothing for ..." (and its not-connected empty), reused.
       EmptyStateView(copy: EmptyStates.copy(empty, search.emptyFacts(asOf: model.queueClock)), palette: palette)
@@ -189,7 +191,7 @@ struct TokenRow: View {
   var body: some View {
     HStack(spacing: 6) {
       ForEach(search.query.chips) { chip in
-        TokenChipView(chip: chip, palette: palette) { search.remove(chip) }
+        TokenChipView(chip: chip, note: search.results?.applied(chip), palette: palette) { search.remove(chip) }
       }
       Spacer(minLength: 0)
     }
@@ -198,11 +200,18 @@ struct TokenRow: View {
 
 struct TokenChipView: View {
   let chip: TokenChip
+  /// D-UI-207: how far the daemon honoured this token, when not fully.
+  var note: (word: String, reason: String)? = nil
   let palette: Tokens.Palette
   let remove: () -> Void
 
   private var spoken: String {
-    chip.parsed ? "Token " + chip.text : "Token " + chip.text + ", " + SearchCopy.unparsed(chip)
+    var words = chip.parsed ? "Token " + chip.text : "Token " + chip.text + ", " + SearchCopy.unparsed(chip)
+    if let note {
+      words += ", " + note.word
+      if !note.reason.isEmpty { words += ", " + note.reason }
+    }
+    return words
   }
 
   var body: some View {
@@ -225,6 +234,11 @@ struct TokenChipView: View {
         .foregroundStyle(Tokens.color(palette.ink))
       if !chip.parsed {
         Text(chip.reason?.rawValue ?? "")
+          .font(.system(size: 9))
+          .foregroundStyle(Tokens.color(palette.inkDim))
+      }
+      if let note {
+        Text(ProvisionalUI.searchChipSeparator + note.word)
           .font(.system(size: 9))
           .foregroundStyle(Tokens.color(palette.inkDim))
       }
@@ -281,6 +295,24 @@ struct ResultsList: View {
                 .id(hit.id)
             }
           }
+          if let more = results.moreCount, more > 0 {
+            Button {
+              search.more()
+            } label: {
+              Text(String(format: ProvisionalUI.searchMoreFormat, more))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Tokens.color(palette.ink))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .overlay(Capsule().strokeBorder(Tokens.color(palette.ink), lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable()
+            .disabled(search.loadingMore)
+            .padding(.top, 10)
+            .accessibilityIdentifier(ShellID.searchMore)
+          }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -294,6 +326,39 @@ struct ResultsList: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+/// D-UI-203..209: what was searched, how far the index reaches, and what the
+/// daemon left out, one line each, with a 1 pt ink bar under the indexing
+/// line. Read as one element, opening "Searched ".
+struct CoverageBlock: View {
+  let results: SearchResults
+  let palette: Tokens.Palette
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      ForEach(Array(results.coverageLines.enumerated()), id: \.offset) { _, line in
+        Text(line)
+          .font(.system(size: 10))
+          .foregroundStyle(Tokens.color(palette.inkDim))
+          .fixedSize(horizontal: false, vertical: true)
+        if line == results.indexingLine {
+          GeometryReader { geo in
+            ZStack(alignment: .leading) {
+              Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.25))
+              Rectangle().fill(Tokens.color(palette.ink))
+                .frame(width: geo.size.width * Double(results.indexingPercent) / 100)
+            }
+          }
+          .frame(maxWidth: 240)
+          .frame(height: ProvisionalUI.searchIndexingBarHeight)
+        }
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(results.coverageLines.joined(separator: " "))
+    .accessibilityIdentifier(ShellID.searchCoverage)
   }
 }
 
@@ -653,6 +718,9 @@ struct Board11Keys: View {
       if model.search.shown {
         Button("") { if let hit = model.search.selectedHit { model.open(hit) } }
           .keyboardShortcut(.return, modifiers: .command)
+        // D-UI-211: cmd-Down reads the next page.
+        Button("") { model.search.more() }
+          .keyboardShortcut(.downArrow, modifiers: .command)
       } else if model.switcher.shown {
         Button("") { if let row = model.switcher.selectedRow { model.open(row) } }
           .keyboardShortcut(.return, modifiers: .command)
@@ -685,6 +753,10 @@ struct Board11Keys: View {
       }
       guard named("g"), !modifiers.contains(.shift) else { return false }
       model.toggleScrubber()
+      return true
+    }
+    if key == .downArrow, !modifiers.contains(.shift), model.search.shown {
+      model.search.more()
       return true
     }
     if named("f") {

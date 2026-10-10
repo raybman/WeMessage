@@ -5,6 +5,7 @@
 # four questions tools/swift/verify-bundle.sh asks from that state:
 #
 #   --verify --deep --strict --verbose=2 <app>
+#   --verify --verbose=2 <file.dmg>      a flat file, by its recorded sum
 #   -d -r- <path>                       the designated requirement
 #   -dvv <path>                         the CodeDirectory line and its flags
 #   -d --entitlements - --xml <path>    the entitlements it was signed with
@@ -15,6 +16,9 @@
 # --verify says so, as the real tool would.
 #
 # FAKE_CODESIGN_FAIL=<basename> makes signing that one target fail.
+# FAKE_CODESIGN_SIGNED_AS=<sha1> records that identity instead of the one
+# named, and FAKE_CODESIGN_TAMPER=<basename> changes that flat file after it
+# is signed: the two ways a signed image can come back wrong (dmg.sh exit 5).
 set -euo pipefail
 
 state="${FAKE_CODESIGN_STATE:?}"
@@ -61,7 +65,7 @@ case " $* " in
     fi
     rm -rf "$d"
     mkdir -p "$d"
-    printf '%s\n' "$identity" >"$d/identity"
+    printf '%s\n' "${FAKE_CODESIGN_SIGNED_AS:-$identity}" >"$d/identity"
     printf '%s\n' "$identifier" >"$d/identifier"
     printf '%s\n' "$options" >"$d/options"
     printf '%s\n' "$timestamp" >"$d/timestamp"
@@ -73,9 +77,25 @@ case " $* " in
     else
       printf 'S' >>"$target"
       sum_of "$target" >"$d/sum"
+      if [ "${FAKE_CODESIGN_TAMPER:-}" = "$(basename "$target")" ]; then
+        printf 'T' >>"$target"
+      fi
     fi
     ;;
   " --verify "*)
+    # A flat file (the disk image): signed, and unchanged since.
+    if [ -f "$target" ]; then
+      if [ ! -f "$d/sum" ]; then
+        printf '%s: code object is not signed at all\n' "$target" >&2
+        exit 1
+      fi
+      if [ "$(sum_of "$target")" != "$(cat "$d/sum")" ]; then
+        printf '%s: invalid signature (code or signature have been modified)\n' "$target" >&2
+        exit 1
+      fi
+      printf '%s: valid on disk\n%s: satisfies its Designated Requirement\n' "$target" "$target" >&2
+      exit 0
+    fi
     if [ ! -f "$d/seal" ]; then
       printf '%s: code object is not signed at all\n' "$target" >&2
       exit 1

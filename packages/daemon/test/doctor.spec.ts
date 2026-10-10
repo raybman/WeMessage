@@ -23,7 +23,13 @@
  * gate (b)) proves `GET /v1/status` and the WS greeting both reflect the
  * probe-driven state end to end.
  */
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -632,21 +638,20 @@ describe('runDoctor — orchestration + only-on-change persistence (§2.2.3)', (
 });
 
 /*
- * v2 S2b rows 8 and 9: the runtime is a tagged union, read from the two
- * hand-written fixtures the client and WeMessageKit decode as well, so the
- * three mirrors are held to one set of bytes. The fixtures are synthetic:
- * the versions are the pinned Node and a plausible Electron, and the abi is
- * the pinned Node's `process.versions.modules`, written down once.
+ * v2 S2b rows 8 and 9, re-pinned by v2 S6d: the runtime is tagged on `kind`
+ * with one kind left, read from the hand-written fixture the client and
+ * WeMessageKit decode as well, so the three mirrors are held to one set of
+ * bytes. The fixture is synthetic: the version is the pinned Node, and the
+ * abi is that Node's `process.versions.modules`, written down once.
  */
 interface RuntimeFixture {
   kind: string;
-  electron?: string;
   host?: string;
   node: string;
   abi: number;
 }
 
-function runtimeFixture(name: 'electron' | 'node'): RuntimeFixture {
+function runtimeFixture(name: 'node'): RuntimeFixture {
   return JSON.parse(
     readFileSync(
       fileURLToPath(
@@ -661,68 +666,53 @@ function runtimeFixture(name: 'electron' | 'node'): RuntimeFixture {
 }
 
 describe('v2 S2b row 8: describeRuntime says which host, by kind', () => {
-  const electron = runtimeFixture('electron');
   const node = runtimeFixture('node');
-  const underElectron = {
-    electron: electron.electron,
-    node: electron.node,
-    modules: String(electron.abi),
-  };
   const underNode = { node: node.node, modules: String(node.abi) };
 
-  it('the fixtures are the two variants, nothing more', () => {
-    expect(Object.keys(electron).sort()).toEqual([
-      'abi',
-      'electron',
-      'kind',
-      'node',
-    ]);
+  it('the fixture directory holds the one variant, nothing more', () => {
+    const dir = fileURLToPath(
+      new URL('../../../fixtures/doctor-runtime/', import.meta.url),
+    );
+    expect(readdirSync(dir).sort()).toEqual(['node.json']);
     expect(Object.keys(node).sort()).toEqual(['abi', 'host', 'kind', 'node']);
-    expect([electron.kind, node.kind, node.host]).toEqual([
-      'electron',
-      'node',
-      'swift',
-    ]);
+    expect([node.kind, node.host]).toEqual(['node', 'swift']);
   });
 
-  it("returns kind 'electron' with the Electron version when it is Electron", () => {
-    expect(describeRuntime(underElectron, {})).toStrictEqual(electron);
-  });
-
-  it('Electron is a measurement, so it wins over a host variable', () => {
+  it("returns kind 'node', host 'swift' under the Swift host", () => {
     expect(
-      describeRuntime(underElectron, { WEMESSAGE_HOST: 'swift' }),
-    ).toStrictEqual(electron);
+      describeRuntime(underNode, { WEMESSAGE_HOST: 'swift' }),
+    ).toStrictEqual(node);
   });
 
-  it("returns kind 'node', host 'swift' under the Swift host, with no electron key", () => {
-    const got = describeRuntime(underNode, { WEMESSAGE_HOST: 'swift' });
-    expect(got).toStrictEqual(node);
-    expect(got !== undefined && 'electron' in got).toBe(false);
+  it('v2 S6d: kind is the surviving set only, and the type says so', () => {
+    expectTypeOf<DoctorRuntime['kind']>().toEqualTypeOf<'node'>();
+    expectTypeOf<DoctorRuntime['host']>().toEqualTypeOf<'swift'>();
   });
 
-  it('narrows on kind: host exists only on the node variant', () => {
-    const got = describeRuntime(underNode, { WEMESSAGE_HOST: 'swift' });
-    if (got?.kind !== 'node') throw new Error('expected the node variant');
-    expectTypeOf(got.host).toEqualTypeOf<'swift'>();
-    expectTypeOf<DoctorRuntime['kind']>().toEqualTypeOf<'electron' | 'node'>();
+  it('v2 S6d: a process.versions naming the v1 host changes nothing', () => {
+    // `process.versions` is handed over whole, so a key describeRuntime no
+    // longer reads still arrives. It must neither win nor leak through.
+    const versions = { ...underNode, electron: '44.2.0' };
+    expect(
+      describeRuntime(versions, { WEMESSAGE_HOST: 'swift' }),
+    ).toStrictEqual(node);
+    expect(describeRuntime(versions, {})).toBeUndefined();
   });
 
-  it.each([
+  it.each<[string, Record<string, string | undefined>]>([
     ['no host variable', {}],
     ['an empty host', { WEMESSAGE_HOST: '' }],
     ['another host', { WEMESSAGE_HOST: 'electron' }],
     ['the wrong case', { WEMESSAGE_HOST: 'SWIFT' }],
     ['padding', { WEMESSAGE_HOST: ' swift' }],
     ['an unset host', { WEMESSAGE_HOST: undefined }],
-    ['ELECTRON_RUN_AS_NODE without Electron', { ELECTRON_RUN_AS_NODE: '1' }],
+    ['ELECTRON_RUN_AS_NODE alone', { ELECTRON_RUN_AS_NODE: '1' }],
   ])('plain Node with %s is not a host it can name: undefined', (_, env) => {
     expect(describeRuntime(underNode, env)).toBeUndefined();
   });
 });
 
 describe('v2 S2b row 9: runDoctor reports the Swift host as kind node', () => {
-  const electron = runtimeFixture('electron');
   const node = runtimeFixture('node');
   const base = {
     probes: fakeProbes(),
@@ -732,29 +722,15 @@ describe('v2 S2b row 9: runDoctor reports the Swift host as kind node', () => {
     supervisor: 'none',
   } as const;
 
-  it("carries kind 'node' and no electron key, in process and on the wire", async () => {
+  it("carries kind 'node', in process and on the wire", async () => {
     const report = await runDoctor({
       ...base,
       versions: { node: node.node, modules: String(node.abi) },
       env: { WEMESSAGE_HOST: 'swift' },
     });
     expect(report.runtime).toStrictEqual(node);
-    expect('electron' in (report.runtime ?? {})).toBe(false);
     const wire = JSON.parse(JSON.stringify(report)) as { runtime?: unknown };
     expect(wire.runtime).toStrictEqual(node);
-  });
-
-  it("carries kind 'electron' under Electron", async () => {
-    const report = await runDoctor({
-      ...base,
-      versions: {
-        electron: electron.electron,
-        node: electron.node,
-        modules: String(electron.abi),
-      },
-      env: {},
-    });
-    expect(report.runtime).toStrictEqual(electron);
   });
 
   it('omits the key when no host can be named', async () => {

@@ -19,7 +19,7 @@
  *   - They hold NO COLOUR outside their own `:root{...}` block. This is S8's
  *     locality rule (F-104) restated for a page that carries its own token
  *     sheet instead of deferring to `tokens.css`. It is not the no-green
- *     sweep, which `apps/desktop/test/tokens.spec.ts` runs over `site/` for
+ *     sweep, which `test/release/no-green.spec.ts` runs over `site/` for
  *     every ship surface. It is the stronger, narrower rule that makes "what
  *     colour is this page" a question with a fourteen-line answer.
  *   - They say the things the plan makes BINDING, in their own words: the
@@ -70,7 +70,7 @@ const RELEASES = 'https://github.com/raybman/WeMessage/releases';
 /**
  * `#30D158`, assembled from fragments.
  *
- * The convention is `apps/desktop/test/tokens.spec.ts`, and the reason is
+ * The convention is `test/release/no-green.spec.ts`, and the reason is
  * the same one that file gives: a spec that forbids a literal should not be
  * the file a search for that literal finds. Row 11 asserts the landing page
  * does not carry it; writing it whole here would make this spec the second
@@ -378,7 +378,7 @@ describe('s9 Sc13 rows 10 and 11: the site and its five docs pages', () => {
      * literal sitting in the source would convict this spec of the thing
      * this spec is checking for. The fragments read as `+1${'...'}` on disk,
      * so the pattern only exists at runtime, which is the same move
-     * `apps/desktop/test/tokens.spec.ts` makes with its green hexes.
+     * `test/release/no-green.spec.ts` makes with its green hexes.
      */
     const probe = `+1${'2025550100'}`;
     expect(
@@ -453,16 +453,30 @@ describe('s9 Sc13 rows 10 and 11: the site and its five docs pages', () => {
     );
   });
 
-  /* ── row 8: the unsigned lane, said on the page that sells the download */
+  /* ── row 8: the self-signed lane, said on the page that sells the download */
 
-  it('row 8: install.html documents Open Anyway and pins no version', () => {
+  it('row 8: install.html documents Open Anyway and the xattr route, and pins no version', () => {
     const text = read(INSTALL);
-    expect(text.toLowerCase()).toContain('unsigned');
-    // The macOS 15 flow by name. Right-click-Open stopped working for
-    // unsigned apps in Sequoia, so a page that only said "right click and
-    // choose Open" would send the reader in a circle.
-    expect(text).toContain('Open Anyway');
-    expect(text).toContain('com.apple.quarantine');
+    // v2 S5b (advisor overlay item 11): self-signed, not notarized, Open
+    // Anyway via Privacy & Security, then the xattr alternative.
+    expect(text).toContain('self-signed');
+    expect(text).toContain('not notarized');
+    expect(text).not.toMatch(/builds are unsigned/i);
+    expect(text).toContain('Apple could not verify');
+    // The macOS flow by name and place. Right-click-Open stopped working in
+    // Sequoia, so a page that only said "right click and choose Open" would
+    // send the reader in a circle. HTML, so the ampersand is an entity.
+    const settings = text.indexOf('Privacy &amp; Security');
+    const openAnyway = text.indexOf('Open Anyway');
+    expect(settings).toBeGreaterThan(-1);
+    expect(openAnyway).toBeGreaterThan(settings);
+    // D-UI-180: the command line second, recursive.
+    const xattr = text.indexOf(
+      'xattr -dr com.apple.quarantine /Applications/WeMessage.app',
+    );
+    expect(xattr).toBeGreaterThan(openAnyway);
+    expect(text).not.toMatch(/xattr -d com\.apple/);
+    expect(text).not.toContain('--no-quarantine');
     expect(text).toContain('SHA256SUMS');
     // The releases list, and no file with a version in its name. A hex
     // colour is not a version and neither is a CSS length, so the sweep is

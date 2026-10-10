@@ -3,7 +3,8 @@
  * spawn (F-120's type-level half).
  *
  * WHY THIS FILE EXISTS AT ALL, since the plan names only `test/arch.spec.ts`
- * and `apps/desktop/test/tokens.spec.ts` as this scenario's test files.
+ * and `apps/desktop/test/tokens.spec.ts` as this scenario's test files (the
+ * latter is `test/release/no-green.spec.ts` since v2 S6c).
  *
  * Row 6 is the only row in Scenario 1 that asserts a RUNTIME behaviour: a
  * call is made, a guard throws, and a spy proves nothing was spawned. Every

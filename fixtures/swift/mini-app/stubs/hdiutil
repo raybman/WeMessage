@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# A stand-in for hdiutil(1), for test/swift/dmg.sh.spec.ts only. It makes no
+# disk image and mounts nothing. Every call is logged to
+# $FAKE_CODESIGN_STATE/hdiutil.log, and it answers the two calls dmg.sh
+# makes:
+#
+#   create -volname <v> -srcfolder <dir> -ov -format UDZO <out>
+#       writes <out> as a text manifest: the volume name, the format, and
+#       every entry under <dir> (a symlink with its target), so a test can
+#       read back what the image would hold
+#   verify <out>
+#       passes when <out> is a manifest this stub wrote
+#
+# FAKE_HDIUTIL_FAIL=create|verify makes that call fail.
+set -euo pipefail
+
+state="${FAKE_CODESIGN_STATE:?}"
+mkdir -p "$state"
+printf '%s\n' "$*" >>"$state/hdiutil.log"
+
+verb="${1:-}"
+shift || true
+if [ "${FAKE_HDIUTIL_FAIL:-}" = "$verb" ]; then
+  printf 'hdiutil: %s failed\n' "$verb" >&2
+  exit 1
+fi
+
+case "$verb" in
+  create)
+    volname=""
+    src=""
+    format=""
+    out=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -volname) volname="$2"; shift 2 ;;
+        -srcfolder) src="$2"; shift 2 ;;
+        -format) format="$2"; shift 2 ;;
+        -ov) shift ;;
+        -*) printf 'fake hdiutil: unexpected option %s\n' "$1" >&2; exit 64 ;;
+        *) out="$1"; shift ;;
+      esac
+    done
+    [ -n "$volname" ] && [ -d "$src" ] && [ -n "$out" ] || {
+      printf 'fake hdiutil: create needs -volname, -srcfolder and an output\n' >&2
+      exit 64
+    }
+    {
+      printf 'fake-dmg volname=%s format=%s\n' "$volname" "$format"
+      (cd "$src" && find . -mindepth 1 | LC_ALL=C sort | while IFS= read -r f; do
+        if [ -L "$f" ]; then
+          printf '%s -> %s\n' "${f#./}" "$(readlink "$f")"
+        else
+          printf '%s\n' "${f#./}"
+        fi
+      done)
+    } >"$out"
+    printf 'created: %s\n' "$out"
+    ;;
+  verify)
+    out="${1:-}"
+    head -n 1 "$out" 2>/dev/null | awk '/^fake-dmg / {ok = 1} END {exit !ok}' || {
+      printf 'hdiutil: verify failed: %s\n' "$out" >&2
+      exit 1
+    }
+    printf 'hdiutil: verify: checksum of "%s" is VALID\n' "$out"
+    ;;
+  *)
+    printf 'fake hdiutil: unexpected call: %s %s\n' "$verb" "$*" >&2
+    exit 64
+    ;;
+esac

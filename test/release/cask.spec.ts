@@ -1,10 +1,9 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
 
 import {
   CASK_STANZA_ORDER,
@@ -56,7 +55,7 @@ const REPO = fileURLToPath(new URL('../..', import.meta.url));
 const CASK_RB_PATH = join(REPO, 'homebrew', 'Casks', 'wemessage.rb');
 const LOCK_PATH = join(REPO, 'homebrew', 'cask.lock.json');
 const README_PATH = join(REPO, 'homebrew', 'README.md');
-const BUILDER_YML_PATH = join(REPO, 'apps', 'desktop', 'electron-builder.yml');
+const BUNDLE_SH_PATH = join(REPO, 'tools', 'swift', 'bundle.sh');
 
 // FACTS (s9 Sc10): the repo this cask tracks releases from. Fixed, not an
 // input the lock file carries, because it does not change release to
@@ -155,18 +154,27 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     // '#{version}' missing and fail, rather than passing by accident
     // because '1.0.0-rc.1' happens to appear somewhere else in the file.
     expect(rb).toContain(
-      'url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64-UNSIGNED.dmg"',
+      'url "https://github.com/raybman/WeMessage/releases/download/v#{version}/WeMessage-#{version}-arm64.dmg"',
     );
     expect(rb).not.toContain('/v1.0.0-rc.1/');
-    expect(rb).not.toContain('WeMessage-1.0.0-rc.1-arm64-UNSIGNED.dmg');
+    expect(rb).not.toContain('WeMessage-1.0.0-rc.1-arm64.dmg');
+    // v2 S5c: the Swift lane's image (`tools/swift/dmg.sh`, named after
+    // pack-swift's zip). Never the previous desktop lane's `-UNSIGNED` artefact,
+    // and never a `-throwaway` one, which no release carries.
+    expect(rb).not.toContain('-UNSIGNED');
+    expect(rb).not.toContain('-throwaway');
 
     expect(rb).toContain(`sha256 "${SHA_64}"`);
-    // Bare `:sequoia`, not a `">= :sequoia"` comparison string: Homebrew's
+    // Bare `:tahoe`, not a `">= :tahoe"` comparison string: Homebrew's
     // own `Homebrew/OSDependsOn` style cop (see row 7) treats the symbol
     // form of `depends_on macos:` as already meaning "this OS or later",
     // so a `>=` string is redundant, not more precise, and `brew style
     // --fix` rewrites it on sight.
-    expect(rb).toContain('depends_on macos: :sequoia');
+    // v2 S5c: macOS 26. The Swift app's deployment target is 26, so a
+    // cask that let Sequoia install it would install an app that cannot
+    // launch.
+    expect(rb).toContain('depends_on macos: :tahoe');
+    expect(rb).not.toContain(':sequoia');
     expect(rb).toContain('depends_on arch: :arm64');
   });
 
@@ -245,17 +253,35 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     expect(rb).not.toMatch(/\bwemessage service\b/);
 
     /*
-     * AND THE STEP BEFORE ANY OF THAT. This cask ships an unsigned build,
-     * Homebrew quarantines what it downloads exactly as a browser would,
-     * and macOS 15 removed the right-click-Open escape hatch for unsigned
-     * apps. So the very first thing that happens after a successful `brew
+     * AND THE STEP BEFORE ANY OF THAT. This cask ships a self-signed,
+     * un-notarized build, Homebrew quarantines what it downloads exactly as a browser would,
+     * and macOS 15 removed the right-click-Open escape hatch for apps
+     * Apple has not notarized. So the very first thing that happens after a successful `brew
      * install --cask` is a refusal, and the caveats block is the only text
      * the operator is shown between those two events. A cask that installs
      * an app the operator cannot then open has not installed anything.
      */
-    expect(caveatsBlock).toContain('UNSIGNED');
-    expect(caveatsBlock).toContain('Open Anyway');
-    expect(caveatsBlock).toContain('com.apple.quarantine');
+    // v2 S5c, D-UI-182: the Swift build is self-signed, not unsigned, so
+    // the caveats say what it is (the project's own certificate, no Apple
+    // notarization) and never call it UNSIGNED. The route past the refusal
+    // is unchanged: Privacy & Security, then the app by its path.
+    expect(caveatsBlock).not.toContain('UNSIGNED');
+    expect(caveatsBlock).toContain("signed with WeMessage's own certificate");
+    expect(caveatsBlock).toContain('Privacy & Security');
+    expect(caveatsBlock).toContain('/Applications/WeMessage.app');
+    expect(caveatsBlock).toContain('follow the signing');
+    // v2 S5b, D-UI-180: Open Anyway first, then the recursive xattr (the
+    // attribute sits on files inside the bundle too), and never Homebrew's
+    // `--no-quarantine`, which Homebrew has removed.
+    const openAnyway = caveatsBlock.indexOf('Open Anyway');
+    expect(openAnyway).toBeGreaterThan(-1);
+    expect(
+      caveatsBlock.indexOf(
+        'xattr -dr com.apple.quarantine /Applications/WeMessage.app',
+      ),
+    ).toBeGreaterThan(openAnyway);
+    expect(caveatsBlock).not.toMatch(/xattr -d com\.apple/);
+    expect(rb).not.toContain('--no-quarantine');
 
     // No hex colour, checked across the WHOLE rendered string rather than
     // only inside caveats: a colour is exactly the kind of thing that
@@ -342,7 +368,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
 
   it.skipIf(!HAS_BREW)(
     'row 7: brew style and brew audit --strict accept the committed cask',
-    () => {
+    async () => {
       const env = {
         ...process.env,
         HOMEBREW_NO_AUTO_UPDATE: '1',
@@ -359,20 +385,40 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
       // and tears the tap down again whether the checks pass or not.
       const tapQualified = 'sc10-cask-spec-scratch/wemessage';
 
+      // Every brew call here is AWAITED, never `spawnSync`. Four cold Ruby
+      // boots add up to 82s on a hosted macos-26 runner, and a synchronous
+      // child blocks the vitest worker's event loop for its whole life. A
+      // worker that cannot turn its loop for more than 60s misses its own
+      // RPC deadline ("Timeout calling onTaskUpdate") and fails the RUN even
+      // though every test passed, which is how v2 S6b's macOS lane went red
+      // four times in a row. Awaiting keeps the loop turning between and
+      // during the calls; the assertions are unchanged.
+      const brew = (
+        args: readonly string[],
+      ): Promise<{ status: number | null; stdout: string; stderr: string }> =>
+        new Promise((resolve, reject) => {
+          const child = spawn('brew', [...args], {
+            env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let stdout = '';
+          let stderr = '';
+          child.stdout.setEncoding('utf8');
+          child.stderr.setEncoding('utf8');
+          child.stdout.on('data', (d: string) => (stdout += d));
+          child.stderr.on('data', (d: string) => (stderr += d));
+          child.on('error', reject);
+          child.on('close', (status) => resolve({ status, stdout, stderr }));
+        });
+
       // Defensive: a previous run crashing between tap-new and untap would
       // otherwise make THIS run's tap-new fail on "already exists".
-      spawnSync('brew', ['untap', tapQualified], { encoding: 'utf8', env });
+      await brew(['untap', tapQualified]);
 
-      const tapNew = spawnSync('brew', ['tap-new', tapQualified, '--no-git'], {
-        encoding: 'utf8',
-        env,
-      });
+      const tapNew = await brew(['tap-new', tapQualified, '--no-git']);
       expect(tapNew.status, tapNew.stdout + tapNew.stderr).toBe(0);
 
-      const tapDirResult = spawnSync('brew', ['--repository', tapQualified], {
-        encoding: 'utf8',
-        env,
-      });
+      const tapDirResult = await brew(['--repository', tapQualified]);
       const tapDir = tapDirResult.stdout.trim();
       expect(
         tapDir.length,
@@ -385,10 +431,7 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
         mkdirSync(dirname(tapCaskPath), { recursive: true });
         writeFileSync(tapCaskPath, readFileSync(CASK_RB_PATH, 'utf8'));
 
-        const style = spawnSync('brew', ['style', '--cask', tapCaskPath], {
-          encoding: 'utf8',
-          env,
-        });
+        const style = await brew(['style', '--cask', tapCaskPath]);
         expect(style.status, style.stdout + style.stderr).toBe(0);
 
         // `brew audit [path ...]` is disabled on this Homebrew version
@@ -398,14 +441,15 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
         // WITHOUT tripping the separate "untrusted tap" gate a bare token
         // name hits: qualifying the name removes the ambiguity that gate
         // exists to guard against.
-        const audit = spawnSync(
-          'brew',
-          ['audit', '--cask', '--strict', `${tapQualified}/wemessage`],
-          { encoding: 'utf8', env },
-        );
+        const audit = await brew([
+          'audit',
+          '--cask',
+          '--strict',
+          `${tapQualified}/wemessage`,
+        ]);
         expect(audit.status, audit.stdout + audit.stderr).toBe(0);
       } finally {
-        spawnSync('brew', ['untap', tapQualified], { encoding: 'utf8', env });
+        await brew(['untap', tapQualified]);
       }
     },
     /*
@@ -535,12 +579,9 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * `Contents/MacOS/wemessage`. Neither file has ever existed. The bundle
    * carries exactly ONE Mach-O (arch F-121: `Contents/MacOS/` holds only
    * `WeMessage`), and the two things the cask wants on PATH are `/bin/sh`
-   * shims that `tools/release/bin/bundle-daemon.mjs` writes into
-   * `dist-bundle/bin`, which `electron-builder.yml` then copies to `bin`
-   * under `Contents/Resources`. (v2 S6a moved the bundler there from
-   * `apps/desktop/scripts/`, and the Swift lane's `tools/swift/bundle.sh`
-   * places the same `bin/` at the same spot, so the last assertion below
-   * holds the two packers to one prefix until S6c retires the Electron one.) Homebrew does not shrug at a `binary`
+   * shims that `tools/release/bin/bundle-daemon.mjs` writes into the
+   * bundle's `bin`, which `tools/swift/bundle.sh` then copies to `bin`
+   * under `Contents/Resources`. Homebrew does not shrug at a `binary`
    * stanza whose source is missing, it raises "source is not there" and
    * the install fails, so the committed cask was UNINSTALLABLE and the
    * whole of this file was green.
@@ -554,35 +595,35 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
    * owned by a different tool, and insists the two agree.
    *
    * So this row derives the expected prefix rather than restating it. If
-   * someone moves the shims by editing `extraResources`, this row fails
+   * someone moves the shims by editing bundle.sh's copy, this row fails
    * and names the new location; it does not quietly keep asserting the old
-   * one. That is the difference between a coupling test and a copy.
+   * one. That is the difference between a coupling test and a copy. (v2
+   * S6c: until then the prefix was read from the previous desktop app's
+   * packer config, and bundle.sh was held to it.)
    *
    * What it deliberately does NOT do is check that the files exist on
    * disk. They only exist after a bundle, which is minutes of work and
-   * darwin/arm64-only; `apps/desktop/test/pack.spec.ts` already asserts
-   * both are present under `Contents/Resources/bin` in a real packed app,
-   * and `apps/desktop/test/bundle.spec.ts` asserts a shim survives being
-   * invoked through a symlink, which is the form a `binary` stanza
-   * actually installs it in. This row is the cheap, always-on link
-   * between those two and the string this renderer writes.
+   * darwin/arm64-only; `test/release/bundle-daemon.spec.ts` asserts both
+   * shims are in the bundle and resolve themselves through `readlink -f`,
+   * which is how a `binary` stanza's symlink reaches them. This row is the
+   * cheap, always-on link between that and the string this renderer
+   * writes.
    */
-  it('row 11: binary stanza paths are derived from electron-builder extraResources', () => {
-    const builder = parse(readFileSync(BUILDER_YML_PATH, 'utf8')) as {
-      extraResources?: readonly { from?: unknown; to?: unknown }[];
-    };
-    const resources = builder.extraResources ?? [];
-    // Not vacuous: a parse that silently produced nothing would make every
-    // assertion below unreachable and this row would pass having read air.
-    expect(resources.length).toBeGreaterThanOrEqual(2);
-
-    const binEntry = resources.find((e) => e.from === 'dist-bundle/bin');
+  it('row 11: binary stanza paths are derived from where bundle.sh copies the shims', () => {
+    const bundleSh = readFileSync(BUNDLE_SH_PATH, 'utf8');
+    const copies = [
+      ...bundleSh.matchAll(
+        /^ditto "\$bundle\/bin" "\$app\/Contents\/Resources\/([^"]+)"$/gm,
+      ),
+    ].map(([, to]) => String(to));
+    // Exactly one copy of the shims. None would make every assertion below
+    // unreachable; two would leave the cask free to point at either.
     expect(
-      binEntry,
-      'electron-builder.yml no longer copies dist-bundle/bin; the cask ' +
-        'binary stanzas below point at wherever it went, so say where',
-    ).toBeDefined();
-    const to = String(binEntry?.to ?? '');
+      copies,
+      'bundle.sh no longer copies $bundle/bin under Contents/Resources; ' +
+        'the cask binary stanzas below point at wherever it went, so say where',
+    ).toHaveLength(1);
+    const to = copies[0] ?? '';
     expect(to).not.toBe('');
 
     const rb = renderCask({
@@ -611,15 +652,44 @@ describe('s9 Sc10: the Homebrew cask renderer (tools/release/src/cask.ts)', () =
     // cask links onto PATH may live in `Contents/MacOS`, which holds the
     // single Mach-O and nothing else.
     expect(rb).not.toContain('Contents/MacOS');
+  });
 
-    // v2 S6a: the Swift lane lands the shims at the same prefix, so the
-    // cask's stanzas resolve whichever packer built the app.
-    const bundleSh = readFileSync(
-      join(REPO, 'tools', 'swift', 'bundle.sh'),
-      'utf8',
-    );
-    expect(bundleSh).toContain(
-      `ditto "$bundle/bin" "$app/Contents/Resources/${to}"`,
-    );
+  /*
+   * v2 S5c: `pnpm release:cask --dmg` takes only the Swift lane's image.
+   * The previous desktop lane's `-UNSIGNED.dmg` would render a cask whose url names
+   * a file no Swift release carries, and a dry run's `-throwaway.dmg` is
+   * never published at all. Every case here is a refusal, which exits
+   * before anything is written, so this row never touches the committed
+   * cask. The last case proves the filter is not refusing everything: a
+   * well-named image that does not exist gets past the name check and is
+   * refused for being unreadable instead.
+   */
+  it('row 12: the CLI takes WeMessage-<version>-arm64.dmg and refuses the old desktop and throwaway names', () => {
+    const before = readFileSync(CASK_RB_PATH, 'utf8');
+    const run = (name: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          join(REPO, 'tools', 'release', 'bin', 'cask.mjs'),
+          '--dmg',
+          join('/nonexistent-s5c', name),
+        ],
+        { encoding: 'utf8' },
+      );
+    for (const name of [
+      'WeMessage-1.0.0-arm64-UNSIGNED.dmg',
+      'WeMessage-1.0.0-arm64-throwaway.dmg',
+      'WeMessage-1.0.0-arm64.zip',
+    ]) {
+      const r = run(name);
+      expect([name, r.status]).toEqual([name, 2]);
+      expect(r.stderr).toContain(
+        '--dmg filename must look like WeMessage-<version>-arm64.dmg',
+      );
+    }
+    const ok = run('WeMessage-1.0.0-arm64.dmg');
+    expect(ok.status).toBe(2);
+    expect(ok.stderr).toContain('could not read --dmg');
+    expect(readFileSync(CASK_RB_PATH, 'utf8')).toBe(before);
   });
 });

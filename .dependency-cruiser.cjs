@@ -44,16 +44,6 @@ module.exports = {
       to: { couldNotResolve: true },
     },
 
-    // INV-1 electron clause (§2.7): no electron in core|store|ingest|sendkit|...
-    {
-      severity: 'error',
-      name: 'no-electron-outside-desktop',
-      from: {
-        path: '^packages/(core|store|ingest|sendkit|daemon|client|cli|protocol)',
-      },
-      to: { path: 'electron' },
-    },
-
     // §3.1 arrows: ingest|sendkit|store import core only
     {
       severity: 'error',
@@ -73,62 +63,18 @@ module.exports = {
       to: { path: '^packages/(?!client|protocol|cli)' },
     },
 
-    // §3.1: the desktop app is a thin client too, and it is now its OWN rule
-    // (s8 Sc1, F-103). Until S8 both lived in one rule, `cli-desktop-thin-
-    // clients`, whose `to` had to exclude `cli` so that the CLI's internal
-    // file layout stayed legal — and that exclusion applied to apps/desktop
-    // as well, which silently permitted `apps/desktop/src -> packages/cli`
-    // for six slices. Nothing exploited it because apps/desktop had two
-    // lines in it; S8 is the slice that fills the directory, and a hole is
-    // only theoretical until somebody needs a status table.
-    //
-    // Two `to` shapes, mirroring adapters-thin-clients: pnpm isolation means
-    // an undeclared `@wemessage/cli` import does not RESOLVE from
-    // apps/desktop, so a resolved-path rule alone would miss the sloppiest
-    // possible reach — an import that is a violation twice over. The bare
-    // specifier catches it before the package.json does.
-    {
-      severity: 'error',
-      name: 'desktop-thin-client',
-      from: { path: '^apps/desktop/src' },
-      to: {
-        path: [
-          '^packages/(?!client|protocol)',
-          '^@wemessage/(?!client$|protocol$)',
-        ],
-      },
-    },
-
     // §3.1: nobody imports daemon.
     //
-    // s8 Sc1 carves out `apps/desktop/test/` and nothing else. The desktop
-    // e2e harness boots a REAL daemon in-process against a temp store
-    // (F-102) — the house has no other place to do that, and a fake daemon
-    // would make the checkpoint scenarios assert against a fiction. The
-    // exception is deliberately narrow (test/, not the package), and it is
-    // paired with `desktop-thin-client` above, which asserts positively that
-    // the SHIPPED app reaches neither the daemon nor anything else. A rule
-    // with one reviewed exception plus a positive assertion is stronger than
-    // the rule it replaces, which had no exception because nothing had tried.
-    //
-    // s9 Sc 1 row 8 STRENGTHENS the `to` to two shapes, for the reason
-    // `desktop-thin-client` and `adapters-thin-clients` already carry two.
-    // The single resolved-path shape had a hole exactly the size of the
-    // sloppiest possible reach: pnpm does not hoist, so `import
-    // '@wemessage/daemon'` from `apps/desktop/src` does not RESOLVE — the
-    // module comes back `couldNotResolve` with no resolved path to match,
-    // and the rule that exists to forbid that import said nothing about
-    // it. The row planted precisely that import and the cruise reported
-    // zero violations. Nothing exploited the hole because nothing under
-    // `apps/desktop/src` has ever needed the daemon; s9 Sc 7 adds a
-    // supervisor, which is the first code with a reason to want it, and a
-    // hole is only theoretical until somebody needs a process.
+    // Two `to` shapes (s9 Sc 1 row 8), for the reason `adapters-thin-clients`
+    // carries two: pnpm does not hoist, so an undeclared `import
+    // '@wemessage/daemon'` does not RESOLVE, it comes back `couldNotResolve`
+    // with no resolved path to match. The bare specifier catches the
+    // sloppiest possible reach, which a resolved-path rule alone would miss.
     {
       severity: 'error',
       name: 'nobody-imports-daemon',
       from: {
         path: '^(packages/(?!daemon)|apps|fixtures)',
-        pathNot: '^apps/desktop/test/',
       },
       to: { path: ['^packages/daemon', '^@wemessage/daemon$'] },
     },
@@ -231,9 +177,8 @@ module.exports = {
     // v2 S6a. The ONE file the rule above exempts, and the one thing it may
     // import that the rule above forbids: `esbuild`, a devDependency of
     // `@wemessage/release` and of nothing else in `tools/`. The daemon
-    // bundler moved here from `apps/desktop/scripts` so the Swift pack lane
-    // survives the Electron app's deletion (S6c), and bundling is its whole
-    // job. It is a build step that READS `dist/` output as data, never a
+    // bundler lives here so the Swift pack lane owns it outright, and
+    // bundling is its whole job. It is a build step that READS `dist/` output as data, never a
     // workspace import, so every other reach stays an error exactly as it is
     // for every other tool.
     {

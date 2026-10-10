@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import WeMessageKit
 
-/// R8: the pure reducer, ported from the Electron renderer's optimistic store
-/// (apps/desktop/src/renderer/store/optimistic.ts). Drafts come from
+/// R8: the pure reducer, ported from the v1 desktop renderer's optimistic store
+/// (deleted in v2 S6c). Drafts come from
 /// responses/drafts.list.pending.json; events come from fixtures/events, aimed
 /// at those drafts by rewriting their draftId.
 @Suite("AppReducer")

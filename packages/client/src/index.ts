@@ -493,9 +493,9 @@ export interface DoctorReportPayload {
   supervisor: 'launchd' | 'app' | 'none';
   /**
    * s9 Sc5: present iff the daemon that answered can name its host. v2 S2b
-   * made that a union on `kind`: `'electron'` is `WeMessage.app` re-entered
-   * with ELECTRON_RUN_AS_NODE=1 (F-121), and `'node'` is the Swift app
-   * running the daemon on the Node it ships, declared by WEMESSAGE_HOST=swift.
+   * tagged it on `kind`; since v2 S6d `'node'` is the only kind, the Swift
+   * app running the daemon on the Node it ships, declared by
+   * WEMESSAGE_HOST=swift.
    *
    * OPTIONAL here, unlike `supervisor` above, because the two absences mean
    * different things. A missing `supervisor` would mean the daemon declined
@@ -510,12 +510,15 @@ export interface DoctorReportPayload {
 
 /**
  * Mirrors the daemon's `DoctorRuntime`, and WeMessageKit's enum of the same
- * name. Narrow on `kind` first: `electron` exists on one variant and `host`
- * on the other, so neither can be read until the caller has said which.
+ * name. One kind since v2 S6d; the tag stays so a future host is a new
+ * variant a reader must narrow past, not a silent change of meaning.
  */
-export type DoctorRuntimePayload =
-  | { kind: 'electron'; electron: string; node: string; abi: number }
-  | { kind: 'node'; host: 'swift'; node: string; abi: number };
+export interface DoctorRuntimePayload {
+  kind: 'node';
+  host: 'swift';
+  node: string;
+  abi: number;
+}
 
 export interface SendInput {
   /** Bare handle, e.g. "+15551234567" — the client builds the chatGuid. */

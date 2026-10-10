@@ -106,57 +106,24 @@ const load = (rel: string): Workflow => parse(read(rel)) as Workflow;
  * The one path in this file that is DERIVED rather than typed, and the
  * reason it had to be.
  *
- * Every `dist-pack/...` in both workflow files was written relative to the
- * repository root, and electron-builder does not write there. It resolves
- * `directories.output` against the PROJECT directory, and `pack.mjs` invokes
- * it as `pnpm --filter @wemessage/desktop exec electron-builder`, which runs
- * in that package's own directory. So the artefacts land in
- * `apps/desktop/dist-pack` and the workflows were all looking one level too
- * high, at a directory that has never existed in this repo.
+ * Every `dist-pack/...` in the workflow files was once written relative to
+ * the repository root while the packer wrote somewhere else, and the
+ * workflows were all looking at a directory that had never existed in this
+ * repo. Nothing caught it: the job that read it `needs`ed a red gate, and a
+ * needed job that never runs is reported as `skipped`, a green-looking tick
+ * on a step that would have exited 2 on its first line.
  *
- * Nothing caught it. `pack-adhoc` in `ci-macos.yml` `needs` the gate job, the
- * gate job has been red, and a needed job that never runs is reported as
- * `skipped` rather than as failed — a green-looking tick attached to a step
- * that would have exited 2 on its first line ("verify-bundle: no such app
- * bundle"). The release workflow has the same fault in nine more places and
- * is triggered by a tag nobody has pushed yet, so its first run would have
- * been the release itself.
- *
- * Hence a derivation and not a constant. Both halves are read:
- *
- *   `apps/desktop/package.json` name === the filter `pack.mjs` passes, which
- *   is what makes `apps/desktop` the project directory rather than a guess;
- *   `apps/desktop/electron-builder.yml` `directories.output`, which is the
- *   only place the leaf name is decided.
- *
- * Change either one and row 9c fails naming the workflow line that drifted,
- * which is the failure this whole comment exists to make impossible to have
- * silently again.
+ * v2 S6c. One packer remains, `pack-swift.mjs`, and it decides its own
+ * default `--out`. So the prefix is read from that file, not typed here, and
+ * row 9c fails naming the workflow line that drifted from it.
  */
-const DESKTOP_DIR = 'apps/desktop';
+const SWIFT_PACK_DIR = 'apps/mac/dist-pack';
 
 const packDir = (): string => {
-  const pkg = JSON.parse(read(`${DESKTOP_DIR}/package.json`)) as {
-    readonly name?: string;
-  };
-  // The link between the filter in `pack.mjs` and this directory. If the
-  // package were renamed, `--filter @wemessage/desktop` would resolve
-  // somewhere else (or nowhere) and the whole derivation below would be
-  // about the wrong tree.
-  expect(pkg.name).toBe('@wemessage/desktop');
-  const packer = read('tools/release/bin/pack.mjs');
-  for (const token of ['--filter', '@wemessage/desktop', 'electron-builder'])
-    expect([token, packer.includes(token)]).toEqual([token, true]);
-  const builder = parse(read(`${DESKTOP_DIR}/electron-builder.yml`)) as {
-    readonly directories?: { readonly output?: unknown };
-  };
-  const out = builder.directories?.output;
-  expect(typeof out).toBe('string');
-  const leaf = String(out);
-  // A relative output. An absolute one would not be under the project dir at
-  // all and this derivation would be a lie rather than a mistake.
-  expect(leaf.startsWith('/')).toBe(false);
-  return `${DESKTOP_DIR}/${leaf}`;
+  expect(read('tools/release/bin/pack-swift.mjs')).toContain(
+    "join(REPO, 'apps', 'mac', 'dist-pack')",
+  );
+  return SWIFT_PACK_DIR;
 };
 
 /**
@@ -212,8 +179,8 @@ const isSubsequence = (
 /** Everything a step could hide an expression in, as one searchable string. */
 const stepText = (s: Step): string => JSON.stringify(s);
 
-const SIGNED_LANE = "steps.signing.outputs.mode == 'release'";
-const ADHOC_LANE = "steps.signing.outputs.mode == 'adhoc'";
+/** v2 S6b: the tap decision, the one decider the Electron job left behind. */
+const TAP_LANE = "steps.tap.outputs.tap == 'yes'";
 
 /**
  * v2 S5a: the Swift job's own lane, decided by its own step. `selfsigned`
@@ -233,14 +200,12 @@ const isUploader = (s: Step): boolean =>
   (s.uses ?? '').startsWith('actions/upload-artifact@') ||
   (s.uses ?? '').startsWith('softprops/action-gh-release@');
 
-/** The closed set of secrets this repository's release is allowed to name. */
+/**
+ * The closed set of secrets this repository's release is allowed to name.
+ * v2 S6b took it from ten to four: the Developer ID, notarization and team
+ * secrets left with the Electron job.
+ */
 const ALLOWED_SECRETS = [
-  'APPLE_DEVELOPER_ID_P12_BASE64',
-  'APPLE_DEVELOPER_ID_P12_PASSWORD',
-  'APPLE_TEAM_ID',
-  'ASC_ISSUER_ID',
-  'ASC_KEY_ID',
-  'ASC_KEY_P8_BASE64',
   'GITHUB_TOKEN',
   'TAP_PUSH_TOKEN',
   'WEMESSAGE_SIGN_P12',
@@ -287,16 +252,10 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 2: two jobs, one dependency, one permission ────────────────── */
 
-  it('row 2: exactly three jobs, and `contents: write` is the whole grant', () => {
+  it('row 2: exactly two jobs, and `contents: write` is the whole grant', () => {
     const wf = load(RELEASE);
-    // v2 S5a adds `pack-swift`; S6b drops `pack-macos`, and this row with it.
-    expect(Object.keys(jobsOf(wf)).sort()).toEqual([
-      'build-test',
-      'pack-macos',
-      'pack-swift',
-    ]);
-    expect(jobsOf(wf)['pack-macos']?.needs).toEqual(['build-test']);
-    expect(jobsOf(wf)['pack-macos']?.['runs-on']).toBe('macos-15');
+    // v2 S5a added `pack-swift`; S6b dropped `pack-macos`, the Electron job.
+    expect(Object.keys(jobsOf(wf))).toEqual(['build-test', SWIFT_JOB]);
     expect(jobsOf(wf)['build-test']?.['runs-on']).toBe('ubuntu-24.04');
     // The Swift job needs the gate and nothing else, on the one image the
     // Swift package declares (ci-swift.yml runs on the same label).
@@ -315,13 +274,10 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   it('row 3: build-test runs the five-command gate, suite last', () => {
     const wf = load(RELEASE);
-    // Linux has no window server, so the suite runs under `xvfb-run -a`.
-    // That is the one legitimate difference between this job and the macOS
-    // lane, and it is normalised away here rather than asserted around, so
-    // that the rest of the row can talk about commands instead of wrappers.
-    const runs = runsOf(wf, 'build-test').map((r) =>
-      r.replace('xvfb-run -a pnpm test', 'pnpm test'),
-    );
+    // v2 S6c. No window server is needed any more: nothing in the suite
+    // opens one, so the suite line is the bare command and no wrapper is
+    // normalised away.
+    const runs = runsOf(wf, 'build-test');
     expect(
       isSubsequence(
         [
@@ -341,64 +297,83 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     // possible for the tagged tree to have never had the suite run on it.
     expect(runs[runs.length - 1]).toBe('pnpm test');
     // And the job is not allowed to grow steps nobody asserted.
-    expect(stepsOf(wf, 'build-test')).toHaveLength(11);
+    expect(stepsOf(wf, 'build-test')).toHaveLength(9);
   });
 
   /* ── row 4: every step declares its lane ────────────────────────────── */
 
-  // teeth: TN-secret-in-adhoc-lane (row 4): deleting the release-lane if from import-signing-certificate made this row report that step as touching a signing secret with no lane guard. Reverted.
-  it('row 4: no step touches a signing secret without a lane guard', () => {
+  // teeth: TN-secret-in-adhoc-lane (row 4), re-pointed in v2 S6b: deleting the lane if from import-release-signing-identity or publish-cask turns this row red.
+  it('row 4: no step touches a secret without the guard its decider sets', () => {
+    // v2 S6b. Each secret but the job token belongs to exactly one decider,
+    // and every other step that names it must carry that decider's output in
+    // its `if:`. An unguarded step that reads an empty secret does not fail
+    // harmlessly: `base64 --decode` writes a zero-byte file, `security
+    // import` exits non-zero, and the job dies before the build it could
+    // have shipped.
+    const GUARD: Readonly<Record<string, string>> = {
+      WEMESSAGE_SIGN_P12: SWIFT_SIGNED_LANE,
+      WEMESSAGE_SIGN_P12_PASSWORD: SWIFT_SIGNED_LANE,
+      TAP_PUSH_TOKEN: TAP_LANE,
+    };
+    const DECIDERS = ['swiftsign', 'tap'];
     const wf = load(RELEASE);
     const offenders: string[] = [];
-    for (const step of stepsOf(wf, 'pack-macos')) {
-      const label =
-        step.id ?? step.name ?? step.uses ?? step.run ?? '(unnamed)';
-      const text = stepText(step);
-      // The one step allowed to read a signing secret without a guard is the
-      // step that COMPUTES the guard. It reads `APPLE_TEAM_ID` to decide the
-      // lane and emits an output; that is the whole mechanism.
-      if (step.id === 'signing') continue;
-      const touchesSigningSecret = /secrets\.(APPLE|ASC)_/.test(text);
-      if (touchesSigningSecret && !(step.if ?? '').includes(SIGNED_LANE))
-        offenders.push(
-          `${label} references a signing secret without ${SIGNED_LANE}`,
-        );
-      const producesUnsigned =
-        text.includes('UNSIGNED') || text.includes('pack:adhoc');
-      if (producesUnsigned && !(step.if ?? '').includes(ADHOC_LANE))
-        offenders.push(
-          `${label} produces an UNSIGNED artefact without ${ADHOC_LANE}`,
-        );
-    }
+    const seen = new Set<string>();
+    for (const [job, def] of Object.entries(jobsOf(wf)))
+      for (const step of def.steps ?? []) {
+        if (DECIDERS.includes(step.id ?? '')) continue;
+        const label = `${job}/${step.id ?? step.name ?? step.uses ?? '(unnamed)'}`;
+        for (const secret of secretsNamedIn(stepText(step))) {
+          const guard = GUARD[secret];
+          if (guard === undefined) continue;
+          seen.add(guard);
+          if (!(step.if ?? '').includes(guard))
+            offenders.push(`${label} reads ${secret} without ${guard}`);
+        }
+      }
     expect(offenders).toEqual([]);
-    // …and the walk is not vacuous: both lanes exist and both were seen.
-    const ifs = stepsOf(wf, 'pack-macos').map((s) => s.if ?? '');
-    expect(ifs.some((c) => c.includes(SIGNED_LANE))).toBe(true);
-    expect(ifs.some((c) => c.includes(ADHOC_LANE))).toBe(true);
+    // ...and the walk is not vacuous: both guards were met on a real step.
+    expect([...seen].sort()).toEqual([SWIFT_SIGNED_LANE, TAP_LANE].sort());
   });
 
-  it('row 4b: the lane is decided by one step, and it is an output', () => {
+  it('row 4b: two deciders, each one step writing an output', () => {
     const wf = load(RELEASE);
-    const signing = stepsOf(wf, 'pack-macos').find((s) => s.id === 'signing');
-    expect(signing).toBeDefined();
-    const body = signing?.run ?? '';
+    const steps = stepsOf(wf, SWIFT_JOB);
+    // `swiftsign` decides the signing lane (rows 13-15 hold its detail);
+    // `tap` decides whether a cask pull request can be opened at all.
+    const tap = steps.filter((s) => s.id === 'tap');
+    expect(tap).toHaveLength(1);
+    const body = tap[0]?.run ?? '';
     expect(body).toContain('GITHUB_OUTPUT');
-    expect(body).toContain('mode=release');
-    expect(body).toContain('mode=adhoc');
-    // No `if:` anywhere in the file may read the `secrets` context directly.
-    // See the header: that context is not available there, so a condition
-    // written that way fails open or fails closed depending on the runner,
-    // and either is worse than the explicit output.
-    for (const step of stepsOf(wf, 'pack-macos'))
-      expect([step.id ?? step.run, /secrets\./.test(step.if ?? '')]).toEqual([
-        step.id ?? step.run,
-        false,
-      ]);
+    expect(body).toContain('tap=yes');
+    expect(body).toContain('tap=no');
+    expect(tap[0]?.if).toBeUndefined();
+    expect(secretsNamedIn(stepText(tap[0] ?? {}))).toEqual(['TAP_PUSH_TOKEN']);
+    // Both run before anything that reads them.
+    const at = (id: string): number => steps.findIndex((s) => s.id === id);
+    expect(at('swiftsign')).toBeGreaterThanOrEqual(0);
+    expect(at('tap')).toBeGreaterThan(at('swiftsign'));
+    const firstReader = steps.findIndex((s) =>
+      /steps\.(swiftsign|tap)\.outputs/.test(s.if ?? ''),
+    );
+    expect(firstReader).toBeGreaterThan(at('tap'));
+    // No `if:` anywhere in the file may read the `secrets` context directly:
+    // it is not available there, so such a condition fails open or closed
+    // depending on the runner, and either is worse than an explicit output.
+    for (const [job, def] of Object.entries(jobsOf(wf)))
+      for (const step of def.steps ?? [])
+        expect([
+          job,
+          step.id ?? step.run,
+          /secrets\./.test(step.if ?? ''),
+        ]).toEqual([job, step.id ?? step.run, false]);
+    // The Developer ID decider is gone with its job.
+    expect(read(RELEASE)).not.toContain('steps.signing.');
   });
 
   /* ── row 5: the secret set is closed, and none of it is echoed ──────── */
 
-  it('row 5: names exactly the ten allowed secrets, and leaks none', () => {
+  it('row 5: names exactly the four allowed secrets, and leaks none', () => {
     // The PARSED workflow, not the raw file. The header of THIS spec
     // documents the `if: secrets.X != ''` trap by writing the trap out, and a
     // reader sweeping raw text counts that comment's `X` as a ninth secret.
@@ -443,8 +418,8 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   it('row 5c: the CI lanes name no secret at all, in any job', () => {
     /*
-     * The release lane is allowed ten secrets and row 5 pins exactly which
-     * ten. The CI lanes are allowed NONE, and until this row the only
+     * The release lane is allowed four secrets and row 5 pins exactly which
+     * four. The CI lanes are allowed NONE, and until this row the only
      * thing that said so was a text sweep in `test/arch.spec.ts`.
      *
      * That gap was measured rather than guessed. The Sc9 teeth mutation
@@ -478,82 +453,66 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(secretsNamedIn(mutated)).toEqual(['APPLE_CERT_P12']);
   });
 
-  it('row 6: the signed lane cleans up its own credentials on every path', () => {
-    const wf = load(RELEASE);
-    const steps = stepsOf(wf, 'pack-macos');
-    const importer = steps.find(
-      (s) => (s.id ?? '') === 'import-signing-certificate',
-    );
-    expect(importer).toBeDefined();
-    const body = importer?.run ?? '';
-    expect(body).toContain('openssl rand');
-    expect(body).toContain('security set-keychain-settings -lut 21600');
-    expect(body).toContain('build.keychain-db');
-    // Key material is written under RUNNER_TEMP, which the runner wipes, and
-    // never under the workspace, which `actions/upload-artifact` can see.
-    expect(body).toContain('RUNNER_TEMP');
-    expect(importer?.if ?? '').toContain(SIGNED_LANE);
-
-    const cleanup = steps.find(
-      (s) => (s.id ?? '') === 'cleanup-signing-credentials',
-    );
-    expect(cleanup).toBeDefined();
-    // `always()` and not `if: success()`, and not omitted. The failure this
-    // catches is the interesting one: the release fails DURING notarization,
-    // the job ends, and a keychain holding a Developer ID private key stays
-    // on a runner that will be recycled to somebody else's job.
-    expect(cleanup?.if ?? '').toContain('always()');
-    const cleanupBody = cleanup?.run ?? '';
-    expect(cleanupBody).toContain('security delete-keychain');
-    expect(cleanupBody).toContain('rm -f');
+  it('row 6: the Developer ID lane is gone, and nothing notarizes', () => {
+    // v2 S6b. The keychain discipline that lived here (scoped, random
+    // password, always deleted) now belongs to the Swift job and rows 20
+    // and 22 hold it. What this row holds is the absence: no step imports a
+    // Developer ID, notarizes, or packs the Electron app.
+    const text = read(RELEASE);
+    for (const gone of [
+      'pack-macos',
+      'release:notarize',
+      'notarytool',
+      'pack:adhoc',
+      'pack:release',
+      'build.keychain-db',
+      'APPLE_',
+      'ASC_',
+      'CSC_',
+      'apps/desktop/dist-pack',
+    ])
+      expect([gone, text.includes(gone)]).toEqual([gone, false]);
   });
 
   /* ── row 7: the release itself ──────────────────────────────────────── */
 
-  it('row 7: the release is a draft, prereleased by version not by lane', () => {
+  it("row 7: the release is a draft, prereleased by version, with this version's notes", () => {
     const wf = load(RELEASE);
-    const rel = stepsOf(wf, 'pack-macos').find((s) =>
+    const steps = stepsOf(wf, SWIFT_JOB);
+    const rels = steps.filter((s) =>
       (s.uses ?? '').startsWith('softprops/action-gh-release@'),
     );
-    expect(rel).toBeDefined();
+    expect(rels).toHaveLength(1);
+    const rel = rels[0];
     const w = (rel?.with ?? {}) as Record<string, unknown>;
-    // A draft, because the last human check on a release is a human looking
-    // at it. Nothing here publishes on its own.
+    // A draft, because the last check on a release is a human looking at it.
     expect(w['draft']).toBe(true);
-    // Keyed on the TAG, not on `steps.signing.outputs.mode`. The lane version
-    // of this assertion was green and wrong: this project ships unsigned by
-    // decision, so `mode == 'adhoc'` is a constant true, every release would
-    // be flagged a prerelease, and `/releases/latest` excludes prereleases.
-    // The README's download link points at `/releases/latest`, so the pair of
-    // them guaranteed a dead button. Asserting the tag shape instead means a
-    // GA tag produces a GA release on the unsigned lane, which is the whole
-    // point of the unsigned lane.
-    // v2 S5a: read through `inputs.tag`, so a dispatch is judged by the tag
-    // it names and not by the branch it was dispatched from.
+    // Keyed on the TAG, not on the lane. A lane-keyed prerelease flag was
+    // green and wrong once already: it is constant across every build the
+    // project cuts, every release becomes a prerelease, and
+    // `/releases/latest`, the README's download link, excludes those.
     expect(w['prerelease']).toBe(
       `\${{ contains(inputs.tag || github.ref_name, '-') }}`,
     );
     expect(w['tag_name']).toBe(RELEASE_TAG);
-    // Not vacuous in the direction that matters: the expression must actually
-    // discriminate, so pin both answers it is required to give.
     const isPre = (tag: string): boolean => tag.includes('-');
     expect(isPre('v1.0.0-rc.1')).toBe(true);
     expect(isPre('v1.0.0')).toBe(false);
-    const dir = packDir();
-    expect(w['body_path']).toBe(`${dir}/RELEASE_NOTES.md`);
-    const files = String(w['files'] ?? '')
-      .split('\n')
-      .map((f) => f.trim())
-      .filter((f) => f.length > 0);
-    expect(files).toEqual([
-      `${dir}/*.dmg`,
-      `${dir}/*.zip`,
-      `${dir}/SHA256SUMS`,
-    ]);
-    // The checksums file is not decoration. It is the only thing a user of an
-    // UNSIGNED build has to check what they downloaded against, because
-    // Gatekeeper will tell them nothing.
-    expect(read(RELEASE)).toContain('SHA256SUMS');
+    // The body is the CHANGELOG section, written by the step before it to
+    // the exact path the uploader reads, and it is not a release file.
+    const notesPath = 'apps/mac/dist-pack/RELEASE_NOTES.md';
+    expect(w['body_path']).toBe(notesPath);
+    const notes = steps.filter((s) => (s.run ?? '').includes('release:notes'));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.run).toBe(`pnpm release:notes --out ${notesPath}`);
+    // Every mode, so a dry run proves the section exists.
+    expect(notes[0]?.if).toBeUndefined();
+    expect(steps.indexOf(notes[0] ?? {})).toBeLessThan(
+      steps.indexOf(rel ?? {}),
+    );
+    expect(String(w['files'] ?? '')).not.toContain('RELEASE_NOTES');
+    // The checksums file is what a user checks a self-signed download against.
+    expect(String(w['files'] ?? '')).toContain('SHA256SUMS');
   });
 
   /* ── row 8: every third-party action is pinned to a commit ──────────── */
@@ -581,67 +540,53 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
 
   /* ── row 9: the macOS CI lane packs the unsigned build ──────────────── */
 
-  it('row 9: ci-macos gains a pack-adhoc job that needs the gate job', () => {
+  it('row 9: ci-macos is one node-gate job on macos-26, with no Electron and no pack', () => {
+    // v2 S6b. The Electron bundle no longer ships, so `pack-adhoc` is gone,
+    // and the shipped app is built and tested by ci-swift. What remains is
+    // the Node side of the repo on the macOS release the app targets.
     const wf = load(CI_MACOS);
-    const names = Object.keys(jobsOf(wf));
-    expect(names).toContain('pack-adhoc');
-    // The gate job's name is READ, never assumed: if S8 renamed it, this row
-    // must fail loudly rather than quietly asserting against a job that no
-    // longer exists.
-    const gate = names.find((n) => n !== 'pack-adhoc');
-    expect(gate).toBeDefined();
-    expect(jobsOf(wf)['pack-adhoc']?.needs).toEqual([gate]);
-    expect(jobsOf(wf)['pack-adhoc']?.['runs-on']).toBe('macos-15');
-    const runs = runsOf(wf, 'pack-adhoc');
-    expect(runs.some((r) => r.includes('pnpm pack:adhoc'))).toBe(true);
-    expect(
-      runs.some((r) => r.includes('verify-bundle.sh') && r.includes('adhoc')),
-    ).toBe(true);
-    const upload = stepsOf(wf, 'pack-adhoc').find((s) =>
-      (s.uses ?? '').startsWith('actions/upload-artifact@'),
-    );
-    expect(upload).toBeDefined();
-    const w = (upload?.with ?? {}) as Record<string, unknown>;
-    expect(String(w['path'] ?? '')).toContain('-UNSIGNED');
-    // Seven days, because these are per-push builds and a public repo's
-    // artifact storage is finite. The number is asserted so that raising it
-    // is a reviewed diff rather than a drift.
-    expect(w['retention-days']).toBe(7);
+    expect(Object.keys(jobsOf(wf))).toEqual(['build-and-test']);
+    const gate = jobsOf(wf)['build-and-test'];
+    expect(gate?.['runs-on']).toBe('macos-26');
+    expect(gate?.needs).toBeUndefined();
+    const text = read(CI_MACOS);
+    for (const gone of [
+      'electron',
+      'ELECTRON',
+      'pack-adhoc',
+      'pack:adhoc',
+      'UNSIGNED',
+      'upload-artifact',
+      'dist-pack',
+    ])
+      expect([gone, text.includes(gone)]).toEqual([gone, false]);
   });
 
-  it('row 9b: the two CI lanes still run the same gate, read from the YAML', () => {
+  it('row 9b: the macOS gate is the Linux gate, step for step, read from the YAML', () => {
     // A second reader for the claim `test/arch.spec.ts` makes with a text
-    // splitter. The splitter had to be narrowed to one job when this slice
-    // added a second job to the macOS file, and a narrowing is exactly the
-    // moment to prove the claim survives under a different reader.
+    // splitter. v2 S6c: with nothing left that needs a window server or a
+    // second runtime, the two lanes run the same commands and differ only in
+    // `runs-on`.
     const linux = load(CI_LINUX);
     const macos = load(CI_MACOS);
     const linuxGate = Object.keys(jobsOf(linux))[0] ?? '';
-    const macosGate =
-      Object.keys(jobsOf(macos)).find((n) => n !== 'pack-adhoc') ?? '';
-    const norm = (rs: readonly string[]): string[] =>
-      rs.map((r) => r.replace('xvfb-run -a pnpm test', 'pnpm test'));
-    expect(norm(runsOf(macos, macosGate))).toEqual(
-      norm(runsOf(linux, linuxGate)),
-    );
-    expect(runsOf(macos, macosGate)).toContain('pnpm test');
+    expect(runsOf(macos, 'build-and-test')).toEqual(runsOf(linux, linuxGate));
+    expect(runsOf(macos, 'build-and-test')).toContain('pnpm test');
+    for (const rel of SWEPT)
+      for (const gone of ['xvfb', 'test:node', 'install-electron'])
+        expect([rel, gone, read(rel).includes(gone)]).toEqual([
+          rel,
+          gone,
+          false,
+        ]);
   });
 
-  it('row 9c: every workflow reads the pack where electron-builder writes it', () => {
+  it('row 9c: every workflow reads the pack where pack-swift.mjs writes it', () => {
     const dir = packDir();
-    // The derivation must actually have moved somewhere. If `directories.output`
-    // were ever set to a path that already began with `apps/desktop`, the
-    // sweep below would pass by tautology.
-    expect(dir).toBe('apps/desktop/dist-pack');
-    const leaf = dir.slice(DESKTOP_DIR.length + 1);
-    // v2 S5a: the Swift lane packs to its own directory, which pack-swift.mjs
-    // decides (its default `--out`); the workflow passes the same path, and
-    // `dist-pack-2` beside it for the second pack.
-    const swiftDir = 'apps/mac/dist-pack';
-    expect(read('tools/release/bin/pack-swift.mjs')).toContain(
-      "join(REPO, 'apps', 'mac', 'dist-pack')",
-    );
-    const prefixes = [dir, swiftDir];
+    const leaf = 'dist-pack';
+    // `dist-pack-2` sits beside the first pack for the reproducibility
+    // compare, so it shares the prefix.
+    const prefixes = [dir];
 
     /*
      * Every line of both workflows, not just `run:` and not just `with:`.
@@ -661,7 +606,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
           for (const m of line.matchAll(new RegExp(`\\S*${leaf}\\S*`, 'g'))) {
             const ref = m[0];
             seen += 1;
-            // `apps/desktop/dist-pack…` is right. A bare `dist-pack…`, or one
+            // `apps/mac/dist-pack…` is right. A bare `dist-pack…`, or one
             // reached through any other prefix, is a path that does not exist
             // on the runner and would fail at the first command to touch it.
             if (!prefixes.some((p) => ref.startsWith(p)))
@@ -674,35 +619,43 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(seen).toBeGreaterThanOrEqual(12);
   });
 
-  /* ── row 10: the tap push is doubly gated and never force-pushed ────── */
+  /* ── row 10: the cask pull request is triply gated, never a push ───── */
 
-  it('row 10: the cask push needs the signed lane AND a tap token', () => {
+  it('row 10: the cask pull request needs the selfsigned lane, a tap token, and no dry run', () => {
     const wf = load(RELEASE);
-    // Found by what it DOES, not by what it mentions. TWO steps in this job
-    // name TAP_PUSH_TOKEN: the `signing` step reads it to decide whether a
-    // tap exists at all, and this one spends it. A `.find()` on the token
-    // returned the first, which carries no `if:` precisely because it is the
-    // step that COMPUTES the lane, so the row asserted against the wrong step
-    // and failed for a right-looking wrong reason. Exactly one step may run
-    // the cask publisher, and the count is asserted so that a second one
-    // cannot be added unguarded beside it.
-    const caskSteps = stepsOf(wf, 'pack-macos').filter((s) =>
-      (s.run ?? '').includes('release:cask'),
+    // Found by what it DOES, not by what it mentions: the `tap` decider also
+    // names TAP_PUSH_TOKEN, and carries no `if:` because it COMPUTES one.
+    // Exactly one step may run the cask publisher, in exactly one job.
+    const caskSteps = Object.entries(jobsOf(wf)).flatMap(([job, def]) =>
+      (def.steps ?? [])
+        .filter((s) => (s.run ?? '').includes('release:cask'))
+        .map((s) => [job, s] as const),
     );
-    expect(caskSteps).toHaveLength(1);
-    const cask = caskSteps[0];
-    // ...and it is still the step holding the token.
+    expect(caskSteps.map(([job]) => job)).toEqual([SWIFT_JOB]);
+    const cask = caskSteps[0]?.[1];
     expect(stepText(cask ?? {})).toContain('TAP_PUSH_TOKEN');
     const cond = cask?.if ?? '';
-    expect(cond).toContain(SIGNED_LANE);
-    expect(cond).toContain('steps.signing.outputs.tap');
+    // A cask pointing at a throwaway build would hand Homebrew users an app
+    // whose leaf exists nowhere else.
+    expect(cond).toContain(SWIFT_SIGNED_LANE);
+    expect(cond).toContain(TAP_LANE);
+    expect(cond).toContain(NOT_DRY_RUN);
+    const body = cask?.run ?? '';
+    // The Swift disk image, by the name cask.mjs parses.
+    expect(body).toContain('apps/mac/dist-pack/WeMessage-*-arm64.dmg');
     // It opens a pull request. It does not write to the tap's default branch,
     // because a bad sha256 pushed straight to `main` breaks `brew install`
     // for everyone until somebody notices.
-    const body = cask?.run ?? '';
     expect(body).toContain('gh pr create');
     expect(body).not.toContain('git push');
     expect(body).not.toContain('--force');
+    // After the release step, so a cask never names a file not yet uploaded,
+    // and before the cleanup, which stays last.
+    const steps = stepsOf(wf, SWIFT_JOB);
+    const rel = steps.findIndex((s) =>
+      (s.uses ?? '').startsWith('softprops/action-gh-release@'),
+    );
+    expect(steps.indexOf(cask ?? {})).toBeGreaterThan(rel);
   });
 
   /* ── row 11: the public sweeps reach the workflow files ─────────────── */
@@ -778,8 +731,8 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       'WEMESSAGE_SIGN_P12',
       'WEMESSAGE_SIGN_P12_PASSWORD',
     ]);
-    // ...and no other job may name them: the Electron lane has its own.
-    for (const job of ['build-test', 'pack-macos'])
+    // ...and no other job may name them.
+    for (const job of ['build-test'])
       expect([
         job,
         secretsNamedIn(JSON.stringify(jobsOf(load(RELEASE))[job])).filter((n) =>
@@ -906,14 +859,27 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     expect(compare.run ?? '').toContain('certificate leaf');
   });
 
-  it('row 19: every upload is selfsigned only, and a throwaway build is never uploaded', () => {
+  it('row 19: a release upload is selfsigned only; a throwaway build uploads its disk image as an artifact and nothing else', () => {
     const uploads = swiftSteps().filter(isUploader);
-    // Non-vacuity: both uploaders are in the job.
+    // Non-vacuity: all three uploaders are in the job, in this order.
     expect(uploads.map((s) => (s.uses ?? '').split('@')[0])).toEqual([
+      'actions/upload-artifact',
       'actions/upload-artifact',
       'softprops/action-gh-release',
     ]);
-    for (const step of uploads) {
+    // v2 S5b: exactly one throwaway upload, a workflow artifact, never a
+    // release, holding the throwaway disk image only.
+    const throwaway = uploads.filter((s) => (s.if ?? '').includes('throwaway'));
+    expect(throwaway).toHaveLength(1);
+    const t = throwaway[0];
+    expect(t?.if).toBe(SWIFT_THROWAWAY_LANE);
+    expect((t?.uses ?? '').startsWith('actions/upload-artifact@')).toBe(true);
+    const tw = (t?.with ?? {}) as Record<string, unknown>;
+    expect(String(tw['name'] ?? '')).toMatch(/-throwaway$/);
+    expect(tw['path']).toBe('apps/mac/dist-pack/*-throwaway.dmg');
+    expect(tw['if-no-files-found']).toBe('error');
+    // Every other uploader is selfsigned only.
+    for (const step of uploads.filter((s) => s !== t)) {
       const cond = step.if ?? '';
       expect([step.uses, cond.includes(SWIFT_SIGNED_LANE)]).toEqual([
         step.uses,
@@ -930,7 +896,7 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       for (const banned of ['gh release', 'gh api', 'curl ', 'upload'])
         expect([banned, run.includes(banned)]).toEqual([banned, false]);
     // The release asset set, and the release is a draft named by the tag.
-    const rel = uploads[1];
+    const rel = uploads[2];
     const w = (rel?.with ?? {}) as Record<string, unknown>;
     expect(w['draft']).toBe(true);
     expect(w['tag_name']).toBe(RELEASE_TAG);
@@ -942,12 +908,14 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
         .filter((f) => f.length > 0),
     ).toEqual([
       'apps/mac/dist-pack/*.zip',
+      'apps/mac/dist-pack/*.dmg',
       'apps/mac/dist-pack/SHA256SUMS',
       'apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt',
     ]);
-    // Uploads come after verify; cleanup is the last step of all.
+    // Uploads come after verify and after the image; cleanup is last.
     const firstUpload = swiftSteps().findIndex(isUploader);
     expect(firstUpload).toBeGreaterThan(indexOfId('verify-swift-bundle'));
+    expect(firstUpload).toBeGreaterThan(indexOfId('dmg-swift'));
     expect(indexOfId('cleanup-swift-signing-identity')).toBe(
       swiftSteps().length - 1,
     );
@@ -992,7 +960,6 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
     );
     expect(checkouts).toEqual([
       ['build-test', CHECKOUT_REF],
-      ['pack-macos', CHECKOUT_REF],
       [SWIFT_JOB, CHECKOUT_REF],
     ]);
     // The old spelling reads a string where the input is a boolean, and
@@ -1007,12 +974,14 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
           step.id ?? step.name,
           (step.run ?? '').includes('inputs.'),
         ]).toEqual([job, step.id ?? step.name, false]);
-    // A dry run: the Electron job does not run (its uploader always makes a
-    // draft), and every release-creating step anywhere is behind the input.
-    expect(jobsOf(wf)['pack-macos']?.if).toBe(`\${{ ${NOT_DRY_RUN} }}`);
+    // A dry run: every release-creating or pull-request-opening step
+    // anywhere is behind the input.
     for (const [job, def] of Object.entries(jobsOf(wf)))
       for (const step of def.steps ?? [])
-        if ((step.uses ?? '').startsWith('softprops/action-gh-release@'))
+        if (
+          (step.uses ?? '').startsWith('softprops/action-gh-release@') ||
+          (step.run ?? '').includes('gh pr create')
+        )
           expect([
             job,
             (def.if ?? '').includes(NOT_DRY_RUN) ||
@@ -1066,6 +1035,64 @@ describe('s9 Sc9: the release workflow is real, and its shape is asserted', () =
       const limit = swiftStep(id)['timeout-minutes'] ?? 0;
       expect([id, limit > 0 && limit <= 10]).toEqual([id, true]);
     }
+  });
+
+  it('row 23: dr-diff runs after the second pack and before upload, selfsigned only', () => {
+    const step = swiftStep('dr-diff');
+    expect(step.if).toBe(SWIFT_SIGNED_LANE);
+    const at = indexOfId('dr-diff');
+    expect(at).toBeGreaterThan(indexOfId('pack-swift-twice'));
+    // Before EVERY uploader, so an unjustified change publishes nothing.
+    const uploaders = swiftSteps()
+      .map((s, i) => [s, i] as const)
+      .filter(([s]) => isUploader(s))
+      .map(([, i]) => i);
+    expect(uploaders.length).toBeGreaterThanOrEqual(2);
+    for (const i of uploaders) expect([i, at < i]).toEqual([i, true]);
+    // The comparison reads this build's requirement and this repo's
+    // CHANGELOG, for the tag passed through env (row 21: never `inputs.`
+    // in a shell line), and it names no secret but the job token.
+    const body = step.run ?? '';
+    expect(body).toContain('node tools/release/bin/dr-diff.mjs');
+    for (const arg of [
+      '--repo "$GITHUB_REPOSITORY"',
+      '--tag "$TAG"',
+      '--current apps/mac/dist-pack/DESIGNATED_REQUIREMENT.txt',
+      '--changelog CHANGELOG.md',
+    ])
+      expect([arg, body.includes(arg)]).toEqual([arg, true]);
+    const env = (step.env ?? {}) as Record<string, unknown>;
+    expect(env['TAG']).toBe(RELEASE_TAG);
+    expect(secretsNamedIn(stepText(step))).toEqual(['GITHUB_TOKEN']);
+    // A failure fails the job: nothing swallows the exit code.
+    expect(body).not.toMatch(/\|\|\s*true|continue-on-error/);
+    expect(stepText(step)).not.toContain('continue-on-error');
+    const limit = step['timeout-minutes'] ?? 0;
+    expect(limit > 0 && limit <= 10).toBe(true);
+  });
+
+  it('row 24: the disk image is built from the zipped app, signed with the same leaf, in both lanes', () => {
+    const step = swiftStep('dmg-swift');
+    // Both lanes: a dry run must produce the image too.
+    expect(step.if).toBeUndefined();
+    expect(indexOfId('dmg-swift')).toBeGreaterThan(
+      indexOfId('verify-swift-bundle'),
+    );
+    const env = (step.env ?? {}) as Record<string, unknown>;
+    expect(env['LEAF']).toBe(LEAF_EXPR);
+    const body = step.run ?? '';
+    for (const token of [
+      'set -euo pipefail',
+      'ditto -x -k "$zip"',
+      'dmg="${zip%.zip}.dmg"',
+      'bash tools/swift/dmg.sh --app "$src/WeMessage.app" --out "$dmg" --identity "$LEAF"',
+      'shasum -a 256',
+      '>> SHA256SUMS',
+    ])
+      expect([token, body.includes(token)]).toEqual([token, true]);
+    expect(secretsNamedIn(stepText(step))).toEqual([]);
+    const limit = step['timeout-minutes'] ?? 0;
+    expect(limit > 0 && limit <= 10).toBe(true);
   });
 
   /* ── row 12: actionlint, when the machine has one ───────────────────── */

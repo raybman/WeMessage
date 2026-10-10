@@ -1,18 +1,17 @@
 import tseslint from 'typescript-eslint';
 
-// Flat config (§1.7). Two independent tripwires for INV-1 alongside dependency-cruiser:
-// consistent-type-imports (protocol type-only, §1.6) + no-restricted-imports(electron).
+// Flat config (§1.7). A tripwire for INV-1 alongside dependency-cruiser:
+// consistent-type-imports (protocol type-only, §1.6).
 export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
-      // s9 Sc5: `apps/desktop/dist-bundle/` is esbuild output, gitignored at
-      // `.gitignore:39`. `**/dist/**` does not match it; the name is not `dist`.
+      // `dist-bundle/` is the daemon bundler's esbuild output, gitignored.
+      // `**/dist/**` does not match it; the name is not `dist`.
       '**/dist-bundle/**',
-      // s9 Sc6: electron-builder's output, gitignored at `.gitignore:40-41`.
-      // `dist-pack/` holds a packed `.app` whose `Contents/Resources/` is a
-      // COPY of `dist-bundle/`, so leaving it unignored lints the same three
-      // generated files a second time, from inside a bundle, and reports
+      // The pack lane's output, gitignored. `dist-pack/` holds a packed
+      // `.app` whose resources are a COPY of a daemon bundle, so leaving it
+      // unignored lints generated files from inside a bundle and reports
       // esbuild's output as if a human had written it.
       '**/dist-pack/**',
       '**/dist-pack-next/**',
@@ -28,64 +27,17 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     // Type-aware linting for every composite-tsconfig source tree.
-    //
-    // s8 Sc1 widens this to `apps/desktop/src`, including `.tsx`. Until S8
-    // the app was two lines and the glob's omission cost nothing; the GUI
-    // slice makes it the largest untyped-lint surface in the repo, and the
-    // renderer is TSX (F-100), so an extension list that stopped at `.ts`
-    // would have left the screens unlinted while looking complete.
-    // `apps/desktop/tsconfig.json` includes `src/**/*.tsx` for exactly this
-    // reason: `projectService` resolves the nearest tsconfig, and a file no
-    // project claims is a lint error rather than a linted file.
-    files: [
-      'packages/**/src/**/*.ts',
-      'apps/desktop/src/**/*.{ts,tsx}',
-      'fixtures/src/**/*.ts',
-    ],
+    files: ['packages/**/src/**/*.ts', 'fixtures/src/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
-        // Preact's automatic runtime (F-100). Set here as well as in the
-        // tsconfigs so the parser and the compiler cannot disagree about
-        // which `jsx` factory a `.tsx` file desugars to.
-        jsxPragma: null,
       },
     },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: 'electron',
-              message:
-                'electron is only permitted in apps/desktop (INV-1, §2.7).',
-            },
-          ],
-        },
-      ],
     },
-  },
-  {
-    // `electron` is banned everywhere else by the rule above; apps/desktop is
-    // the one place it is the point. The boundary is still enforced, by
-    // dependency-cruiser's `no-electron-outside-desktop` — the same fence
-    // drawn once rather than a hole. `.tsx` joins `.ts` for the same reason
-    // the type-aware block above did (s8 Sc1).
-    files: ['apps/desktop/**/*.{ts,tsx}'],
-    rules: { 'no-restricted-imports': 'off' },
-  },
-  {
-    // s9 Sc6: electron-builder loads its lifecycle hooks with `require`, and
-    // `apps/desktop` is `"type": "module"`, so the hook has to be `.cjs` and a
-    // `.cjs` file has to use `require`. The exception is the exact directory
-    // that holds build hooks, not `**/*.cjs`: a stray CommonJS file anywhere
-    // else in the repo should still have to argue for itself.
-    files: ['apps/desktop/scripts/*.cjs'],
-    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
 );

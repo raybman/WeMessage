@@ -326,9 +326,9 @@ describe('row 4: Info.plist', () => {
   });
 
   it('the Automation prompt, copyright and category are pinned literals', () => {
-    // v2 S6a: these were held equal to apps/desktop/electron-builder.yml,
-    // which S6c deletes. They are the strings the Electron app shipped, now
-    // pinned here so the Swift lane reads nothing under the Electron app.
+    // v2 S6a pinned these as literals, the strings the previous desktop app
+    // shipped, so the Swift lane would read nothing under that app. S6c
+    // deleted it; the literals are now the only source.
     const p = plist();
     expect(p['NSAppleEventsUsageDescription']).toBe(
       'WeMessage sends replies through Messages on your behalf, and only ones you have approved.',
@@ -508,7 +508,7 @@ describe('row 6: pack-swift.mjs drives the lane in order', () => {
   });
 });
 
-describe('v2 S6a: the lane reads its inputs from outside the Electron app', () => {
+describe('v2 S6a: the lane reads its inputs from tools/ and apps/mac only', () => {
   it('step 3 invokes tools/release/bin/bundle-daemon.mjs', () => {
     expect(existsSync(join(repoRoot, BUNDLER))).toBe(true);
     const text = read(PACK_SWIFT);
@@ -519,10 +519,10 @@ describe('v2 S6a: the lane reads its inputs from outside the Electron app', () =
     expect(text).toContain(
       "const DIST_BUNDLE_NODE = join(REPO, 'apps', 'mac', 'dist-bundle-node');",
     );
-    // The moved bundler still carries the node flavour step 3 asks for.
+    // The bundler builds the node flavour step 3 asks for, and only it.
     for (const needed of ["'--runtime'", "'node'", "'--out'", "'--node'"])
       expect([needed, text.includes(needed)]).toEqual([needed, true]);
-    expect(read(BUNDLER)).toContain("opts.runtime === 'node'");
+    expect(read(BUNDLER)).toContain("const RUNTIMES = ['node'];");
   });
 
   it('bundle.sh reads apps/mac/Resources/icon.icns, and it is a whole icns file', () => {

@@ -10,6 +10,7 @@ File                 What it does
 swift.sh             Picks the swift.org Swift 6 toolchain and execs it
 bundle.sh            Assembles WeMessage.app from the release build
 sign.sh              Signs an assembled bundle, inside-out, with one identity
+dmg.sh               Puts a signed app in a plain disk image and signs the image
 verify-bundle.sh     Checks an assembled bundle, and with --expect-leaf its signature
 node-fetch.sh        Fetches the pinned Node runtime (node.lock.json)
 xcodegen-fetch.sh    Fetches the pinned XcodeGen release (xcodegen.lock.json); CI only
@@ -45,6 +46,23 @@ runtime flag on each, the entitlements each carries, and spctl's verdict
 recorded for the log but never fatal. `test/swift/sign.sh.spec.ts` runs
 both against `fixtures/swift/mini-app` with stub tools; the real signing
 run is the release workflow's `pack-swift` job.
+
+## dmg.sh (v2 S5b)
+
+```
+bash tools/swift/dmg.sh --app <WeMessage.app> --out <file.dmg> --identity <sha1>
+```
+
+Stages the app next to an `Applications` symlink, builds a UDZO image with
+`hdiutil create -volname WeMessage`, checks it with `hdiutil verify`, then
+signs the image with the same 40-hex identity as the app
+(`--timestamp=none`) and verifies it: `codesign --verify`, and the image's
+designated requirement must name that leaf. The window is plain on purpose
+(D-UI-181): no background art and no icon layout, so hdiutil is the only
+tool it needs. Exit 2 is usage, 3 the identity is missing, 4 hdiutil or
+codesign failed, 5 the signed image does not verify or names another leaf.
+`test/swift/dmg.sh.spec.ts` runs it against the stub `hdiutil`, `codesign`
+and `security` in `fixtures/swift/mini-app/stubs`.
 
 ## xcodegen-fetch.sh
 

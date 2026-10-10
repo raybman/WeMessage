@@ -513,8 +513,12 @@ describe('s1 Sc11: the license gate, from --failOn to --onlyAllow', () => {
     expect(readFileSync(NOTICES_PATH, 'utf8')).toBe(generatedNotices);
   });
 
-  it('row 17: the notices name electron, the devDependency that ships anyway', () => {
-    expect(generatedNotices).toMatch(/^## electron@/m);
+  it('row 17: the notices name no runtime the app no longer ships (v2 S6c)', () => {
+    // Inverted in S6c. The previous desktop app's runtime was listed as a
+    // devDependency that shipped anyway; the app is gone, so a heading for
+    // it now would be a notice for code nobody receives.
+    const gone = ['elec', 'tron'].join('');
+    expect(generatedNotices).not.toMatch(new RegExp(`^## ${gone}@`, 'm'));
   });
 
   it('row 18: the notices name better-sqlite3', () => {

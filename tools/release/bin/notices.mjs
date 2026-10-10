@@ -6,21 +6,19 @@
  *
  * Scenario 11. SCOPE: the union of a `--production` scan of every
  * workspace member (every package that ends up in a `dependencies` field
- * and is genuinely bundled), plus BUNDLED_EXTRAS below. That constant holds
- * two names for two different reasons, not one:
+ * and is genuinely bundled), plus BUNDLED_EXTRAS below.
  *
- *   - `electron` is a devDependency of apps/desktop. electron-builder
- *     copies Electron's own binary into the shipped app, so it IS bundled,
- *     but a `--production` scan structurally cannot see it: `--production`
- *     only reads a package.json's own `dependencies` field, and Electron
- *     sits under `devDependencies` because npm considers it a build-time
- *     tool, not because it is absent from the app.
  *   - `better-sqlite3` is already a `dependencies` entry in packages/store
  *     and packages/ingest, so the production scan finds it on its own.
  *     It is listed here anyway, belt and braces, so a future refactor that
  *     moves it to devDependencies (native modules sometimes get moved
  *     there for build-tooling reasons) cannot silently drop it from a
- *     notices file nobody is watching that closely.
+ *     notices file nobody is watching that closely. The daemon bundle
+ *     ships its prebuild, so it is bundled whatever its manifest says.
+ *
+ * v2 S6c: the list held a second name, the previous desktop app's runtime,
+ * until that app was deleted. Nothing else ships outside a `dependencies`
+ * field now.
  *
  * WHAT NEVER APPEARS IN THE OUTPUT: license-checker's `email` field, and
  * the full text of any bundled LICENSE file. Both can carry a maintainer's
@@ -57,8 +55,8 @@ const WORKSPACE_ROOTS = manifestPaths()
   .map((p) => (p === 'package.json' ? '.' : p.replace(/\/package\.json$/, '')))
   .sort();
 
-/** See the header comment: two names, two different reasons. */
-const BUNDLED_EXTRAS = ['electron', 'better-sqlite3'];
+/** See the header comment. */
+const BUNDLED_EXTRAS = ['better-sqlite3'];
 
 const scanJson = (root, production) => {
   const args = [
@@ -100,9 +98,9 @@ export const buildNoticesUnion = () => {
     }
   }
   // A full (non-production) scan per root, kept ONLY where the bare name
-  // matches BUNDLED_EXTRAS, so pulling electron in does not also pull in
-  // the rest of apps/desktop's devDependency graph (axe-core and friends,
-  // which are test-time only and never enter the bundle).
+  // matches BUNDLED_EXTRAS, so pulling an extra in does not also pull in
+  // the rest of a member's devDependency graph (test-time only, never in
+  // the bundle).
   for (const root of WORKSPACE_ROOTS) {
     let report;
     try {
@@ -129,8 +127,8 @@ export const renderNotices = (union) => {
   lines.push(
     'It lists every third-party package a WeMessage release bundles: the ' +
       "union of each workspace member's production dependencies, plus " +
-      '`electron` and `better-sqlite3`, which are bundled regardless of ' +
-      'how they happen to be declared. See the generator source for why.',
+      '`better-sqlite3`, which is bundled regardless of how it happens to ' +
+      'be declared. See the generator source for why.',
   );
   lines.push('');
   for (const name of [...union.keys()].sort()) {

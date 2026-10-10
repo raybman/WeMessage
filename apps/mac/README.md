@@ -761,3 +761,26 @@ D-UI-169  (B3)      LinkedIn pushing back is a blocking danger banner under
   accessibility audit, so danger stays on the banner's bar and wash. The
   thread pane keeps its open thread when the tab or the inbox scope narrows
   the list past it; its head still names the inbox a reply goes through.
+
+- Release copy and the disk image (v2 S5b). These are not app values, so
+  nothing in `ProvisionalUI.swift` holds them: the first-run copy lives in
+  `README.md`, `site/docs/install.html` and the cask caveats, and the image
+  is built by `tools/swift/dmg.sh`. D-UI-182 is the cask's caveats (S5c);
+  183 and 184 are kept spare for S5:
+
+```
+Row       Plan row  Default
+--------  --------  ---------------------------------------------------------
+D-UI-180  103       first-run copy leads with Open Anyway in System Settings,
+                    Privacy & Security, then
+                    `xattr -dr com.apple.quarantine`; Homebrew's
+                    `--no-quarantine` is not offered (Homebrew removed it)
+D-UI-181  104       the disk image window is plain: the app and an
+                    Applications shortcut, no artwork, no icon layout, no
+                    Finder scripting
+D-UI-182  S5c       the cask's caveats call the build self-signed with the
+                    project's own certificate and not notarized, never
+                    UNSIGNED; same Open Anyway then `xattr -dr` route as
+                    D-UI-180; one line says the grants follow the
+                    certificate, so an ordinary update keeps them
+```

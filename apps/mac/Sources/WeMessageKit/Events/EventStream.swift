@@ -1,8 +1,7 @@
 import Foundation
 
 /// The daemon's event stream as a sequence of AppActions, ported from the
-/// Electron main process's createEventStream
-/// (apps/desktop/src/main/event-stream.ts).
+/// v1 desktop app's createEventStream (deleted in v2 S6c).
 ///
 /// Each connection runs the same session: the first frame arrives (a
 /// connection.state first frame is the daemon's greeting and is consumed;

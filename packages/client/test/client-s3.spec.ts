@@ -72,13 +72,13 @@ describe('doctor()', () => {
 });
 
 /*
- * v2 S2b row 13: `runtime` mirrors the daemon's tagged union. Both variants
- * come from the same hand-written fixtures the daemon and WeMessageKit read,
- * and the type half is the point: `runtime.electron` must not type-check
- * until the caller has narrowed on `kind`, because under the Swift host
- * there is no Electron to report.
+ * v2 S2b row 13, re-pinned by v2 S6d: `runtime` mirrors the daemon's tagged
+ * shape, one kind left. The variant comes from the same hand-written fixture
+ * the daemon and WeMessageKit read, and the type half is the point: the
+ * tag is a literal, so a future kind is a compile error at every reader
+ * rather than a value nobody narrowed.
  */
-function runtimeFixture(name: 'electron' | 'node'): DoctorRuntimePayload {
+function runtimeFixture(name: 'node'): DoctorRuntimePayload {
   return JSON.parse(
     readFileSync(
       fileURLToPath(
@@ -92,48 +92,30 @@ function runtimeFixture(name: 'electron' | 'node'): DoctorRuntimePayload {
   ) as DoctorRuntimePayload;
 }
 
-describe('v2 S2b row 13: doctor().runtime is a union narrowed on kind', () => {
-  it.each(['electron', 'node'] as const)(
-    'returns the %s variant verbatim',
-    async (name) => {
-      const runtime = runtimeFixture(name);
-      fetchMock.mockResolvedValueOnce(
-        jsonResponse(200, {
-          state: 'fully-connected',
-          checks: [],
-          probedAt: '2026-09-02T00:00:00.000Z',
-          supervisor: 'none',
-          runtime,
-        }),
-      );
+describe('v2 S2b row 13: doctor().runtime is tagged on kind', () => {
+  it('returns the node variant verbatim', async () => {
+    const runtime = runtimeFixture('node');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        state: 'fully-connected',
+        checks: [],
+        probedAt: '2026-09-02T00:00:00.000Z',
+        supervisor: 'none',
+        runtime,
+      }),
+    );
 
-      const result = await client().doctor();
+    const result = await client().doctor();
 
-      expect(result.runtime).toStrictEqual(runtime);
-      expect(result.runtime?.kind).toBe(name);
-    },
-  );
-
-  it('exposes host only on the node variant and electron only on the other', () => {
-    const node = runtimeFixture('node');
-    const electron = runtimeFixture('electron');
-    if (node.kind !== 'node' || electron.kind !== 'electron')
-      throw new Error('the fixtures are swapped');
-    expectTypeOf(node.host).toEqualTypeOf<'swift'>();
-    expectTypeOf(electron.electron).toEqualTypeOf<string>();
-    expect(node.host).toBe('swift');
-    expect('electron' in node).toBe(false);
-    expect('host' in electron).toBe(false);
+    expect(result.runtime).toStrictEqual(runtime);
+    expect(result.runtime?.kind).toBe('node');
   });
 
-  it('does not let an unnarrowed caller read runtime.electron', () => {
-    const unnarrowed = runtimeFixture('node');
-    // @ts-expect-error electron exists on one variant only; narrow on kind.
-    const read: unknown = unnarrowed.electron;
-    expect(read).toBeUndefined();
-    expectTypeOf<DoctorRuntimePayload['kind']>().toEqualTypeOf<
-      'electron' | 'node'
-    >();
+  it('v2 S6d: kind and host are single literals', () => {
+    const node = runtimeFixture('node');
+    expectTypeOf(node.host).toEqualTypeOf<'swift'>();
+    expectTypeOf<DoctorRuntimePayload['kind']>().toEqualTypeOf<'node'>();
+    expect(Object.keys(node).sort()).toEqual(['abi', 'host', 'kind', 'node']);
   });
 });
 

@@ -12,7 +12,7 @@ ever leaves your Mac is what you route to an agent.
 
 ## Install
 
-Requires macOS 15 (Sequoia) or later on Apple silicon.
+Requires macOS 26 (Tahoe) or later on Apple silicon.
 
 ```sh
 brew tap raybman/wemessage
@@ -22,40 +22,56 @@ brew install --cask wemessage
 Or download the DMG from the
 [releases page](https://github.com/raybman/WeMessage/releases).
 
-**The builds are unsigned, on purpose.** Shipping a signed build requires a paid
-Apple Developer membership, and putting a yearly fee between you and a working
-copy of a program you can already read the source of would defeat the point.
-The cost is one extra step the first time you open it, and it is worth knowing
-exactly what that step is rather than being told to click through a warning:
+**The builds are self-signed, not notarized.** Every release is signed with
+the project's own certificate, the same one every time, but not with a paid
+Apple Developer ID, so Apple has not notarized it. Putting a yearly fee
+between you and a working copy of a program you can already read the source
+of would defeat the point. The cost is one extra step the first time you open
+it, and it is worth knowing exactly what that step is rather than being told
+to click through a warning:
 
 1. Open the DMG and drag WeMessage to Applications.
-2. Launch it. macOS refuses, because it cannot check the app with Apple.
-3. Open **System Settings, Privacy and Security**, scroll to the bottom, and
-   click **Open Anyway** next to the message about WeMessage.
+2. Launch it. macOS refuses once: on macOS 26 it says Apple could not verify
+   WeMessage is free of malware.
+3. Open **System Settings, Privacy & Security**, scroll to the bottom, and
+   click **Open Anyway** next to the message about WeMessage. The button is
+   there and only there: right-clicking the app and choosing Open no longer
+   offers it.
 4. Launch it again and confirm.
 
-If you prefer the command line, `xattr -d com.apple.quarantine
-/Applications/WeMessage.app` does the same thing. Either way you are making the
-same decision: you are vouching for this build yourself instead of asking Apple
-to vouch for it. Every release publishes a `SHA256SUMS` file so you can check
-that what you downloaded is what was built:
+If you prefer the command line, this does the same thing for the app and
+everything inside it:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/WeMessage.app
+```
+
+A Homebrew install is quarantined exactly like a download, so the same two
+routes apply to it. Either way you are making the same decision: you are
+vouching for this build yourself instead of asking Apple to vouch for it.
+Every release publishes a `SHA256SUMS` file so you can check that what you
+downloaded is what was built:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 ```
 
-**Every update re-locks Full Disk Access.** This is the real cost of an
-unsigned build, and it is not the Gatekeeper prompt above. macOS identifies an
-unsigned app by a hash of the binary, and that hash changes on every build, so
-after an update the WeMessage row in **Privacy and Security, Full Disk
-Access** stays visibly switched on while the gateway's reads of the
-message database start failing. Nothing is broken and no data is lost. Select
-the WeMessage entry, remove it with the minus button, add
+**Full Disk Access follows the signing certificate.** macOS remembers the
+grant by the certificate the app is signed with, and every release is signed
+with the same one, so an ordinary update keeps it. Two kinds of update do
+not: the first one onto a build signed some other way (an earlier unsigned
+build, or one you built yourself), and a release that rotates the
+certificate, which the changelog announces on a line of its own.
+After an update like that the WeMessage row in **Privacy & Security, Full
+Disk Access** stays visibly switched on while the gateway's reads of the
+message database start failing. Nothing is broken and no data is lost. Select the
+WeMessage entry, remove it with the minus button, add
 `/Applications/WeMessage.app` back with the plus button, and restart the
 gateway. Toggling the existing switch off and on does not work, because the
-entry it belongs to points at a build that no longer exists. `wemessage doctor`
-reports this case by name rather than leaving you to guess at it, and the
-onboarding wizard checks the daemon's own reads instead of trusting the switch.
+entry it belongs to points at a build that no longer matches.
+`wemessage doctor` reports this case by name rather than leaving you to guess
+at it, and the onboarding wizard checks the daemon's own reads instead of
+trusting the switch.
 
 Build it yourself instead, if you would rather:
 

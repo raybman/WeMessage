@@ -12,8 +12,8 @@
  *   - Every relative link in the README points at a file that exists. Dead
  *     links in a README are invisible to the author, who knows what the file
  *     was called, and total to a reader, who does not.
- *   - The README says, in words, that the build is unsigned, and says what
- *     the user has to do about it. This project made a deliberate choice to
+ *   - The README says, in words, that the build is self-signed and not
+ *     notarized, and says what the user has to do about it. This project made a deliberate choice to
  *     ship without an Apple Developer ID so that a paid membership is not
  *     standing between a reader and a working copy. That choice is only
  *     defensible if it is DOCUMENTED. An unsigned build whose README does not
@@ -83,18 +83,41 @@ describe('s9 Sc13: the README, the security policy and the changelog', () => {
     expect(versionHits).toEqual([]);
   });
 
-  /* ── row 3: the unsigned decision is stated, not buried ─────────────── */
+  /* ── row 3: the self-signed decision is stated, not buried ─────────── */
 
-  it('row 3: says the build is unsigned and says what to do about it', () => {
+  it('row 3: says the build is self-signed and not notarized, and what to do about it', () => {
+    // v2 S5b rewrote this row from "unsigned" (advisor overlay item 11): the
+    // Swift build is signed with the project's own certificate, so the word
+    // that is true now is self-signed, and the one Gatekeeper cares about is
+    // notarized. Read inside Install, where a reader deciding to download is.
     const text = read(README);
-    expect(text.toLowerCase()).toContain('unsigned');
-    // The exact words of the macOS 15 flow. Right-click-Open stopped working
-    // for unsigned apps in Sequoia, so a README that only says "right click
-    // and choose Open" sends the reader in a circle.
-    expect(text).toContain('Open Anyway');
-    expect(text).toContain('com.apple.quarantine');
-    // And the mitigation offered in place of a signature is named.
-    expect(text).toContain('SHA256SUMS');
+    const at = text.indexOf('\n## Install');
+    const install = text.slice(at, text.indexOf('\n## ', at + 1));
+    expect(install.length).toBeGreaterThan(500);
+    expect(install).toContain('self-signed');
+    expect(install).toContain('not notarized');
+    expect(install).not.toMatch(/builds are unsigned/i);
+    // What macOS 26 actually says, so the reader recognises the refusal.
+    expect(install).toContain('Apple could not verify');
+    // The way past it, by name and by place: Open Anyway lives in Privacy &
+    // Security, not in the Finder's right-click menu, which stopped offering
+    // it in Sequoia.
+    const settings = install.indexOf('Privacy & Security');
+    const openAnyway = install.indexOf('Open Anyway');
+    expect(settings).toBeGreaterThan(-1);
+    expect(openAnyway).toBeGreaterThan(settings);
+    // D-UI-180: Open Anyway first, the command line second. `-dr`, not `-d`:
+    // the attribute sits on files inside the bundle too.
+    const xattr = install.indexOf(
+      'xattr -dr com.apple.quarantine /Applications/WeMessage.app',
+    );
+    expect(xattr).toBeGreaterThan(openAnyway);
+    expect(install).not.toMatch(/xattr -d com\.apple/);
+    // Homebrew removed `--no-quarantine`; copy that names it sends the
+    // reader to a flag that errors.
+    expect(text).not.toContain('--no-quarantine');
+    // And the mitigation offered in place of notarization is named.
+    expect(install).toContain('SHA256SUMS');
   });
 
   /* ── row 4: no dead links ───────────────────────────────────────────── */

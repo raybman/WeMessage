@@ -1,7 +1,7 @@
 # Releasing WeMessage
 
 This is the procedure for cutting a WeMessage release. It is public on purpose:
-the builds are unsigned and reproducible from this repository, so the steps that
+the builds are self-signed and reproducible from this repository, so the steps that
 produce them should be readable by anyone who wants to check that what is
 published matches what is here.
 
@@ -9,32 +9,36 @@ Read `SECURITY.md` before publishing anything.
 
 ## Lanes
 
-There are two packaging lanes, and only one of them exists today.
+There is one packaging lane: `pack-swift` in `release.yml`.
 
 ```
-  lane          signing               produces                        status
-  ----------    -------------------   -----------------------------   ---------
-  pack-adhoc    ad-hoc, no identity   WeMessage-<v>-arm64-UNSIGNED     shipping
-                                      .dmg, .zip, SHA256SUMS
-  pack-release  Developer ID +        WeMessage-<v>-arm64.dmg, .zip    deferred
-                notarization
+  lane          signing                      produces                       status
+  ----------    --------------------------   ----------------------------   --------
+  pack-swift    project self-signed leaf     WeMessage-<v>-arm64.dmg, .zip  shipping
+                (throwaway leaf when the     SHA256SUMS,
+                signing secrets are absent)  DESIGNATED_REQUIREMENT.txt
 ```
 
-The ad-hoc lane is the shipping lane. The release lane is wired but deferred
-until there is a reason to pay for a Developer ID, and nothing in the project
-depends on it existing. If you are cutting a release, you are cutting an ad-hoc
-one.
+The v1 desktop lanes (`pack-adhoc` in `ci-macos.yml`, `pack-macos` in
+`release.yml`, Developer ID plus notarization) were removed in v2 S6b. Nothing
+is notarized, and nothing in the project depends on a Developer ID.
 
-Two consequences of the ad-hoc lane, both of which are documented for users in
-`README.md` and must be re-stated in every release's notes:
+`pack-swift` signs with the project's own certificate when the signing secrets
+are present, and only then uploads to a draft release. Without them it signs
+with a throwaway leaf made for that run, and uploads nothing to a release. A dry
+run (`dry_run: true`) never uploads to a release or opens a pull request in
+either mode.
 
-1. Gatekeeper refuses the first launch, and the user has to approve it by hand
-   in System Settings. `spctl` rejecting the artefact is the expected result,
-   not a failure. The smoke suite asserts the rejection.
-2. Every update re-locks Full Disk Access, because macOS identifies an unsigned
-   app by a hash of the binary and that hash changes on every build. The user
-   has to remove and re-add the app in Privacy and Security. `wemessage doctor`
-   reports this case by name.
+Two consequences of a self-signed build, both documented for users in
+`README.md` and to be re-stated in every release's notes:
+
+1. Gatekeeper refuses the first launch, and the user approves it by hand with
+   Open Anyway in System Settings, Privacy and Security. `spctl` rejecting the
+   artefact is the expected result, not a failure.
+2. Because every release is signed by the same leaf, the designated
+   requirement is stable across updates, and macOS keeps the Full Disk Access
+   grant. A build signed by a throwaway leaf does not have that property and
+   must never be published.
 
 The `ui` job in `ci-swift.yml` also builds the app, to launch it under
 XCUITest. That build is ad hoc signed from `apps/mac/project.yml` and has no
@@ -57,30 +61,34 @@ pnpm licenses:check
 pnpm lint
 ```
 
-CI runs the same five across three workflows: `ci-linux`, `ci-macos`, and
-`ci-python`. All three must report success on the commit being tagged. A run
+CI runs them across four workflows: `ci-linux` (the full suite), `ci-macos`
+(the Node projects, as `pnpm test:node`, on macOS 26), `ci-python`, and
+`ci-swift` (the app). All four must report success on the commit being tagged. A run
 that passed on an earlier commit proves nothing about the one you are shipping.
 
 ## Cutting a candidate
 
 1. Set the version. Every workspace manifest and the root manifest move
    together, and the tag tool refuses a set that disagrees with itself.
-2. Update `CHANGELOG.md`. The unsigned-build caveats above belong in the notes
+2. Update `CHANGELOG.md`. The self-signed-build caveats above belong in the notes
    for every release, not just the first one.
-3. Push, and wait for all three CI workflows to report success.
-4. Build the artefacts: `pnpm pack:adhoc`.
+3. Push, and wait for all four CI workflows to report success.
+4. Build the artefacts: `pnpm pack:swift`, or run `release.yml` with
+   `dry_run: true`.
 5. Run the release smoke checklist below.
-6. Tag. Publishing an unsigned build as a general-availability version, rather
+6. Tag. Publishing a self-signed build as a general-availability version, rather
    than a prerelease, requires setting `UNSIGNED_RELEASE_ACKNOWLEDGED=1`. That
-   is a deliberate speed bump, not a formality: it exists so that shipping an
-   unsigned `1.0.0` is a decision somebody made rather than a default somebody
+   is a deliberate speed bump, not a formality: it exists so that shipping a
+   self-signed `1.0.0` is a decision somebody made rather than a default somebody
    inherited.
 7. Attach `SHA256SUMS` to the release. Users are told to check it, so it has to
    be there.
 
 ## Release smoke checklist
 
-Legs 1 through 3 are automated and run on macOS in the `pack-adhoc` job. Leg 4
+Legs 1 through 3 were automated in the v1 desktop `pack-adhoc` job, which v2 S6b
+removed; until `pack-swift` carries them, run them by hand on the release
+artefact. Leg 4
 is manual and cannot be automated, because it tests the parts of macOS that
 exist specifically to resist automation: Gatekeeper, TCC, and the permission
 prompts a genuinely new user sees.
@@ -104,7 +112,7 @@ in. An unchecked row is a row that did not run.
       result on the ad-hoc lane and is the one step a user cannot skip.
 - [ ] The bundled daemon installs a background service, and the service answers
       `/v1/doctor` within the deadline reporting the launchd supervisor, the
-      Electron runtime it was built for, and the expected version.
+      host runtime it was built for, and the expected version.
 - [ ] The onboarding wizard, launched from the packaged app rather than from a
       development build, reaches the send test.
 - [ ] The send test produces exactly one send, it went through the approval
@@ -191,6 +199,70 @@ identity and ships through GitHub Releases and the project's own Homebrew
 tap (see `homebrew/README.md`). A cask install keeps the quarantine
 attribute, so the Gatekeeper steps below are the same for a tap install.
 
+### Identity
+
+Signing identity, certificate leaf SHA-1: `0000000000000000000000000000000000000000`
+
+That line names the one self-signed identity every Swift release is signed
+with, by the 40-hex SHA-1 of its certificate leaf, never by its common name.
+It is a placeholder of zeros until S5d writes the real leaf in its place.
+The release workflow's `compare-leaf-with-releasing` step reads this line,
+in the selfsigned lane only, so the placeholder never fails a throwaway run.
+
+Why it matters: macOS keys every privacy grant (Full Disk Access,
+Automation, Contacts) on the app's designated requirement, and for a
+self-signed build that requirement names this leaf. A release signed with
+another leaf resets every user's grants.
+
+So the `pack-swift` job runs `dr-diff` (`tools/release/bin/dr-diff.mjs`) in
+the selfsigned lane, after the second pack and before any upload. It
+compares this build's `DESIGNATED_REQUIREMENT.txt` with the one attached to
+the newest published release before it (drafts are skipped, prereleases
+count):
+
+```
+Result               When                                                Job
+-------------------  --------------------------------------------------  -------------------------
+first-release        no earlier published release carries a requirement  continues
+same                 the requirement is unchanged                        continues
+rotated, justified   CHANGELOG.md carries the rotation line below,       continues
+                     under this version's heading
+rotated, unjustified anything else                                       fails, exit 6, before
+                                                                         anything is uploaded
+```
+
+Rotating the identity is a deliberate act. Replace the leaf above with the
+new one, and add exactly this line under the new version's heading in
+`CHANGELOG.md`, both hashes lowercase, the old leaf first:
+
+```
+- Signing identity rotated: <old leaf> -> <new leaf>
+```
+
+A line under an older heading or under `[Unreleased]`, or one naming any
+other leaf, justifies nothing. The release notes then have to tell every
+user to grant Full Disk Access, Automation and Contacts again. S5d, the
+first real identity, needs no rotation line: it records
+`- Signing identity established: <leaf>` instead.
+
+The disk image. `pack-swift` also builds `WeMessage-<version>-arm64.dmg`
+with `tools/swift/dmg.sh`, from the app exactly as zipped, signs the image
+with the same leaf and verifies it, and lists it in `SHA256SUMS` next to the
+zip. The window is plain (D-UI-181): the app, an Applications shortcut, no
+artwork and no Finder scripting. A throwaway run builds the image too, named
+`-throwaway`, and keeps it only as the workflow artifact
+`wemessage-swift-dmg-throwaway` for seven days, never on a release.
+
+First-run copy (D-UI-180). The build is self-signed and not notarized, so
+on macOS 26 Gatekeeper refuses the first launch once. Every surface that
+tells a user what to do (`README.md`, `site/docs/install.html`, the cask
+caveats) gives the same two ways, in this order: Open Anyway in System
+Settings, Privacy & Security, first;
+`xattr -dr com.apple.quarantine /Applications/WeMessage.app` second. A
+Homebrew install is quarantined like any download, so the same two apply.
+There is no third: Homebrew deprecated `--no-quarantine` in 2025 and has
+since removed it, so no surface may tell a user to pass it.
+
 ### Before you start
 
 **Blocked on S5d.** The signing lane exists (S5a): `tools/swift/sign.sh`
@@ -199,8 +271,9 @@ self-signed identity named by its SHA-1, and the release workflow's
 `pack-swift` job packs twice, compares the designated requirements and
 verifies the result. Until the maintainer's go on signing custody, that
 job runs with a throwaway identity it mints on the runner and deletes at
-the end, and it uploads nothing: the throwaway zip proves the lane, it is
-not a build anyone installs. `pnpm pack:swift` without `--identity` still
+the end, and it uploads nothing to a release: the throwaway zip proves the
+lane, it is not a build anyone installs, and its disk image is kept only as
+a workflow artifact named `-throwaway`. `pnpm pack:swift` without `--identity` still
 refuses with exit 2 before it builds anything. S5d is the custody step:
 the real identity lives in a password manager and two repository secrets
 (`WEMESSAGE_SIGN_P12`, `WEMESSAGE_SIGN_P12_PASSWORD`), and with them set
@@ -213,7 +286,7 @@ What else has to be true first:
 
 - Run it in your own macOS account, signed in to Messages, because step 11
   sends a real message. macOS 26 is the target.
-- If the Electron build of WeMessage is installed, remove its background
+- If the v1 desktop build of WeMessage is installed, remove its background
   service with its own `wemessaged service uninstall` and remove its Full
   Disk Access entry first. Both builds use the identifier
   `sh.wemessage.gateway`, and this project never installs them side by side.

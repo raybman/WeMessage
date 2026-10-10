@@ -101,16 +101,20 @@ const S8_CLOSE_SUBJECT = 's8 close: seventeen mutations';
  * cannot notice an absence. A renamed file fails here too, which is correct:
  * §1.3 is the map a reviewer navigates by.
  *
- * DEVIATION, recorded rather than smoothed over. §1.3 lists Sc 12's spec at
- * `test/release/smoke.spec.ts`. It is at `apps/desktop/test/smoke.spec.ts`
- * instead, because it must run AFTER the `desktop-pack` project has built the
- * app it inspects, and the only sequencing mechanism this repo has is a
- * sibling `vitest.*.config.ts` inside the package (`groupOrder`), which
- * structurally cannot reach a spec under the root `test/` tree. The path
- * moved; the obligation did not.
+ * v2 S6c deleted the previous desktop app, and with it five of the files
+ * this list named. They are not dropped from the ledger. Sc 5's spec was
+ * PORTED, to `test/release/bundle-daemon.spec.ts`, because the bundler it
+ * guards still ships inside the Swift app. The other four guarded things
+ * that no longer exist (the electron-builder pack, the desktop wizard, the
+ * packaged-app smoke, the README gif), so they move to `RETIRED_SPECS`
+ * below, where the row asserts each one is really gone. A ledger that only
+ * shrinks is indistinguishable from one that lost files by accident.
  */
 const S9_SPECS: readonly (readonly [path: string, owner: string])[] = [
   ['test/arch.spec.ts', 'Sc1'],
+  // Sc 1 rows 2 and 3, moved here by v2 S6c from the previous desktop
+  // app's token spec, which also held S8 rows that went with the app.
+  ['test/release/no-green.spec.ts', 'Sc1'],
   ['packages/daemon/test/lock.spec.ts', 'Sc2'],
   ['packages/daemon/test/main-lock.spec.ts', 'Sc2'],
   ['packages/daemon/test/launchd-plist.spec.ts', 'Sc3'],
@@ -118,27 +122,57 @@ const S9_SPECS: readonly (readonly [path: string, owner: string])[] = [
   ['packages/daemon/test/service-cli.spec.ts', 'Sc3'],
   ['packages/cli/test/cli-s9.spec.ts', 'Sc3/Sc7'],
   ['packages/daemon/test/disconnect-launchd.spec.ts', 'Sc4'],
-  ['apps/desktop/test/bundle.spec.ts', 'Sc5'],
-  ['apps/desktop/test/pack.spec.ts', 'Sc6'],
-  // DEVIATION. §1.3 names `apps/desktop/test/supervisor.spec.ts`. No such
-  // file was written and none is needed: Sc 7 split cleanly along an
-  // existing seam. The wizard half (the sixth `keep-running` step and the
-  // exit that claims the product is ready) landed in the renderer's own
-  // wizard spec, and the daemon half (the `supervisor` field on the doctor
-  // DTO, and the FDA_EPERM remediation F-142 rewrote) landed in
-  // `packages/daemon/test/doctor.spec.ts`, already listed below. A third
-  // file would have been a home for rows that belong to neither.
-  ['apps/desktop/test/unit/wizard-exits.spec.ts', 'Sc7'],
+  ['test/release/bundle-daemon.spec.ts', 'Sc5'],
+  // Sc 7's daemon half (the `supervisor` field on the doctor DTO, and the
+  // FDA_EPERM remediation F-142 rewrote). Its wizard half went with the
+  // previous desktop app; see `RETIRED_SPECS`.
   ['packages/daemon/test/doctor.spec.ts', 'Sc7'],
   ['test/release/notarize.spec.ts', 'Sc8'],
   ['test/release/workflows.spec.ts', 'Sc9'],
   ['test/release/cask.spec.ts', 'Sc10'],
   ['test/release/licenses.spec.ts', 'Sc11'],
-  ['apps/desktop/test/smoke.spec.ts', 'Sc12'],
   ['test/release/readme.spec.ts', 'Sc13'],
-  ['apps/desktop/test/gif.spec.ts', 'Sc13'],
   ['test/release/versions.spec.ts', 'Sc14'],
   ['test/release/s9-e2e.spec.ts', 'Sc15'],
+];
+
+/**
+ * The S9 specs v2 S6c retired with the previous desktop app, and why.
+ *
+ * Asserted ABSENT, not merely unlisted: a retired spec that came back would
+ * be running against an app that no longer exists, and a retired path that
+ * never left would mean the deletion this list describes did not happen.
+ */
+const RETIRED_SPECS: readonly (readonly [
+  path: string,
+  owner: string,
+  why: string,
+])[] = [
+  [
+    'apps/desktop/test/bundle.spec.ts',
+    'Sc5',
+    'ported, not lost: test/release/bundle-daemon.spec.ts carries every row',
+  ],
+  [
+    'apps/desktop/test/pack.spec.ts',
+    'Sc6',
+    'electron-builder pack; the Swift lane is tools/swift/pack-swift.mjs',
+  ],
+  [
+    'apps/desktop/test/unit/wizard-exits.spec.ts',
+    'Sc7',
+    'the desktop wizard; the Swift app has its own onboarding tests',
+  ],
+  [
+    'apps/desktop/test/smoke.spec.ts',
+    'Sc12',
+    'packaged-app smoke; the Swift app is smoked by tools/swift/verify-bundle.sh',
+  ],
+  [
+    'apps/desktop/test/gif.spec.ts',
+    'Sc13',
+    'rendered the README gif from the desktop renderer, which is gone; the committed gif is still pixel-swept by test/release/no-green.spec.ts',
+  ],
 ];
 
 /**
@@ -184,6 +218,23 @@ const TEETH: readonly (readonly [name: string, owner: string])[] = [
   ['TN-skip-the-hard-row', 'Sc15'],
 ];
 
+/**
+ * Teeth whose target v2 S6c deleted with the previous desktop app.
+ *
+ * Each was recorded in a spec that is now in `RETIRED_SPECS`, aimed at a row
+ * that no longer exists, so its record went with the file. It stays in
+ * `TEETH` (the count is still seventeen, because gate 9 was met at the S9
+ * close and that history is not rewritten) but the sweep now demands the
+ * OPPOSITE of the live teeth: recorded nowhere. A retired tooth that turned
+ * up in a surviving spec would be a claim about a mutation nobody can have
+ * run against this tree.
+ */
+const RETIRED_TEETH: ReadonlySet<string> = new Set([
+  'TN-builder-defaults',
+  'TN-fresh-dir-on-upgrade',
+  'TN-real-screenshot',
+]);
+
 /** `// teeth: TN-name (row N)`, the one spelling the sweep will accept. */
 const TEETH_RE = /^\s*(?:\/\/|\*)\s*teeth:\s*(TN-[a-z0-9-]+)\s*\(row\s+\d+/gim;
 
@@ -212,6 +263,9 @@ describe('s9 Sc15 row 2: the slice produced what it promised', () => {
       else if (statSync(abs).size === 0)
         missing.push(`${owner}: ${path} is empty`);
     }
+    for (const [path, owner, why] of RETIRED_SPECS)
+      if (existsSync(join(repoRoot, path)))
+        missing.push(`${owner}: ${path} was retired (${why}) but is present`);
     // The whole list at once, not a loop of single asserts: a builder who is
     // three files short should learn that in one run, not three.
     expect(missing).toEqual([]);
@@ -266,6 +320,13 @@ describe('s9 Sc15 row 2: the slice produced what it promised', () => {
     }
     for (const [name, owner] of TEETH) {
       const where = found.get(name) ?? [];
+      if (RETIRED_TEETH.has(name)) {
+        if (where.length > 0)
+          problems.push(
+            `${owner}: ${name} was retired by v2 S6c but is recorded in ${where.join(', ')}`,
+          );
+        continue;
+      }
       if (where.length === 0)
         problems.push(`${owner}: ${name} is recorded nowhere`);
       else if (where.length > 1)
@@ -297,6 +358,14 @@ describe('s9 Sc15 row 2: the slice produced what it promised', () => {
     expect(hit('// teeth: TN-spawn-anyway')).toEqual([]);
     expect(hit('// teeth TN-spawn-anyway (row 4)')).toEqual([]);
     expect(TEETH).toHaveLength(17);
+    // Every retired tooth is one of the seventeen, and retirement is the
+    // exception: most of the ledger must still be live evidence.
+    for (const name of RETIRED_TEETH)
+      expect(
+        TEETH.some(([n]) => n === name),
+        name,
+      ).toBe(true);
+    expect(RETIRED_TEETH.size).toBeLessThan(TEETH.length / 2);
 
     // And the same disbelief aimed at the tail. The left column is what a
     // record may not be; the right is the shortest thing that still counts,
@@ -431,10 +500,11 @@ describe('s9 Sc15 row 4: the sweeps still exist and still cover what they covere
      * Both sides are read live: the allowlist from the helper, the tracked
      * set from git. The plan's list also named `rt-light.png` and
      * `rt-dark.png`; neither has ever existed in this repo
-     * (`apps/desktop/test/tokens.spec.ts` records that deviation), so the
-     * set is read rather than quoted.
+     * (`test/release/no-green.spec.ts` records that deviation), so the
+     * set is read rather than quoted. v2 S6c moved the helper to
+     * `test/release/helpers/` with the rows that use it.
      */
-    const allow = read('apps/desktop/test/helpers/no-green-static.ts');
+    const allow = read('test/release/helpers/no-green-static.ts');
     const declared = [
       ...((allow.split('RASTER_ALLOWLIST')[1] ?? '')
         .split('];')[0]
@@ -565,22 +635,10 @@ const DECLARED_SKIPS: readonly SkipSite[] = [
     why: '`actionlint` is installed by neither workflow, so it is opportunistic on both lanes',
   },
   {
-    file: 'apps/desktop/test/pack.spec.ts',
-    guard: '!darwin',
-    count: 1,
-    why: 'the whole scenario inspects a macOS `.app`; on Linux there is nothing to inspect',
-  },
-  {
-    file: 'apps/desktop/test/pack.spec.ts',
-    guard: "!process.env['CSC_NAME']",
-    count: 1,
-    why: '(C) Sc 6 row 9: the release lane needs a Developer ID certificate',
-  },
-  {
-    file: 'apps/desktop/test/bundle.spec.ts',
+    file: 'test/release/bundle-daemon.spec.ts',
     guard: '!RUNS_THE_BUNDLE',
-    count: 5,
-    why: 'the bundle is Electron-as-Node and is built and run only on the macOS lane; the fifth site (v2 S2b) boots the node flavour as the Swift host, which opens its database through the darwin-arm64 prebuild',
+    count: 1,
+    why: 'v2 S2b row 3 boots the bundle as the Swift host, and it opens its database through the one darwin-arm64 prebuild the bundle ships; every listing row still runs on Linux',
   },
   {
     file: 'packages/daemon/test/launchd-plist.spec.ts',
@@ -593,12 +651,6 @@ const DECLARED_SKIPS: readonly SkipSite[] = [
     guard: '!darwin',
     count: 1,
     why: 'the guarded `launchctl` lifecycle has no Linux counterpart',
-  },
-  {
-    file: 'apps/desktop/test/smoke.spec.ts',
-    guard: '!darwin || !existsSync(ZIP)',
-    count: 1,
-    why: 'the release smoke drives the SHIPPED zip through a real launch agent, and neither the artefact nor a service manager exists on the Linux lane; the macOS lane builds the zip at groupOrder 4 and runs this at 5, so the guard is dark only where it could not be honest',
   },
   {
     file: 'packages/daemon/test/lock.spec.ts',
@@ -685,12 +737,13 @@ describe('s9 Sc15 row 5: no row stopped running without saying so', () => {
       ).toBeGreaterThan(20);
       expect(s.count).toBeGreaterThan(0);
     }
-    // The two credential-gated rows the plan calls (C) must still be
-    // present and still be labelled, because those are the two the DoD
-    // permits to be dark at the S9 close and no others may join them.
+    // The credential-gated rows the plan calls (C) must still be present
+    // and still be labelled, because those are the ones the DoD permits to
+    // be dark and no others may join them. There were two at the S9 close;
+    // v2 S6c retired the Developer ID pack row with the previous desktop
+    // app, which leaves the notary row alone.
     const credentialed = DECLARED_SKIPS.filter((s) => s.why.startsWith('(C)'));
     expect(credentialed.map((s) => s.file).sort()).toEqual([
-      'apps/desktop/test/pack.spec.ts',
       'test/release/notarize.spec.ts',
     ]);
   });
@@ -727,86 +780,48 @@ describe('s9 Sc15 row 5: no row stopped running without saying so', () => {
 /**
  * WHY THIS ROW IS META, EXACTLY LIKE ROW 4.
  *
- * The plan words row 6 as an assertion to make here: "`client.send(` in
- * `apps/desktop/src` still exactly one". Two things are wrong with taking
- * that literally, and both are worth writing down rather than quietly
- * working around.
+ * The plan worded row 6 against the previous desktop app: one outbound call
+ * site in its sources, a renderer store whose bridge type was a `Pick`, and
+ * a wizard test send that was the same route as every other. Each of those
+ * was a guard in `test/arch.spec.ts`, and each went with the app in v2 S6c.
+ * Keeping their markers here would have pinned three rows that no longer
+ * guard anything; deleting this row would have dropped the question.
  *
- * FIRST, the literal is ZERO, not one. The app's call is
- * `requireClient()` followed by the outbound verb, so the receiver is a CALL
- * and not a name. `test/arch.spec.ts` row 7 discovered exactly this at the
- * S8 close: the old predicate matched nothing, the subset assertion held
- * over an empty list, and the row could not have failed for any edit to any
- * file. It was tightened there to read the receiver as an identifier OR a
- * closing paren, and it asserts the enumeration is non-empty before
- * concluding anything from it. Re-implementing that predicate here would
- * mean maintaining two regexes for one invariant, and the weaker one would
- * be the one nobody remembered to fix.
- *
- * SECOND, and decisive: this file is swept. Spelling the outbound verb in
- * call position here plants a fresh occurrence in a tracked text file, and
- * the guards behind INV-2 read raw text. Row 4 hit the same wall for the
- * banned launchd verbs and the secret shapes, and the answer is the same:
- * COUNT, never quote. What this row owes the reader is proof that the three
- * guards still exist, still run, and still have teeth. What it must not do
- * is become a fourth, weaker copy of them.
+ * What survives is the half of INV-2 that never depended on a GUI: the send
+ * backend has a closed, counted set of importers, and the wire has no frame
+ * that sends. The Swift app holds its own half in its hygiene tests, which
+ * read its sources for every route a screen can post to. Spelling the
+ * outbound verb in call position here would plant a fresh occurrence in a
+ * swept file, so this row COUNTS and points, never quotes.
  */
 describe('s9 Sc15 row 6: the GUI still has no path to a dispatch', () => {
-  it('all three INV-2 guards are still in the arch file', () => {
+  it('the two GUI-independent INV-2 guards are still in the arch file', () => {
     const arch = read('test/arch.spec.ts');
     for (const marker of [
-      // The IPC boundary: exactly one outbound call site in the whole app,
-      // and it sits inside the wizard handler that refuses an unarmed pair.
-      'INV-2 at the GUI boundary',
-      // The renderer: the queue's bridge is a `Pick`, so the wizard channel
-      // is not merely unreachable from the store, it is not in its type.
-      'INV-2 in the renderer',
-      // Onboarding: the wizard's "test yourself" is not a second path, it
-      // is the same route, the same `Approval`, the same audit rows.
-      'is THE send, or it is nothing',
+      // Every importer of the send backend, enumerated and counted.
+      'the port importer allowlist is pinned at 16 files (INV-2)',
+      // No frame type is a way around an approval the daemon validated.
+      'INV-2 at the wire',
     ])
       expect(arch, marker).toContain(marker);
   });
 
-  it('the arch guard proves itself non-empty before concluding anything', () => {
+  it('the importer guard proves itself non-empty before concluding anything', () => {
     /*
-     * The specific failure mode this row exists to catch, because it has
-     * already happened once here: a guard whose enumeration is empty passes
-     * every subset assertion forever. Row 7 in arch answers it with an
-     * explicit count, and this row pins that the count is still there.
-     * If somebody relaxes `toBe(1)` back to a `toContain`, this goes red.
+     * The failure this row exists to catch has happened here once: a guard
+     * whose enumeration is empty passes every subset assertion forever. The
+     * importer row answers it with an exact length and an EQUALITY against
+     * the live scan, so an empty scan is red rather than vacuously green. If
+     * somebody relaxes either back to a `toContain`, this goes red.
      */
     const arch = read('test/arch.spec.ts');
-    const row7 = arch.slice(arch.indexOf('INV-2 at the GUI boundary'));
-    expect(row7).toContain('expect(callers.length).toBe(1)');
-    // …and the row's own teeth: it plants two synthetic call sites in a
-    // temp tree and asserts the enumeration grows to three. A guard that
-    // cannot demonstrate it sees a plant is a guard nobody should trust.
-    expect(row7).toContain('expect(callers.length).toBe(3)');
-  });
-
-  it('the queue store reaches ten channels, and its bridge type is a Pick of eleven', () => {
-    /*
-     * The RATCHET, read from the source rather than restated. Ten request
-     * channels plus the push subscription is eleven keys in the `Pick`; the
-     * eleventh is `on`, which is inbound. S9 added no channel, so both
-     * numbers are the S8-close numbers. A slice that grows either has to
-     * come through here and say why.
-     *
-     * Counted rather than listed on purpose: naming the members would put
-     * this file in the business of tracking the renderer's vocabulary, and
-     * `apps/desktop/test/unit/store-wiring.spec.ts` already pins them one
-     * by one against the send pattern.
-     */
-    const src = read('apps/desktop/src/renderer/store/index.ts');
-    const members = (block: string, end: string): number =>
-      [
-        ...((src.split(block)[1] ?? '').split(end)[0] ?? '').matchAll(
-          /'([^']+)'/g,
-        ),
-      ].length;
-    expect(members('STORE_CHANNELS = [', '] as const')).toBe(10);
-    expect(members('StoreBridge = Pick<', '>;')).toBe(11);
+    const row = arch.slice(
+      arch.indexOf('the port importer allowlist is pinned at 16 files (INV-2)'),
+    );
+    expect(row).toContain('expect(PORT_IMPORTER_ALLOWLIST).toHaveLength(16)');
+    expect(row).toContain(
+      'expect(sendBackendChatDbReaderImporters()).toEqual(',
+    );
   });
 
   it('S9 touched no route file that could open a second path', () => {
@@ -1022,6 +1037,11 @@ describe('s9 Sc15 row 7: the seams are byte-clean, and the audit union only grew
  * the packaged daemon under Electron-as-Node, kept harmless only by
  * `--no-load`. Selecting on a lane symbol would have returned the empty set
  * for precisely the spec this row exists to notice.
+ *
+ * v2 S6c deleted that app, and with it both of its entries below: the
+ * bundle spec's port (`test/release/bundle-daemon.spec.ts`) boots the daemon
+ * as the Swift host does and passes no service verb, and the release smoke
+ * spec went with the Electron pack. The row is unchanged; the set shrank.
  */
 
 /** How a spec can reach the real service manager, if it can at all. */
@@ -1052,19 +1072,6 @@ function classifyReach(text: string): Reach | null {
  * has. Every entry below carries the reason it is safe.
  */
 const LAUNCHD_REACH: readonly (readonly [file: string, reach: Reach])[] = [
-  // The packaged daemon, spawned under Electron-as-Node against a redirected
-  // agents directory and a test label prefix. `--no-load` is the only thing
-  // standing between this spec and a real bootstrap, which is exactly why it
-  // is listed here rather than filtered out.
-  ['apps/desktop/test/bundle.spec.ts', 'service argv, --no-load'],
-  // s9 Sc 12. The newest member, and the one that shows this row earning its
-  // place: it was added to the repository as an untracked file, and the run
-  // in which it was first `git add`ed is the run in which this row went red
-  // with "reaches launchd but is not declared". Nobody had to remember. It
-  // classifies as a real lane because it calls `installRealLaneSpawner`, and
-  // it is the only spec here that drives the SHIPPED bundle rather than a
-  // built tree, so its launch agent supervises a real packaged daemon.
-  ['apps/desktop/test/smoke.spec.ts', 'real lane'],
   // The user-facing CLI, which does not implement the verb: it refuses with
   // the usage exit code and prints the daemon line to run instead, so it
   // never reaches a service manager and needs no flag. Listed anyway, so the
@@ -1179,15 +1186,16 @@ describe('s9 Sc15 row 9: every manifest carries the same version', () => {
         };
       });
 
-  it('all eighteen manifests are at one version, and it is an rc', () => {
+  it('all seventeen manifests are at one version, and it is an rc', () => {
     /*
-     * Eighteen: seventeen workspace packages plus the monorepo root. Read
+     * Seventeen: sixteen workspace packages plus the monorepo root (eighteen
+     * until v2 S6c deleted the previous desktop app's manifest). Read
      * from `git ls-files` rather than from a glob over the working tree, so
      * an untracked scratch package cannot join the set and an ignored one
      * cannot leave it.
      */
     const all = manifests();
-    expect(all).toHaveLength(18);
+    expect(all).toHaveLength(17);
     const versions = [...new Set(all.map((m) => m.version))];
     expect(versions).toEqual(['1.0.0-rc.1']);
   });
@@ -1265,16 +1273,21 @@ describe('s9 Sc15 row 10: the five workflows exist and the guard over them has t
     }
   });
 
-  it('the ad-hoc pack lane exists on the macOS CI workflow', () => {
+  it('the macOS CI workflow is the node gate on the release the app targets', () => {
     /*
-     * The lane this whole slice ships on. Notarization is deferred to
-     * v1.0.0, so `pack-adhoc` is the job that produces the artefact a user
-     * actually downloads, and it must be on the CI workflow rather than
-     * only on `release`, or the pack is unproven until tag day.
+     * v2 S6b. This row used to require `pack-adhoc`, the Electron pack job.
+     * The Electron bundle no longer ships: the app a user downloads is the
+     * Swift one, packed by `release.yml`'s `pack-swift` and built on every
+     * push by ci-swift. ci-macos is now the Node gate on macOS 26, the floor
+     * the app declares, and it must not grow a pack job back.
      */
     const macos = read('.github/workflows/ci-macos.yml');
-    expect(macos).toContain('pack-adhoc:');
-    expect(macos).toMatch(/pack-adhoc:\s*\n\s+needs: /);
+    expect(macos).toContain('runs-on: macos-26');
+    // `test:node` was the desktop-excluding script; v2 S6c deleted the app,
+    // so the whole suite IS the node suite and the script is plain `test`.
+    expect(macos).toContain('run: pnpm test\n');
+    expect(macos).not.toContain('pack-adhoc');
+    expect(macos).not.toContain('electron');
   });
 
   it('the Sc9 guard over the workflows is still in the tree and still counts', () => {
@@ -1286,10 +1299,10 @@ describe('s9 Sc15 row 10: the five workflows exist and the guard over them has t
     for (const w of WORKFLOWS)
       expect(guard, w).toContain(w.split('/').pop() ?? '');
     for (const marker of [
-      'row 2: exactly three jobs',
-      'row 5: names exactly the ten allowed secrets',
+      'row 2: exactly two jobs',
+      'row 5: names exactly the four allowed secrets',
       'row 8: every `uses:` is a 40-hex SHA',
-      'row 9: ci-macos gains a pack-adhoc job',
+      'row 9: ci-macos is one node-gate job on macos-26',
     ])
       expect(guard, marker).toContain(marker);
   });

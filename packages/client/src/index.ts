@@ -210,6 +210,27 @@ export interface StatusPayload {
    * real daemon never emits it.
    */
   meta?: Record<string, unknown>;
+  /**
+   * v2 F7: when the daemon composed this payload (its clock). Absent from a
+   * server built without a store.
+   */
+  asOf?: string;
+  /** v2 F7: the local copy's size and counts; absent without a store. */
+  mirror?: MirrorStatusPayload;
+}
+
+/** v2 F7: `StatusPayload.mirror`, mirroring packages/daemon/src/status-facts.ts. */
+export interface MirrorStatusPayload {
+  /** `~`-abbreviated; never an absolute home path. */
+  path: string;
+  bytes: number;
+  messages: number;
+  chats: number;
+  historyFrom: string | null;
+  phase: 'empty' | 'indexing' | 'current';
+  indexed: number;
+  eligible: number;
+  countedAt: string;
 }
 
 /** v2 B0: one channel's availability, as `GET /v1/status` carries it. */
@@ -221,6 +242,12 @@ export interface ChannelStatusPayload {
   state: ChannelState;
   /** Why the channel is not connected; absent when it is. */
   reason?: string;
+  /** v2 F7, iMessage only: the last scan burst's time, null before one. */
+  lastSyncAt?: string | null;
+  /** v2 F7, iMessage only: messages sent since local midnight. */
+  today?: number;
+  /** v2 F7, iMessage only: the operator's own handle, null when unread. */
+  handle?: string | null;
 }
 
 /**

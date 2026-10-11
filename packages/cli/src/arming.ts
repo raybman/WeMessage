@@ -223,6 +223,15 @@ export function renderStatus(status: StatusPayload, nowMs: number): string {
     field('cursor', cursor),
     field('today', `${String(status.counts.messagesToday)} message(s)`),
     field('adapters', String(status.adapters.length)),
+    // v2 F7: the mirror line only when the daemon has a store to count.
+    ...(status.mirror === undefined
+      ? []
+      : [
+          field(
+            'mirror',
+            `${String(status.mirror.messages)} message(s), ${String(status.mirror.chats)} chat(s), ${status.mirror.phase}`,
+          ),
+        ]),
   ].join('\n');
 }
 

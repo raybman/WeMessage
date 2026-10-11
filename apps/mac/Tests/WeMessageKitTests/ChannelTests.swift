@@ -146,7 +146,12 @@ struct ChannelTests {
   @Test("C11: the S0 status golden folds to the real answer")
   func goldenFolds() throws {
     let golden = try JSONDecoder().decode(StatusPayload.self, from: Fixtures.response("status").bodyData)
-    #expect(golden.channels == Self.real)
+    // v2 F7: the real daemon's iMessage entry also carries its facts; the
+    // availability fold reads channel, state and reason only.
+    #expect(golden.channels.map { Self.entry($0.channel, $0.state, $0.reason) } == Self.real)
+    #expect(golden.channels.first?.today == 0)
+    #expect(golden.channels.first?.handle == "+15550100000")
+    #expect(golden.channels.dropFirst().allSatisfy { $0.today == nil && $0.handle == nil && $0.lastSyncAt == nil })
     #expect(ChannelAvailability.table(golden.channels, gate: Self.open)[.imessage] == .connected)
   }
 }

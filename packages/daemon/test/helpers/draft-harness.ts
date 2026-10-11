@@ -36,8 +36,10 @@ import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import {
   buildServer,
+  composeStatus,
   createAuditSink,
   createScheduler,
+  createStatusFacts,
   readConnectionState,
   type DaemonServer,
   type Scheduler,
@@ -190,7 +192,22 @@ export interface BootOptions {
    * `null` composes exactly as production does, with the field absent.
    */
   autonomy?: Autonomy | null;
+  /**
+   * v2 F7c: serve `GET /v1/status` from the composed payload (status-facts),
+   * as `daemon.ts` does, instead of the store-backed fallback. The zone is
+   * UTC, the mirror path a fixed `~` path and the byte count fixed, so a
+   * recorded golden does not move with the runner. `ownHandle` defaults to
+   * this harness's reader; the contract recorder pins a synthetic one.
+   * Opt-in and off by default, like every other option here.
+   */
+  status?: true | { ownHandle: () => string | null };
 }
+
+/** v2 F7c: the mirror path a harness status reports. */
+export const HARNESS_MIRROR_PATH =
+  '~/Library/Application Support/WeMessage/wemessage.db';
+/** v2 F7c: the mirror size a harness status reports. */
+export const HARNESS_MIRROR_BYTES = 4096;
 
 export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const dir =
@@ -261,8 +278,36 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
   const yearCounts =
     opts.yearCounts ?? ((g: string, tz: string) => reader.yearCounts(g, tz));
 
+  // v2 F7c: the composed status, when asked for.
+  const statusOpt =
+    opts.status === undefined
+      ? {}
+      : (() => {
+          const facts = createStatusFacts({
+            store,
+            clock: clockCtl.clock,
+            zone: 'UTC',
+            displayPath: HARNESS_MIRROR_PATH,
+            statBytes: () => HARNESS_MIRROR_BYTES,
+            ownHandle:
+              opts.status === true
+                ? () => reader.ownHandle()
+                : opts.status.ownHandle,
+          });
+          return {
+            getStatus: () =>
+              composeStatus({
+                store,
+                clock: clockCtl.clock,
+                autonomy: autonomyOpt.autonomy ?? 'parked',
+                facts,
+              }),
+          };
+        })();
+
   const server = await buildServer({
     ...autonomyOpt,
+    ...statusOpt,
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink, lateVerify },
     // s7 Sc3: ONE greeting closure, read by BOTH event transports inside

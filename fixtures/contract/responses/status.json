@@ -17,7 +17,10 @@
     "channels": [
       {
         "channel": "imessage",
-        "state": "connected"
+        "state": "connected",
+        "lastSyncAt": null,
+        "today": 0,
+        "handle": "+15550100000"
       },
       {
         "channel": "whatsapp",
@@ -34,6 +37,18 @@
         "state": "not_connected",
         "reason": "not_in_this_version"
       }
-    ]
+    ],
+    "asOf": "2026-09-01T12:00:00.000Z",
+    "mirror": {
+      "path": "~/Library/Application Support/WeMessage/wemessage.db",
+      "bytes": 4096,
+      "messages": 0,
+      "chats": 0,
+      "historyFrom": null,
+      "phase": "empty",
+      "indexed": 0,
+      "eligible": 0,
+      "countedAt": "2026-09-01T12:00:00.000Z"
+    }
   }
 }

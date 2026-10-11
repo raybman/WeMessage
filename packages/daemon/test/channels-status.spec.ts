@@ -69,10 +69,34 @@ const EXPECTED: ChannelStatusEntry[] = [
   { channel: 'email', state: 'not_connected', reason: 'not_in_this_version' },
 ];
 
-function assertChannels(body: unknown, text: string): void {
+/**
+ * `withFacts`: v2 F7 puts lastSyncAt, today and handle on the composed
+ * daemon's connected iMessage entry. The union is the same; the comparison
+ * is on channel, state and reason, and the facts are pinned to that entry.
+ */
+function assertChannels(body: unknown, text: string, withFacts = false): void {
   const channels = (body as { channels?: unknown }).channels;
   expect(channelsSchema.safeParse(channels).success).toBe(true);
-  expect(channels).toEqual(EXPECTED);
+  if (withFacts) {
+    const entries = channels as Record<string, unknown>[];
+    expect(
+      entries.map(({ channel, state, reason }) =>
+        reason === undefined ? { channel, state } : { channel, state, reason },
+      ),
+    ).toEqual(EXPECTED);
+    expect(Object.keys(entries[0] ?? {}).sort()).toEqual([
+      'channel',
+      'handle',
+      'lastSyncAt',
+      'state',
+      'today',
+    ]);
+    for (const entry of entries.slice(1)) {
+      expect(Object.keys(entry).sort()).toEqual(['channel', 'reason', 'state']);
+    }
+  } else {
+    expect(channels).toEqual(EXPECTED);
+  }
   expect(text).not.toContain(FIXTURE_STATE);
 }
 
@@ -178,7 +202,7 @@ describe('B0 row 2: every status branch answers with the union', () => {
       headers: { authorization: `Bearer ${daemon.server.token ?? ''}` },
     });
     expect(res.statusCode).toBe(200);
-    assertChannels(res.json(), res.body);
+    assertChannels(res.json(), res.body, true);
   });
 });
 

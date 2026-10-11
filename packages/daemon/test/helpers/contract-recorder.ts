@@ -800,6 +800,9 @@ async function recordMain(
     send: true,
     threads: source,
     search: true,
+    // v2 F7c: the status golden is the composed daemon's shape, facts and
+    // all, with a synthetic handle so the field is not only ever null.
+    status: { ownHandle: () => '+15550100000' },
   });
   const H = h.headers;
   const ok = async (

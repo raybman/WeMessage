@@ -11,6 +11,8 @@
  * F-1: foreground process, no launchd packaging in S1.
  */
 import { rmSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
   AuditEvent,
   ChatDbReader,
@@ -33,7 +35,6 @@ import {
   type DispatchGateDenied,
   runStartupRecovery,
   systemActor,
-  SETTING_KILL_SWITCH,
   SETTING_USER_DISCONNECTED,
   type StartupRecoveryResult,
   verifyLate,
@@ -51,7 +52,7 @@ import {
   type WakeSignal,
 } from '@wemessage/ingest';
 import type { GatewayEventPayload } from '@wemessage/protocol';
-import type { SqliteStore } from '@wemessage/store';
+import { DB_FILENAME, type SqliteStore } from '@wemessage/store';
 import { openDaemonStore } from './open-store.js';
 import type { WebSocket } from 'ws';
 import { sanitizeInbound } from './sanitize.js';
@@ -59,8 +60,12 @@ import { createInboundDispatch } from './adapters/dispatch.js';
 import type { AdapterTransportHandle } from './adapters/transport.js';
 import type { AgentRequests } from './adapters/submit.js';
 import { createScheduler } from './scheduler.js';
-import { resolveArming } from './arming.js';
-import { channelStatuses } from './channels.js';
+import {
+  composeStatus,
+  createStatusFacts,
+  dbBytes,
+  tildePath,
+} from './status-facts.js';
 import { buildServer, startServer, type DaemonServer } from './server.js';
 import { readConnectionState, runDoctor, type DoctorProbes } from './doctor.js';
 import type { SupervisionDeps } from './connection.js';
@@ -153,6 +158,17 @@ export interface StartDaemonOptions {
    * `createChatDbReader`.
    */
   scanOpenReader?: ScanLoopOptions['openReader'];
+  /**
+   * v2 F7: the IANA zone "today" is counted in. main.ts passes the zone it
+   * resolved; absent means this process's own.
+   */
+  zone?: string;
+  /**
+   * v2 F7: the home directory the mirror path is `~`-abbreviated against
+   * (status.mirror.path). Absent means `os.homedir()`; a test hands in its
+   * temp root so it can prove the wire never carries the absolute path.
+   */
+  homeDir?: string;
 }
 
 const realDelay = (ms: number): Promise<void> =>
@@ -204,6 +220,11 @@ export interface RunningDaemon {
    * did, which is why this sentence used to be false).
    */
   tick(): Promise<void>;
+  /**
+   * v2 F7: how many times status has recounted the mirror. The cache's
+   * witness: a quiet daemon answers any number of status reads on one count.
+   */
+  statusRecounts(): number;
   stop(): Promise<void>;
 }
 
@@ -241,6 +262,13 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
     IngestChatDbReader,
     'chatTitles' | 'chatsTitled' | 'existingGuids' | 'yearCounts'
   >;
+  /**
+   * v2 F7: the operator's own iMessage handle, for status only. Throws
+   * while closed like every other read; `isOpen` lets status say null
+   * instead of asking.
+   */
+  ownHandle(): string | null;
+  isOpen(): boolean;
   close(): void;
   reopen(): void;
 } {
@@ -275,6 +303,8 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       // v2 F2c: the transcript's year scrubber, under the same rule.
       yearCounts: (chatGuid, tz) => live().yearCounts(chatGuid, tz),
     },
+    ownHandle: () => live().ownHandle(),
+    isOpen: () => current !== null,
     close: () => {
       current?.close();
       current = null;
@@ -567,11 +597,18 @@ export async function startDaemon(
   bootLog.push('watcher');
 
   // ---- phase 3: HTTP/WS listen ----
-  const utcMidnight = (): string => {
-    const now = new Date(options.clock.now());
-    now.setUTCHours(0, 0, 0, 0);
-    return now.toISOString();
-  };
+  // v2 F7: the status facts (status-facts.ts). The handle is read through
+  // the same live handle /v1/send holds, so a disconnect closes it too.
+  const storePath = join(options.configDir, DB_FILENAME);
+  const statusFacts = createStatusFacts({
+    store,
+    clock: options.clock,
+    zone: options.zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    displayPath: tildePath(storePath, options.homeDir ?? homedir()),
+    statBytes: () => dbBytes(storePath),
+    ownHandle: () => sendReaderHandle.ownHandle(),
+    readerOpen: () => sendReaderHandle.isOpen(),
+  });
   const server = await buildServer({
     configDir: options.configDir,
     autonomy,
@@ -633,29 +670,15 @@ export async function startDaemon(
       },
       rearmWatcher,
     },
-    getStatus: () => ({
-      // s3 Scenario 7: probe-derived, persisted state (was the in-memory
-      // scanHealthy flag through S1/S2).
-      connectionState: readConnectionState(store),
-      cursor: store.getCursor(),
-      counts: {
-        messagesToday: store.countSentSince(utcMidnight()),
-      },
-      // s5 Sc14: F-5's adapter list, filled in by the slice that made
-      // adapter health a real column. `AdapterRecord` carries `hasToken`
-      // and no hash of any kind (F-43), so the status payload cannot leak
-      // credential material by construction.
-      adapters: store.listAdapters(),
-      // s6 Scenario 11: the last two F-5 placeholders. Both are DERIVED at
-      // request time from the same rows the gate reads — the switch is one
-      // settings row, the posture is a function of five of them — so a status
-      // payload can never disagree with the decision the daemon would make a
-      // millisecond later. Neither is cached and neither is a column.
-      killSwitch: store.getSetting(SETTING_KILL_SWITCH) === '1',
-      armed: resolveArming({ store, clock: options.clock, autonomy }),
-      // v2 B0: the message channels this version reads (channels.ts).
-      channels: channelStatuses(),
-    }),
+    // v2 F7: composed in status-facts.ts, the same function the contract
+    // recorder calls, so the golden cannot drift from this payload.
+    getStatus: () =>
+      composeStatus({
+        store,
+        clock: options.clock,
+        autonomy,
+        facts: statusFacts,
+      }),
     onEventsClient: (socket) => {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
@@ -774,6 +797,7 @@ export async function startDaemon(
       indexStep();
       return scheduler.tick();
     },
+    statusRecounts: () => statusFacts.recounts(),
     stop: async () => {
       trigger.stop();
       // Adapter sessions first: they finalize against the store, and their

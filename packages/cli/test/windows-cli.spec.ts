@@ -274,6 +274,30 @@ describe('the armed line on status (row 5)', () => {
     ]);
   });
 
+  it('v2 F7: a status with a mirror adds one counts line and never the path', () => {
+    const out = renderStatus(
+      {
+        ...status({ killSwitch: false, armed: null }),
+        mirror: {
+          path: '~/Library/Application Support/WeMessage/wemessage.db',
+          bytes: 4096,
+          messages: 527_147,
+          chats: 3953,
+          historyFrom: '2014-03-02T09:00:00.000Z',
+          phase: 'indexing',
+          indexed: 217_300,
+          eligible: 530_000,
+          countedAt: '2026-09-03T12:00:00.000Z',
+        },
+      },
+      NOW,
+    );
+    expect(out.split('\n').at(-1)).toBe(
+      'mirror:      527147 message(s), 3953 chat(s), indexing',
+    );
+    expect(out).not.toContain('wemessage.db');
+  });
+
   it('a null killSwitch is not `off` — it is unreported', () => {
     const out = renderStatus(status({ killSwitch: null, armed: null }), NOW);
     expect(out).toContain('kill switch: (not reported)');

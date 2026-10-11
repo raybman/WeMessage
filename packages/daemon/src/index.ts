@@ -150,4 +150,17 @@ export {
   channelsSchema,
   channelStatuses,
   type ChannelStatusEntry,
+  type ImessageLive,
 } from './channels.js';
+export {
+  composeStatus,
+  createStatusFacts,
+  dbBytes,
+  tildePath,
+  STATUS_HANDLE_EVERY_MS,
+  STATUS_RECOUNT_EVERY_MS,
+  type ComposeStatusDeps,
+  type MirrorStatus,
+  type StatusFacts,
+  type StatusFactsDeps,
+} from './status-facts.js';

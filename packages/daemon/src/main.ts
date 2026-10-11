@@ -148,6 +148,10 @@ const daemon = await startDaemon({
   // Lifting it is its own future slice, with its own UI.
   autonomy: 'parked',
   clock,
+  // v2 F7: "today" in status is counted from local midnight in this zone,
+  // resolved once here; the mirror path is ~-abbreviated against homedir().
+  zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  homeDir: homedir(),
   watcher: createNodeFsWatcher(),
   wake,
   port: env.WEMESSAGE_PORT,

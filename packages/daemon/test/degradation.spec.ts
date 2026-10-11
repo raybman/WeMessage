@@ -140,6 +140,8 @@ function controllableOpenReader(): ControllableOpenReader {
         openMode: 'immutable',
         rawDb: null as never,
         readSince: boom,
+        // v2 F8b: chat.db's head, for recovery's heal.
+        headRowid: boom,
         readMutatedSince: boom,
         resolveChat: boom,
         findOutboundMessage: boom,

@@ -264,7 +264,12 @@ function compileMirror(q: MirrorQuery): CompiledMirror | null {
   }
   const cols =
     'm.guid, m.chat_guid, m.handle, m.is_from_me, m.is_group, m.kind, ' +
-    "m.text, m.sent_at, json_array_length(m.meta, '$.attachments') AS n_att";
+    'm.text, m.sent_at, ' +
+    // v2 F8d: parsing every row's meta JSON was ~40% of a capped filter-only
+    // query (20,000 rows). A row whose meta never names "attachments" has
+    // none, so the substring probe skips the parse with the same answer.
+    `CASE WHEN instr(m.meta, '"attachments"') > 0 ` +
+    "THEN json_array_length(m.meta, '$.attachments') END AS n_att";
   const limit = q.cap + 1;
 
   if (q.ftsMatch !== null) {

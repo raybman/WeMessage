@@ -72,6 +72,8 @@ export interface ChatDbReaderOptions {
 export type ChatDbOpenMode = 'immutable' | 'readonly-fallback';
 
 export interface IngestChatDbReader extends ChatDbReader {
+  /** v2 F8b: chat.db's MAX(ROWID), 0 when empty. Always present here. */
+  headRowid(): Promise<number>;
   /** True when the underlying SQLite handle was opened read-only. */
   isReadonly(): boolean;
   /** Which §2.2.1 open path engaged (immutable URI vs plain ro fallback). */
@@ -154,6 +156,14 @@ const MESSAGES_SQL = `${MESSAGE_SELECT_SQL}
   WHERE m.ROWID > ?
   ORDER BY m.ROWID ASC
 `;
+
+/** v2 F8b: one bounded page of readSince. */
+const MESSAGES_PAGE_SQL = `${MESSAGES_SQL}
+  LIMIT ?
+`;
+
+/** v2 F8b: chat.db head for recovery's cursor heal, no rows materialised. */
+const HEAD_ROWID_SQL = `SELECT MAX(ROWID) AS head FROM message`;
 
 /**
  * Rows mutated in place strictly after the ns watermark (S2 Scenario 8).
@@ -935,6 +945,9 @@ export function createChatDbReader(
 
   const messagesStmt = db.prepare(MESSAGES_SQL);
   messagesStmt.safeIntegers(true); // Apple-epoch ns exceed 2^53
+  const messagesPageStmt = db.prepare(MESSAGES_PAGE_SQL);
+  messagesPageStmt.safeIntegers(true);
+  const headRowidStmt = db.prepare(HEAD_ROWID_SQL);
   const mutationsStmt = db.prepare(MUTATIONS_SQL);
   mutationsStmt.safeIntegers(true);
   const mutationsWindowedStmt = db.prepare(MUTATIONS_WINDOWED_SQL);
@@ -1017,9 +1030,18 @@ export function createChatDbReader(
     rawDb: db,
     isReadonly: () => db.readonly,
 
-    readSince(lastRowid: number): Promise<Message[]> {
-      const rows = messagesStmt.all(BigInt(lastRowid)) as DbMessageRow[];
+    readSince(lastRowid: number, limit?: number): Promise<Message[]> {
+      const rows = (
+        limit === undefined
+          ? messagesStmt.all(BigInt(lastRowid))
+          : messagesPageStmt.all(BigInt(lastRowid), BigInt(Math.max(0, limit)))
+      ) as DbMessageRow[];
       return Promise.resolve(rows.map(toMessage));
+    },
+
+    headRowid(): Promise<number> {
+      const row = headRowidStmt.get() as { head: number | null } | undefined;
+      return Promise.resolve(row?.head ?? 0);
     },
 
     readMutatedSince(

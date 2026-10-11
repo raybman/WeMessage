@@ -795,3 +795,20 @@ export interface Store {
    */
   sweepStaged(now: IsoUtc, unboundMs: number, terminalMs: number): string[];
 }
+
+/**
+ * v2 F8b (bounded startup; the port only grows, s9 Sc15 row 7). Startup
+ * used to read all of chat.db twice before listening: recovery's
+ * readSince(0) and the first scan's. On a real history that is minutes and
+ * well over a gigabyte.
+ *
+ * - `headRowid` is chat.db's MAX(ROWID), 0 when empty: what recovery needs
+ *   to heal a cursor, without materialising a single message. Optional so
+ *   fakes stay valid; recovery falls back to a full read when it is absent.
+ * - `readSince(lastRowid, limit)` is one page: at most `limit` rows with
+ *   ROWID strictly greater than `lastRowid`, in ROWID order.
+ */
+export interface ChatDbReader {
+  headRowid?(): Promise<number>;
+  readSince(lastRowid: number, limit: number): Promise<Message[]>;
+}

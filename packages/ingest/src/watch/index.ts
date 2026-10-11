@@ -112,6 +112,13 @@ export interface WatchTriggerOptions {
   pollIntervalMs?: number;
   /** Scan failures are surfaced here and never kill the loop. */
   onError?: (error: unknown) => void;
+  /**
+   * v2 F8b: true while the scan left work behind (a paged catch-up). After a
+   * SUCCESSFUL scan that leaves a backlog, the next page is queued behind
+   * pending I/O instead of waiting out the poll. A failed scan never
+   * re-kicks: the poll paces retries.
+   */
+  hasMore?: () => boolean;
 }
 
 export interface WatchTrigger {
@@ -143,14 +150,17 @@ export function createWatchTrigger(options: WatchTriggerOptions): WatchTrigger {
       return;
     }
     inFlight = true;
+    let ok = true;
     void options
       .scan()
       .catch((error: unknown) => {
+        ok = false;
         options.onError?.(error);
       })
       .then(() => {
         inFlight = false;
-        if (pending && started) {
+        const more = ok && options.hasMore?.() === true;
+        if ((pending || more) && started) {
           pending = false;
           // v2 F8a: queue the trailing re-scan behind pending I/O instead of
           // chaining it on the microtask queue, so HTTP requests that arrived

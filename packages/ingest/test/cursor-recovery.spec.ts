@@ -313,6 +313,73 @@ describe('cursor-recovery (Scenario 9, T-9.3, §4.0 / §2.2.2 / F-2)', () => {
     expect(c.store.getCursor()).toEqual(before);
   });
 
+  it('v2 F8b: recovery never reads chat.db rows: the heal asks for the head, drafts ask chat.db directly', async () => {
+    const c = ctx();
+    c.fixture.addMessageBurst(5, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      startAt: '2026-01-03T00:00:00Z',
+    });
+    const sent = c.fixture.addSelfMessage({
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'bounded recovery body',
+      at: '2026-01-04T01:00:00Z',
+    });
+    await c.scanner();
+    c.store.setCursor({ lastRowid: 9_999, lastScanAt: FIXED_NOW });
+    const draftId = seedSendingDraft(c, {
+      body: 'bounded recovery body',
+      startedAt: '2026-01-04T00:00:00.000Z',
+    });
+    const real = createChatDbReader(c.fixture.path, { clock: fakeClock });
+    cleanups.push(() => real.close());
+    const readSinceCalls: number[] = [];
+    const result = await runStartupRecovery({
+      store: c.store,
+      reader: {
+        ...real,
+        readSince: (rowid: number) => {
+          readSinceCalls.push(rowid);
+          return real.readSince(rowid);
+        },
+        headRowid: () => real.headRowid(),
+        findOutboundMessage: (q) => real.findOutboundMessage(q),
+        readMutatedSince: (s: string, a?: string) =>
+          real.readMutatedSince(s, a),
+      },
+      sendBackend: c.backend,
+      clock: fakeClock,
+    });
+    expect(readSinceCalls).toEqual([]);
+    expect(result.cursor).toEqual({
+      healed: true,
+      reason: 'ahead-of-chatdb',
+      lastRowid: sent.rowid,
+    });
+    expect(draftRow(c, draftId).sent_message_guid).toBe(sent.guid);
+  });
+
+  it('v2 F8b: readSince(lastRowid, limit) is one bounded page in ROWID order', async () => {
+    const c = ctx();
+    const refs = c.fixture.addMessageBurst(7, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      startAt: '2026-01-03T00:00:00Z',
+    });
+    const reader = createChatDbReader(c.fixture.path, { clock: fakeClock });
+    cleanups.push(() => reader.close());
+    const first = await reader.readSince(0, 3);
+    expect(first.map((m) => m.sourceRowid)).toEqual(
+      refs.slice(0, 3).map((r) => r.rowid),
+    );
+    const rest = await reader.readSince(first[2]?.sourceRowid ?? 0, 100);
+    expect(rest.map((m) => m.sourceRowid)).toEqual(
+      refs.slice(3).map((r) => r.rowid),
+    );
+    expect(await reader.headRowid()).toBe(refs[6]?.rowid);
+  });
+
   it("'sending' draft with a matching is_from_me row -> sent, guid + ledger recorded, ZERO send calls (§2.2.2)", async () => {
     const c = ctx();
     const sent = c.fixture.addSelfMessage({

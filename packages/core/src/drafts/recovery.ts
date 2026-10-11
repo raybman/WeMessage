@@ -59,6 +59,9 @@ export interface StartupRecoveryResult {
   audit: RecoveryAuditEvent[];
 }
 
+/** chat.db's date zero: no ledger start means any date verifies. */
+const APPLE_EPOCH_ISO = '2001-01-01T00:00:00.000Z';
+
 function isValidRowid(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
@@ -69,10 +72,17 @@ export async function runStartupRecovery(
   const { store, reader, clock } = deps;
   const audit: RecoveryAuditEvent[] = [];
 
-  // One full read serves both halves: chat.db head for cursor healing and
-  // the §2.2.2 verification corpus for ledger reconciliation.
-  const all = await reader.readSince(0);
-  const maxRowid = all.reduce((max, m) => Math.max(max, m.sourceRowid), 0);
+  // v2 F8b: the heal needs only chat.db's head, never its rows. A full
+  // readSince(0) here cost a 1.5 GB RSS spike and ~9 s on every restart
+  // against a real history. Readers without headRowid (old fakes) keep the
+  // full read so the heal stays exact.
+  const maxRowid =
+    reader.headRowid !== undefined
+      ? await reader.headRowid()
+      : (await reader.readSince(0)).reduce(
+          (max, m) => Math.max(max, m.sourceRowid),
+          0,
+        );
 
   const persisted = store.getCursor();
   let cursor: CursorRecovery;
@@ -104,14 +114,15 @@ export async function runStartupRecovery(
 
   const drafts: DraftRecoveryOutcome[] = [];
   for (const draft of store.listSendingDrafts()) {
-    const match = all.find(
-      (m) =>
-        m.isFromMe &&
-        m.chatGuid === draft.chatGuid &&
-        m.text === draft.body &&
-        (draft.ledgerStartedAt === null || m.sentAt >= draft.ledgerStartedAt),
-    );
-    if (match !== undefined) {
+    // §2.2.2 predicate (is_from_me, same chat, exact body, date >=
+    // started_at), asked of chat.db directly: the same query the dispatcher
+    // and late verification use, bounded by the chat and the date.
+    const match = await reader.findOutboundMessage({
+      chatGuid: draft.chatGuid,
+      text: draft.body,
+      sinceIso: draft.ledgerStartedAt ?? APPLE_EPOCH_ISO,
+    });
+    if (match !== null) {
       store.markDraftSent(draft.id, match.guid, clock.now());
       drafts.push({
         draftId: draft.id,

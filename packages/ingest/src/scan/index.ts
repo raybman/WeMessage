@@ -67,11 +67,24 @@ export interface ScanLoopOptions {
     options: ChatDbReaderOptions,
   ) => IngestChatDbReader;
   maxBusyRetries?: number;
+  /**
+   * v2 F8b: read at most this many rows per burst. Unset keeps the original
+   * read-everything burst. A first run against a real history was one
+   * unbounded read of the whole table (minutes, ~1.8 GB) before the daemon
+   * could listen; paged, each burst is bounded and `hasBacklog()` tells the
+   * caller to come back for the next page.
+   */
+  pageSize?: number;
 }
 
 export interface ScanLoop {
   /** One scan burst: emits and returns the newly-seen messages. */
   scanOnce(): Promise<Message[]>;
+  /**
+   * v2 F8b: true when the last burst filled its page, so rows may remain
+   * past the cursor. Always false without `pageSize`.
+   */
+  hasBacklog(): boolean;
 }
 
 function isBusyError(err: unknown): boolean {
@@ -88,6 +101,8 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
   const sleep = options.sleep ?? defaultSleep;
   const openReader = options.openReader ?? createChatDbReader;
   const maxBusyRetries = options.maxBusyRetries ?? DEFAULT_MAX_BUSY_RETRIES;
+  const pageSize = options.pageSize;
+  let backlog = false;
 
   async function burst(): Promise<Message[]> {
     const previous = options.store.getCursor();
@@ -100,7 +115,11 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
     };
     const reader = openReader(options.chatDbPath, readerOptions);
     try {
-      const rows = await reader.readSince(lastRowid);
+      const rows =
+        pageSize === undefined
+          ? await reader.readSince(lastRowid)
+          : await reader.readSince(lastRowid, pageSize);
+      const full = pageSize !== undefined && rows.length >= pageSize;
       const emitted: Message[] = [];
       const justEmitted = new Set<string>();
       let maxRowid = lastRowid;
@@ -140,9 +159,27 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
         sentAfterNs = (anchor - MUTATION_SENT_WINDOW_NS).toString();
       }
 
+      // v2 F8b: a first run that is paging through history reads every row
+      // in its CURRENT, already-mutated state, so mutations made before now
+      // are not news. Start the mutation watermark at now; without this the
+      // first sweep after the catch-up re-delivers every historical edit.
+      if (
+        full &&
+        previous === null &&
+        options.store.getSetting(MUTATION_WATERMARK_KEY) === null
+      ) {
+        options.store.setSetting(
+          MUTATION_WATERMARK_KEY,
+          isoToAppleNs(options.clock.now()).toString(),
+        );
+      }
+      backlog = full;
+
       // Step 2 (Scenario 8): mutation sweep. Same burst, same reader, same
-      // busy/backoff envelope as the ROWID pass above.
-      if (options.onMutation !== undefined) {
+      // busy/backoff envelope as the ROWID pass above. v2 F8b: skipped while
+      // a paged catch-up is behind; a row not yet read must not surface as
+      // a mutation before it surfaces as a message.
+      if (options.onMutation !== undefined && !full) {
         await yieldToEventLoop();
         const sinceNs = options.store.getSetting(MUTATION_WATERMARK_KEY) ?? '0';
         const sinceNsBig = BigInt(sinceNs);
@@ -175,6 +212,7 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
   }
 
   return {
+    hasBacklog: () => backlog,
     async scanOnce(): Promise<Message[]> {
       for (let attempt = 0; ; attempt++) {
         try {

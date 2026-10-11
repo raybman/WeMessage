@@ -160,6 +160,16 @@ export interface StartDaemonOptions {
    */
   scanOpenReader?: ScanLoopOptions['openReader'];
   /**
+   * v2 F8b: rows per scan burst. A first run pages through history instead
+   * of reading all of chat.db before listening. Default SCAN_PAGE_SIZE.
+   */
+  scanPageSize?: number;
+  /**
+   * v2 F8c: how often a daemon that booted without chat.db access (no Full
+   * Disk Access yet) retries the open. Default CHATDB_RETRY_MS.
+   */
+  chatDbRetryMs?: number;
+  /**
    * v2 F7: the IANA zone "today" is counted in. main.ts passes the zone it
    * resolved; absent means this process's own.
    */
@@ -262,6 +272,30 @@ const mustNotCallSendBackend: SendBackend = {
  * production since the gate denies sends while disconnected, but a real
  * invariant violation should never fail silently.
  */
+/** v2 F8b: rows per scan burst; bounded memory and time per burst. */
+export const SCAN_PAGE_SIZE = 1000;
+/** v2 F8b: how long boot keeps paging before it listens anyway. */
+export const BOOT_CATCHUP_BUDGET_MS = 2000;
+/** v2 F8c: retry cadence for opening chat.db after a boot without access. */
+export const CHATDB_RETRY_MS = 5000;
+
+/**
+ * v2 F8c: the errors that mean "this process may not read chat.db" (no Full
+ * Disk Access, or the grant went stale with a rebuild) or "there is no
+ * chat.db here". Both are a state to report, never a reason to exit: under
+ * launchd KeepAlive an exit is a crash loop the operator cannot see into.
+ */
+export function isChatDbAccessError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return (
+    code === 'SQLITE_CANTOPEN' ||
+    code === 'SQLITE_PERM' ||
+    code === 'SQLITE_AUTH' ||
+    code === 'EPERM' ||
+    code === 'EACCES'
+  );
+}
+
 function createReaderHandle(factory: () => IngestChatDbReader): {
   reader: ChatDbReader;
   /**
@@ -288,7 +322,15 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
   close(): void;
   reopen(): void;
 } {
-  let current: IngestChatDbReader | null = factory();
+  // v2 F8c: a boot without chat.db access starts closed (every read throws,
+  // routes degrade) instead of crashing; reopen() is the way back.
+  let current: IngestChatDbReader | null;
+  try {
+    current = factory();
+  } catch (err) {
+    if (!isChatDbAccessError(err)) throw err;
+    current = null;
+  }
   const live = (): IngestChatDbReader => {
     if (current === null) {
       throw new Error(
@@ -299,7 +341,10 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
   };
   return {
     reader: {
-      readSince: (lastRowid) => live().readSince(lastRowid),
+      readSince: (lastRowid: number, limit?: number) =>
+        live().readSince(lastRowid, limit as number),
+      // v2 F8b: recovery's cursor heal reads chat.db's head, not its rows.
+      headRowid: () => live().headRowid(),
       readMutatedSince: (sinceNs: string, sentAfterNs?: string) =>
         live().readMutatedSince(sinceNs, sentAfterNs),
       resolveChat: (handle) => live().resolveChat(handle),
@@ -369,24 +414,45 @@ export async function startDaemon(
   });
 
   // ---- phase 1: recovery (T-9.3) before anything serves (§2.5) ----
-  const recoveryReader = createChatDbReader(options.chatDbPath, {
-    clock: options.clock,
-  });
-  let recovery: StartupRecoveryResult;
-  try {
-    recovery = await runStartupRecovery({
-      store,
-      reader: recoveryReader,
-      sendBackend: mustNotCallSendBackend,
+  // v2 F8c: without chat.db access (no Full Disk Access yet) recovery is
+  // DEFERRED, not fatal: the daemon boots degraded, the doctor reports it,
+  // sends stay gated, and recovery runs the moment the open succeeds (the
+  // retry loop or POST /v1/connect), before the watcher arms.
+  const recover = async (): Promise<StartupRecoveryResult> => {
+    const recoveryReader = createChatDbReader(options.chatDbPath, {
       clock: options.clock,
     });
-  } finally {
-    recoveryReader.close();
-  }
-  // Persist the S1 in-memory trail NOW — phase 1, before the watcher arms
-  // and before listen (§2.5; S1 deviation #1 resolved). F-16 system actor.
-  for (const entry of recovery.audit) {
-    sink.append(toRecoveryAuditEvent(entry), systemActor('recovery'));
+    let result: StartupRecoveryResult;
+    try {
+      result = await runStartupRecovery({
+        store,
+        reader: recoveryReader,
+        sendBackend: mustNotCallSendBackend,
+        clock: options.clock,
+      });
+    } finally {
+      recoveryReader.close();
+    }
+    // Persist the S1 in-memory trail NOW, before the watcher arms and
+    // before listen (§2.5; S1 deviation #1 resolved). F-16 system actor.
+    for (const entry of result.audit) {
+      sink.append(toRecoveryAuditEvent(entry), systemActor('recovery'));
+    }
+    return result;
+  };
+  let recovery: StartupRecoveryResult;
+  let recoveryDeferred = false;
+  try {
+    recovery = await recover();
+  } catch (err) {
+    if (!isChatDbAccessError(err)) throw err;
+    options.onError?.(err);
+    recoveryDeferred = true;
+    recovery = {
+      cursor: { healed: false, lastRowid: store.getCursor()?.lastRowid ?? 0 },
+      drafts: [],
+      audit: [],
+    };
   }
   bootLog.push('recovery');
 
@@ -510,6 +576,7 @@ export async function startDaemon(
     ...(options.scanOpenReader ? { openReader: options.scanOpenReader } : {}),
     onMessage: deliver,
     onMutation: deliver,
+    pageSize: options.scanPageSize ?? SCAN_PAGE_SIZE,
     onDecodeFailed: (signal) => {
       // §2.2.1 degrade signal, persisted since Scenario 9 (S1 deviation #1).
       sink.append(
@@ -557,8 +624,10 @@ export async function startDaemon(
       // (or never propagated, macOS 26) — re-probe immediately rather than
       // waiting for the next GET /v1/doctor / POST /v1/connect. The scan
       // error still propagates to onError afterward; the loop keeps going.
-      const code = (err as NodeJS.ErrnoException | undefined)?.code;
-      if (code === 'EPERM' || code === 'EACCES') {
+      // v2 F8c: SQLITE_CANTOPEN is the same fact as EPERM here (the open
+      // itself was refused), and a stale grant after a rebuild says it that
+      // way.
+      if (isChatDbAccessError(err)) {
         const report = await runDoctor({
           probes: options.doctorProbes,
           supervisor: options.supervision?.supervisor ?? 'none',
@@ -573,6 +642,7 @@ export async function startDaemon(
         // failure was e.g. automation/messages, not chat.db access).
         if (report.state === 'disconnected' || report.state === 'unsupported') {
           stopWatcher();
+          startAccessRetry();
         }
       }
       throw err;
@@ -585,6 +655,8 @@ export async function startDaemon(
     clock: options.clock,
     ...(options.wake ? { wake: options.wake } : {}),
     ...(options.onError ? { onError: options.onError } : {}),
+    // v2 F8b: a paged catch-up queues its next page behind pending I/O.
+    hasMore: () => scanLoop.hasBacklog(),
   });
 
   // s3-execution Scenario 9: `watcherArmed` tracks whether the tail
@@ -602,6 +674,11 @@ export async function startDaemon(
   };
   const rearmWatcher = async (): Promise<void> => {
     if (watcherArmed) return;
+    if (recoveryDeferred) {
+      // v2 F8c: recovery before tailing, the same order as a normal boot.
+      recovery = await recover();
+      recoveryDeferred = false;
+    }
     sendReaderHandle.reopen();
     trigger.start();
     await scan();
@@ -611,10 +688,75 @@ export async function startDaemon(
     for (const socket of sockets) socket.close();
   };
 
-  if (!userDisconnected) {
+  // v2 F8c: the access retry. While chat.db cannot be opened (no Full Disk
+  // Access, or a grant gone stale with a rebuild), try the open on a slow
+  // timer; once it opens, re-probe and rearm exactly as POST /v1/connect
+  // does. A human's disconnect is never undone by it.
+  let accessRetry: NodeJS.Timeout | null = null;
+  let accessRetrying = false;
+  const stopAccessRetry = (): void => {
+    if (accessRetry !== null) clearInterval(accessRetry);
+    accessRetry = null;
+  };
+  const tryRegainAccess = async (): Promise<void> => {
+    if (accessRetrying) return;
+    if (watcherArmed || store.getSetting(SETTING_USER_DISCONNECTED) === '1') {
+      stopAccessRetry();
+      return;
+    }
+    accessRetrying = true;
+    try {
+      try {
+        createChatDbReader(options.chatDbPath, {
+          clock: options.clock,
+        }).close();
+      } catch (err) {
+        if (isChatDbAccessError(err)) return;
+        throw err;
+      }
+      const report = await runDoctor({
+        probes: options.doctorProbes,
+        supervisor: options.supervision?.supervisor ?? 'none',
+        store,
+        sink,
+        clock: options.clock,
+      });
+      if (report.state === 'fully-connected' || report.state === 'read-only') {
+        await rearmWatcher();
+        stopAccessRetry();
+      }
+    } catch (err) {
+      options.onError?.(err);
+    } finally {
+      accessRetrying = false;
+    }
+  };
+  function startAccessRetry(): void {
+    if (accessRetry !== null) return;
+    accessRetry = setInterval(() => {
+      void tryRegainAccess();
+    }, options.chatDbRetryMs ?? CHATDB_RETRY_MS);
+    accessRetry.unref?.();
+  }
+
+  if (!userDisconnected && recoveryDeferred) {
+    // v2 F8c: booted without chat.db access. Nothing to tail yet; the
+    // doctor above has already recorded why, and status reports it.
+    watcherArmed = false;
+    startAccessRetry();
+  } else if (!userDisconnected) {
     trigger.start();
-    // catch-up scan: rows written while the daemon was down (§1.3.8 restart)
+    // catch-up scan: rows written while the daemon was down (§1.3.8
+    // restart). v2 F8b: paged, so boot pages for at most
+    // BOOT_CATCHUP_BUDGET_MS and listens; the trigger keeps paging after.
+    const catchupStart = Date.now();
     await scan();
+    while (
+      scanLoop.hasBacklog() &&
+      Date.now() - catchupStart < BOOT_CATCHUP_BUDGET_MS
+    ) {
+      await scan();
+    }
   }
   bootLog.push('watcher');
 
@@ -856,6 +998,7 @@ export async function startDaemon(
     },
     statusRecounts: () => statusFacts.recounts(),
     stop: async () => {
+      stopAccessRetry();
       trigger.stop();
       // Adapter sessions first: they finalize against the store, and their
       // `adapter.health` broadcast should reach event-stream subscribers

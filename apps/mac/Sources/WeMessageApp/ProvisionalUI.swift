@@ -1307,7 +1307,9 @@ public enum ProvisionalUI {
   public static let untitledFile = "Untitled file"
 
   // D-UI-201: media the source gave no dimensions for is a fixed 4:3 tile
-  // with its name and size. Nothing is fetched.
+  // with its name and size. v2 F6c narrows it: nothing is fetched for a
+  // file with no id, over the D-UI-219 cap, or not an image; an image with
+  // an id under the cap draws its thumbnail in this tile instead.
   public static let mediaTileAspect: Double = 4.0 / 3.0
   public static let mediaTileWidth: Double = 184
 
@@ -1431,4 +1433,43 @@ public enum ProvisionalUI {
   // D-UI-218: status is re-read every 5 s while a window is visible and
   // paused while none is, with no spinner.
   public static let statusPollMilliseconds = 5_000
+
+  // D-UI-219: an image tile fetches when it is drawn, for files of 25 MB
+  // or less, as a 256 px thumbnail through ImageIO, kept in memory only. A
+  // larger file, or one of no stated size, keeps the D-UI-201 tile and
+  // says "Open to load".
+  public static let thumbnailMaxBytes = 25_000_000
+  public static let thumbnailOpenToLoad = "Open to load"
+
+  // D-UI-220: a file Messages keeps in iCloud draws a dashed tile in these
+  // words: no spinner, no retry loop.
+  public static let thumbnailNotOnThisMac = "In iCloud \u{00B7} not on this Mac"
+
+  // D-UI-221: any other refusal says what happened in words; chat.db
+  // unreadable names Full Disk Access.
+  public static let thumbnailUnreadable = "Messages unreadable \u{00B7} FDA"
+  /// `reason` is the daemon's refusal word (AttachmentFailure's raw
+  /// value); nil when the daemon did not answer.
+  public static func thumbnailCannotShow(_ reason: String?) -> String {
+    let words: String
+    switch reason {
+    case "unknown-attachment": words = "Messages has no such file"
+    case "no-local-path": words = "Messages kept no copy"
+    case "not-on-this-mac": words = "not on this Mac"
+    case "outside-root": words = "outside the Messages folder"
+    case "changed": words = "the file changed"
+    case "source-unavailable": words = "Messages unreadable"
+    case nil: words = "the daemon did not answer"
+    case .some(let other): words = other
+    }
+    return "Can't show this file \u{00B7} " + words
+  }
+
+  // D-UI-222: the transcript viewer shows an image full size; any other
+  // file shows Save, and video a poster tile reading "Save to play". Save
+  // (cmd-S) writes a copy into Downloads, as board 15's viewer does: the
+  // save panel stays confined to the share card (AppHygieneTests).
+  public static let viewerSaveToPlay = "Save to play"
+  public static let viewerSave = "Save to Downloads  \u{2318}S"
+  public static let viewerDone = "Done"
 }

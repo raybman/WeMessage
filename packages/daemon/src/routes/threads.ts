@@ -56,6 +56,7 @@ import {
   type YearCount,
 } from '@wemessage/core';
 import { stripControlChars } from '../sanitize.js';
+import { ATTACHMENT_ID } from './attachments.js';
 
 /** v2 F5: what the send path's lookup answers, by shape alone. */
 export interface ResolvedChat {
@@ -182,8 +183,11 @@ interface WireTurn {
 }
 
 /**
- * v2 F6: a file on the wire. The id joins the wire in F6c, with the Kit
- * that decodes it; until then the route copies every F4 field and no id.
+ * v2 F6c: a file on the wire. `id` is chat.db's attachment.guid, the id
+ * GET /v1/attachments/:id takes; it is absent when the source has none or
+ * when it is not id-shaped (the bytes route's own pattern), so the wire
+ * never carries an id the route would refuse, and never anything
+ * path-shaped.
  */
 type WireTurnFile = Omit<TurnFile, 'id'> & { id?: string };
 
@@ -219,6 +223,7 @@ function metaToWire(raw: string | null): string | null {
 /** v2 F4: one file's metadata, copied field by field. Never a path. */
 function fileToWire(f: TurnFile): WireTurnFile {
   return {
+    ...(f.id !== null && ATTACHMENT_ID.test(f.id) ? { id: f.id } : {}),
     name: fileNameToWire(f.name),
     mime: metaToWire(f.mime),
     uti: metaToWire(f.uti),

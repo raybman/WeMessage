@@ -6,13 +6,15 @@
  * is its only caller and the only thing that writes fixtures/contract; this
  * module never touches the disk outside its own temp dirs.
  *
- * Five servers, each for one reason:
+ * Six servers, each for one reason:
  *  - the main harness: live, rules + send + a stub thread source, every
  *    success response and most error envelopes;
  *  - a parked harness: the one place 409 parked can be asked for;
  *  - an SSE harness: a fresh sink, so the frame ids run 1 (greeting) to 22;
  *  - a connection server: connect/disconnect are not in the harness;
- *  - a no-token server: the 503 fail-closed answer.
+ *  - a no-token server: the 503 fail-closed answer;
+ *  - an attachments harness (v2 F6c): a temp home with one generated PNG,
+ *    for the bytes route's 404 and 416.
  *
  * What is random by construction is stabilised (`stabilise` below) so that
  * re-recording an unchanged daemon is byte-identical. The SSE event frames
@@ -20,6 +22,7 @@
  */
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -46,6 +49,7 @@ import {
   type GatewayEventPayload,
 } from '@wemessage/protocol';
 import { openStore } from '@wemessage/store';
+import { createChatDb, syntheticPng } from '@wemessage/fixtures';
 import {
   buildServer,
   SSE_KEEPALIVE_MS,
@@ -212,6 +216,9 @@ export const ERROR_NAMES = [
   '400.empty-search',
   '409.thread-state-conflict',
   '400.unknown-event',
+  // v2 F6c: the bytes route's two envelopes (the route landed in F6b).
+  '404.attachment-not-local',
+  '416.range',
 ] as const;
 
 /**
@@ -1354,6 +1361,58 @@ async function recordParked(): Promise<{ rec: Recorded; dir: string }> {
   return { rec, dir: h.dir };
 }
 
+/**
+ * v2 F6c: the bytes route's envelopes, from the real route over a synthetic
+ * chat.db and a temp home: an id chat.db does not know is 404
+ * attachment-not-local (reason unknown-attachment), and a range past the
+ * end of a generated PNG is 416. Never the real Attachments folder.
+ */
+async function recordAttachments(): Promise<{
+  notLocal: Recorded;
+  range: Recorded;
+  dir: string;
+}> {
+  const dir = mkdtempSync(join(tmpdir(), 'wm-f6c-rec-'));
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'Library', 'Messages', 'Attachments'), {
+    recursive: true,
+  });
+  const fixture = createChatDb(join(dir, 'chat.db'), { home });
+  const handleId = fixture.addHandle('+15550100001');
+  const chatId = fixture.addChat({
+    identifier: '+15550100001',
+    handleIds: [handleId],
+  });
+  fixture.addAttachmentOnly({
+    chatId,
+    handleId,
+    attachmentGuid: 'AT-0001',
+    transferName: 'grey.png',
+    onDisk: syntheticPng(4, 4),
+  });
+  const h = await boot({ dir, fixture, attachments: { home } });
+  const notLocal = expectStatus(
+    '404.attachment-not-local',
+    await ask(h.server, h.headers, {
+      method: 'GET',
+      url: '/v1/attachments/AT-NOPE',
+      route: 'GET /v1/attachments/:id',
+    }),
+    404,
+  );
+  const range = expectStatus(
+    '416.range',
+    await ask(h.server, h.headers, {
+      method: 'GET',
+      url: '/v1/attachments/AT-0001',
+      route: 'GET /v1/attachments/:id',
+      headers: { ...h.headers, range: 'bytes=100000-' },
+    }),
+    416,
+  );
+  return { notLocal, range, dir };
+}
+
 /** connect/disconnect are not in the harness: a fourth server, stub deps. */
 async function recordConnection(): Promise<{
   connect: Recorded;
@@ -1480,8 +1539,11 @@ export async function recordContract(): Promise<ContractBundle> {
   rawErrors['503.no-auth-token'] = await recordNoToken();
   const { sse, unknownEvent } = await recordSse();
   rawErrors['400.unknown-event'] = unknownEvent;
+  const attachments = await recordAttachments();
+  rawErrors['404.attachment-not-local'] = attachments.notLocal;
+  rawErrors['416.range'] = attachments.range;
 
-  const dirs = [main.dir, parked.dir, conn.dir]
+  const dirs = [main.dir, parked.dir, conn.dir, attachments.dir]
     .flatMap((d) => {
       let real = d;
       try {

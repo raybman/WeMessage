@@ -1,0 +1,248 @@
+{
+  "route": "GET /v1/threads/:guid/messages",
+  "status": 200,
+  "body": {
+    "chatGuid": "iMessage;-;+15550100001",
+    "channel": "imessage",
+    "turns": [
+      {
+        "guid": "r-00",
+        "from": "me",
+        "kind": "text",
+        "text": "made the reservation",
+        "at": "2026-09-01T09:39:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": null,
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-01",
+        "from": "them",
+        "kind": "text",
+        "text": "which time did you get?",
+        "at": "2026-09-01T09:40:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "imessage",
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-02",
+        "from": "me",
+        "kind": "text",
+        "text": "seven thirty",
+        "at": "2026-09-01T09:41:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "sent",
+          "at": null
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-03",
+        "from": "me",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T09:42:00.000Z",
+        "attachments": 1,
+        "service": "imessage",
+        "delivery": {
+          "state": "delivered",
+          "at": "2026-09-01T09:42:30.000Z"
+        },
+        "reactions": [],
+        "files": [
+          {
+            "id": "AT-0403-1",
+            "name": "itinerary.pdf",
+            "mime": "application/pdf",
+            "uti": "com.adobe.pdf",
+            "bytes": 88000,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "guid": "r-04",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T09:50:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 2,
+        "service": "imessage",
+        "reactions": [],
+        "files": [
+          {
+            "id": "AT-0404-1",
+            "name": "IMG_0412.heic",
+            "mime": "image/heic",
+            "uti": "public.heic",
+            "bytes": 2400000,
+            "sticker": false,
+            "hidden": false
+          },
+          {
+            "id": "AT-0404-2",
+            "name": null,
+            "mime": null,
+            "uti": null,
+            "bytes": null,
+            "sticker": false,
+            "hidden": true
+          }
+        ]
+      },
+      {
+        "guid": "r-05",
+        "from": "me",
+        "kind": "text",
+        "text": "sent this one as a text message",
+        "at": "2026-09-01T09:55:00.000Z",
+        "attachments": 0,
+        "service": "sms",
+        "delivery": {
+          "state": "delivered",
+          "at": "2026-09-01T09:55:20.000Z"
+        },
+        "reactions": [
+          {
+            "kind": "laugh",
+            "from": "them",
+            "handle": "+15550100001"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "r-06",
+        "from": "them",
+        "kind": "text",
+        "text": "got it over RCS",
+        "at": "2026-09-01T09:56:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 0,
+        "service": "rcs",
+        "reactions": [
+          {
+            "kind": "love",
+            "from": "me"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "r-07",
+        "from": "me",
+        "kind": "text",
+        "text": "are you there?",
+        "at": "2026-09-01T09:56:30.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "failed",
+          "at": null,
+          "errorCode": 22
+        },
+        "reactions": [],
+        "files": []
+      },
+      {
+        "guid": "r-08",
+        "from": "me",
+        "kind": "text",
+        "text": "see you at the door",
+        "at": "2026-09-01T09:57:00.000Z",
+        "attachments": 0,
+        "service": "imessage",
+        "delivery": {
+          "state": "read",
+          "at": "2026-09-01T09:57:40.000Z"
+        },
+        "reactions": [
+          {
+            "kind": "emphasize",
+            "from": "them",
+            "handle": "+15550100001"
+          }
+        ],
+        "files": []
+      },
+      {
+        "guid": "r-09",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T10:05:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 1,
+        "service": "imessage",
+        "reactions": [],
+        "files": [
+          {
+            "id": "AT-0409-1",
+            "name": "grey.png",
+            "mime": "image/png",
+            "uti": "public.png",
+            "bytes": 4096,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "guid": "r-10",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T10:06:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 1,
+        "service": "imessage",
+        "reactions": [],
+        "files": [
+          {
+            "id": "AT-0410-1",
+            "name": "IMG_0500.heic",
+            "mime": "image/heic",
+            "uti": "public.heic",
+            "bytes": 3100000,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "guid": "r-11",
+        "from": "them",
+        "kind": "attachment-only",
+        "text": null,
+        "at": "2026-09-01T10:07:00.000Z",
+        "handle": "+15550100001",
+        "attachments": 1,
+        "service": "imessage",
+        "reactions": [],
+        "files": [
+          {
+            "id": "AT-0411-1",
+            "name": "panorama.heic",
+            "mime": "image/heic",
+            "uti": "public.heic",
+            "bytes": 30000000,
+            "sticker": false,
+            "hidden": false
+          }
+        ]
+      }
+    ],
+    "nextBefore": null,
+    "asOf": "2026-09-01T10:08:00.000Z"
+  }
+}

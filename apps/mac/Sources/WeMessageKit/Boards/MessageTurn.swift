@@ -29,6 +29,9 @@ public struct MessageTurn: Equatable, Sendable {
   /// A file the message carries, as metadata only: the window never holds
   /// the bytes. v2 F4: a name or a type the source does not know is nil.
   public struct Attachment: Codable, Equatable, Sendable {
+    /// v2 F6c: the id GET /v1/attachments/:id takes; nil on a specimen or
+    /// a turn recorded before F6c, which never fetches.
+    public var id: String?
     public let name: String?
     public let mime: String?
     public var uti: String?
@@ -45,8 +48,9 @@ public struct MessageTurn: Equatable, Sendable {
 
     public init(
       name: String?, mime: String?, uti: String? = nil, sticker: Bool? = nil, bytes: Int? = nil, seconds: Int? = nil,
-      width: Int? = nil, height: Int? = nil, received: Int? = nil, expired: Bool? = nil
+      width: Int? = nil, height: Int? = nil, received: Int? = nil, expired: Bool? = nil, id: String? = nil
     ) {
+      self.id = id
       self.name = name
       self.mime = mime
       self.uti = uti
@@ -249,7 +253,7 @@ public struct MessageTurn: Equatable, Sendable {
   }
 
   static func attachment(_ f: WireFile) -> Attachment {
-    Attachment(name: f.name, mime: f.mime, uti: f.uti, sticker: f.sticker ? true : nil, bytes: f.bytes)
+    Attachment(name: f.name, mime: f.mime, uti: f.uti, sticker: f.sticker ? true : nil, bytes: f.bytes, id: f.id)
   }
 
   static func isMedia(_ a: Attachment) -> Bool {

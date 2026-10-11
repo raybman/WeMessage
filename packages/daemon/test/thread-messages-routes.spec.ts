@@ -47,6 +47,7 @@ interface WireTurn {
   delivery?: { state: string; at: string | null; errorCode?: number } | null;
   reactions?: { kind: string; from: string; handle?: string }[];
   files?: {
+    id?: string;
     name: string | null;
     mime: string | null;
     uti: string | null;
@@ -426,8 +427,9 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
     /** A source answering one page of exactly these turns. */
     const pageOf = (turns: TurnsPage['turns']) =>
       fakeSource(() => Promise.resolve({ turns, nextBefore: null }));
-    /** The F4 wire fields; the id joins the wire in v2 F6c. */
+    /** The F4 wire fields, and (v2 F6c) the id: chat.db's attachment.guid. */
     const wireFile = {
+      id: 'AT-F4-1',
       name: 'IMG_0412.heic',
       mime: 'image/heic',
       uti: 'public.heic',
@@ -435,7 +437,7 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       sticker: false,
       hidden: false,
     };
-    const file = { id: 'AT-F4-1', ...wireFile };
+    const file = wireFile;
 
     it('wireCarriesServiceDeliveryReactionsFiles, from a real chat.db', async () => {
       const h = await boot({ threads: true });
@@ -453,6 +455,7 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
         dateDelivered: at(56),
         dateRead: at(57),
         filename: '~/Library/Messages/Attachments/ab/12/F00D/IMG_0412.heic',
+        attachmentGuid: 'AT-F4-1',
         transferName: 'IMG_0412.heic',
         mimeType: 'image/heic',
         uti: 'public.heic',
@@ -585,6 +588,7 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       expect(names?.[1]).toHaveLength(255);
       expect(names?.[2]).toBeNull();
       expect(body.turns[0]?.files?.[3]).toEqual({
+        id: 'AT-F4-1',
         name: null,
         mime: null,
         uti: null,
@@ -595,6 +599,39 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       expect(body.turns[0]?.reactions).toEqual([
         { kind: 'like', from: 'them', handle: '+15550100002' },
       ]);
+    });
+
+    it('idOnWireOnlyWhenIdShaped (v2 F6c): a null or path-shaped id is left off', async () => {
+      const h = await boot({
+        threads: pageOf([
+          {
+            guid: 'G1',
+            from: 'them',
+            kind: 'attachment-only',
+            text: null,
+            at: at(1),
+            attachments: 4,
+            files: [
+              { ...file, id: 'AT-OK_1.2:3-x' },
+              { ...file, id: null },
+              { ...file, id: '../../etc/passwd' },
+              { ...file, id: '~/Library/Messages/Attachments/x.png' },
+            ],
+          },
+        ]),
+      });
+      const body = (
+        await get(h, pathOf('any;-;+15550000354'))
+      ).json() as MessagesBody;
+      const files = body.turns[0]?.files ?? [];
+      expect(files.map((f) => f.id)).toEqual([
+        'AT-OK_1.2:3-x',
+        undefined,
+        undefined,
+        undefined,
+      ]);
+      expect(Object.keys(files[1] ?? {})).not.toContain('id');
+      expect(JSON.stringify(body)).not.toMatch(/Library|\.\.\//);
     });
 
     it('noPathOnWire: no "/" and no "Library" in any file name', async () => {

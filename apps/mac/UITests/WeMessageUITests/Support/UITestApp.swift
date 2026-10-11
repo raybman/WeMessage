@@ -62,6 +62,12 @@ enum ID {
   static let smsPrefix = "wemessage.bubble.sms."
   static let effectPrefix = "wemessage.bubble.effect."
   static let unsupportedPrefix = "wemessage.bubble.unsupported."
+  /// v2 F6c: a transcript file the daemon can serve, and its viewer.
+  static let attachmentTilePrefix = "wemessage.bubble.attachment."
+  static let attachmentViewer = "wemessage.attachment.viewer"
+  static let attachmentViewerLine = "wemessage.attachment.viewer.line"
+  static let attachmentViewerSave = "wemessage.attachment.viewer.save"
+  static let attachmentViewerDone = "wemessage.attachment.viewer.done"
   // v2 S4f, boards 06 and 09.
   static let triageBar = "wemessage.triage.bar"
   static let bulkStrip = "wemessage.bulk.strip"

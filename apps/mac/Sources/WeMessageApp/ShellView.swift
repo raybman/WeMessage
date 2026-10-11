@@ -59,6 +59,14 @@ enum ShellID {
   static let reactionPrefix = "wemessage.bubble.reaction."
   /// The delivery state inside an outbound bubble: this prefix and its guid.
   static let deliveryPrefix = "wemessage.bubble.delivery."
+  /// v2 F6c: a transcript file the daemon can serve is this prefix and its
+  /// id (labelled by its words: name and size, or why it cannot show); it
+  /// opens the viewer sheet, with its line, Save (cmd-S) and Done (Esc).
+  static let attachmentTilePrefix = "wemessage.bubble.attachment."
+  static let attachmentViewer = "wemessage.attachment.viewer"
+  static let attachmentViewerLine = "wemessage.attachment.viewer.line"
+  static let attachmentViewerSave = "wemessage.attachment.viewer.save"
+  static let attachmentViewerDone = "wemessage.attachment.viewer.done"
   /// An agent draft specimen: this prefix and the draft id.
   static let draftSpecimenPrefix = "wemessage.bubble.draft."
   /// A message sent over SMS (D-UI-39): this prefix and its guid.

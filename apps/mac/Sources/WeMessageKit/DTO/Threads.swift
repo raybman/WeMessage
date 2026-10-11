@@ -112,8 +112,11 @@ public struct WireReaction: Codable, Equatable, Sendable {
 }
 
 /// v2 F4: one file as metadata: a basename at most, never a path. Every
-/// member is required; the four optionals are the wire's null.
+/// member is required; the four optionals are the wire's null. v2 F6c:
+/// `id` (chat.db's attachment.guid, what GET /v1/attachments/:id takes) is
+/// the one optional member: a turn recorded before F6c has none.
 public struct WireFile: Codable, Equatable, Sendable {
+  public var id: String?
   public var name: String?
   public var mime: String?
   public var uti: String?
@@ -122,10 +125,14 @@ public struct WireFile: Codable, Equatable, Sendable {
   public var hidden: Bool
 
   enum CodingKeys: String, CodingKey, CaseIterable {
-    case name, mime, uti, bytes, sticker, hidden
+    case id, name, mime, uti, bytes, sticker, hidden
   }
 
-  public init(name: String?, mime: String?, uti: String? = nil, bytes: Int?, sticker: Bool = false, hidden: Bool = false) {
+  public init(
+    id: String? = nil, name: String?, mime: String?, uti: String? = nil, bytes: Int?, sticker: Bool = false,
+    hidden: Bool = false
+  ) {
+    self.id = id
     self.name = name
     self.mime = mime
     self.uti = uti
@@ -136,6 +143,7 @@ public struct WireFile: Codable, Equatable, Sendable {
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    id = try c.decodeIfPresent(String.self, forKey: .id)
     name = try c.decode(String?.self, forKey: .name)
     mime = try c.decode(String?.self, forKey: .mime)
     uti = try c.decode(String?.self, forKey: .uti)
@@ -146,6 +154,7 @@ public struct WireFile: Codable, Equatable, Sendable {
 
   public func encode(to encoder: any Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encodeIfPresent(id, forKey: .id)
     try c.encode(name, forKey: .name)
     try c.encode(mime, forKey: .mime)
     try c.encode(uti, forKey: .uti)

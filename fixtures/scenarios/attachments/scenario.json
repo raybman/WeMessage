@@ -1,0 +1,23 @@
+{
+  "summary": "Rich turns with attachment ids: Maya's heic and a grey PNG served as generated grey PNGs, one file in iCloud and not on this Mac, and one panorama over the thumbnail cap.",
+  "extends": "rich-turns",
+  "attachments": {
+    "AT-0404-1": {
+      "png": {
+        "width": 1200,
+        "height": 900,
+        "grey": 128
+      }
+    },
+    "AT-0409-1": {
+      "png": {
+        "width": 64,
+        "height": 64,
+        "grey": 96
+      }
+    },
+    "AT-0410-1": {
+      "refuse": "not-on-this-mac"
+    }
+  }
+}

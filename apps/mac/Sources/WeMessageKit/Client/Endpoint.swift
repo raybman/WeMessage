@@ -31,6 +31,9 @@ public enum Endpoint: Sendable {
   case search(SearchParams)
   /// v2 F2: one conversation's turns counted by year in the zone `tz`.
   case threadYears(guid: String, tz: String)
+  /// v2 F6c: one attachment's bytes by its chat.db id, all of them or one
+  /// inclusive byte range. The answer is the file, not JSON.
+  case attachmentBytes(id: String, range: ClosedRange<Int>?)
   case updateAdapter(id: String, AdapterPatch)
   case updateRule(id: String, RulePatch)
   case updateSchedule(id: String, SchedulePatch)
@@ -73,7 +76,8 @@ public enum Endpoint: Sendable {
     switch self {
     case .health, .status, .doctor, .verifyAudit, .listAdapters, .listContacts, .settings, .listRules,
       .listSchedules, .listAudit, .listDrafts, .dryRunRule, .readThread, .listThreads, .events, .getDraft,
-      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle, .listThreadStates, .search, .threadYears:
+      .getAdapter, .getRule, .getSchedule, .batchReport, .resolveHandle, .listThreadStates, .search, .threadYears,
+      .attachmentBytes:
       return "GET"
     case .updateAdapter, .updateRule, .updateSchedule, .setSettings:
       return "PATCH"
@@ -126,6 +130,7 @@ public enum Endpoint: Sendable {
     case .listThreadStates: return "/v1/threads/state"
     case .threadYears: return "/v1/threads/:guid/years"
     case .search: return "/v1/search"
+    case .attachmentBytes: return "/v1/attachments/:id"
     case .disconnect: return "/v1/disconnect"
     case .send: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
@@ -141,7 +146,7 @@ public enum Endpoint: Sendable {
       .approveDraft(let id, _), .rejectDraft(let id, _), .testRule(let id, _), .getDraft(let id),
       .recallDraft(let id), .retryDraft(let id), .redraftDraft(let id), .rotateAdapterToken(let id),
       .deleteAdapter(let id), .getAdapter(let id), .deleteRule(let id), .getRule(let id), .deleteSchedule(let id),
-      .getSchedule(let id), .batchReport(let id):
+      .getSchedule(let id), .batchReport(let id), .attachmentBytes(let id, _):
       return id
     case .readThread(let guid, _, _, _), .setThreadState(let guid, _), .threadYears(let guid, _):
       return guid
@@ -304,6 +309,13 @@ public enum Endpoint: Sendable {
     if case .events = self {
       request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
       request.cachePolicy = .reloadIgnoringLocalCacheData
+    }
+    if case .attachmentBytes(_, let range) = self {
+      // v2 F6c (D-F6-8): bytes are never cached on disk; one range or all.
+      request.cachePolicy = .reloadIgnoringLocalCacheData
+      if let range {
+        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
+      }
     }
     return request
   }

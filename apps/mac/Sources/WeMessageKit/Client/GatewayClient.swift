@@ -254,6 +254,52 @@ public actor GatewayClient {
     try await outcome(.listThreadStates)
   }
 
+  // MARK: attachments
+
+  /// v2 F6c: one attachment's bytes, all of them or one inclusive range.
+  /// The answer is the file, not JSON, so it skips the strict decode. A
+  /// file the daemon cannot serve throws its `AttachmentFailure` (a 404
+  /// reason, or 503 unreadable); anything else throws as every call does
+  /// (a 416 is `.request(status: 416, ...)`). Same per-call 401 retry.
+  public func attachmentBytes(_ id: String, range: ClosedRange<Int>? = nil) async throws -> AttachmentBytes {
+    let endpoint = Endpoint.attachmentBytes(id: id, range: range)
+    let (data, response): (Data, HTTPURLResponse)
+    do {
+      (data, response) = try await performRaw(endpoint, token: currentToken())
+    } catch GatewayError.unauthorized {
+      guard let fresh = tokens.resolve() else { throw GatewayError.unauthorized }
+      token = fresh
+      (data, response) = try await performRaw(endpoint, token: fresh)
+    }
+    let mime = response.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
+    let etag = response.value(forHTTPHeaderField: "ETag")
+    var total = data.count
+    if let range = response.value(forHTTPHeaderField: "Content-Range"),
+      let slash = range.lastIndex(of: "/"), let whole = Int(range[range.index(after: slash)...])
+    {
+      total = whole
+    }
+    return AttachmentBytes(data: data, mime: mime, etag: etag, total: total)
+  }
+
+  /// One raw exchange: a 2xx comes back with its headers; anything else
+  /// throws, an attachment refusal as itself.
+  private nonisolated func performRaw(_ endpoint: Endpoint, token: BearerToken?) async throws
+    -> (Data, HTTPURLResponse)
+  {
+    let request = try endpoint.urlRequest(baseURL: config.baseURL, token: token)
+    let (data, response) = try await Self.transported { try await self.transport.send(request) }
+    let status = response.statusCode
+    if (200..<300).contains(status) { return (data, response) }
+    if let failure = AttachmentFailure.from(status: status, body: GatewayError.parseErrorBody(data)) {
+      throw failure
+    }
+    if case .failure(let error) = GatewayError.classify(status: status, body: data, endpoint: endpoint) {
+      throw error
+    }
+    throw GatewayError.request(status: status, body: GatewayError.parseErrorBody(data))
+  }
+
   // MARK: the event stream
 
   /// GET /v1/events/sse as raw frames. Opening it follows the same per-call

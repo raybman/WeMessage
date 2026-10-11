@@ -52,6 +52,13 @@
 // core's compileSearch echoes them. Every canned page is one page, so a
 // cursor is answered with the empty page. Years are a canned answer for the
 // chat and zone, else counted from the served transcript in the zone.
+//
+// v2 F6c: GET /v1/attachments/:id. A scenario.json's `attachments` map
+// names what each id answers: {"png": {"width", "height", "grey"}} is a grey PNG made
+// here at runtime with node:zlib (no image is checked in), and
+// {"refuse": "<reason>"} is the 404 attachment-not-local golden with that
+// reason. The nearest scenario in the chain that names the id answers it;
+// any other id is the golden as recorded (unknown-attachment).
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   existsSync,
@@ -61,6 +68,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
+import { deflateSync } from 'node:zlib';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { LONG, generateBulk, pageMessages, pageThreads } from './bulk.mjs';
@@ -111,6 +119,16 @@ const BY_HANDLE_ROUTE = 'GET /v1/threads/by-handle/:handle';
 const SEARCH = 'GET /v1/search';
 const YEARS = /^GET \/v1\/threads\/([^/]+)\/years$/;
 const YEARS_ROUTE = 'GET /v1/threads/:guid/years';
+/** v2 F6c: a file's bytes, by attachment id. */
+const ATTACHMENT = /^GET \/v1\/attachments\/([^/]+)$/;
+/** The daemon's closed refusal set (packages/daemon/src/routes/attachments.ts). */
+const REFUSALS = new Set([
+  'unknown-attachment',
+  'no-local-path',
+  'not-on-this-mac',
+  'outside-root',
+  'changed',
+]);
 const SEARCH_KEYS = new Set([
   'term',
   'from',
@@ -327,6 +345,7 @@ export function loadScenarios(dir = SCENARIOS) {
       summary,
       extends: parent = null,
       generator = null,
+      attachments = {},
     } = readJson(meta);
     if (generator !== null && !Object.hasOwn(GENERATORS, generator))
       throw new Error(
@@ -345,12 +364,116 @@ export function loadScenarios(dir = SCENARIOS) {
       searches: has ? indexSearches(responses) : [],
       years: has ? indexYears(responses) : new Map(),
       frames: readFrames(join(dir, name, 'sse')),
+      attachments: readAttachments(name, attachments),
     });
   }
   if (map.has(DEFAULT_SCENARIO))
     throw new Error(`fake-daemon: "${DEFAULT_SCENARIO}" is reserved`);
   for (const name of map.keys()) chainOf({ scenarios: map }, name);
   return map;
+}
+
+/** v2 F6c: a scenario's `attachments` map, checked; throws on a bad entry. */
+function readAttachments(name, raw) {
+  const map = new Map();
+  for (const [id, spec] of Object.entries(raw ?? {})) {
+    const png = spec?.png;
+    const dim = (n) => Number.isInteger(n) && n >= 1 && n <= 4096;
+    const pngOk =
+      png !== null &&
+      typeof png === 'object' &&
+      !Array.isArray(png) &&
+      Object.keys(png).sort().join() === 'grey,height,width' &&
+      dim(png.width) &&
+      dim(png.height) &&
+      Number.isInteger(png.grey) &&
+      png.grey >= 0 &&
+      png.grey <= 255;
+    const refuse = spec?.refuse;
+    if (pngOk && refuse === undefined)
+      map.set(id, { png: [png.width, png.height, png.grey] });
+    else if (png === undefined && REFUSALS.has(refuse)) map.set(id, { refuse });
+    else
+      throw new Error(
+        `fake-daemon: "${name}" attachment "${id}" is neither a png nor a refusal`,
+      );
+  }
+  return map;
+}
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const byte of buf) c = (CRC_TABLE[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const typed = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(typed), 0);
+  return Buffer.concat([len, typed, crc]);
+}
+
+/** v2 F6c: a `w` x `h` 8-bit grey PNG, every pixel `grey`. */
+export function greyPng(w, h, grey) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  const row = Buffer.alloc(w + 1, grey & 0xff);
+  row[0] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk(
+      'IDAT',
+      deflateSync(Buffer.concat(Array.from({ length: h }, () => row))),
+    ),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/** v2 F6c: what an attachment id answers along the scenario chain. */
+function attachmentFor(goldens, state, raw) {
+  let id = '';
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    id = '';
+  }
+  const refused = (reason) => ({
+    status: goldens.errors.attachmentNotLocal.status,
+    headers: JSON_HEADERS,
+    body: { ...goldens.errors.attachmentNotLocal.body, reason },
+  });
+  for (const scenario of chainOf(goldens, state.scenario)) {
+    const spec = scenario.attachments.get(id);
+    if (!spec) continue;
+    if (spec.refuse) return refused(spec.refuse);
+    const [w, h, grey] = spec.png;
+    const bytes = greyPng(w, h, grey);
+    return {
+      status: 200,
+      headers: {
+        'content-type': 'image/png',
+        'content-length': String(bytes.length),
+        etag: `"${String(w)}x${String(h)}-${String(grey)}"`,
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+        'accept-ranges': 'bytes',
+      },
+      raw: bytes,
+    };
+  }
+  return answer(goldens.errors.attachmentNotLocal);
 }
 
 export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
@@ -379,6 +502,7 @@ export function loadGoldens(root = CONTRACT, scenarios = SCENARIOS) {
       threadStateConflict: byName(errors, '409.thread-state-conflict.json'),
       invalidSearch: byName(errors, '400.invalid-search.json'),
       emptySearch: byName(errors, '400.empty-search.json'),
+      attachmentNotLocal: byName(errors, '404.attachment-not-local.json'),
     },
     sse: {
       headers: readJson(join(sse, 'headers.json')),
@@ -400,7 +524,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 
 /**
  * @typedef {{ status: number, headers: Record<string, string>, body?: unknown,
- *   stream?: boolean, frames?: Buffer[], emit?: Buffer,
+ *   stream?: boolean, frames?: Buffer[], emit?: Buffer, raw?: Buffer,
  *   next?: ReturnType<typeof initialState> }} Answer
  */
 
@@ -1173,7 +1297,8 @@ function dispatch(req, token, goldens, state, key, query) {
     key === THREAD_STATES ||
     THREAD_STATE.test(key) ||
     key === SEARCH ||
-    YEARS.test(key);
+    YEARS.test(key) ||
+    ATTACHMENT.test(key);
   if (!known) return answer(goldens.errors.notFound);
 
   const header = req.authorization ?? '';
@@ -1213,6 +1338,8 @@ function dispatch(req, token, goldens, state, key, query) {
     return answer(resolveMessages(goldens, state, guid));
   }
   if (key === SEARCH) return searchFor(goldens, state, query);
+  const attachment = ATTACHMENT.exec(key);
+  if (attachment) return attachmentFor(goldens, state, attachment[1] ?? '');
   if (key === THREAD_STATES) return listThreadStates(goldens, state, req.now);
   const threadState = THREAD_STATE.exec(key);
   if (threadState)
@@ -1376,7 +1503,8 @@ export async function start({
       return;
     }
     res.writeHead(out.status, out.headers);
-    res.end(JSON.stringify(out.body));
+    // v2 F6c: a file's bytes go out as they are; everything else is JSON.
+    res.end(out.raw ?? JSON.stringify(out.body));
   };
   const server = createServer((req, res) => {
     const chunks = [];

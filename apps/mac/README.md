@@ -189,6 +189,12 @@ equal):
 - `wemessage.bubble.effect.<guid>`: a message sent with an effect
 - `wemessage.bubble.unsupported.<guid>`: the honest fallback for a type the
   app cannot render
+- `wemessage.bubble.attachment.<id>`: v2 F6c, a transcript file the daemon
+  can serve, by its attachment id; labelled by its words (name and size,
+  "Open to load" over the D-UI-219 cap, or why it cannot show). It opens
+  `wemessage.attachment.viewer` (labelled by the file's name and size) with
+  `wemessage.attachment.viewer.line`, `wemessage.attachment.viewer.save`
+  (cmd-S, a copy into Downloads) and `wemessage.attachment.viewer.done` (Esc)
 - `wemessage.triage.bar`: Triage's list header (06.C), the counter and the
   burn-down bar with no percentage; its label is the counter's sentence
 - `wemessage.bulk.strip`: Needs You's bulk strip (09.D), how many drafts

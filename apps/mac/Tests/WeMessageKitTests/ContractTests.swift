@@ -129,7 +129,7 @@ struct ContractTests {
   @Test("every errors/*.json maps to the expected GatewayError")
   func errors() throws {
     let names = try Fixtures.errorNames()
-    #expect(names.count == 20, "errors on disk: \(names.count)")
+    #expect(names.count == 22, "errors on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.error(name)
       guard let (endpoint, expected) = Self.expectation(for: fixture) else {
@@ -166,6 +166,11 @@ struct ContractTests {
       return (.send(to: "+15551234567", body: "hi"), .gateDenied(reason: "kill-switch"))
     case "404.not-found":
       return (.getDraft(id: "id-0001"), .notFound)
+    case "404.attachment-not-local":
+      // v2 F6c: classify alone keeps the body; attachmentBytes maps the reason.
+      return (.attachmentBytes(id: "AT-0001", range: nil), .request(status: 404, body: fixture.body))
+    case "416.range":
+      return (.attachmentBytes(id: "AT-0001", range: 100_000...100_001), .request(status: 416, body: fixture.body))
     case "404.unknown-chat":
       return (.readThread(guid: chat, limit: nil, before: nil, until: nil), .unknownChat)
     case "409.grace-elapsed":

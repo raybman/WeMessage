@@ -190,6 +190,51 @@ final class Board02Tests: XCTestCase {
     XCTAssertEqual(requests.filter { $0.method != "GET" }, [], "\(appearance): the rich thread wrote")
   }
 
+  /// v2 F6c: the "attachments" scenario's Maya transcript. The grey PNG
+  /// draws from the daemon's bytes, the iCloud file says so in words, the
+  /// panorama over the cap says it opens to load and is never fetched, and
+  /// the viewer saves a copy into the test's Downloads. Nothing but GETs.
+  @MainActor
+  func testAttachmentTilesFromDaemon() async throws {
+    try await FakeDaemon.reset()
+    try await FakeDaemon.scenario("attachments")
+    let app = UITestApp.make(appearance: "light", reduceTransparency: false)
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    open(app, Self.maya)
+
+    let icloud = ID.attachmentTilePrefix + "AT-0410-1"
+    XCTAssertTrue(
+      waitUntil { self.label(app, icloud) == ProvisionalUI.thumbnailNotOnThisMac },
+      "the iCloud tile reads \(label(app, icloud))")
+    let huge = ID.attachmentTilePrefix + "AT-0411-1"
+    XCTAssertTrue(
+      waitUntil { self.label(app, huge).hasSuffix(ProvisionalUI.thumbnailOpenToLoad) },
+      "the over-cap tile reads \(label(app, huge))")
+    let grey = element(app, ID.attachmentTilePrefix + "AT-0409-1")
+    XCTAssertTrue(grey.waitForExistence(timeout: UITestApp.timeout), "no tile for the grey PNG")
+
+    grey.click()
+    let viewer = element(app, ID.attachmentViewer)
+    XCTAssertTrue(viewer.waitForExistence(timeout: UITestApp.timeout), "the viewer never opened")
+    let save = element(app, ID.attachmentViewerSave)
+    XCTAssertTrue(waitUntil { save.exists && save.isEnabled }, "Save never enabled")
+    save.click()
+    XCTAssertTrue(
+      waitUntil { self.label(app, ID.attachmentViewerLine).contains("Downloads as grey") },
+      "the viewer line reads \(label(app, ID.attachmentViewerLine))")
+    element(app, ID.attachmentViewerDone).click()
+    XCTAssertTrue(waitUntil { !viewer.exists }, "Done left the viewer open")
+
+    let requests = try await FakeDaemon.journal().requests.filter { !$0.path.hasPrefix("/v1/_") }
+    let paths = requests.map(\.path)
+    XCTAssertTrue(paths.contains("/v1/attachments/AT-0409-1"), "the grey PNG was never read: \(paths)")
+    XCTAssertTrue(paths.contains("/v1/attachments/AT-0410-1"), "the iCloud file was never asked: \(paths)")
+    XCTAssertFalse(paths.contains("/v1/attachments/AT-0411-1"), "the over-cap file was fetched: \(paths)")
+    XCTAssertEqual(requests.filter { $0.method != "GET" }, [], "the attachments thread wrote")
+  }
+
   // MARK: The composer's teeth
 
   /// Return is a newline: type, press Return, and after the whole window

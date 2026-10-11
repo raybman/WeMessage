@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/attachments/:id",
+  "status": 416,
+  "body": {
+    "error": "range-not-satisfiable"
+  }
+}

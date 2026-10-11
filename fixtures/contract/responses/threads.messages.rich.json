@@ -43,6 +43,7 @@
         ],
         "files": [
           {
+            "id": "AT-0102-1",
             "name": "IMG_0412.heic",
             "mime": "image/heic",
             "uti": "public.heic",
@@ -120,6 +121,7 @@
         ],
         "files": [
           {
+            "id": "AT-0106-1",
             "name": "itinerary.pdf",
             "mime": "application/pdf",
             "uti": "com.adobe.pdf",
@@ -128,6 +130,7 @@
             "hidden": false
           },
           {
+            "id": "AT-0106-2",
             "name": null,
             "mime": null,
             "uti": null,

@@ -78,6 +78,8 @@ struct TranscriptView: View {
           }
           .padding(.vertical, TranscriptLayout.verticalPadding)
           .padding(.horizontal, TranscriptLayout.horizontalPadding)
+          // v2 F6c: the thread's thumbnails, for MediaBody's live tiles.
+          .environment(\.attachmentThumbnails, model.thumbnails)
           .padding(.bottom, bottomInset)
           .frame(maxWidth: .infinity)
           // D-S7a-8: a short thread fills the pane and sits at its foot by

@@ -178,6 +178,8 @@ public final class ShellModel {
   let fullDiskAccess: any FullDiskAccessSeam
 
   private let client: GatewayClient
+  /// v2 F6c (D-UI-219): transcript thumbnails, in memory for the session.
+  let thumbnails: AttachmentThumbnails
   private var task: Task<Void, Never>?
 
   /// Board 01, folded from status, threads and the queue (D-UI-18 window).
@@ -645,6 +647,7 @@ public final class ShellModel {
   init(client: GatewayClient, avatars: AvatarBook) {
     self.client = client
     self.avatars = avatars
+    self.thumbnails = AttachmentThumbnails(client: client)
     self.thread = ThreadModel(client: client)
     self.email = EmailDesk(client: client)
     self.linkedIn = LinkedInDesk(client: client)

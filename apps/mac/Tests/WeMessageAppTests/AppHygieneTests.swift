@@ -102,6 +102,9 @@ struct AppHygieneTests {
     "wemessage.media.viewer.close", "wemessage.media.viewer.previous", "wemessage.media.viewer.next",
     "wemessage.media.viewer.kinds", "wemessage.media.viewer.save", "wemessage.media.viewer.reveal",
     "wemessage.media.viewer.copy", "wemessage.media.refusal", "wemessage.media.refusal.take",
+    // v2 F6c, the transcript's file viewer.
+    "wemessage.attachment.viewer", "wemessage.attachment.viewer.line", "wemessage.attachment.viewer.save",
+    "wemessage.attachment.viewer.done",
     // v2 S4l, board 16.
     "wemessage.oslayer", "wemessage.oslayer.dock", "wemessage.oslayer.menu", "wemessage.popover",
     "wemessage.popover.title", "wemessage.popover.stamp", "wemessage.popover.line", "wemessage.popover.more",
@@ -440,10 +443,11 @@ struct AppHygieneTests {
   /// v2 F7's 213..218: the status fields (the age rule, the local copy, 2c
   /// and CopyProgress from the mirror, the banner's handle, the re-read).
   /// v2 F7 retires D-UI-20 (the banner names the handle status serves) and
-  /// D-UI-72 (the daemon serves the copy's counts).
+  /// D-UI-72 (the daemon serves the copy's counts). v2 F6c's 219..222:
+  /// transcript thumbnails, the iCloud and refusal tiles, the viewer.
   static let dUINumbers =
     Array(1...19) + Array(21...50) + Array(52...71) + Array(73...78) + Array(80...131) + [132, 135, 140, 185]
-    + Array(186...194) + Array(195...202) + Array(203...212) + Array(213...218)
+    + Array(186...194) + Array(195...202) + Array(203...212) + Array(213...218) + Array(219...222)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.

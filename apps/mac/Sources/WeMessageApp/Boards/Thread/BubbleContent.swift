@@ -221,42 +221,38 @@ struct MediaBody: View {
   /// 4:3 tile with its name and size (D-UI-201). Off on board 08, whose
   /// specimens are drawn at the wireframe's size.
   var fixedTile = false
+  /// v2 F6c: the thread's thumbnailer; nil wherever specimens are drawn.
+  @Environment(\.attachmentThumbnails) private var thumbnails
+
+  /// v2 F6c (D-UI-219): a single file with an id, in the thread, is a live
+  /// tile: a button with its own words. Everything else stays decoration.
+  private var live: (MessageTurn.Attachment, String, AttachmentThumbnails)? {
+    guard fixedTile, items.count == 1, let item = items.first, let id = item.id, let thumbnails else { return nil }
+    return (item, id, thumbnails)
+  }
 
   var body: some View {
-    Group {
-      if items.count == 1, let item = items.first {
-        single(item)
-      } else if items.count == 2 {
-        HStack(spacing: 4) {
-          ForEach(0..<2, id: \.self) { MediaCell(label: "\($0 + 1)", width: 88, height: 88, palette: palette) }
+    if let live {
+      ThumbTile(item: live.0, id: live.1, palette: palette, thumbnails: live.2)
+    } else {
+      Group {
+        if items.count == 1, let item = items.first {
+          single(item)
+        } else if items.count == 2 {
+          HStack(spacing: 4) {
+            ForEach(0..<2, id: \.self) { MediaCell(label: "\($0 + 1)", width: 88, height: 88, palette: palette) }
+          }
+        } else {
+          grid
         }
-      } else {
-        grid
       }
+      .accessibilityHidden(true)
     }
-    .accessibilityHidden(true)
   }
 
   @ViewBuilder private func single(_ item: MessageTurn.Attachment) -> some View {
     if (item.mime ?? "").hasPrefix("video/") {
-      ZStack(alignment: .bottomTrailing) {
-        MediaCell(label: "", width: 184, height: 128, palette: palette)
-          .overlay {
-            Circle()
-              .fill(Tokens.color(palette.layer1))
-              .overlay(Circle().strokeBorder(Tokens.color(palette.ink), lineWidth: 1))
-              .overlay(
-                Image(systemName: "play.fill").font(.system(size: 9)).foregroundStyle(Tokens.color(palette.ink))
-              )
-              .frame(width: 26, height: 26)
-          }
-        Text(SpecimenText.duration(item.seconds ?? 0))
-          .font(.system(size: 9, design: .monospaced))
-          .foregroundStyle(Tokens.color(palette.ink))
-          .padding(.horizontal, 3)
-          .background(Tokens.color(palette.layer1))
-          .padding(6)
-      }
+      VideoPoster(seconds: item.seconds, palette: palette)
     } else {
       let dims = item.width.flatMap { w in item.height.map { "IMG \(w)\u{00D7}\($0)" } }
       if fixedTile, dims == nil {

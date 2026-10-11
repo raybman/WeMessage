@@ -1,0 +1,8 @@
+{
+  "route": "GET /v1/attachments/:id",
+  "status": 404,
+  "body": {
+    "error": "attachment-not-local",
+    "reason": "unknown-attachment"
+  }
+}

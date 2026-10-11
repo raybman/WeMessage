@@ -167,9 +167,9 @@ struct MessageTurnRichTests {
 
     // Files: the photo is media, the PDF with a hidden companion is a file.
     let photo = try #require(turns.first { $0.guid == "msg-0102" })
-    #expect(photo.kind == .media([.init(name: "IMG_0412.heic", mime: "image/heic", uti: "public.heic", bytes: 2_400_000)]))
+    #expect(photo.kind == .media([.init(name: "IMG_0412.heic", mime: "image/heic", uti: "public.heic", bytes: 2_400_000, id: "AT-0102-1")]))
     let pdf = try #require(turns.first { $0.guid == "msg-0106" })
-    #expect(pdf.kind == .file(.init(name: "itinerary.pdf", mime: "application/pdf", uti: "com.adobe.pdf", bytes: 88_000)))
+    #expect(pdf.kind == .file(.init(name: "itinerary.pdf", mime: "application/pdf", uti: "com.adobe.pdf", bytes: 88_000, id: "AT-0106-1")))
   }
 
   @Test("the wire DTOs are strict, and delivery keeps absent apart from null")

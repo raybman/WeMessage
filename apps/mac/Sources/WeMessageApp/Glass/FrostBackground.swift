@@ -31,6 +31,7 @@ struct FrostBackground: ViewModifier {
           switch fill {
           case .layer0: Rectangle().fill(Tokens.color(palette.layer0))
           case .material(.regular): Rectangle().fill(.regularMaterial)
+          case .material(.ultraThin): Rectangle().fill(.ultraThinMaterial)
           case .material(.hudWindow): BehindWindowEffect(material: .hudWindow)
           }
         }

@@ -213,16 +213,20 @@ public enum ProvisionalUI {
   }
   public static let popoverSnapshot: PopoverSnapshot = .plainWindow
 
-  // D-UI-21: the window frost material (the S4a.0 spike's default). Drawn as
-  // the window's container background, .containerBackground(for: .window),
-  // under transparent panes; Reduce Transparency swaps it for layer0.
+  // D-UI-21: the window frost material. Drawn as the window's container
+  // background, .containerBackground(for: .window), under transparent panes;
+  // Reduce Transparency swaps it for layer0. v2 F9 (Eric, Oct 11 2026: "more
+  // translucent, even more glassy"): ultra-thin, the most transmissive
+  // SwiftUI material, replacing the S4a.0 spike's regular.
   public enum FrostMaterial: Sendable {
-    /// SwiftUI's regular material.
+    /// SwiftUI's regular material (the S4a.0 spike's default).
     case regular
+    /// SwiftUI's ultra-thin material: the same blur, far less fill.
+    case ultraThin
     /// AppKit's HUD window material, behind-window: transmits more.
     case hudWindow
   }
-  public static let frostMaterial: FrostMaterial = .regular
+  public static let frostMaterial: FrostMaterial = .ultraThin
 
   // D-UI-22: where the dated title counter shows. Board 01's frames draw no
   // counter; 06.C says it "appears" in Triage; the S4 plan puts "title and

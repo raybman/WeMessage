@@ -99,6 +99,6 @@ struct AccessibilityMirrorTests {
   func frostDecision() {
     #expect(FrostBackground.Fill.decide(reduceTransparency: true) == .layer0)
     #expect(FrostBackground.Fill.decide(reduceTransparency: false) == .material(ProvisionalUI.frostMaterial))
-    #expect(ProvisionalUI.frostMaterial == .regular)
+    #expect(ProvisionalUI.frostMaterial == .ultraThin)
   }
 }

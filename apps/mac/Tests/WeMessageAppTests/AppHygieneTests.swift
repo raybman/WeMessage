@@ -486,10 +486,10 @@ struct AppHygieneTests {
     for (n, body) in sections.sorted(by: { $0.key < $1.key }) {
       #expect(body.contains("public static let ") || body.contains("public static func "), "D-UI-\(n) holds no constant")
     }
-    // D-UI-21 (the S4a.0 spike's material): regular material, as an enum
-    // case, never a string another file could copy.
+    // D-UI-21 (v2 F9, Eric's "more glassy"): ultra-thin material, as an
+    // enum case, never a string another file could copy.
     let material = sections[21] ?? ""
-    #expect(material.contains("public static let frostMaterial: FrostMaterial = .regular"))
+    #expect(material.contains("public static let frostMaterial: FrostMaterial = .ultraThin"))
     #expect(material.contains("containerBackground"), "D-UI-21 does not say where the material is applied")
     // Foundation only: the UI test bundle compiles this file too.
     #expect(try Self.imports(provisional) == ["Foundation"])

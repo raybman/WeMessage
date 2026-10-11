@@ -218,6 +218,34 @@ describe('v2 F6b: bytes, by id, from the Attachments folder only', () => {
     expect(reasonOf(r)).toBe('changed');
   });
 
+  it('a new file that reuses the inode number is still changed', async () => {
+    // ext4 gives a freed inode number to the next file created, so on Linux
+    // an unlink-and-recreate can keep dev and ino (run 38107969492). Here
+    // the reuse is simulated so the row holds on any filesystem: the opened
+    // file reports the checked dev and ino, but its own size and ctime.
+    let target = '';
+    let checked: ReturnType<typeof realFs.statSync> | undefined;
+    const base = swappingFs(() => {
+      unlinkSync(target);
+      writeFileSync(target, syntheticHeader('html'));
+    });
+    const fs: ResolveFs = {
+      ...base,
+      statSync: (p) => (checked = realFs.statSync(p)),
+      fstatSync: (fd) =>
+        Object.assign(realFs.fstatSync(fd), {
+          dev: checked!.dev,
+          ino: checked!.ino,
+        }),
+    };
+    const w = await world({ fs });
+    add(w, 'AT-REUSE', syntheticPng(4, 4));
+    target = w.pathOf('AT-REUSE');
+    const r = await get(w.h, 'AT-REUSE');
+    expect(r.statusCode).toBe(404);
+    expect(reasonOf(r)).toBe('changed');
+  });
+
   it('a symlink planted at the path between check and open is changed', async () => {
     // The original moves out of the root (same inode) and a link takes its
     // place: following it would pass the dev/ino compare and serve a file

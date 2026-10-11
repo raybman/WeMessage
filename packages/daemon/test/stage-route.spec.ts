@@ -102,16 +102,31 @@ describe('v2 F6d: staging streams, hashes, caps and sniffs', () => {
 
     // 100 MB + 1, streamed without a Content-Length so the outbox's own
     // count is what refuses it (the header check is the cheap twin).
+    //
+    // Measured on CI (runs 38107969492, 38107969479): a cold stage grew RSS
+    // by 36 MB, all of it V8 sizing its young generation to the allocation
+    // rate (heapTotal +12 MB locally, heapUsed +0.2 MB, buffers +0.1 MB), not
+    // a byte of body held. So one identical stage warms the heap first, and
+    // the second is measured at its PEAK (sampled every 5 ms), which is
+    // stricter than the end-to-end delta. A route that buffered the body
+    // would still grow by about 100 MB here.
+    expect((await stage(h, lazyPng(STAGE_MAX_BYTES + 1))).statusCode).toBe(413);
     const before = process.memoryUsage().rss;
+    let peak = before;
+    const sampler = setInterval(() => {
+      peak = Math.max(peak, process.memoryUsage().rss);
+    }, 5);
     const big = await stage(h, lazyPng(STAGE_MAX_BYTES + 1));
-    const grownMb = (process.memoryUsage().rss - before) / (1024 * 1024);
+    clearInterval(sampler);
+    peak = Math.max(peak, process.memoryUsage().rss);
+    const grownMb = (peak - before) / (1024 * 1024);
     expect(big.statusCode).toBe(413);
     expect(big.json()).toEqual({
       error: 'attachment-too-large',
       limit: STAGE_MAX_BYTES,
     });
     console.log(
-      `F6d stage 100 MB + 1: RSS grew ${grownMb.toFixed(1)} MB (budget 16)`,
+      `F6d stage 100 MB + 1: peak RSS grew ${grownMb.toFixed(1)} MB (budget 16)`,
     );
     expect(grownMb).toBeLessThanOrEqual(16);
     // Nothing left behind: no temp file, no second folder.

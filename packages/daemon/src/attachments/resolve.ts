@@ -11,9 +11,13 @@
  *     `Attachments`, and a symlink that escapes is caught after it is
  *     followed.
  *  3. stat the real path: it must be a regular file.
- *  4. open it O_RDONLY|O_NOFOLLOW and fstat the descriptor: dev and ino
- *     must equal step 3's. A file swapped (or re-pointed by a symlink)
- *     between the check and the open is `changed`, never served.
+ *  4. open it O_RDONLY|O_NOFOLLOW and fstat the descriptor: dev, ino,
+ *     size and ctime must equal step 3's. A file swapped (or re-pointed by
+ *     a symlink) between the check and the open is `changed`, never served.
+ *     dev and ino alone are not enough off APFS: ext4 hands a freed inode
+ *     number straight to the next file created (seen on the Linux CI
+ *     runner, run 38107969492), so an unlink-and-recreate kept dev/ino.
+ *     The new file's size or change time gives it away.
  *
  * No reason, and nothing returned, carries a path.
  */
@@ -120,7 +124,9 @@ export function resolveAttachment(
   if (
     !opened.isFile() ||
     opened.dev !== checked.dev ||
-    opened.ino !== checked.ino
+    opened.ino !== checked.ino ||
+    opened.size !== checked.size ||
+    opened.ctimeMs !== checked.ctimeMs
   ) {
     d.fs.closeSync(fd);
     return { ok: false, reason: 'changed' };

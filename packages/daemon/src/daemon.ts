@@ -300,7 +300,7 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
   return {
     reader: {
       readSince: (lastRowid) => live().readSince(lastRowid),
-      readMutatedSince: (sinceNs, sentAfterNs) =>
+      readMutatedSince: (sinceNs: string, sentAfterNs?: string) =>
         live().readMutatedSince(sinceNs, sentAfterNs),
       resolveChat: (handle) => live().resolveChat(handle),
       findOutboundMessage: (q) => live().findOutboundMessage(q),

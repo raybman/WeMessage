@@ -404,7 +404,7 @@ describe('mutation sweep window (v2 F8a)', () => {
           ...real,
           close: () => real.close(),
           readSince: (rowid) => real.readSince(rowid),
-          readMutatedSince: (sinceNs, sentAfterNs) => {
+          readMutatedSince: (sinceNs: string, sentAfterNs?: string) => {
             calls.push(sentAfterNs);
             return real.readMutatedSince(sinceNs, sentAfterNs);
           },
@@ -419,8 +419,52 @@ describe('mutation sweep window (v2 F8a)', () => {
     });
     await scanner.scanOnce();
     await scanner.scanOnce();
-    const expected = (appleEpochNs(FIXED_NOW) - WINDOW_NS).toString();
-    expect(calls).toEqual([undefined, expected]);
+    // The newest message (2026-01-02T00:00:02Z) is earlier than the previous
+    // scan (FIXED_NOW), so the window anchors on it: the earlier of the two.
+    const newest = appleEpochNs('2026-01-02T00:00:02Z');
+    expect(newest).toBeLessThan(appleEpochNs(FIXED_NOW));
+    expect(calls).toEqual([undefined, (newest - WINDOW_NS).toString()]);
+    // and the anchor is persisted, so a burst with no new rows keeps it
+    calls.length = 0;
+    await scanner.scanOnce();
+    expect(calls).toEqual([(newest - WINDOW_NS).toString()]);
+  });
+
+  it('a message dated after the previous scan never narrows the window past it', async () => {
+    const c = ctx();
+    const calls: (string | undefined)[] = [];
+    const scanner = createScanLoop({
+      chatDbPath: c.fixture.path,
+      store: c.store,
+      clock: fakeClock,
+      onMessage: () => {},
+      onMutation: () => {},
+      openReader: (path, opts) => {
+        const real = createChatDbReader(path, opts);
+        return {
+          ...real,
+          close: () => real.close(),
+          readSince: (rowid) => real.readSince(rowid),
+          readMutatedSince: (sinceNs: string, sentAfterNs?: string) => {
+            calls.push(sentAfterNs);
+            return real.readMutatedSince(sinceNs, sentAfterNs);
+          },
+        };
+      },
+    });
+    // dated a week AFTER the fake clock (skew): the scan time wins
+    c.fixture.addMessageBurst(1, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'from the future',
+      startAt: '2026-01-12T12:00:00Z',
+    });
+    await scanner.scanOnce();
+    await scanner.scanOnce();
+    expect(calls).toEqual([
+      undefined,
+      (appleEpochNs(FIXED_NOW) - WINDOW_NS).toString(),
+    ]);
   });
 
   it('an edit to a message sent inside the window is swept; one sent long before is not', async () => {

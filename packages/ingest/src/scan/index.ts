@@ -19,6 +19,16 @@ import { isoToAppleNs, type DecodeFailedSignal } from '../normalize/index.js';
 /** settings key for the mutation-sweep ns watermark (S2 Scenario 8). */
 export const MUTATION_WATERMARK_KEY = 'ingest.mutationWatermarkNs';
 
+/**
+ * v2 F8a: settings key for the newest SENT time the ROWID pass has seen
+ * (Apple-epoch ns, decimal string). The sweep window anchors on the earlier
+ * of this and the previous scan time, so a chat.db whose newest message is
+ * behind the wall clock (a restored backup, skew, a test fixture) still has
+ * its recent edits swept. Anchoring on the earlier of the two only ever
+ * WIDENS the window.
+ */
+export const NEWEST_SENT_KEY = 'ingest.newestSentNs';
+
 const BUSY_BACKOFF_START_MS = 50;
 const BUSY_BACKOFF_CAP_MS = 2000;
 const DEFAULT_MAX_BUSY_RETRIES = 10;
@@ -82,13 +92,6 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
   async function burst(): Promise<Message[]> {
     const previous = options.store.getCursor();
     const lastRowid = previous?.lastRowid ?? 0;
-    // v2 F8a: no cursor means a first run, which sweeps the whole table once.
-    const sentAfterNs =
-      previous === null
-        ? undefined
-        : (
-            isoToAppleNs(previous.lastScanAt) - MUTATION_SENT_WINDOW_NS
-          ).toString();
     const readerOptions: ChatDbReaderOptions = {
       clock: options.clock,
       ...(options.onDecodeFailed !== undefined
@@ -115,6 +118,27 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
         lastRowid: maxRowid,
         lastScanAt: options.clock.now(),
       });
+
+      // v2 F8a: track the newest sent time seen, then derive the window.
+      const storedNewest = options.store.getSetting(NEWEST_SENT_KEY);
+      let newestSentNs = storedNewest !== null ? BigInt(storedNewest) : null;
+      const before = newestSentNs;
+      for (const message of rows) {
+        const ns = isoToAppleNs(message.sentAt);
+        if (newestSentNs === null || ns > newestSentNs) newestSentNs = ns;
+      }
+      if (newestSentNs !== null && newestSentNs !== before) {
+        options.store.setSetting(NEWEST_SENT_KEY, newestSentNs.toString());
+      }
+      // No cursor means a first run, which sweeps the whole table once.
+      let sentAfterNs: string | undefined;
+      if (previous !== null) {
+        let anchor = isoToAppleNs(previous.lastScanAt);
+        if (newestSentNs !== null && newestSentNs < anchor) {
+          anchor = newestSentNs;
+        }
+        sentAfterNs = (anchor - MUTATION_SENT_WINDOW_NS).toString();
+      }
 
       // Step 2 (Scenario 8): mutation sweep. Same burst, same reader, same
       // busy/backoff envelope as the ROWID pass above.

@@ -1,0 +1,7 @@
+{
+  "route": "POST /v1/attachments/staged",
+  "status": 409,
+  "body": {
+    "error": "attachments-unproven"
+  }
+}

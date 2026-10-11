@@ -56,7 +56,7 @@ struct ContractTests {
   @Test("every responses/*.json decodes strictly into its DTO")
   func responsesDecode() throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 57, "responses on disk: \(names.count)")
+    #expect(names.count == 59, "responses on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.response(name)
       do {
@@ -85,7 +85,7 @@ struct ContractTests {
       #expect(again == fixture.body, "\(name):\n want \(want)\n got  \(got)")
       compared += 1
     }
-    #expect(compared == 54, "non-204 responses compared: \(compared)")
+    #expect(compared == 56, "non-204 responses compared: \(compared)")
   }
 
   @Test(
@@ -129,7 +129,7 @@ struct ContractTests {
   @Test("every errors/*.json maps to the expected GatewayError")
   func errors() throws {
     let names = try Fixtures.errorNames()
-    #expect(names.count == 22, "errors on disk: \(names.count)")
+    #expect(names.count == 25, "errors on disk: \(names.count)")
     for name in names {
       let fixture = try Fixtures.error(name)
       guard let (endpoint, expected) = Self.expectation(for: fixture) else {
@@ -144,6 +144,7 @@ struct ContractTests {
 
   static func expectation(for fixture: ContractFixture) -> (Endpoint, GatewayError)? {
     let chat = "iMessage;-;+15551234567"
+    let stage = Endpoint.stageAttachment(name: "grey.png", mime: "image/png", bytes: Data([0x89, 0x50]))
     switch fixture.name {
     case "400.invalid-body":
       return (.createDraft(DraftCreateInput(chatGuid: chat, body: "hi")), .request(status: 400, body: fixture.body))
@@ -171,6 +172,11 @@ struct ContractTests {
       return (.attachmentBytes(id: "AT-0001", range: nil), .request(status: 404, body: fixture.body))
     case "416.range":
       return (.attachmentBytes(id: "AT-0001", range: 100_000...100_001), .request(status: 416, body: fixture.body))
+    case "409.attachments-unproven":
+      // v2 F6f: off is a refusal the app reads (D-UI-224), never a crash.
+      return (stage, .conflict(ConflictDetail(error: "attachments-unproven")))
+    case "413.attachment-too-large", "415.attachment-type-mismatch":
+      return (stage, .request(status: fixture.status, body: fixture.body))
     case "404.unknown-chat":
       return (.readThread(guid: chat, limit: nil, before: nil, until: nil), .unknownChat)
     case "409.grace-elapsed":
@@ -417,7 +423,8 @@ extension Fixtures {
     case "rules.test": return try trip(RuleTestResult.self)
     case "schedules.create", "schedules.patch": return try trip(ScheduleEnvelope.self)
     case "schedules.list": return try trip([SchedulePayload].self)
-    case "send": return try trip(SendResult.self)
+    case "send", "send.file": return try trip(SendResult.self)
+    case "attachments.staged": return try trip(StagedAttachment.self)
     case "settings.list": return try trip(SettingsEnvelope.self)
     case "settings.patch": return try trip(SettingsPatchResult.self)
     case "status": return try trip(StatusPayload.self)

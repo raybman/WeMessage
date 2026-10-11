@@ -34,6 +34,11 @@ public enum Endpoint: Sendable {
   /// v2 F6c: one attachment's bytes by its chat.db id, all of them or one
   /// inclusive byte range. The answer is the file, not JSON.
   case attachmentBytes(id: String, range: ClosedRange<Int>?)
+  /// v2 F6f: the operator's file into the daemon's outbox. The body is the
+  /// file's own bytes (never JSON, never a path), typed by `mime`, named by
+  /// the percent-encoded `X-WeMessage-Name`. Off (409) until
+  /// `send.attachments`.
+  case stageAttachment(name: String, mime: String, bytes: Data)
   case updateAdapter(id: String, AdapterPatch)
   case updateRule(id: String, RulePatch)
   case updateSchedule(id: String, SchedulePatch)
@@ -90,7 +95,7 @@ public enum Endpoint: Sendable {
       return "DELETE"
     case .connect, .resume, .createAdapter, .disconnect, .bulkDrafts, .approveDraft, .rejectDraft, .createDraft,
       .testRule, .createRule, .createSchedule, .send, .sendFile, .setGlobalMode, .setKillSwitch, .pause, .recallDraft,
-      .retryDraft, .redraftDraft, .rotateAdapterToken:
+      .retryDraft, .redraftDraft, .rotateAdapterToken, .stageAttachment:
       return "POST"
     }
   }
@@ -134,6 +139,7 @@ public enum Endpoint: Sendable {
     case .threadYears: return "/v1/threads/:guid/years"
     case .search: return "/v1/search"
     case .attachmentBytes: return "/v1/attachments/:id"
+    case .stageAttachment: return "/v1/attachments/staged"
     case .disconnect: return "/v1/disconnect"
     case .send, .sendFile: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
@@ -321,6 +327,14 @@ public enum Endpoint: Sendable {
       if let range {
         request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
       }
+    }
+    if case .stageAttachment(let name, let mime, let bytes) = self {
+      // v2 F6f: the bytes are the body, typed as what they are; the daemon
+      // sniffs them against this type and refuses a mismatch (415).
+      request.httpBody = bytes
+      request.setValue(mime, forHTTPHeaderField: "Content-Type")
+      request.setValue(Self.encodeComponent(name), forHTTPHeaderField: "X-WeMessage-Name")
+      request.cachePolicy = .reloadIgnoringLocalCacheData
     }
     return request
   }

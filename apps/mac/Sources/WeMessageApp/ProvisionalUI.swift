@@ -36,7 +36,10 @@ import Foundation
 // D-UI-213..218: the v2 F7 status fields, the age rule, the local copy's
 // size, 2c and CopyProgress from the mirror, the banner's handle and the
 // status re-read. v2 F7 retires D-UI-20, the banner names the handle status
-// serves, and D-UI-72, the daemon serves the copy's counts).
+// serves, and D-UI-72, the daemon serves the copy's counts);
+// D-UI-219..222: the v2 F6c transcript thumbnails, their refusal tiles and
+// the viewer; D-UI-223..225: the v2 F6f attach door, the words while
+// attachments are off, and the file send's three progress lines.
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -943,10 +946,11 @@ public enum ProvisionalUI {
   }
   public static let mediaDoors: MediaDoors = .fixtureKeyDoors
 
-  // D-UI-104: the tray's Send does not send. The daemon has no attachment
-  // route (G-15a), so Send parks the set, says so, and keeps it staged.
-  // Nothing goes over the wire, and nothing offers to send anyway.
-  public static let mediaParkedNote = "Parked. This daemon has no route for attachments yet, so nothing left this Mac. The set stays staged."
+  // D-UI-104: the tray's Send does not send while attachments are off: it
+  // says so and keeps the set staged. Nothing goes over the wire, and
+  // nothing offers to send anyway. Reworded by D-UI-224 (v2 F6f): the
+  // daemon now has the route, held off until one test send proves it.
+  public static let mediaParkedNote = attachmentsOff
 
   // D-UI-105: the compression table is a report for iMessage only. No row
   // can be chosen (there is no transcoder in this version) and the other
@@ -1472,4 +1476,34 @@ public enum ProvisionalUI {
   public static let viewerSaveToPlay = "Save to play"
   public static let viewerSave = "Save to Downloads  \u{2318}S"
   public static let viewerDone = "Done"
+
+  // D-UI-223: the composer's attach door (15.A door 1, made real): a
+  // paperclip, shift-cmd-A, drawn only where Send is (an iMessage 1:1 with
+  // the kill switch off). It picks one file into a compact tray above the
+  // field; nothing leaves until that tray's own Send.
+  public static let attachDoorLabel = "Attach a file"
+  public static let attachDoorGlyph = "paperclip"
+  public static let attachTraySend = "Send file"
+  public static let attachTrayRemove = "Remove from tray"
+
+  // D-UI-224: while `send.attachments` is off (the default, D-F6-1), or
+  // status has not said it is on, the tray's Send prints this and stages
+  // nothing. Board 15's D-UI-104 note reads the same words.
+  public static let attachmentsOff = "Attachments are off until one test send proves them. Nothing left this Mac."
+
+  // D-UI-225: the file send's progress, in words and shape, never colour.
+  // Waiting is plain; confirmed names the minute Messages wrote the row;
+  // not confirmed is outlined. A refusal before the wire says what it was.
+  public static let attachmentWaiting = "Waiting for Messages to confirm"
+  public static let attachmentUnconfirmed = "Not confirmed in 10 s"
+  public static func attachmentConfirmed(at: Date, timeZone: TimeZone = .current) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    let parts = calendar.dateComponents([.hour, .minute], from: at)
+    let two = { (n: Int?) in n.map { $0 < 10 ? "0" + String($0) : String($0) } ?? "00" }
+    return "Sent \u{00B7} confirmed " + two(parts.hour) + ":" + two(parts.minute)
+  }
+  public static func attachmentNotSent(_ why: String) -> String {
+    "Not sent \u{00B7} " + why
+  }
 }

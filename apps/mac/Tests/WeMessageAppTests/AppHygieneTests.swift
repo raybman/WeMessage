@@ -41,6 +41,9 @@ struct AppHygieneTests {
     "wemessage.thread.draft", "wemessage.thread.draft.approve", "wemessage.thread.draft.edit",
     "wemessage.thread.draft.hold", "wemessage.composer", "wemessage.composer.field", "wemessage.composer.send",
     "wemessage.composer.hold", "wemessage.composer.outbox",
+    // v2 F6f, the attach door and its tray.
+    "wemessage.composer.attach", "wemessage.composer.tray", "wemessage.composer.tray.send",
+    "wemessage.composer.tray.line",
     // v2 S4e, board 08 (the per-specimen ids are prefixes: atlas.<slug>,
     // bubble.reaction.<guid>.<n>, bubble.delivery.<guid>, bubble.draft.<id>,
     // bubble.sms.<guid>, bubble.effect.<guid>, bubble.unsupported.<guid>).
@@ -444,10 +447,12 @@ struct AppHygieneTests {
   /// and CopyProgress from the mirror, the banner's handle, the re-read).
   /// v2 F7 retires D-UI-20 (the banner names the handle status serves) and
   /// D-UI-72 (the daemon serves the copy's counts). v2 F6c's 219..222:
-  /// transcript thumbnails, the iCloud and refusal tiles, the viewer.
+  /// transcript thumbnails, the iCloud and refusal tiles, the viewer. v2
+  /// F6f's 223..225: the attach door, the off words, the progress lines.
   static let dUINumbers =
     Array(1...19) + Array(21...50) + Array(52...71) + Array(73...78) + Array(80...131) + [132, 135, 140, 185]
     + Array(186...194) + Array(195...202) + Array(203...212) + Array(213...218) + Array(219...222)
+    + Array(223...225)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.

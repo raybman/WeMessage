@@ -1,0 +1,9 @@
+{
+  "route": "POST /v1/send",
+  "status": 200,
+  "body": {
+    "draftId": "id-0025",
+    "outcome": "sent",
+    "sentMessageGuid": "id-0026"
+  }
+}

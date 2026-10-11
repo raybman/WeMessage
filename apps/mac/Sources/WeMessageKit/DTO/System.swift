@@ -591,6 +591,36 @@ extension SendResult {
   }
 }
 
+/// v2 F6f: `POST /v1/attachments/staged`. The stage id is the sha256 of the
+/// bytes the daemon wrote; the name is the safe name Messages will show.
+public struct StagedAttachment: Codable, Equatable, Sendable {
+  public var stageId: String
+  public var name: String
+  public var mime: String
+  public var bytes: Int
+
+  public init(stageId: String, name: String, mime: String, bytes: Int) {
+    self.stageId = stageId
+    self.name = name
+    self.mime = mime
+    self.bytes = bytes
+  }
+
+  enum CodingKeys: String, CodingKey, CaseIterable {
+    case stageId, name, mime, bytes
+  }
+}
+
+extension StagedAttachment {
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.strictContainer(keyedBy: CodingKeys.self)
+    stageId = try c.decode(String.self, forKey: .stageId)
+    name = try c.decode(String.self, forKey: .name)
+    mime = try c.decode(String.self, forKey: .mime)
+    bytes = try c.decode(Int.self, forKey: .bytes)
+  }
+}
+
 // MARK: contacts
 
 /// Who may be answered, and how.

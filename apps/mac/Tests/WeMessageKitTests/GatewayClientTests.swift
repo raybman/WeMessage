@@ -46,7 +46,7 @@ struct GatewayClientTests {
   @Test("every Endpoint hits the ROUTE_TABLE method+path (read from responses fixtures)")
   func routes() async throws {
     let names = try Fixtures.responseNames()
-    #expect(names.count == 57)
+    #expect(names.count == 59)
     var exercised = 0
     for name in names {
       let fixture = try Fixtures.response(name)
@@ -66,7 +66,7 @@ struct GatewayClientTests {
       #expect(Self.matches(path, template: fixture.pathTemplate), "\(name): \(path) is not \(fixture.pathTemplate)")
       exercised += 1
     }
-    #expect(exercised == 57, "fixtures exercised: \(exercised)")
+    #expect(exercised == 59, "fixtures exercised: \(exercised)")
   }
 
   static func matches(_ path: String, template: String) -> Bool {
@@ -124,6 +124,9 @@ struct GatewayClientTests {
     case "schedules.list": _ = try await client.listSchedules()
     case "schedules.patch": _ = try await client.updateSchedule("id-0001", SchedulePatch(enabled: false))
     case "send": _ = try await client.send(to: "+15551234567", body: "hi")
+    case "send.file": _ = try await client.sendFile(to: "+15551234567", stageId: String(repeating: "0", count: 64))
+    case "attachments.staged":
+      _ = try await client.stageAttachment(name: "grey.png", mime: "image/png", bytes: Data([0x89, 0x50]))
     case "settings.list": _ = try await client.settings()
     case "settings.patch": _ = try await client.setSettings(["send.autoGraceSeconds": .int(20)])
     case "status": _ = try await client.status()

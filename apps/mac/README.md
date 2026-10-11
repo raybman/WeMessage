@@ -172,6 +172,14 @@ equal):
   it while it counts
 - `wemessage.composer.hold`: reserved for Hold until; never placed while
   D-UI-17 is absent-with-reason
+- `wemessage.composer.attach`: the attach door (shift-cmd-A), placed only
+  where Send is; a pick lands in the thread's tray and sends nothing
+- `wemessage.composer.tray`: the picked file waiting above the field, with
+  what changes on the way out (HEIC to JPEG, the location strip)
+- `wemessage.composer.tray.send`: the tray's own Send; the field rides along
+  as the caption, sent only after the file is verified
+- `wemessage.composer.tray.line`: the tray's line (waiting, confirmed, not
+  sent, or attachments off); an unconfirmed send is outlined, never coloured
 - `wemessage.atlas`: board 08's specimen sheet, reachable only through
   `WEMESSAGE_UI_BOARD=08` under the UI-test flag (no menu item, no key);
   its label carries the pinned geometry, as the shell's does

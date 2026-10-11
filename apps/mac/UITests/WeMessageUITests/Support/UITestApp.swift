@@ -43,6 +43,10 @@ enum ID {
   static let composer = "wemessage.composer"
   static let composerField = "wemessage.composer.field"
   static let composerSend = "wemessage.composer.send"
+  static let composerAttach = "wemessage.composer.attach"
+  static let composerTray = "wemessage.composer.tray"
+  static let composerTraySend = "wemessage.composer.tray.send"
+  static let composerTrayLine = "wemessage.composer.tray.line"
   /// Never placed while D-UI-17 is absent-with-reason: tests assert it is not.
   static let composerHold = "wemessage.composer.hold"
   static let composerOutbox = "wemessage.composer.outbox"

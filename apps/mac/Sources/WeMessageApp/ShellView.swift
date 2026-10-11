@@ -44,6 +44,12 @@ enum ShellID {
   /// The send in its undo window, sending, parked or sent (14.F); its value
   /// is the phase.
   static let composerOutbox = "wemessage.composer.outbox"
+  /// v2 F6f: the attach door (shift-cmd-A), placed only where Send is.
+  static let composerAttach = "wemessage.composer.attach"
+  /// The picked file waiting in the thread, its own Send, and its line.
+  static let composerTray = "wemessage.composer.tray"
+  static let composerTraySend = "wemessage.composer.tray.send"
+  static let composerTrayLine = "wemessage.composer.tray.line"
   /// A transcript bubble is this prefix and its message guid.
   static let bubblePrefix = "wemessage.thread.bubble."
   /// A day separator is this prefix and the day as yyyy-mm-dd.

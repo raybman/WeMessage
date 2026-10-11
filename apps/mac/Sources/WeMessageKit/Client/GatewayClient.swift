@@ -190,6 +190,17 @@ public actor GatewayClient {
     try await call(.send(to: handle, body: body))
   }
 
+  /// v2 F6f: stage the operator's file (its bytes, typed) in the daemon's
+  /// outbox. A 409 `attachments-unproven` reads as `error.refusal`.
+  public func stageAttachment(name: String, mime: String, bytes: Data) async throws -> StagedAttachment {
+    try await call(.stageAttachment(name: name, mime: mime, bytes: bytes))
+  }
+
+  /// v2 F6f: send one staged file to a 1:1 handle, by its stage id.
+  public func sendFile(to handle: String, stageId: String) async throws -> SendResult {
+    try await call(.sendFile(to: handle, stageId: stageId))
+  }
+
   public func settings() async throws -> SettingsEnvelope { try await call(.settings) }
 
   public func setSettings(_ values: [String: SettingPatchValue]) async throws -> SettingsPatchResult {

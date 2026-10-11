@@ -16,6 +16,7 @@ struct ComposerView: View {
   let palette: Tokens.Palette
 
   @FocusState private var focused: Bool
+  @State private var picking = false
 
   static let fieldHint = "Message\u{2026}"
   static let draftHint = "Or just start typing. Your keystrokes always win."
@@ -59,6 +60,9 @@ struct ComposerView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
+      if canSend, let tray = model.trays[guid] {
+        ComposerTray(tray: tray, sender: model.sender, caption: text, palette: palette)
+      }
       if let draft, showsVerbs {
         DraftVerbs(
           palette: palette,
@@ -76,6 +80,9 @@ struct ComposerView: View {
       if draft == nil || ProvisionalUI.draftComposer == .verbsAboveField {
         HStack(alignment: .top, spacing: 8) {
           field
+          if canSend && draft == nil {
+            attachDoor
+          }
           if canSend && (draft == nil || !text.wrappedValue.isEmpty) {
             sendButton
           }
@@ -170,6 +177,28 @@ struct ComposerView: View {
       if !borderless {
         RoundedRectangle(cornerRadius: 16).strokeBorder(Tokens.color(palette.inkDim, opacity: 0.5), lineWidth: 1)
       }
+    }
+  }
+
+  /// v2 F6f: the attach door. A pick lands in this thread's tray and
+  /// nothing more; the tray's own Send is the decision (H-S4-11).
+  private var attachDoor: some View {
+    Button { picking = true } label: {
+      Image(systemName: ProvisionalUI.attachDoorGlyph)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Tokens.color(palette.ink))
+        .frame(width: 32, height: 32)
+        .overlay(Circle().strokeBorder(Tokens.color(palette.inkDim, opacity: 0.5), lineWidth: 1))
+        .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .focusable()
+    .keyboardShortcut("a", modifiers: [.command, .shift])
+    .accessibilityLabel(ProvisionalUI.attachDoorLabel)
+    .accessibilityIdentifier(ShellID.composerAttach)
+    .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
+      guard case .success(let url) = result else { return }
+      model.attachPicked(url, in: thread)
     }
   }
 

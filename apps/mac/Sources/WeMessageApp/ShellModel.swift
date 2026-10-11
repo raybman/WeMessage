@@ -106,6 +106,11 @@ public final class ShellModel {
   let linkedIn: LinkedInDesk
   /// The one send funnel: every send and approval goes through it.
   public let outbound: Outbound
+  /// v2 F6f: the composer's file send. Off until settings say
+  /// `send.attachments` is on; its caption goes through `outbound`.
+  let sender: AttachmentSender
+  /// v2 F6f: each thread's compact tray, made when its attach door is used.
+  private(set) var trays: [String: AttachmentsModel] = [:]
   /// Board 11: search everything (shift-cmd-F), the quick switcher (cmd-K),
   /// find in thread (cmd-F) and the year scrubber (opt-cmd-G). All read;
   /// none writes. Search runs on the daemon's index (v2 F2).
@@ -656,7 +661,38 @@ public final class ShellModel {
     self.fullDiskAccess = TestHooks.fullDiskAccess()
     let shell = WeakShell()
     self.outbound = Outbound(client: client, killSwitch: { shell.model?.killSwitch })
+    self.sender = AttachmentSender(
+      port: client, killSwitch: { shell.model?.killSwitch },
+      caption: { chatGuid, handle, body in
+        guard let outbound = shell.model?.outbound else { return .killSwitch }
+        return outbound.perform(.send(chatGuid: chatGuid, handle: handle, body: body), gesture: .sendButton)
+      })
     shell.model = self
+  }
+
+  /// v2 F6f: the attach door's pick lands in the thread's tray. Nothing
+  /// sends: the tray's own Send is the one way out (H-S4-11).
+  func attachPicked(_ url: URL, in thread: ThreadSummary) {
+    guard let file = AttachmentPrep.pick(url), let tray = tray(for: thread) else { return }
+    tray.clearTray()
+    tray.attach([file])
+  }
+
+  /// v2 F6f: the tray for `thread`, made on first use. Its sink is the
+  /// sender, so the one way a picked file leaves is the tray's own Send.
+  private func tray(for thread: ThreadSummary) -> AttachmentsModel? {
+    guard let handle = threadHandle(thread) else { return nil }
+    if let tray = trays[thread.chatGuid] { return tray }
+    let chatGuid = thread.chatGuid
+    let sender = self.sender
+    let content = MediaContent(
+      recipient: thread.title, handle: handle, messages: [], attachments: [], attached: [], dropped: [],
+      pasted: (bytes: 0, width: 0, height: 0, at: Date(timeIntervalSince1970: 0)), draftedWords: "")
+    let tray = AttachmentsModel(
+      content: content, send: { sender.start($0, chatGuid: chatGuid, handle: handle) },
+      save: { _ in throw CocoaError(.featureUnsupported) }, reveal: { _ in }, copy: { _ in })
+    trays[chatGuid] = tray
+    return tray
   }
 
   // MARK: board 11
@@ -881,9 +917,13 @@ public final class ShellModel {
       avatarTask = Task { await avatars.prefetch(page.threads) }
     }
     // 09.C: the agent undo window is send.undoGraceSeconds, clamped 5...30.
-    if let envelope = try? await client.settings() {
+    let settings = try? await client.settings()
+    if let envelope = settings {
       outbound.approveSeconds = UndoWindow.agent(fromSetting: envelope.settings["send.undoGraceSeconds"]?.value)
     }
+    // v2 F6f: attachments are on only while the daemon says so; a failed
+    // read is off (D-F6-1).
+    sender.isOn = AttachmentPrep.enabled(settings?.settings[AttachmentPrep.settingKey]?.value)
     if let envelope = try? await client.listDrafts() { fold(.response(.drafts(envelope.drafts))) }
     // v2 F3: the daemon's Done, Snooze and Mute replace the cache.
     await queue.hydrate()

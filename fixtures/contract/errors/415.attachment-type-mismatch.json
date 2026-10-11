@@ -1,0 +1,9 @@
+{
+  "route": "POST /v1/attachments/staged",
+  "status": 415,
+  "body": {
+    "error": "attachment-type-mismatch",
+    "declared": "image/jpeg",
+    "sniffed": "image/png"
+  }
+}

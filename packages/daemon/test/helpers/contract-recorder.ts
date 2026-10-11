@@ -35,6 +35,7 @@ import {
   INDEX_BATCH,
   InvalidCursorError,
   SETTING_CONNECTION_STATE,
+  SETTING_SEND_ATTACHMENTS,
   UnknownChatError,
   type ChannelSource,
   type ChatsQuery,
@@ -193,6 +194,9 @@ export const RESPONSE_NAMES = [
   'threads.state.list',
   'search',
   'search.partial',
+  // v2 F6f: the operator's file send, staged then sent (routes from F6d/F6e).
+  'attachments.staged',
+  'send.file',
 ] as const;
 
 export const ERROR_NAMES = [
@@ -219,6 +223,10 @@ export const ERROR_NAMES = [
   // v2 F6c: the bytes route's two envelopes (the route landed in F6b).
   '404.attachment-not-local',
   '416.range',
+  // v2 F6f: staging's three refusals, recorded for the Swift client.
+  '409.attachments-unproven',
+  '413.attachment-too-large',
+  '415.attachment-type-mismatch',
 ] as const;
 
 /**
@@ -1413,6 +1421,77 @@ async function recordAttachments(): Promise<{
   return { notLocal, range, dir };
 }
 
+/**
+ * v2 F6f: the operator's file send, from the real stage route and the real
+ * send route over a temp outbox: one generated PNG staged and sent with
+ * `send.attachments` on, then the three refusals (off is 409, over a
+ * lowered cap is 413, a PNG declared as a JPEG is 415). Every byte is
+ * generated here; nothing reads ~/Library/Messages.
+ */
+async function recordStaging(): Promise<{
+  staged: Recorded;
+  sent: Recorded;
+  off: Recorded;
+  tooLarge: Recorded;
+  mismatch: Recorded;
+  dirs: string[];
+}> {
+  const png = syntheticPng(4, 4);
+  const stage = (
+    h: Harness,
+    payload: Buffer,
+    mime = 'image/png',
+  ): Promise<Recorded> =>
+    ask(h.server, h.headers, {
+      method: 'POST',
+      url: '/v1/attachments/staged',
+      route: 'POST /v1/attachments/staged',
+      headers: {
+        ...h.headers,
+        'content-type': mime,
+        'x-wemessage-name': encodeURIComponent('grey.png'),
+      },
+      payload,
+    });
+  const on = await boot({ outbox: { maxBytes: png.length }, send: true });
+  on.store.setSetting(SETTING_SEND_ATTACHMENTS, '1');
+  const staged = expectStatus('attachments.staged', await stage(on, png), 200);
+  const sent = expectStatus(
+    'send.file',
+    await ask(on.server, on.headers, {
+      method: 'POST',
+      url: '/v1/send',
+      route: 'POST /v1/send',
+      payload: { chatGuid: CHAT, file: idAt(staged.body, 'stageId') },
+    }),
+    200,
+  );
+  const tooLarge = expectStatus(
+    '413.attachment-too-large',
+    await stage(on, Buffer.concat([png, Buffer.from([0])])),
+    413,
+  );
+  const mismatch = expectStatus(
+    '415.attachment-type-mismatch',
+    await stage(on, png, 'image/jpeg'),
+    415,
+  );
+  const off = await boot({ outbox: true, send: true });
+  const refused = expectStatus(
+    '409.attachments-unproven',
+    await stage(off, png),
+    409,
+  );
+  return {
+    staged,
+    sent,
+    off: refused,
+    tooLarge,
+    mismatch,
+    dirs: [on.dir, off.dir],
+  };
+}
+
 /** connect/disconnect are not in the harness: a fourth server, stub deps. */
 async function recordConnection(): Promise<{
   connect: Recorded;
@@ -1542,8 +1621,20 @@ export async function recordContract(): Promise<ContractBundle> {
   const attachments = await recordAttachments();
   rawErrors['404.attachment-not-local'] = attachments.notLocal;
   rawErrors['416.range'] = attachments.range;
+  const staging = await recordStaging();
+  rawResponses['attachments.staged'] = staging.staged;
+  rawResponses['send.file'] = staging.sent;
+  rawErrors['409.attachments-unproven'] = staging.off;
+  rawErrors['413.attachment-too-large'] = staging.tooLarge;
+  rawErrors['415.attachment-type-mismatch'] = staging.mismatch;
 
-  const dirs = [main.dir, parked.dir, conn.dir, attachments.dir]
+  const dirs = [
+    main.dir,
+    parked.dir,
+    conn.dir,
+    attachments.dir,
+    ...staging.dirs,
+  ]
     .flatMap((d) => {
       let real = d;
       try {

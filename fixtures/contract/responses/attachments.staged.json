@@ -1,0 +1,10 @@
+{
+  "route": "POST /v1/attachments/staged",
+  "status": 200,
+  "body": {
+    "stageId": "0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "grey.png",
+    "mime": "image/png",
+    "bytes": 71
+  }
+}

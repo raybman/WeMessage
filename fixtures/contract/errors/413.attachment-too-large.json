@@ -1,0 +1,8 @@
+{
+  "route": "POST /v1/attachments/staged",
+  "status": 413,
+  "body": {
+    "error": "attachment-too-large",
+    "limit": 71
+  }
+}

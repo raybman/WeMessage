@@ -78,6 +78,9 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(label(app, ID.bubblePrefix + "msg-0013").hasPrefix("Received, "), "resting: msg-0013 reads \(label(app, ID.bubblePrefix + "msg-0013"))")
     XCTAssertFalse(element(app, ID.draft).exists, "resting: a draft in Daniel's thread")
     XCTAssertTrue(element(app, ID.composerSend).exists, "resting: no Send")
+    // v2 F6f: the attach door sits where Send is, and nothing is waiting.
+    XCTAssertTrue(element(app, ID.composerAttach).exists, "resting: no attach door")
+    XCTAssertFalse(element(app, ID.composerTray).exists, "resting: a tray with nothing picked")
     assertNoHoldUntil(app, "resting")
     shoot("resting")
 
@@ -93,6 +96,7 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(waitUntil { self.element(app, ID.inv5).exists }, "group: no INV-5 strip")
     XCTAssertTrue(waitUntil { self.element(app, ID.bubblePrefix + "msg-0025").exists }, "group: msg-0025")
     XCTAssertFalse(element(app, ID.composerSend).exists, "group: Send is placed in a group")
+    XCTAssertFalse(element(app, ID.composerAttach).exists, "group: the attach door is placed in a group")
     assertNoHoldUntil(app, "group")
     shoot("group")
 
@@ -120,6 +124,7 @@ final class Board02Tests: XCTestCase {
     XCTAssertTrue(waitUntil { self.value(app, ID.killChip) == "on" }, "kill chip: \(value(app, ID.killChip))")
     XCTAssertTrue(waitUntil { !self.element(app, ID.draftApprove).exists }, "kill: Approve is still placed")
     XCTAssertFalse(element(app, ID.composerSend).exists, "kill: Send is placed under the kill switch")
+    XCTAssertFalse(element(app, ID.composerAttach).exists, "kill: the attach door is placed under the kill switch")
     XCTAssertFalse(element(app, ID.draftEdit).exists, "kill: Edit is placed under the kill switch")
     assertNoHoldUntil(app, "kill")
     XCTAssertTrue(fieldText(app).contains("ring me after 4"), "kill: the typed text was dropped: \(fieldText(app))")

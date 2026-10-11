@@ -218,6 +218,7 @@ describe('foldReactions (v2 F4)', () => {
 
 const fileRow: FileDbRow = {
   messageRowid: 1n,
+  id: 'AT-RICH-1',
   transferName: 'IMG_0412.heic',
   mimeType: 'image/heic',
   uti: 'public.heic',
@@ -229,6 +230,7 @@ const fileRow: FileDbRow = {
 describe('fileOf (v2 F4)', () => {
   it('maps every column, never a path', () => {
     expect(fileOf(fileRow)).toEqual({
+      id: 'AT-RICH-1',
       name: 'IMG_0412.heic',
       mime: 'image/heic',
       uti: 'public.heic',

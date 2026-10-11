@@ -685,3 +685,29 @@ export interface AdapterTransport {
   send(frame: unknown): Promise<void>;
   onFrame(handler: (frame: unknown) => void): void;
 }
+
+/**
+ * v2 F6: what chat.db says about one attachment, for the daemon's bytes
+ * route. `filename` is chat.db's own path (usually `~/Library/...`); it is
+ * resolved and confined by the daemon and never leaves it.
+ */
+export interface AttachmentRow {
+  filename: string | null;
+  transferName: string | null;
+  transferState: number | null;
+}
+
+/**
+ * v2 F6 body extension, added by declaration merging so this file only
+ * grows: the read half of a FILE send's verification. Does an outbound row
+ * in this chat, at/after `sinceIso`, carry an attachment whose transfer
+ * name is exactly `transferName`? Bytes are not compared: Messages may
+ * recompress what it sends.
+ */
+export interface ChatDbReader {
+  findOutboundFile(q: {
+    chatGuid: ChatGuid;
+    transferName: string;
+    sinceIso: IsoUtc;
+  }): Promise<{ guid: MessageGuid } | null>;
+}

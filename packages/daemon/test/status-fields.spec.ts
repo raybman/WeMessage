@@ -138,6 +138,9 @@ function controllableOpenReader(): {
         existingGuids: boom,
         yearCounts: boom,
         ownHandle: boom,
+        // v2 F6: the bytes lookup and a file send's verification.
+        attachmentFile: boom,
+        findOutboundFile: boom,
         close: () => undefined,
       };
     },

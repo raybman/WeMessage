@@ -156,6 +156,9 @@ function controllableOpenReader(): ControllableOpenReader {
         yearCounts: boom,
         // v2 F7b: and the operator's own handle.
         ownHandle: boom,
+        // v2 F6: the bytes lookup and a file send's verification.
+        attachmentFile: boom,
+        findOutboundFile: boom,
         close: () => undefined,
       };
     },

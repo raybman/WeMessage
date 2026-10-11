@@ -445,6 +445,7 @@ function richTurns(): TranscriptTurn[] {
       reactions: [{ kind: 'love', from: 'them', handle: RICH_HANDLE }],
       files: [
         {
+          id: 'AT-0102-1',
           name: 'IMG_0412.heic',
           mime: 'image/heic',
           uti: 'public.heic',
@@ -501,6 +502,7 @@ function richTurns(): TranscriptTurn[] {
       ],
       files: [
         {
+          id: 'AT-0106-1',
           name: 'itinerary.pdf',
           mime: 'application/pdf',
           uti: 'com.adobe.pdf',
@@ -509,6 +511,7 @@ function richTurns(): TranscriptTurn[] {
           hidden: false,
         },
         {
+          id: 'AT-0106-2',
           name: null,
           mime: null,
           uti: null,

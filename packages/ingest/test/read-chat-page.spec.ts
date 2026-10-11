@@ -411,12 +411,13 @@ describe('readChatPage (v2 A2)', () => {
       const f = freshFixture();
       const c = oneToOne(f, '+15550002331');
       const three = f.addMessage({ chatId: c.chatId, text: null, at: at(1) });
-      for (const [name, mime, uti] of [
-        ['Quarterly plan.pdf', 'application/pdf', 'com.adobe.pdf'],
-        ['IMG_0412.heic', 'image/heic', 'public.heic'],
-        ['clip.mov', 'video/quicktime', 'com.apple.quicktime-movie'],
+      for (const [name, mime, uti, id] of [
+        ['Quarterly plan.pdf', 'application/pdf', 'com.adobe.pdf', 'AT-PDF'],
+        ['IMG_0412.heic', 'image/heic', 'public.heic', 'AT-HEIC'],
+        ['clip.mov', 'video/quicktime', 'com.apple.quicktime-movie', 'AT-MOV'],
       ] as const) {
         f.addAttachment(three.rowid, {
+          attachmentGuid: id,
           transferName: name,
           filename: `~/Library/Messages/Attachments/ab/12/F00D-${name}.bin`,
           mimeType: mime,
@@ -434,6 +435,7 @@ describe('readChatPage (v2 A2)', () => {
       expect(turns[0]?.attachments).toBe(3);
       expect(turns[0]?.files).toEqual([
         {
+          id: 'AT-PDF',
           name: 'Quarterly plan.pdf',
           mime: 'application/pdf',
           uti: 'com.adobe.pdf',
@@ -442,6 +444,7 @@ describe('readChatPage (v2 A2)', () => {
           hidden: false,
         },
         {
+          id: 'AT-HEIC',
           name: 'IMG_0412.heic',
           mime: 'image/heic',
           uti: 'public.heic',
@@ -450,6 +453,7 @@ describe('readChatPage (v2 A2)', () => {
           hidden: false,
         },
         {
+          id: 'AT-MOV',
           name: 'clip.mov',
           mime: 'video/quicktime',
           uti: 'com.apple.quicktime-movie',

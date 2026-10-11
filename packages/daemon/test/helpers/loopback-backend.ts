@@ -135,5 +135,7 @@ export function createUnusedChatDbReader(): ChatDbReader {
     listChats: boom,
     // v2 A2: one conversation's history. Unused here for the same reason.
     readChatPage: boom,
+    // v2 F6: a file send's verification. Unused here for the same reason.
+    findOutboundFile: boom,
   };
 }

@@ -178,8 +178,14 @@ interface WireTurn {
   service?: Service;
   delivery?: TurnDelivery | null;
   reactions?: TurnReaction[];
-  files?: TurnFile[];
+  files?: WireTurnFile[];
 }
+
+/**
+ * v2 F6: a file on the wire. The id joins the wire in F6c, with the Kit
+ * that decodes it; until then the route copies every F4 field and no id.
+ */
+type WireTurnFile = Omit<TurnFile, 'id'> & { id?: string };
 
 /** v2 F4: the longest file name the wire carries. */
 const WIRE_FILE_NAME_MAX = 255;
@@ -211,7 +217,7 @@ function metaToWire(raw: string | null): string | null {
 }
 
 /** v2 F4: one file's metadata, copied field by field. Never a path. */
-function fileToWire(f: TurnFile): TurnFile {
+function fileToWire(f: TurnFile): WireTurnFile {
   return {
     name: fileNameToWire(f.name),
     mime: metaToWire(f.mime),

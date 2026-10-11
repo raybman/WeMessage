@@ -8,7 +8,7 @@
  * full undocumented schema; the [macOS smoke] pragma diff (ci-macos.yml, S3)
  * guards the gap. Test-only library: @wemessage/fixtures never ships (§2.1).
  */
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
@@ -225,6 +225,13 @@ export interface CreateChatDbOptions {
    * of a chat.db that predates the column. Default true.
    */
   callerIdColumn?: boolean;
+  /**
+   * v2 F6: a fake home directory (a tmp dir, never the real one). An
+   * attachment added with `onDisk` writes its bytes under
+   * `<home>/Library/Messages/Attachments/` and records the `~/...` path
+   * there, the shape Messages writes.
+   */
+  home?: string;
 }
 
 export interface MessageRef {
@@ -233,7 +240,23 @@ export interface MessageRef {
 }
 
 export interface AttachmentOptions {
-  filename?: string;
+  /** v2 F6: null writes a NULL filename (a file with no local path). */
+  filename?: string | null;
+  /**
+   * v2 F6: attachment.guid. Random when absent. Not `guid`: on
+   * addAttachmentOnly that name is the message's.
+   */
+  attachmentGuid?: string;
+  /** v2 F6: attachment.transfer_state. */
+  transferState?: number;
+  /** v2 F6: attachment.is_outgoing. */
+  isOutgoing?: boolean;
+  /**
+   * v2 F6: bytes to write to disk under the fixture's fake `home`, at
+   * `Library/Messages/Attachments/xx/yy/<guid>/<transfer name>`. The
+   * recorded filename is the `~/...` form. Needs `home` on createChatDb.
+   */
+  onDisk?: Uint8Array;
   uti?: string;
   mimeType?: string;
   /** v2 F4: null writes a NULL transfer_name. */
@@ -306,6 +329,19 @@ export interface ChatDbFixture {
   ): MessageRef;
   addAttachmentOnly(opts: AddMessageOptions & AttachmentOptions): MessageRef;
   addAttachment(messageRowid: number, opts?: AttachmentOptions): number;
+  /** v2 F6: the guid of an attachment row by its ROWID. */
+  guidOfAttachment(attachmentId: number): string;
+  /**
+   * v2 F6: an outbound attachment-only row in `chatGuid`, the read half of
+   * a file send's verification (`findOutboundFile` matches transfer_name).
+   */
+  appendOutboundFile(opts: {
+    chatGuid: string;
+    transferName: string;
+    atIso: string;
+    mimeType?: string;
+    totalBytes?: number;
+  }): MessageRef;
   addSelfMessage(opts: Omit<AddMessageOptions, 'isFromMe'>): MessageRef;
   /**
    * s3-execution Scenario 8, Part 3 fixture extension: a test-only
@@ -548,28 +584,85 @@ export function createChatDb(
     },
 
     addAttachment(messageRowid, opts) {
+      const guid = opts?.attachmentGuid ?? randomUUID().toUpperCase();
+      const transferName =
+        opts?.transferName === null
+          ? null
+          : (opts?.transferName ?? 'fixture.png');
+      let filename =
+        opts?.filename === null
+          ? null
+          : (opts?.filename ?? '~/Library/Messages/Attachments/00/fixture.png');
+      if (opts?.onDisk !== undefined) {
+        if (options?.home === undefined) {
+          throw new Error('addAttachment: onDisk needs createChatDb({home})');
+        }
+        const shard = guid.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+        const rel = join(
+          'Library/Messages/Attachments',
+          shard.slice(0, 2).padEnd(2, '0'),
+          shard.slice(2, 4).padEnd(2, '0'),
+          guid,
+        );
+        const name = transferName ?? 'fixture.bin';
+        mkdirSync(join(options.home, rel), { recursive: true });
+        writeFileSync(join(options.home, rel, name), opts.onDisk);
+        filename = `~/${rel}/${name}`;
+      }
       const info = db
         .prepare(
-          `INSERT INTO attachment (guid, filename, uti, mime_type, transfer_name, total_bytes, is_sticker, hide_attachment)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO attachment (guid, filename, uti, mime_type, transfer_name, total_bytes, is_sticker, hide_attachment, transfer_state, is_outgoing)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
-          randomUUID().toUpperCase(),
-          opts?.filename ?? '~/Library/Messages/Attachments/00/fixture.png',
+          guid,
+          filename,
           opts?.uti ?? 'public.png',
           opts?.mimeType ?? 'image/png',
-          opts?.transferName === null
-            ? null
-            : (opts?.transferName ?? 'fixture.png'),
-          opts?.totalBytes ?? 1024,
+          transferName,
+          opts?.totalBytes ?? opts?.onDisk?.byteLength ?? 1024,
           opts?.isSticker === true ? 1 : 0,
           opts?.hidden === true ? 1 : 0,
+          opts?.transferState ?? 5,
+          opts?.isOutgoing === true ? 1 : 0,
         );
       const attachmentId = Number(info.lastInsertRowid);
       db.prepare(
         'INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (?, ?)',
       ).run(messageRowid, attachmentId);
       return attachmentId;
+    },
+
+    guidOfAttachment(attachmentId) {
+      const row = db
+        .prepare('SELECT guid FROM attachment WHERE ROWID = ?')
+        .get(attachmentId) as { guid: string } | undefined;
+      if (row === undefined) {
+        throw new Error(`guidOfAttachment: no attachment ${attachmentId}`);
+      }
+      return row.guid;
+    },
+
+    appendOutboundFile(opts) {
+      const chat = db
+        .prepare('SELECT ROWID as rowid FROM chat WHERE guid = ?')
+        .get(opts.chatGuid) as { rowid: number } | undefined;
+      if (chat === undefined) {
+        throw new Error(
+          `appendOutboundFile: no chat with guid ${opts.chatGuid}`,
+        );
+      }
+      return fixture.addAttachmentOnly({
+        chatId: chat.rowid,
+        isFromMe: true,
+        at: opts.atIso,
+        transferName: opts.transferName,
+        isOutgoing: true,
+        ...(opts.mimeType !== undefined ? { mimeType: opts.mimeType } : {}),
+        ...(opts.totalBytes !== undefined
+          ? { totalBytes: opts.totalBytes }
+          : {}),
+      });
     },
 
     addSelfMessage(opts) {

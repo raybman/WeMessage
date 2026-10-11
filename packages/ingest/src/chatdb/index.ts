@@ -13,6 +13,7 @@
 import Database from 'better-sqlite3';
 import type {
   AttachmentRef,
+  AttachmentRow,
   ChatDbReader,
   ChatGuid,
   ChatSummary,
@@ -100,6 +101,11 @@ export interface IngestChatDbReader extends ChatDbReader {
    * Throws UnknownChatError for a chat chat.db does not hold.
    */
   yearCounts(chatGuid: string, tz: string): YearCount[];
+  /**
+   * v2 F6: one attachment's chat.db row by its guid, or null when no
+   * message joins it. Never opens the file.
+   */
+  attachmentFile(id: string): AttachmentRow | null;
   /**
    * v2 F7b: the operator's own iMessage handle, raw as chat.db stores it:
    * the destination_caller_id of the newest row they SENT over iMessage
@@ -238,6 +244,47 @@ function outboundBodyEquals(row: OutboundCandidateRow, body: string): boolean {
   const decoded = decodeTypedstreamText(row.attributedBody);
   return decoded.ok && decoded.text === body;
 }
+
+/**
+ * v2 F6: one attachment by chat.db's guid, for the bytes route. The guid is
+ * a bound parameter, never spliced. A row no message joins is not served
+ * (null): chat.db keeps attachment rows of purged messages. This is the one
+ * reader statement that names \`filename\`; the caller (the daemon's
+ * resolver) confines it to the attachments root and never echoes it.
+ */
+const ATTACHMENT_FILE_SQL = `
+  SELECT
+    a.filename       AS filename,
+    a.transfer_name  AS transferName,
+    a.transfer_state AS transferState
+  FROM attachment a
+  WHERE a.guid = ?
+    AND EXISTS (
+      SELECT 1 FROM message_attachment_join maj
+      WHERE maj.attachment_id = a.ROWID
+    )
+`;
+
+/**
+ * v2 F6: findOutboundFile. The same predicates as FIND_OUTBOUND_SQL (chat
+ * scope, direction, since-watermark), with the body test replaced by an
+ * exact transfer_name match on a joined attachment. The oldest match wins:
+ * it is the first attempt.
+ */
+const FIND_OUTBOUND_FILE_SQL = `
+  SELECT m.guid AS guid
+  FROM message m
+  JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+  JOIN chat c ON c.ROWID = cmj.chat_id
+  JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+  JOIN attachment a ON a.ROWID = maj.attachment_id
+  WHERE c.guid = ?
+    AND m.is_from_me = 1
+    AND a.transfer_name = ?
+    AND m.date >= ?
+  ORDER BY m.ROWID ASC
+  LIMIT 1
+`;
 
 /**
  * readChatTurns (Scenario 6, §1.5 F-46): the tail of one conversation, both
@@ -489,6 +536,7 @@ const CHAT_PAGE_SQL = `
 const FILES_FOR_PAGE_SQL = `
   SELECT
     maj.message_id   AS messageRowid,
+    a.guid           AS id,
     a.transfer_name  AS transferName,
     a.mime_type      AS mimeType,
     a.uti            AS uti,
@@ -870,6 +918,8 @@ export function createChatDbReader(
   const lastMessageDateStmt = db.prepare(LAST_MESSAGE_DATE_SQL);
   lastMessageDateStmt.safeIntegers(true);
   const findOutboundStmt = db.prepare(FIND_OUTBOUND_SQL);
+  const attachmentFileStmt = db.prepare(ATTACHMENT_FILE_SQL);
+  const findOutboundFileStmt = db.prepare(FIND_OUTBOUND_FILE_SQL);
   const chatTurnsStmt = db.prepare(CHAT_TURNS_SQL);
   chatTurnsStmt.safeIntegers(true);
   const listChatsStmt = db.prepare(LIST_CHATS_SQL);
@@ -1044,6 +1094,35 @@ export function createChatDbReader(
         }
       }
       return Promise.resolve(null);
+    },
+
+    findOutboundFile(q: {
+      chatGuid: ChatGuid;
+      transferName: string;
+      sinceIso: string;
+    }): Promise<{ guid: MessageGuid } | null> {
+      const row = findOutboundFileStmt.get(
+        q.chatGuid,
+        q.transferName,
+        isoToAppleNs(q.sinceIso),
+      ) as { guid: string } | undefined;
+      return Promise.resolve(row === undefined ? null : { guid: row.guid });
+    },
+
+    attachmentFile(id: string): AttachmentRow | null {
+      const row = attachmentFileStmt.get(id) as
+        | {
+            filename: string | null;
+            transferName: string | null;
+            transferState: number | null;
+          }
+        | undefined;
+      if (row === undefined) return null;
+      return {
+        filename: row.filename,
+        transferName: row.transferName,
+        transferState: row.transferState,
+      };
     },
 
     listChats(q: ChatsQuery): Promise<ChatsPage> {

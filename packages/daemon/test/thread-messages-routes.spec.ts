@@ -426,7 +426,8 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
     /** A source answering one page of exactly these turns. */
     const pageOf = (turns: TurnsPage['turns']) =>
       fakeSource(() => Promise.resolve({ turns, nextBefore: null }));
-    const file = {
+    /** The F4 wire fields; the id joins the wire in v2 F6c. */
+    const wireFile = {
       name: 'IMG_0412.heic',
       mime: 'image/heic',
       uti: 'public.heic',
@@ -434,6 +435,7 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
       sticker: false,
       hidden: false,
     };
+    const file = { id: 'AT-F4-1', ...wireFile };
 
     it('wireCarriesServiceDeliveryReactionsFiles, from a real chat.db', async () => {
       const h = await boot({ threads: true });
@@ -477,7 +479,7 @@ describe('GET /v1/threads/:guid/messages (v2 A2)', () => {
           service: 'imessage',
           delivery: { state: 'read', at: at(57) },
           reactions: [{ kind: 'love', from: 'them', handle: '+15550100001' }],
-          files: [file],
+          files: [wireFile],
         },
       ]);
     });

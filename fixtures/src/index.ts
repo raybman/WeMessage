@@ -18,3 +18,10 @@ export {
 // validate real wire bytes against the same schemas without importing across
 // a package's `test/` boundary. Test-only, like everything else in here.
 export { isValid, schemaErrors, type JsonSchema } from './schema-check.js';
+
+// v2 F6: media bytes generated in the test, never real files.
+export {
+  syntheticPng,
+  syntheticHeader,
+  type SyntheticKind,
+} from './synthetic-media.js';

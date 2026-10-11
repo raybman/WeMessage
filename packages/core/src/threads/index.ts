@@ -147,6 +147,11 @@ export type TurnDelivery =
 
 /** v2 F4: one attachment's metadata. A name is a basename, never a path. */
 export interface TurnFile {
+  /**
+   * v2 F6: chat.db's attachment.guid, the id the bytes route takes. Never a
+   * path; null only when the source row has no guid.
+   */
+  id: string | null;
   name: string | null;
   mime: string | null;
   uti: string | null;

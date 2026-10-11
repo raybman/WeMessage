@@ -287,6 +287,8 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       readMutatedSince: (sinceNs) => live().readMutatedSince(sinceNs),
       resolveChat: (handle) => live().resolveChat(handle),
       findOutboundMessage: (q) => live().findOutboundMessage(q),
+      // v2 F6: a file send's verification; gated upstream like a text send.
+      findOutboundFile: (q) => live().findOutboundFile(q),
       readChatTurns: (q) => live().readChatTurns(q),
       // v2 A1: the conversations list. Unlike a send, nothing gates this
       // read upstream, so while disconnected it reaches `live()` and throws,

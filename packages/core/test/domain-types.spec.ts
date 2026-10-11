@@ -413,6 +413,8 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
         Promise.resolve({ chats: [], nextCursor: null, total: 0 }),
       // v2 A2: one conversation's history.
       readChatPage: () => Promise.resolve({ turns: [], nextBefore: null }),
+      // v2 F6: a file send's verification.
+      findOutboundFile: () => Promise.resolve(null),
     };
     const watcher: FsWatcher = { watch: () => () => undefined };
     const backend: SendBackend = {

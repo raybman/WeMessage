@@ -173,6 +173,8 @@ export function deliveryOf(r: DeliveryInput): TurnDelivery | null | undefined {
 /** One attachment row as FILES_FOR_PAGE_SQL reads it. Never a path. */
 export interface FileDbRow {
   messageRowid: bigint;
+  /** v2 F6: attachment.guid, the file's id on the wire. */
+  id: string | null;
   transferName: string | null;
   mimeType: string | null;
   uti: string | null;
@@ -196,6 +198,7 @@ export function baseName(raw: string | null): string | null {
 export function fileOf(r: FileDbRow): TurnFile {
   const bytes = r.totalBytes ?? 0n;
   return {
+    id: r.id,
     name: baseName(r.transferName),
     mime: r.mimeType,
     uti: r.uti,

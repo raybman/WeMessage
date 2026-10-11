@@ -327,6 +327,11 @@ function makeReader(cfg: {
       cfg.calls.push('readChatPage');
       return Promise.resolve({ turns: [], nextBefore: null });
     },
+    // v2 F6: a file send's verification; no text send ever reaches it.
+    findOutboundFile: () => {
+      cfg.calls.push('findOutboundFile');
+      return Promise.resolve(null);
+    },
   };
 }
 

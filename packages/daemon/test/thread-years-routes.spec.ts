@@ -219,7 +219,8 @@ describe('GET /v1/threads/:guid/years (v2 F2c)', () => {
   });
 
   it('pins GET and its HEAD twin (route ratchet #31)', () => {
-    expect(ROUTE_TABLE).toHaveLength(80);
+    // 82 since v2 F6b (#32) added `GET /v1/attachments/:id` and its twin.
+    expect(ROUTE_TABLE).toHaveLength(82);
     expect(ROUTE_TABLE).toContain('GET /v1/threads/:guid/years');
     expect(ROUTE_TABLE).toContain('HEAD /v1/threads/:guid/years');
   });

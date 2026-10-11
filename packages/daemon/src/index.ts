@@ -45,6 +45,21 @@ export { registerDoctorRoutes, type DoctorRouteDeps } from './routes/doctor.js';
 export { registerSendRoutes, type SendRouteDeps } from './routes/send.js';
 // v2 F2b: message search over the daemon's own index.
 export { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
+// v2 F6b: attachment bytes, from the Attachments folder only.
+export {
+  ATTACHMENT_ID,
+  registerAttachmentRoutes,
+  type AttachmentRouteDeps,
+} from './routes/attachments.js';
+export {
+  parseRange,
+  resolveAttachment,
+  type ResolveDeps,
+  type ResolveFail,
+  type ResolveFs,
+  type Resolved,
+} from './attachments/resolve.js';
+export { sniff, SNIFF_BYTES, type SniffedMime } from './attachments/sniff.js';
 export {
   registerConnectionRoutes,
   type ConnectionRouteDeps,

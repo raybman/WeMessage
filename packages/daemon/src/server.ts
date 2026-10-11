@@ -66,6 +66,10 @@ import {
   type ThreadRouteDeps,
 } from './routes/threads.js';
 import { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
+import {
+  registerAttachmentRoutes,
+  type AttachmentRouteDeps,
+} from './routes/attachments.js';
 import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
 import { closeReasonFor, parseEventFilter } from './events-filter.js';
@@ -221,6 +225,14 @@ export interface DaemonOptions {
    * broadcasts nothing. chat.db is reached only through the closures.
    */
   search?: SearchRouteDeps;
+
+  /**
+   * v2 F6b: when provided, registers `GET /v1/attachments/:id` (and its HEAD
+   * twin): one attachment's bytes, from the Attachments folder only. A read:
+   * no sink, nothing audited or broadcast. chat.db is reached only through
+   * the closure.
+   */
+  attachments?: AttachmentRouteDeps;
 
   /**
    * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they
@@ -648,6 +660,12 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
   if (opts.search) {
     // v2 F2b: route ratchet #30. Operator bearer only, like the list.
     registerSearchRoutes(app, opts.search);
+  }
+
+  if (opts.attachments) {
+    // v2 F6b: route ratchet #32. Operator bearer only: an adapter token is
+    // refused by the hook above, so agents never reach a file's bytes.
+    registerAttachmentRoutes(app, opts.attachments);
   }
 
   if (opts.connection && sink) {

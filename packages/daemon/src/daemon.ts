@@ -169,6 +169,12 @@ export interface StartDaemonOptions {
    * temp root so it can prove the wire never carries the absolute path.
    */
   homeDir?: string;
+  /**
+   * v2 F6b: the only folder attachment bytes are served from (D-F6-5).
+   * Absent means `<homeDir>/Library/Messages/Attachments`; a test hands in
+   * a folder under its temp root, never the real one.
+   */
+  attachmentsRoot?: string;
 }
 
 const realDelay = (ms: number): Promise<void> =>
@@ -260,7 +266,11 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
    */
   search: Pick<
     IngestChatDbReader,
-    'chatTitles' | 'chatsTitled' | 'existingGuids' | 'yearCounts'
+    | 'chatTitles'
+    | 'chatsTitled'
+    | 'existingGuids'
+    | 'yearCounts'
+    | 'attachmentFile'
   >;
   /**
    * v2 F7: the operator's own iMessage handle, for status only. Throws
@@ -304,6 +314,9 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
       existingGuids: (guids) => live().existingGuids(guids),
       // v2 F2c: the transcript's year scrubber, under the same rule.
       yearCounts: (chatGuid, tz) => live().yearCounts(chatGuid, tz),
+      // v2 F6b: one attachment's row for the bytes route, under the same
+      // rule: while disconnected it throws and the route answers 503.
+      attachmentFile: (id) => live().attachmentFile(id),
     },
     ownHandle: () => live().ownHandle(),
     isOpen: () => current !== null,
@@ -710,6 +723,20 @@ export async function startDaemon(
       chatTitles: (guids) => sendReaderHandle.search.chatTitles(guids),
       chatsTitled: (needle) => sendReaderHandle.search.chatsTitled(needle),
       existingGuids: (guids) => sendReaderHandle.search.existingGuids(guids),
+    },
+    // v2 F6b: attachment bytes, from the Attachments folder only, through
+    // the same handle, so a disconnect answers 503 and never a stale file.
+    attachments: {
+      attachmentFile: (id) => sendReaderHandle.search.attachmentFile(id),
+      home: options.homeDir ?? homedir(),
+      root:
+        options.attachmentsRoot ??
+        join(
+          options.homeDir ?? homedir(),
+          'Library',
+          'Messages',
+          'Attachments',
+        ),
     },
     // greeting frame (§3.4 connection.state): proves the stream is live.
     //

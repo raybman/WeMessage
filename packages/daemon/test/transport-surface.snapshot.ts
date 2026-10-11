@@ -268,6 +268,22 @@ export const ROUTE_TABLE: readonly string[] = [
   // NO port importer moves: the counts reach `routes/threads.ts` as a
   // closure from `daemon.ts`, like F5's lookup, so PORT_IMPORTER_ALLOWLIST
   // stays at 16.
+  //
+  // #32 deliberate (v2 F6b): `GET /v1/attachments/:id`, the bytes of one
+  // chat.db attachment by its `attachment.guid`, 80 -> 82.
+  //   1 route + 1 auto-HEAD twin = +2; 80 + 2 = 82.
+  // A read under every rule #26 set: behind the operator bearer (an adapter
+  // token is a 401), no audit row, no broadcast. The id is the only input
+  // and no client path is accepted; the file is served from the
+  // Attachments folder only (realpath, prefix plus separator, O_NOFOLLOW,
+  // dev/ino), and every failure is a 404 with a reason that never names a
+  // path. A reader that throws is a 503. Content-Type is sniffed over a
+  // closed set, never the stored mime.
+  //
+  // NO WS event moves and NO frame moves: looking pushes nothing.
+  //
+  // NO port importer moves: the row reaches `routes/attachments.ts` as a
+  // closure from `daemon.ts`, so PORT_IMPORTER_ALLOWLIST stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -275,6 +291,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'GET /v1/adapters',
   'GET /v1/adapters/:id',
   'GET /v1/agent',
+  'GET /v1/attachments/:id',
   'GET /v1/audit',
   'GET /v1/audit/verify',
   'GET /v1/batches/:id',
@@ -301,6 +318,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'HEAD /v1/adapters',
   'HEAD /v1/adapters/:id',
   'HEAD /v1/agent',
+  'HEAD /v1/attachments/:id',
   'HEAD /v1/audit',
   'HEAD /v1/audit/verify',
   'HEAD /v1/batches/:id',
@@ -625,6 +643,10 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
  * pinned as fixtures/contract/errors/400.unknown-event.json instead.
  * `GET /v1/agent` is the adapter socket; its frames are the adapter wire, not
  * a request body.
+ *
+ * `GET /v1/attachments/:id` (v2 F6b) reads its `:id` raw and checks its shape
+ * by hand (`ATTACHMENT_ID`): any id it does not know, malformed or not, is
+ * the same 404 `unknown-attachment`, so there is no params schema to pin.
  */
 export const NO_BODY_ROUTES: readonly string[] = [
   'DELETE /v1/adapters/:id',
@@ -634,6 +656,7 @@ export const NO_BODY_ROUTES: readonly string[] = [
   'GET /v1/adapters',
   'GET /v1/adapters/:id',
   'GET /v1/agent',
+  'GET /v1/attachments/:id',
   'GET /v1/audit/verify',
   'GET /v1/batches/:id',
   'GET /v1/contacts',

@@ -465,7 +465,8 @@ describe('SSE, event filters and WS/SSE parity (s7 Scenario 3, ★)', () => {
     // v2 F3 (#29): `GET /v1/threads/state` + twin + its PUT, 73 -> 76.
     // v2 F2b (#30): `GET /v1/search` + twin, 76 -> 78.
     // v2 F2c (#31): `GET /v1/threads/:guid/years` + twin, 78 -> 80.
-    expect(ROUTE_TABLE).toHaveLength(80);
+    // v2 F6b (#32): `GET /v1/attachments/:id` + twin, 80 -> 82.
+    expect(ROUTE_TABLE).toHaveLength(82);
 
     const h = await bootAgent({ greeting: true });
     const before = h.sink.subscriberCount();

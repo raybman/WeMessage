@@ -3852,7 +3852,10 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // the daemon's own index; no event, no frame, no port importer.
     // 80 since v2 F2c (#31): `GET /v1/threads/:guid/years` and its twin,
     // one conversation's turns by year; no event, no frame, no importer.
-    expect(ROUTE_TABLE.length).toBe(80);
+    // 82 since v2 F6b (#32): `GET /v1/attachments/:id` and its twin, one
+    // attachment's bytes from the Attachments folder; no event, no frame,
+    // no port importer.
+    expect(ROUTE_TABLE.length).toBe(82);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -5805,7 +5808,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged, except the route table (#26, #27, #28, #29, #30, #31) and thread.state (#29)', () => {
+    it('the S8-close counts are unchanged, except the route table (#26, #27, #28, #29, #30, #31, #32) and thread.state (#29)', () => {
       // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
       // twin), the conversations list the v2 messenger opens on: 67 -> 69.
       // v2 A2 minted #27 for `GET /v1/threads/:guid/messages` (+ HEAD
@@ -5819,8 +5822,9 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // and no port importer moved. v2 F2b minted #30 for `GET /v1/search`
       // (+ HEAD twin): 76 -> 78, and nothing else moved. v2 F2c minted #31
       // for `GET /v1/threads/:guid/years` (+ HEAD twin): 78 -> 80, and
-      // nothing else moved.
-      expect(ROUTE_TABLE.length).toBe(80);
+      // nothing else moved. v2 F6b minted #32 for `GET /v1/attachments/:id`
+      // (+ HEAD twin): 80 -> 82, and nothing else moved.
+      expect(ROUTE_TABLE.length).toBe(82);
       expect(WS_EVENT_VOCABULARY.length).toBe(22);
       expect(GATEWAY_EVENT_NAMES.length).toBe(22);
       expect(EMITTED_WS_EVENTS.length).toBe(22);
@@ -5834,7 +5838,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30) and v2 F2c (#31), and #32 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30), v2 F2c (#31) and v2 F6b (#32), and #33 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
@@ -5844,11 +5848,12 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // the event and frame counts in the row above are S8's. v2 F3 minted
       // #29 for the thread-state pair and the `thread.state` event. v2 F2b
       // minted #30 for `GET /v1/search`. v2 F2c minted #31 for
-      // `GET /v1/threads/:guid/years`. #32 is the next tooth.
+      // `GET /v1/threads/:guid/years`. v2 F6b minted #32 for
+      // `GET /v1/attachments/:id`. #33 is the next tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(31);
-      expect(seen).not.toContain(32);
+      expect(Math.max(...seen)).toBe(32);
+      expect(seen).not.toContain(33);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
       expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
@@ -5856,6 +5861,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(text).toMatch(/#29 deliberate \(v2 F3/);
       expect(text).toMatch(/#30 deliberate \(v2 F2b\)/);
       expect(text).toMatch(/#31 deliberate \(v2 F2c\)/);
+      expect(text).toMatch(/#32 deliberate \(v2 F6b\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {

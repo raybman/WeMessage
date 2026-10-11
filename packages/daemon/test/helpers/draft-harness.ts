@@ -41,6 +41,7 @@ import {
   createScheduler,
   createStatusFacts,
   readConnectionState,
+  type AttachmentRouteDeps,
   type DaemonServer,
   type Scheduler,
   type SearchRouteDeps,
@@ -201,6 +202,14 @@ export interface BootOptions {
    * Opt-in and off by default, like every other option here.
    */
   status?: true | { ownHandle: () => string | null };
+  /**
+   * v2 F6b: also register `GET /v1/attachments/:id`, composed as `daemon.ts`
+   * composes it: this harness's reader, `home` (a temp folder, never the
+   * real one) and `<home>/Library/Messages/Attachments` unless `root` says
+   * otherwise. `attachmentFile` and `fs` swap in a failing read or a
+   * filesystem that moves a file between the check and the open.
+   */
+  attachments?: { home: string } & Partial<AttachmentRouteDeps>;
 }
 
 /** v2 F7c: the mirror path a harness status reports. */
@@ -363,6 +372,20 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
               guids: Parameters<SearchRouteDeps['existingGuids']>[0],
             ) => reader.existingGuids(guids),
             ...(opts.search === true ? {} : opts.search),
+          },
+        }),
+    ...(opts.attachments === undefined
+      ? {}
+      : {
+          attachments: {
+            attachmentFile: (id: string) => reader.attachmentFile(id),
+            root: join(
+              opts.attachments.home,
+              'Library',
+              'Messages',
+              'Attachments',
+            ),
+            ...opts.attachments,
           },
         }),
     ...(opts.rules === true

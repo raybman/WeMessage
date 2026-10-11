@@ -675,8 +675,9 @@ describe("search is the operator's alone, and only a read (v2 F2b)", () => {
 
 describe('the surface (v2 F2b, route ratchet #30)', () => {
   it('pins GET and its HEAD twin', () => {
-    // 80 since v2 F2c (#31) added `GET /v1/threads/:guid/years`.
-    expect(ROUTE_TABLE).toHaveLength(80);
+    // 80 since v2 F2c (#31) added `GET /v1/threads/:guid/years`; 82 since
+    // v2 F6b (#32) added `GET /v1/attachments/:id`.
+    expect(ROUTE_TABLE).toHaveLength(82);
     expect(ROUTE_TABLE).toContain('GET /v1/search');
     expect(ROUTE_TABLE).toContain('HEAD /v1/search');
   });

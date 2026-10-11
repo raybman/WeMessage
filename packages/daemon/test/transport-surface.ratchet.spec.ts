@@ -167,6 +167,17 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
           );
         },
       },
+      // v2 F6b (#32): the attachment bytes route is real reachable surface.
+      // Its chat.db lookup throws, for the same reason the page reader does.
+      attachments: {
+        home: dir,
+        root: join(dir, 'Attachments'),
+        attachmentFile: () => {
+          throw new Error(
+            'attachmentFile must not be called: route-table test only',
+          );
+        },
+      },
       send: {
         store,
         reader: createUnusedChatDbReader(),

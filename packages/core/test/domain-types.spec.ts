@@ -299,6 +299,7 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       setSetting: () => undefined,
       hasInboundMessage: () => false,
       insertInboundMessage: () => undefined,
+      countInboundMessagesSince: () => 0,
       countSentSince: () => 0,
       mirrorCounts: () => ({ messages: 0, chats: 0, historyFrom: null }),
       listSendingDrafts: () => [],

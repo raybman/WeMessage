@@ -15,6 +15,7 @@ $ wemessage status
 < cursor:      rowid 0 @ <iso>
 < today:       0 message(s)
 < adapters:    0
+< mirror:      0 message(s), 0 chat(s), empty
 < exit 0
 $ wemessage drafts list
 < (no drafts)

@@ -47,7 +47,6 @@ export interface Clock {
   nowMs(): number;
 }
 
-/** Persisted cursor position over chat.db ROWIDs (§2.3 `cursor`). */
 /** v2 F7a: what the mirror holds (status `mirror`). */
 export interface MirrorCounts {
   messages: number;
@@ -55,6 +54,7 @@ export interface MirrorCounts {
   historyFrom: IsoUtc | null;
 }
 
+/** Persisted cursor position over chat.db ROWIDs (§2.3 `cursor`). */
 export interface CursorState {
   lastRowid: number;
   lastScanAt: IsoUtc;
@@ -78,6 +78,11 @@ export interface Store {
   hasInboundMessage(guid: string): boolean;
   /** Idempotent on guid — the §1.3.8 restart re-scan dedup substrate. */
   insertInboundMessage(message: Message): void;
+  // v2 F7: kept, not deleted, because the port only grows (s9 Sc15 row 7).
+  // Status no longer reads it: "today" is `countSentSince` below, since the
+  // received stamp is the copy time.
+  /** Mirror rows received at/after `since` — F-5 status `counts.messagesToday`. */
+  countInboundMessagesSince(since: IsoUtc): number;
   /**
    * v2 F7a: mirror rows SENT at/after `since` (status "today"). Counts by
    * `sent_at`, never `received_at`: the received stamp is the copy time, so

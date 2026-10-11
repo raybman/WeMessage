@@ -576,6 +576,7 @@ export class SqliteStore implements Store {
   readonly #setSetting: Database.Statement;
   readonly #hasInbound: Database.Statement;
   readonly #insertInbound: Database.Statement;
+  readonly #countInboundSince: Database.Statement;
   readonly #countSentSince: Database.Statement;
   readonly #countMirrorRows: Database.Statement;
   readonly #countMirrorChats: Database.Statement;
@@ -738,6 +739,9 @@ export class SqliteStore implements Store {
         'is_from_me, is_group, service, kind, text, sent_at, received_at, ' +
         'edited_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(guid) DO NOTHING',
+    );
+    this.#countInboundSince = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM inbound_messages WHERE received_at >= ?',
     );
     // v2 F7a: by SENT time over `inbound_sent` (leading column sent_at), a
     // covering range count. Never received_at: that is the copy time.
@@ -1281,6 +1285,11 @@ export class SqliteStore implements Store {
    */
   deleteSetting(key: string): void {
     this.#deleteSetting.run(key);
+  }
+
+  countInboundMessagesSince(since: IsoUtc): number {
+    const row = this.#countInboundSince.get(since) as { n: number };
+    return row.n;
   }
 
   countSentSince(since: IsoUtc): number {

@@ -117,6 +117,7 @@ function makeStore(cfg: {
     setSetting: () => undefined,
     hasInboundMessage: () => false,
     insertInboundMessage: () => undefined,
+    countInboundMessagesSince: () => 0,
     countSentSince: () => 0,
     mirrorCounts: () => ({ messages: 0, chats: 0, historyFrom: null }),
     listSendingDrafts: () => [],

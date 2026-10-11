@@ -13,6 +13,9 @@ export default defineConfig({
       // sequencing one spec after the entire rest of the suite without
       // changing how any other daemon spec runs.
       'packages/daemon/vitest.lifecycle.config.ts',
+      // v2 F8d: the store's search budgets, sequenced after everything else
+      // (groupOrder 2) so they time the query, not the neighbours.
+      'packages/store/vitest.perf.config.ts',
       'packages/adapters/*/vitest.config.ts',
       // `apps/*`, not one path: the next app with a Node test project must
       // not be invisible to `pnpm test` by omission. Today `apps/mac` is the

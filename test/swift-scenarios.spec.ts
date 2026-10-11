@@ -92,6 +92,7 @@ const EXPECTED_SCENARIOS = [
   'rich-turns',
   'search',
   'search-indexing',
+  'stale-sync',
   'thread-state',
 ];
 
@@ -159,7 +160,7 @@ describe('v2 S4b SC1: parseArgs --control', () => {
 });
 
 describe('v2 S4b SC2: loadScenarios', () => {
-  it('finds the twenty-eight shipped scenarios, and "default" is not one of them', () => {
+  it('finds the twenty-nine shipped scenarios, and "default" is not one of them', () => {
     const map = loadScenarios();
     expect([...map.keys()]).toEqual(EXPECTED_SCENARIOS);
     expect(map.has(DEFAULT_SCENARIO)).toBe(false);
@@ -168,6 +169,7 @@ describe('v2 S4b SC2: loadScenarios', () => {
     expect(map.get('rich-turns')?.parent).toBe('rich');
     expect(map.get('thread-state')?.parent).toBe('pending');
     expect(map.get('search-indexing')?.parent).toBe('search');
+    expect(map.get('stale-sync')?.parent).toBe('rich');
     for (const s of map.values()) expect(s.summary.length).toBeGreaterThan(20);
   });
 
@@ -2259,5 +2261,61 @@ describe('v2 F2e: search and years in the fake daemon', () => {
         status: 200,
       },
     ]);
+  });
+});
+
+/**
+ * v2 F7e: the status facts in the fake daemon. rich carries them, fresh
+ * (asOf 2 s past the last read); stale-sync is rich, fully connected, with
+ * the daemon's clock 45 s past the last read, so the app ages it to STALE
+ * on the age rule alone (D-F7-4, D-UI-213: stale after 10 s).
+ */
+describe('v2 F7e: the status facts and the stale-sync scenario', () => {
+  const get = (state: State) =>
+    step(state, { method: 'GET', path: '/v1/status' }).out;
+  type Facts = {
+    connectionState: string;
+    cursor: { lastScanAt: string };
+    counts: { messagesToday: number };
+    channels: Array<{
+      channel: string;
+      lastSyncAt?: string | null;
+      today?: number;
+      handle?: string | null;
+    }>;
+    asOf?: string;
+    mirror?: { path: string; messages: number; eligible: number };
+  };
+  const facts = (name: string) => body(get(switchTo(name))) as Facts;
+  const ageMs = (s: Facts) => {
+    const im = s.channels.find((c) => c.channel === 'imessage');
+    return Date.parse(String(s.asOf)) - Date.parse(String(im?.lastSyncAt));
+  };
+
+  it('rich serves the facts: lastSyncAt is the cursor scan, today is the count, the path is ~-abbreviated, and it is fresh', () => {
+    const s = facts('rich');
+    const im = s.channels.find((c) => c.channel === 'imessage');
+    expect(im?.lastSyncAt).toBe(s.cursor.lastScanAt);
+    expect(im?.today).toBe(s.counts.messagesToday);
+    expect(im?.handle).toBe('+15550100000');
+    expect(s.mirror?.path.startsWith('~/')).toBe(true);
+    expect(JSON.stringify(s)).not.toMatch(/\/Users\//);
+    expect(ageMs(s)).toBeLessThanOrEqual(10_000);
+    for (const c of s.channels.filter((x) => x.channel !== 'imessage')) {
+      expect(
+        c.lastSyncAt === undefined &&
+          c.today === undefined &&
+          c.handle === undefined,
+        c.channel,
+      ).toBe(true);
+    }
+  });
+
+  it('stale-sync is rich, fully connected, with the read 45 s behind the daemon clock and nothing else changed', () => {
+    const s = facts('stale-sync');
+    expect(s.connectionState).toBe('fully-connected');
+    expect(ageMs(s)).toBe(45_000);
+    const rich = facts('rich');
+    expect({ ...s, asOf: rich.asOf }).toEqual(rich);
   });
 });

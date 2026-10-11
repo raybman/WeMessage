@@ -331,21 +331,10 @@ private struct SizedPage: View {
   @Bindable var model: OnboardingModel
   let palette: Tokens.Palette
 
-  private func figure(_ n: Int?) -> String { n.map(OnboardingCopy.count) ?? ProvisionalUI.auditResultUnserved }
-
-  private var rows: [(String, String)] {
-    let s = model.sizing
-    return [
-      ("messages", figure(s?.messages)),
-      ("chats", figure(s?.chats)),
-      ("on disk", s.map { "\($0.megabytes) MB   (estimate, text only)" } ?? ProvisionalUI.auditResultUnserved),
-      ("history from", s?.historyFrom ?? ProvisionalUI.auditResultUnserved),
-      ("attachments", OnboardingCopy.attachments),
-    ]
-  }
+  private var rows: [(String, String)] { OnboardingCopy.sizedRows(model.sizing) }
 
   var body: some View {
-    Heading(text: OnboardingCopy.sizedTitle, palette: palette)
+    Heading(text: OnboardingCopy.sizedHeading(model.sizing), palette: palette)
     Card(palette: palette) {
       ForEach(rows, id: \.0) { row in
         HStack(spacing: 0) {
@@ -401,7 +390,7 @@ private struct CopyProgressPage: View {
             .font(.system(size: 11))
             .foregroundStyle(Tokens.color(palette.inkDim))
         }
-        Para(text: OnboardingCopy.copied(p.copied), palette: palette)
+        Para(text: OnboardingCopy.progressLine(p), palette: palette)
       } else {
         Para(text: ProvisionalUI.auditResultUnserved, palette: palette)
       }

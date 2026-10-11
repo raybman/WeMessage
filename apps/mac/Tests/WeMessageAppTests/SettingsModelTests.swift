@@ -118,3 +118,41 @@ struct SettingsModelTests {
     #expect(SettingsModel.deleteCopyNotHere.hasPrefix("Not in this version."))
   }
 }
+
+// MARK: - v2 F7e, the local copy from the status's mirror (D-UI-214)
+
+extension SettingsModelTests {
+  @Test("F7e: Storage reads the daemon's mirror: size, ~ path, grouped counts, since and counted, and the sidebar line is the size")
+  func storageLineFromMirror() throws {
+    let (model, _) = Self.model()
+    model.shell.status = try ShellModelTests.decode(Reply.scenario("rich", "status.json"), StatusPayload.self)
+    let utc = TimeZone(identifier: "UTC")!
+    let storage = try #require(SettingsModel.storage(mirror: model.shell.status?.mirror, zone: utc))
+    #expect(storage.line == "178 MB \u{00B7} ~/Library/Application Support/WeMessage/wemessage.db")
+    #expect(storage.detail == "527,147 messages in 3,953 chats since 2014-03-02, counted 12:00.")
+    #expect(storage.size == "178 MB")
+    #expect(!storage.line.contains("/Users/"))
+    #expect(model.stateLine(.storage) == "178 MB")
+  }
+
+  @Test("F7e: a status with no mirror (an older daemon) keeps the honest unreported line, never a zero")
+  func storageUnreportedWhenAbsent() throws {
+    let (model, _) = Self.model()
+    #expect(model.storage == nil)
+    #expect(model.stateLine(.storage) == "not reported by this daemon")
+    model.shell.status = try ShellModelTests.decode(Reply.scenario("degraded", "status.json"), StatusPayload.self)
+    #expect(model.shell.status?.mirror == nil)
+    #expect(model.storage == nil)
+    #expect(model.stateLine(.storage) == "not reported by this daemon")
+    // An empty copy has no history and still says its size.
+    var mirror = try #require(
+      try ShellModelTests.decode(Reply.scenario("rich", "status.json"), StatusPayload.self).mirror)
+    mirror.historyFrom = nil
+    mirror.messages = 0
+    mirror.chats = 0
+    mirror.bytes = 0
+    let empty = try #require(SettingsModel.storage(mirror: mirror, zone: TimeZone(identifier: "UTC")!))
+    #expect(empty.detail == "0 messages in 0 chats, counted 12:00.")
+    #expect(empty.size == "0 MB")
+  }
+}

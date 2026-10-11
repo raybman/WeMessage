@@ -102,7 +102,7 @@ final class SettingsModel {
     case .notifications: "none in this version"
     case .appearance: "follows system"
     case .keyboard: "\(Keymap.editableVerbs.count) verbs, \(keymap.reboundCount) rebound"
-    case .storage: Self.storageUnreported
+    case .storage: storage.map(\.size) ?? Self.storageUnreported
     case .confirm: killLine
     }
   }
@@ -185,8 +185,37 @@ final class SettingsModel {
 
   // MARK: storage
 
-  /// G-13a: the daemon serves no size for the local copy.
+  /// G-13a: what the pane says when the daemon serves no size for the
+  /// local copy (a daemon older than v2 F7, or no status read yet).
   static let storageUnreported = "not reported by this daemon"
+
+  /// v2 F7e (D-UI-214): the local copy as the daemon counted it.
+  struct Storage: Equatable, Sendable {
+    /// "178 MB · ~/Library/…/wemessage.db"
+    let line: String
+    /// "527,147 messages in 3,953 chats since 2014-03-02, counted 12:00."
+    let detail: String
+    /// "178 MB": the sidebar's state line and the row's trailing word.
+    let size: String
+  }
+
+  /// The pane's words from the status's `mirror`; nil when it carries none.
+  /// Megabytes are decimal (10^6 bytes), rounded to the nearest whole one.
+  static func storage(mirror: MirrorStatusPayload?, zone: TimeZone = .current) -> Storage? {
+    guard let mirror else { return nil }
+    let megabytes = Int((Double(mirror.bytes) / 1_000_000).rounded())
+    let since = mirror.historyFrom.flatMap { WireDate.parse($0) }.map { ShellText.format($0, "yyyy-MM-dd", zone) }
+    let counted = WireDate.parse(mirror.countedAt).map { ShellText.shortClock($0, zone: zone) } ?? mirror.countedAt
+    return Storage(
+      line: ProvisionalUI.storageLine(megabytes: megabytes, path: mirror.path),
+      detail: ProvisionalUI.storageDetail(
+        messages: SearchText.grouped(mirror.messages), chats: SearchText.grouped(mirror.chats), since: since,
+        counted: counted),
+      size: ProvisionalUI.storageSize(megabytes: megabytes))
+  }
+
+  /// The local copy, from the shell's last status read.
+  var storage: Storage? { Self.storage(mirror: shell.status?.mirror) }
 
   /// The confirm card's three lines for deleting the local copy (09.C's
   /// removed, revoked, untouched), and why its go control is disabled.

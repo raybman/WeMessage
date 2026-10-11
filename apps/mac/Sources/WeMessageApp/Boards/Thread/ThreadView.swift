@@ -58,7 +58,7 @@ struct ThreadView: View {
       }
       .coordinateSpace(.named(Self.readerSpace))
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { readerHeight = $0 }
-      ChannelBanner(thread: thread, palette: palette)
+      ChannelBanner(thread: thread, palette: palette, handle: model.replyHandle)
       if model.lens == .triage {
         VerbRow(model: model, thread: thread, palette: palette)
       }
@@ -100,12 +100,19 @@ struct Inv5Strip: View {
 }
 
 /// The reply banner above the composer (02.A): the channel tag, "Replying
-/// on iMessage" (no number, D-UI-20), and on the right what the app can
+/// on iMessage", with the operator's own number when the daemon's status
+/// names it (v2 F7e, D-UI-217; a null handle says no number, never a
+/// guess and never the Contacts card), and on the right what the app can
 /// say about the transport: Apple chooses it at send time. An SMS chat
 /// says its last transport instead (02.D), from the chat guid's service.
 struct ChannelBanner: View {
   let thread: ThreadSummary
   let palette: Tokens.Palette
+  /// The iMessage entry's `handle` from the last status read.
+  var handle: String? = nil
+
+  /// The banner's words for `handle`.
+  static func words(_ handle: String?) -> String { ProvisionalUI.replying(as: handle) }
 
   static let chooses = "sends through Messages.app \u{00B7} transport chosen by Apple at send time"
   static let lastSMS = "last transport: SMS \u{00B7} carrier rates"
@@ -115,7 +122,7 @@ struct ChannelBanner: View {
   var body: some View {
     HStack(spacing: 8) {
       ChannelTag(channel: ShellModel.Scope.imessage.rawValue, palette: palette)
-      Text(ProvisionalUI.replyingBanner)
+      Text(Self.words(handle))
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(Tokens.color(palette.ink))
         .fixedSize()
@@ -133,7 +140,7 @@ struct ChannelBanner: View {
       Rectangle().fill(Tokens.color(palette.inkDim, opacity: 0.2)).frame(height: 2)
     }
     .accessibilityElement(children: .contain)
-    .accessibilityLabel(ProvisionalUI.replyingBanner + ", " + cap)
+    .accessibilityLabel(Self.words(handle) + ", " + cap)
     .accessibilityIdentifier(ShellID.threadBanner)
   }
 }

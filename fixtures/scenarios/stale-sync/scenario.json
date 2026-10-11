@@ -1,0 +1,4 @@
+{
+  "summary": "Fully connected, but the daemon's clock is 45 s past its last chat.db read: iMessage ages to STALE with no error code at all.",
+  "extends": "rich"
+}

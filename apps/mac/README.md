@@ -265,7 +265,7 @@ proposed by`, `APPROVED by you`, `HELD by kill switch`, and so on)
   Make the copy, Skip <channel>, Finish setup, Open inbox)
 - `wemessage.onboarding.again`: 2b's Open System Settings again; its value
   is `asked n, probes m, polling on|off`
-- `wemessage.onboarding.sizing`: 2c's count, or not served (D-UI-72)
+- `wemessage.onboarding.sizing`: 2c's rows from the status's `mirror` (v2 F7e, D-UI-215), "not copied yet" for an empty copy, or not served
 - `wemessage.onboarding.progress`: CopyProgress, dated
 - `wemessage.onboarding.notbuilt`: steps 3 to 5 say the channel is not in
   this version (D-UI-71)

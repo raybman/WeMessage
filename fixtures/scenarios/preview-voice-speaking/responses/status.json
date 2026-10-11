@@ -52,7 +52,10 @@
     "channels": [
       {
         "channel": "imessage",
-        "state": "connected"
+        "state": "connected",
+        "lastSyncAt": "2026-09-01T12:00:42.000Z",
+        "today": 14,
+        "handle": "+15550100000"
       },
       {
         "channel": "whatsapp",
@@ -70,6 +73,18 @@
         "reason": "not_in_this_version"
       }
     ],
+    "asOf": "2026-09-01T12:00:44.000Z",
+    "mirror": {
+      "path": "~/Library/Application Support/WeMessage/wemessage.db",
+      "bytes": 178257920,
+      "messages": 527147,
+      "chats": 3953,
+      "historyFrom": "2014-03-02T09:00:00.000Z",
+      "phase": "current",
+      "indexed": 527147,
+      "eligible": 527147,
+      "countedAt": "2026-09-01T12:00:40.000Z"
+    },
     "meta": {
       "voice": {
         "dockState": "speaking",

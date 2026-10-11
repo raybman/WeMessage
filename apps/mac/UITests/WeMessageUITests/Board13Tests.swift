@@ -120,6 +120,14 @@ final class Board13Tests: XCTestCase {
     // 13.G: delete asks, and its go is disabled.
     open(app, "storage")
     XCTAssertTrue(QueueUI.element(app, ID.settingsStorage).exists, "no storage pane")
+    // v2 F7e (D-UI-214): the kill scenario's status carries the mirror, so
+    // the pane says the copy's size and where it lives, never "size unknown".
+    let pane = QueueUI.element(app, ID.settingsStorage)
+    let sized = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", " MB", " MB")
+    XCTAssertTrue(
+      QueueUI.waitUntil { pane.descendants(matching: .any).matching(sized).count > 0 }, "the storage pane names no size")
+    let unknown = NSPredicate(format: "label == %@ OR value == %@", "size unknown", "size unknown")
+    XCTAssertEqual(pane.descendants(matching: .any).matching(unknown).count, 0, "the storage pane says size unknown")
     shot("storage")
     QueueUI.element(app, ID.settingsStorageDelete).click()
     let sheet = QueueUI.element(app, ID.settingsConfirmSheet)

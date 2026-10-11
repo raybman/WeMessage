@@ -32,6 +32,9 @@ public struct ShellBoard: Equatable, Sendable {
   public var asOf: Date?
   /// What is waiting, inside the window.
   public var queue: [QueueItem]
+  /// v2 F7e (D-UI-213): whole seconds between the last read and the
+  /// daemon's own clock, set only when that gap aged iMessage to stale.
+  public var quietFor: Int? = nil
 
   public static let empty = ShellBoard(
     marks: Dictionary(uniqueKeysWithValues: ShellModel.Scope.allCases.map { ($0, RailMark.none) }), lastScan: nil,
@@ -43,7 +46,13 @@ public struct ShellBoard: Equatable, Sendable {
   /// The fold. iMessage has a daemon today: it is connected unless status
   /// is missing or says "disconnected", and fresh only when the daemon is
   /// fully connected and has scanned at least once (a read-only daemon
-  /// cannot vouch for what it has not read). Another channel draws a mark
+  /// cannot vouch for what it has not read), and, when the status carries
+  /// the daemon's own clock (`asOf`, v2 F7), the last read is no more than
+  /// `ProvisionalUI.staleAfter` behind it (D-UI-213). The age is the
+  /// daemon's clock minus its own last read, never the wall clock, so a
+  /// window that stops hearing from the daemon does not invent an age. A
+  /// status with no `asOf` (an older daemon) keeps the connection-state
+  /// rule. Another channel draws a mark
   /// only when `channels` says it is connected or a fixture board (v2 B0,
   /// D-UI-140), on the same freshness; not connected says nothing. With no
   /// `channels` every other channel is not connected, as in this version.
@@ -54,7 +63,12 @@ public struct ShellBoard: Equatable, Sendable {
     let lastScan = status?.cursor.flatMap { WireDate.parse($0.lastScanAt) }
     let asOf = clock(status: status, threads: threads, drafts: drafts)
     let connected = status.map { $0.connectionState != "disconnected" } ?? false
-    let fresh = connected && status?.connectionState == "fully-connected" && lastScan != nil
+    let age: TimeInterval? = {
+      guard let lastScan, let now = status?.asOf.flatMap({ WireDate.parse($0) }) else { return nil }
+      return now.timeIntervalSince(lastScan)
+    }()
+    let aged = age.map { $0 > ProvisionalUI.staleAfter } ?? false
+    let fresh = connected && status?.connectionState == "fully-connected" && lastScan != nil && !aged
     let items = QueueRules.items(drafts: drafts, threads: threads?.threads ?? [], excluding: excluding)
     let queue = asOf.map { now in
       items.filter { QueueRules.queueCount(items: [$0], now: now, window: window) == 1 }
@@ -72,7 +86,8 @@ public struct ShellBoard: Equatable, Sendable {
     }
     let channels = ShellModel.Scope.allCases.filter { $0 != .all }.map { marks[$0] ?? RailMark.none }
     marks[.all] = QueueRules.allMark(channels)
-    return ShellBoard(marks: marks, lastScan: lastScan, asOf: asOf, queue: queue)
+    let quietFor = aged && connected ? age.map { Int($0.rounded(.down)) } : nil
+    return ShellBoard(marks: marks, lastScan: lastScan, asOf: asOf, queue: queue, quietFor: quietFor)
   }
 
   /// Whether a channel other than iMessage gets a rail mark: connected

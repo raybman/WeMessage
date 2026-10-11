@@ -178,6 +178,16 @@ public struct FreshnessRow: Equatable, Sendable {
   /// Today's messages, dated by this row's own sync; nil for a channel that
   /// is not connected (never a 0).
   public let today: Int?
+  /// v2 F7e (D-UI-213): how long the daemon has read nothing, when that is
+  /// why the row is stale.
+  public var quietFor: Int? = nil
+
+  public init(scope: ShellModel.Scope, state: State, today: Int?, quietFor: Int? = nil) {
+    self.scope = scope
+    self.state = state
+    self.today = today
+    self.quietFor = quietFor
+  }
 
   /// 10.A's own words for a channel with no transport: never a number.
   public static let notConnectedWords = "not connected"
@@ -194,7 +204,9 @@ public struct FreshnessRow: Equatable, Sendable {
   public func age(zone: TimeZone = .current) -> String {
     switch state {
     case .live(let at): at.map { "live \u{00B7} as of " + ShellText.clock($0, zone: zone) } ?? "live"
-    case .stale(let since): since.map { "STALE \u{00B7} since " + ShellText.clock($0, zone: zone) } ?? "STALE \u{00B7} never synced"
+    case .stale(let since):
+      (since.map { "STALE \u{00B7} since " + ShellText.clock($0, zone: zone) } ?? "STALE \u{00B7} never synced")
+        + (quietFor.map(ProvisionalUI.noReadFor) ?? "")
     case .notConnected:
       Self.notConnectedWords
     }
@@ -222,7 +234,9 @@ public enum Freshness {
       case .digit, .baseline:
         FreshnessRow(scope: scope, state: .live(asOf: board.lastScan), today: today(scope, status))
       case .stale:
-        FreshnessRow(scope: scope, state: .stale(since: board.lastScan), today: today(scope, status))
+        FreshnessRow(
+          scope: scope, state: .stale(since: board.lastScan), today: today(scope, status),
+          quietFor: scope == .imessage ? board.quietFor : nil)
       case .none:
         FreshnessRow(scope: scope, state: .notConnected, today: nil)
       }
@@ -230,7 +244,10 @@ public enum Freshness {
   }
 
   static func today(_ scope: ShellModel.Scope, _ status: StatusPayload?) -> Int? {
-    scope == .imessage ? status?.counts.messagesToday : nil
+    // v2 F7: the iMessage entry's own count, the top-level one from a
+    // daemon that does not carry it on the entry.
+    guard scope == .imessage else { return nil }
+    return status?.channels.first(where: { $0.channel == "imessage" })?.today ?? status?.counts.messagesToday
   }
 
   /// The table's foot (10.A): the clock it was computed at while every
@@ -240,7 +257,7 @@ public enum Freshness {
     if let stale = rows.first(where: { if case .stale = $0.state { true } else { false } }) {
       guard case .stale(let since) = stale.state else { return nil }
       let when = since.map { " since " + ShellText.clock($0, zone: zone) } ?? ", never synced"
-      return "CANNOT SAY \(stale.scope.fullLabel) stale" + when
+      return "CANNOT SAY \(stale.scope.fullLabel) stale" + when + (stale.quietFor.map(ProvisionalUI.noReadFor) ?? "")
     }
     let dates = rows.compactMap { row -> Date? in
       if case .live(let at) = row.state { return at }
@@ -332,10 +349,17 @@ public final class SystemFullDiskAccess: FullDiskAccessSeam {
     if case .ok = listed { return true }
     return false
   }
-  /// The daemon serves no count query yet (D-UI-72).
-  public func sizing() async -> CopySizing? { nil }
-  /// The daemon serves no copy progress yet (D-UI-72).
-  public func copyProgress() async -> CopyProgressFacts? { nil }
+  /// v2 F7e: the copy as the daemon's status counts it (`mirror`); nil
+  /// from a daemon that does not answer or carries none.
+  public func sizing() async -> CopySizing? {
+    precondition(!TestHooks.isUITest, "the system Full Disk Access seam under the UI-test flag")
+    return CopySizing.from(try? await GatewayClient().status().mirror)
+  }
+  /// v2 F7e: the same status's index progress (D-UI-216).
+  public func copyProgress() async -> CopyProgressFacts? {
+    precondition(!TestHooks.isUITest, "the system Full Disk Access seam under the UI-test flag")
+    return CopyProgressFacts.from(try? await GatewayClient().status().mirror)
+  }
 }
 
 /// The FDA screen's words (10.C): the four headings and what each says.

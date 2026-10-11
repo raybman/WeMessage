@@ -152,3 +152,61 @@ struct ShellBoardTests {
     #expect(WhatsAppBoardModel.banner(linkedDevice: "") == ProvisionalUI.whatsAppBannerName)
   }
 }
+
+// MARK: - v2 F7e, the age rule (D-F7-4, D-UI-213)
+
+extension ShellBoardTests {
+  static let utc = TimeZone(identifier: "UTC")!
+
+  @Test("F7e: stale-sync is fully connected, but the daemon's clock is 45 s past its last read: iMessage is STALE, the row, footer and banner say so, and how long nothing was read")
+  func scanOlderThanStaleAfterIsStale() throws {
+    let stale = try Self.fixture("stale-sync")
+    #expect(stale.status.connectionState == "fully-connected")
+    let board = Self.fold(stale, ChannelAvailability.table(stale.status.channels, gate: .closed))
+    #expect(board.mark(.imessage) == .stale)
+    #expect(board.quietFor == 45)
+    let rows = Freshness.rows(board: board, status: stale.status)
+    #expect(rows[0].age(zone: Self.utc) == "STALE \u{00B7} since 12:00:42" + ProvisionalUI.noReadFor(45))
+    #expect(rows[0].count == "14 today")
+    #expect(Freshness.footer(rows, zone: Self.utc) == "CANNOT SAY iMessage stale since 12:00:42" + ProvisionalUI.noReadFor(45))
+    #expect(TrustBanner.line(board: board, zone: Self.utc) != nil)
+
+    // rich: the same read, 2 s behind the clock, is live.
+    let rich = try Self.fixture("rich")
+    let fresh = Self.fold(rich, ChannelAvailability.table(rich.status.channels, gate: .closed))
+    #expect(fresh.mark(.imessage) != .stale)
+    #expect(fresh.quietFor == nil)
+    // The boundary: exactly staleAfter is still live, one second past it is not.
+    var edge = rich.status
+    edge.asOf = "2026-09-01T12:00:52.000Z"
+    #expect(ShellBoard.fold(status: edge, threads: nil, drafts: [], window: QueueWindow()).mark(.imessage) != .stale)
+    edge.asOf = "2026-09-01T12:00:53.000Z"
+    #expect(ShellBoard.fold(status: edge, threads: nil, drafts: [], window: QueueWindow()).mark(.imessage) == .stale)
+  }
+
+  @Test("F7e: a status with no asOf falls back to the connection state: fully connected and scanned is live however old the scan, read-only is stale with no age")
+  func noAsOfFallsBackToConnectionState() throws {
+    var stale = try Self.fixture("stale-sync").status
+    stale.asOf = nil
+    let live = ShellBoard.fold(status: stale, threads: nil, drafts: [], window: QueueWindow())
+    #expect(live.mark(.imessage) != .stale)
+    #expect(live.quietFor == nil)
+    let degraded = try Self.fixture("degraded").status
+    #expect(degraded.asOf == nil)
+    let board = ShellBoard.fold(status: degraded, threads: nil, drafts: [], window: QueueWindow())
+    #expect(board.mark(.imessage) == .stale)
+    #expect(board.quietFor == nil)
+    let rows = Freshness.rows(board: board, status: degraded)
+    #expect(rows[0].age(zone: Self.utc) == "STALE \u{00B7} since 12:00:42")
+  }
+
+  @Test("F7e: today is the iMessage entry's own count, the top-level count only when the entry carries none")
+  func todayFromTheChannelEntry() throws {
+    var status = try Self.fixture("rich").status
+    status.counts.messagesToday = 99
+    let board = ShellBoard.fold(status: status, threads: nil, drafts: [], window: QueueWindow())
+    #expect(Freshness.rows(board: board, status: status)[0].today == 14)
+    status.channels[0].today = nil
+    #expect(Freshness.rows(board: board, status: status)[0].today == 99)
+  }
+}

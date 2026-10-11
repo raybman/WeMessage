@@ -80,7 +80,10 @@ struct FreshnessTable: View {
             .frame(width: 84, alignment: .leading)
           Text(row.age(zone: zone))
             .fontWeight(row.state == .notConnected ? .regular : .semibold)
-            .frame(width: 170, alignment: .leading)
+            // v2 F7e: a stale row also says how long nothing was read, so
+            // the column grows to its words rather than truncating them.
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: 170, alignment: .leading)
           Text(row.count)
             .frame(minWidth: 70, alignment: .trailing)
         }

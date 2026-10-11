@@ -364,6 +364,17 @@ public final class ShellModel {
   /// The kill switch as status last said it: nil when status has not said.
   public var killSwitch: Bool? { status?.killSwitch }
 
+  /// v2 F7e (D-UI-217): the operator's own iMessage handle as the last
+  /// status named it, for the reply banner; nil when it did not. Held in
+  /// memory only, read from status, never from Contacts.
+  public var replyHandle: String? {
+    status?.channels.first { $0.channel == "imessage" }?.handle
+  }
+
+  /// v2 F7e (D-UI-218): whether a window can show what status says. The
+  /// status poll skips its read while this is false.
+  public var windowVisible = true
+
   /// The threads the list shows for the current scope and lens.
   public var rows: [ThreadSummary] {
     board.rows(threads?.threads ?? [], scope: scope, lens: lens, including: Set(snoozedThreads.keys))
@@ -898,6 +909,20 @@ public final class ShellModel {
   public func loadAudit() async {
     guard let rows = try? await client.listAudit() else { return }
     audit = rows.map(AuditLine.init).sorted { $0.seq < $1.seq }
+  }
+
+  /// v2 F7e (D-UI-218): re-reads status every
+  /// `ProvisionalUI.statusPollMilliseconds` while a window is visible, so
+  /// the age rule (D-UI-213) sees the daemon's clock move with no event in
+  /// between. Status only: the thread list and drafts stay on the stream.
+  /// A failed read leaves the last status as it was; the stream owns the
+  /// connection line. Returns when the sleeper throws (cancellation).
+  public func statusPoll(sleeper: any Sleeper) async {
+    while true {
+      do { try await sleeper.sleep(milliseconds: ProvisionalUI.statusPollMilliseconds) } catch { return }
+      guard windowVisible else { continue }
+      if let status = try? await client.status() { self.status = status }
+    }
   }
 
   /// Cancels the task `start()` made; the stream ends with it.

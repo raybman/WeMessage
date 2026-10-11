@@ -608,3 +608,79 @@ struct ShellModelTests {
     #expect(m.lens == .recent)
   }
 }
+
+// MARK: - v2 F7e, the status poll (D-UI-218) and the reply banner (D-UI-217)
+
+/// Lets `limit` sleeps through at once, then throws as a cancelled task's
+/// sleep would; counts the milliseconds it was asked for.
+final class CountingSleeper: Sleeper, @unchecked Sendable {
+  private let lock = NSLock()
+  private let limit: Int
+  private var asked: [Int] = []
+  init(limit: Int) { self.limit = limit }
+  var sleeps: [Int] { lock.withLock { asked } }
+  func sleep(milliseconds: Int) async throws {
+    let n = lock.withLock { () -> Int in
+      asked.append(milliseconds)
+      return asked.count
+    }
+    if n > limit { throw CancellationError() }
+    await Task.yield()
+  }
+}
+
+extension ShellModelTests {
+  static func richTransport() -> FakeTransport {
+    FakeTransport { request in
+      switch request.url?.path {
+      case "/v1/status": return try Reply.scenario("stale-sync", "status.json")
+      default: throw Unreachable()
+      }
+    }
+  }
+
+  @Test("F7e: the status poll reads status once per 5 s tick while the window is visible, and not at all while it is hidden")
+  func statusPollPausesWhenHidden() async throws {
+    let hiddenTransport = Self.richTransport()
+    let hidden = ShellModel(client: testClient(hiddenTransport))
+    hidden.windowVisible = false
+    let hiddenSleeper = CountingSleeper(limit: 4)
+    await hidden.statusPoll(sleeper: hiddenSleeper)
+    #expect(hiddenSleeper.sleeps.count == 5)
+    #expect(hiddenTransport.requests.isEmpty)
+    #expect(hidden.status == nil)
+
+    let visibleTransport = Self.richTransport()
+    let visible = ShellModel(client: testClient(visibleTransport))
+    let sleeper = CountingSleeper(limit: 4)
+    await visible.statusPoll(sleeper: sleeper)
+    #expect(sleeper.sleeps == Array(repeating: 5_000, count: 5))
+    #expect(visibleTransport.requests.map { $0.url?.path } == Array(repeating: "/v1/status", count: 4))
+    // The read folded: the daemon's clock is 45 s past its last read.
+    #expect(visible.status?.asOf == "2026-09-01T12:01:27.000Z")
+    #expect(visible.board.mark(.imessage) == .stale)
+  }
+
+  @Test("F7e: the reply banner names the operator's own number when status carries it, and says no number when it is null")
+  func bannerNamesHandle() async throws {
+    let m = ShellModel(client: testClient(Self.richTransport()))
+    #expect(m.replyHandle == nil)
+    #expect(ChannelBanner.words(m.replyHandle) == "Replying on iMessage")
+    m.status = try ShellModelTests.decode(Reply.scenario("rich", "status.json"), StatusPayload.self)
+    #expect(m.replyHandle == "+15550100000")
+    #expect(ChannelBanner.words(m.replyHandle) == "Replying on iMessage as +15550100000")
+  }
+
+  @Test("F7e: a null or empty handle, or a status from an older daemon, leaves the banner plain")
+  func bannerPlainWhenNull() throws {
+    var status = try ShellModelTests.decode(Reply.scenario("rich", "status.json"), StatusPayload.self)
+    status.channels[0].handle = nil
+    let m = ShellModel(client: testClient(Self.richTransport()))
+    m.status = status
+    #expect(m.replyHandle == nil)
+    #expect(ChannelBanner.words(m.replyHandle) == ProvisionalUI.replyingBanner)
+    #expect(ChannelBanner.words("") == ProvisionalUI.replyingBanner)
+    m.status = try ShellModelTests.decode(Reply.scenario("degraded", "status.json"), StatusPayload.self)
+    #expect(ChannelBanner.words(m.replyHandle) == ProvisionalUI.replyingBanner)
+  }
+}

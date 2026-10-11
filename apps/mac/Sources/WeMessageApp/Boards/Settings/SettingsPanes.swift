@@ -231,9 +231,16 @@ struct StoragePane: View {
   var body: some View {
     SettingsHeading(text: "Storage", palette: palette)
     VStack(alignment: .leading, spacing: 4) {
-      SettingsLine(
-        title: "Local copy", detail: "WeMessage keeps a copy of what it reads on this Mac. Its size is \(SettingsModel.storageUnreported).",
-        trailing: "size unknown", palette: palette)
+      if let storage = model.storage {
+        // v2 F7e (D-UI-214): the daemon counted it.
+        SettingsLine(
+          title: "Local copy", detail: storage.line + "\n" + storage.detail, trailing: storage.size, palette: palette)
+      } else {
+        SettingsLine(
+          title: "Local copy",
+          detail: "WeMessage keeps a copy of what it reads on this Mac. Its size is \(SettingsModel.storageUnreported).",
+          trailing: "size unknown", palette: palette)
+      }
       SettingsLine(
         title: "Audit log", detail: "Append-only and hash-chained. There is no Clear; a log you can clear proves nothing.",
         trailing: "kept", palette: palette)

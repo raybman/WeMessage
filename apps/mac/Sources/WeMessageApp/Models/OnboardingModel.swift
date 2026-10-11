@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WeMessageKit
 
 // v2 S4h, board 12: onboarding. The model holds no client: nothing here can
 // reach the daemon, so onboarding cannot send, draft, or arm anything
@@ -162,13 +163,29 @@ public struct CopySizing: Equatable, Sendable {
   public let messages: Int
   public let chats: Int
   public let megabytes: Int
-  /// yyyy-mm-dd.
-  public let historyFrom: String
-  public init(messages: Int, chats: Int, megabytes: Int, historyFrom: String) {
+  /// yyyy-mm-dd; nil when nothing is copied yet.
+  public let historyFrom: String?
+  /// v2 F7e (D-UI-215): the copy exists, so these are its counts, not an
+  /// estimate of a copy still to be made.
+  public let made: Bool
+  public init(messages: Int, chats: Int, megabytes: Int, historyFrom: String?, made: Bool = false) {
     self.messages = messages
     self.chats = chats
     self.megabytes = megabytes
     self.historyFrom = historyFrom
+    self.made = made
+  }
+
+  /// v2 F7e: the daemon's mirror as 2c's rows. The daemon counts the copy,
+  /// not chat.db, so an empty mirror says so (D-UI-215) rather than
+  /// guessing what a copy would hold. Megabytes are decimal, rounded.
+  public static func from(_ mirror: MirrorStatusPayload?, zone: TimeZone = .current) -> CopySizing? {
+    guard let mirror else { return nil }
+    return CopySizing(
+      messages: mirror.messages, chats: mirror.chats,
+      megabytes: Int((Double(mirror.bytes) / 1_000_000).rounded()),
+      historyFrom: mirror.historyFrom.flatMap { WireDate.parse($0) }.map { ShellText.format($0, "yyyy-MM-dd", zone) },
+      made: mirror.phase != "empty")
   }
 }
 
@@ -177,10 +194,27 @@ public struct CopyProgressFacts: Equatable, Sendable {
   public let left: Int
   public let copied: Int
   public let asOf: Date
-  public init(left: Int, copied: Int, asOf: Date) {
+  /// v2 F7e (D-UI-216): what search can find so far, out of what it will;
+  /// nil from a source that does not say.
+  public let eligible: Int?
+  /// The history is copied and readable; search is still catching up.
+  public let indexing: Bool
+  public init(left: Int, copied: Int, asOf: Date, eligible: Int? = nil, indexing: Bool = false) {
     self.left = left
     self.copied = copied
     self.asOf = asOf
+    self.eligible = eligible
+    self.indexing = indexing
+  }
+
+  /// v2 F7e: the daemon's mirror as CopyProgress. Left is what search has
+  /// still to index, dated by when the daemon counted it; nil with no
+  /// mirror, or a count with no readable date.
+  public static func from(_ mirror: MirrorStatusPayload?) -> CopyProgressFacts? {
+    guard let mirror, let asOf = WireDate.parse(mirror.countedAt) else { return nil }
+    return CopyProgressFacts(
+      left: max(0, mirror.eligible - mirror.indexed), copied: mirror.indexed, asOf: asOf, eligible: mirror.eligible,
+      indexing: mirror.phase == "indexing")
   }
 }
 
@@ -472,6 +506,36 @@ public enum OnboardingCopy {
   public static let copying = "Copying, dated"
   public static func copied(_ n: Int) -> String {
     "\(count(n)) copied. You can use the app now; search covers what has arrived so far."
+  }
+  /// CopyProgress's sentence: search's share while it is still indexing
+  /// (D-UI-216), else how many are copied.
+  public static func progressLine(_ p: CopyProgressFacts) -> String {
+    if p.indexing, let eligible = p.eligible {
+      return ProvisionalUI.searchHas(count(p.copied), of: count(eligible))
+    }
+    return copied(p.copied)
+  }
+  /// 2c's heading: the copy that will be, or the copy that is (D-UI-215).
+  public static func sizedHeading(_ s: CopySizing?) -> String {
+    (s?.made ?? false) ? ProvisionalUI.copyMadeHeading : sizedTitle
+  }
+  /// 2c's rows. Nothing served says so; an empty copy says it is not
+  /// copied yet, never a 0 that reads as an empty history (D-UI-215).
+  public static func sizedRows(_ s: CopySizing?) -> [(String, String)] {
+    let unserved = ProvisionalUI.auditResultUnserved
+    let empty = s.map { $0.messages == 0 && !$0.made } ?? false
+    func cell(_ value: String?) -> String {
+      guard s != nil else { return unserved }
+      return empty ? ProvisionalUI.notCopiedYet : (value ?? unserved)
+    }
+    let disk = s.map { $0.made ? "\($0.megabytes) MB" : "\($0.megabytes) MB   (estimate, text only)" }
+    return [
+      ("messages", cell(s.map { count($0.messages) })),
+      ("chats", cell(s.map { count($0.chats) })),
+      ("on disk", cell(disk)),
+      ("history from", cell(s?.historyFrom)),
+      ("attachments", attachments),
+    ]
   }
   public static let continueLabel = "Continue"
 

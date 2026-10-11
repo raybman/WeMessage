@@ -73,7 +73,7 @@
         "reason": "not_in_this_version"
       }
     ],
-    "asOf": "2026-09-01T12:00:44.000Z",
+    "asOf": "2026-09-01T12:01:27.000Z",
     "mirror": {
       "path": "~/Library/Application Support/WeMessage/wemessage.db",
       "bytes": 178257920,

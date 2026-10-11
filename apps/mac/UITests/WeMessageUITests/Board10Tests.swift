@@ -15,6 +15,10 @@ import XCTest
 ///   empties stacked (10.B), each its own cause and exactly one action;
 ///   then its Settings page, the ages, pacing and collision (10.A, 10.D,
 ///   10.E).
+/// - stale-sync (v2 F7e, one launch, light): fully connected, but the
+///   daemon's clock is 45 s past its last read, so the age rule (D-UI-213)
+///   alone raises the banner and the iMessage age says how long nothing
+///   was read.
 /// The light launches run the accessibility audit. Every launch ends on the
 /// journal: no send, no draft action, no write. Shots are
 /// board-10-<state>-<appearance>.png. CI only.
@@ -48,6 +52,31 @@ final class Board10Tests: XCTestCase {
   @MainActor
   func testBoard10EmptiesDark() async throws {
     try await empties(appearance: "dark")
+  }
+
+  /// v2 F7e: no error code, no read-only state: only the daemon's own clock
+  /// running past its last read. The rail, the banner and the age row all
+  /// say stale, and the row says for how long.
+  @MainActor
+  func testBoard10StaleSync() async throws {
+    try await FakeDaemon.scenario("stale-sync")
+    let app = UITestApp.make(appearance: "light", reduceTransparency: false)
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let banner = QueueUI.element(app, ID.trustBanner)
+    XCTAssertTrue(banner.waitForExistence(timeout: UITestApp.timeout), "stale-sync: no trust banner")
+    XCTAssertTrue(QueueUI.label(app, ID.trustBanner).hasPrefix("iMessage has not synced since "))
+    XCTAssertEqual(QueueUI.value(app, ID.railIMessage), "stale")
+    QueueUI.element(app, ID.trustAction).click()
+    XCTAssertTrue(QueueUI.element(app, ID.freshness).waitForExistence(timeout: UITestApp.timeout), "no age table")
+    let imessage = QueueUI.label(app, ID.freshnessRowPrefix + "imessage")
+    XCTAssertTrue(imessage.contains("STALE"), "iMessage row: \(imessage)")
+    XCTAssertTrue(imessage.contains("no read for 45 s"), "iMessage row: \(imessage)")
+    XCTAssertTrue(imessage.contains("14 today"), "iMessage row: \(imessage)")
+    QueueUI.settle()
+    glance(app, name: "board-10-stale-sync-light.png")
+    try await QueueUI.assertJournal("board 10 stale-sync")
   }
 
   @MainActor

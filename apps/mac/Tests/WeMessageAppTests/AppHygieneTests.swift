@@ -437,9 +437,13 @@ struct AppHygieneTests {
   /// the daemon's index (coverage, indexing, debounce, chips, notes, the
   /// scrubber's rows, paging and the daemon-down line). v2 F2 retires
   /// D-UI-79: search runs on the daemon's index, with no client-side caps.
+  /// v2 F7's 213..218: the status fields (the age rule, the local copy, 2c
+  /// and CopyProgress from the mirror, the banner's handle, the re-read).
+  /// v2 F7 retires D-UI-20 (the banner names the handle status serves) and
+  /// D-UI-72 (the daemon serves the copy's counts).
   static let dUINumbers =
-    Array(1...50) + Array(52...78) + Array(80...131) + [132, 135, 140, 185] + Array(186...194) + Array(195...202)
-    + Array(203...212)
+    Array(1...19) + Array(21...50) + Array(52...71) + Array(73...78) + Array(80...131) + [132, 135, 140, 185]
+    + Array(186...194) + Array(195...202) + Array(203...212) + Array(213...218)
   static let dUIKeys = dUINumbers.map { "D-UI-\($0)" }
 
   /// ProvisionalUI.swift cut into its "// D-UI-n:" sections, keyed by n.
@@ -513,8 +517,12 @@ struct AppHygieneTests {
     let system = "System" + "Contacts("
     let provider = "Contacts" + "AvatarProvider("
     let guardLine = "precondition(!TestHooks.isUITest"
+    // v2 F7e (D-UI-217): the operator's own number comes from the daemon's
+    // status, never from the Contacts "me" card, in any file at all.
+    let meCard = "unified" + "Me" + "Contact"
     var leaks: [String] = []
     for (path, text) in files {
+      if text.contains(meCard) { leaks.append("\(path): reads the me card") }
       if path != home && text.contains(store) { leaks.append("\(path): names the store") }
       if path != hooks && text.contains(system) { leaks.append("\(path): builds the system seam") }
       if path != hooks && path != home && text.contains(provider) && !path.contains("/Tests/") {
@@ -552,7 +560,7 @@ struct AppHygieneTests {
     return leaks
   }
 
-  @Test("H-S4-5: the contacts store is named only in ContactsAvatarProvider.swift, built once behind a UI-test-flag refusal, and the hooks build it only after the flag returns the fixtures")
+  @Test("H-S4-5: the contacts store is named only in ContactsAvatarProvider.swift, built once behind a UI-test-flag refusal, and the hooks build it only after the flag returns the fixtures; no file reads the me card (v2 F7e)")
   func contactsStoreOnlyInProvider() throws {
     let home = Self.contactsFile
     let hooks = Self.appDir + "/TestHooks.swift"
@@ -581,6 +589,12 @@ struct AppHygieneTests {
     #expect(Self.contactsLeaks(unguarded, home: home, hooks: hooks).contains { $0.contains("not behind the flag") })
     let elsewhere = good + [("app/ShellModel.swift", "let a = \(seam)")]
     #expect(Self.contactsLeaks(elsewhere, home: home, hooks: hooks) == ["app/ShellModel.swift: builds the system seam"])
+    // v2 F7e: the banner, or even the provider's own file, reading the me card.
+    let meCard = "unified" + "Me" + "Contact"
+    let banner = good + [("app/Boards/Thread/ThreadView.swift", "let me = try? s.\(meCard)(withKeysToFetch: [])")]
+    #expect(Self.contactsLeaks(banner, home: home, hooks: hooks) == ["app/Boards/Thread/ThreadView.swift: reads the me card"])
+    let ownFile = [(home, good[0].1 + "\nlet m = s.\(meCard)"), good[1]]
+    #expect(Self.contactsLeaks(ownFile, home: home, hooks: hooks) == ["\(home): reads the me card"])
   }
 
   /// Types declared in a file under Fixtures/, and every name that looks like

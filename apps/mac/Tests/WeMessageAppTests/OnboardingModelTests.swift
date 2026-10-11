@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WeMessageKit
 
 @testable import WeMessageApp
 
@@ -210,5 +211,65 @@ struct OnboardingModelTests {
     for channel in OnboardingChannel.allCases where channel != .email {
       #expect(OnboardingCopy.warning(channel) != nil)
     }
+  }
+}
+
+// MARK: - v2 F7e, 2c and CopyProgress from the daemon's mirror (D-UI-215, D-UI-216)
+
+extension OnboardingModelTests {
+  static let utc = TimeZone(identifier: "UTC")!
+
+  static func richMirror() throws -> MirrorStatusPayload {
+    try #require(try ShellModelTests.decode(Reply.scenario("rich", "status.json"), StatusPayload.self).mirror)
+  }
+
+  @Test("F7e: a made copy's 2c rows are the daemon's counts, its size and its first day, under 'Your copy', with no estimate")
+  func sizingFromMirror() throws {
+    let sizing = try #require(CopySizing.from(try Self.richMirror(), zone: Self.utc))
+    #expect(sizing == CopySizing(messages: 527_147, chats: 3_953, megabytes: 178, historyFrom: "2014-03-02", made: true))
+    #expect(OnboardingCopy.sizedHeading(sizing) == ProvisionalUI.copyMadeHeading)
+    let rows = OnboardingCopy.sizedRows(sizing)
+    #expect(rows.map(\.0) == ["messages", "chats", "on disk", "history from", "attachments"])
+    #expect(rows.map(\.1) == ["527,147", "3,953", "178 MB", "2014-03-02", OnboardingCopy.attachments])
+    #expect(CopySizing.from(nil) == nil)
+    #expect(OnboardingCopy.sizedHeading(nil) == OnboardingCopy.sizedTitle)
+    #expect(OnboardingCopy.sizedRows(nil).prefix(4).allSatisfy { $0.1 == ProvisionalUI.auditResultUnserved })
+  }
+
+  @Test("F7e: an empty copy says 'not copied yet' on every counted row, never a 0 that reads as an empty history")
+  func emptyPhaseSaysNotCopied() throws {
+    var mirror = try Self.richMirror()
+    mirror.phase = "empty"
+    mirror.messages = 0
+    mirror.chats = 0
+    mirror.indexed = 0
+    mirror.eligible = 0
+    mirror.historyFrom = nil
+    mirror.bytes = 4096
+    let sizing = try #require(CopySizing.from(mirror, zone: Self.utc))
+    #expect(!sizing.made)
+    #expect(OnboardingCopy.sizedHeading(sizing) == OnboardingCopy.sizedTitle)
+    let rows = OnboardingCopy.sizedRows(sizing)
+    #expect(rows.prefix(4).map(\.1) == Array(repeating: ProvisionalUI.notCopiedYet, count: 4))
+    #expect(!rows.map(\.1).contains("0"))
+  }
+
+  @Test("F7e: while search backfills, CopyProgress says the history is readable and how much search has, dated by the daemon's count")
+  func copyProgressIsIndexing() throws {
+    var mirror = try Self.richMirror()
+    mirror.phase = "indexing"
+    mirror.indexed = 217_300
+    mirror.eligible = 530_000
+    let p = try #require(CopyProgressFacts.from(mirror))
+    #expect(p.left == 312_700)
+    #expect(p.copied == 217_300)
+    #expect(p.indexing)
+    #expect(p.asOf == WireDate.parse("2026-09-01T12:00:40.000Z"))
+    #expect(OnboardingCopy.progressLine(p) == "History is readable now. Search has 217,300 of 530,000.")
+    // current: the plain copied line.
+    let done = try #require(CopyProgressFacts.from(try Self.richMirror()))
+    #expect(!done.indexing && done.left == 0)
+    #expect(OnboardingCopy.progressLine(done) == OnboardingCopy.copied(527_147))
+    #expect(CopyProgressFacts.from(nil) == nil)
   }
 }

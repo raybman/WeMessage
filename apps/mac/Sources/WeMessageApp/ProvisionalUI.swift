@@ -32,7 +32,11 @@ import Foundation
 // coverage and indexing lines, the debounce, the chip words, the scrubber's
 // counts, the page footer and the daemon-down line. D-UI-51 is retired: the
 // daemon keeps Done, Snooze and Mute since v2 F3. D-UI-79 is retired: search
-// runs on the daemon's index since v2 F2, with no client-side caps).
+// runs on the daemon's index since v2 F2, with no client-side caps;
+// D-UI-213..218: the v2 F7 status fields, the age rule, the local copy's
+// size, 2c and CopyProgress from the mirror, the banner's handle and the
+// status re-read. v2 F7 retires D-UI-20, the banner names the handle status
+// serves, and D-UI-72, the daemon serves the copy's counts).
 // Every value below is the
 // plan's default, chosen only so the window can be built and tested before
 // the design questions are answered. They
@@ -205,15 +209,6 @@ public enum ProvisionalUI {
     case realStatusItem
   }
   public static let popoverSnapshot: PopoverSnapshot = .plainWindow
-
-  // D-UI-20: the reply banner before the daemon knows the account's number.
-  public enum ReplyingNumber: Sendable {
-    case omitted
-    case fromSettings
-    case placeholder
-  }
-  public static let replyingNumber: ReplyingNumber = .omitted
-  public static let replyingBanner = "Replying on iMessage"
 
   // D-UI-21: the window frost material (the S4a.0 spike's default). Drawn as
   // the window's container background, .containerBackground(for: .window),
@@ -689,16 +684,6 @@ public enum ProvisionalUI {
     case disclosureAndSkipOnly
   }
   public static let channelSteps: ChannelSteps = .disclosureAndSkipOnly
-
-  // D-UI-72: the daemon serves no message count, chat count, size or copy
-  // progress today, so the shipped seam answers nothing and 2c and
-  // CopyProgress print not served (auditResultUnserved). Make the copy
-  // records the choice; the copy itself is the daemon's ingest. The UI-test
-  // fixture serves the wireframe's figures.
-  public enum CopyFacts: Sendable {
-    case notServedUntilTheDaemonCounts
-  }
-  public static let copyFacts: CopyFacts = .notServedUntilTheDaemonCounts
 
   // D-UI-73: 2b draws the in-app half only (Waiting, the 2 s line, Open
   // System Settings again). The System Settings half of the wireframe is
@@ -1395,4 +1380,55 @@ public enum ProvisionalUI {
   // (v2 F2e-2 deviation: the plan names only the daemon-down words).
   public static let searchDaemonDown = "Search needs the WeMessage daemon. Nothing was searched."
   public static let searchNotRun = "The daemon did not run this search. Nothing was searched."
+
+  // D-UI-213: a fully connected iMessage ages to stale when the daemon's
+  // own clock (status.asOf) is more than 10 s past its last chat.db read
+  // (lastSyncAt), 3 times the 3 s poll fallback (D-F7-4). The row, the
+  // footer and the popover add how long nothing was read. A status with no
+  // asOf leaves the connection state alone to decide, as before. Never the
+  // app's wall clock.
+  public static let staleAfter: TimeInterval = 10
+  public static func noReadFor(_ seconds: Int) -> String { " \u{00B7} no read for \(seconds) s" }
+
+  // D-UI-214: Storage's local copy, from status.mirror: the size and the
+  // ~ path, then the counts and when they were taken. MB is 1,000,000
+  // bytes, as Finder counts. A daemon that serves no mirror keeps
+  // SettingsModel.storageUnreported.
+  public static func storageLine(megabytes: Int, path: String) -> String { "\(megabytes) MB \u{00B7} \(path)" }
+  public static func storageDetail(messages: String, chats: String, since: String?, counted: String) -> String {
+    var line = "\(messages) messages in \(chats) chats"
+    if let since { line += " since \(since)" }
+    return line + ", counted \(counted)."
+  }
+  public static func storageSize(megabytes: Int) -> String { "\(megabytes) MB" }
+
+  // D-UI-215: 2c reads the copy as made (status.mirror, D-F7-6) under its
+  // own heading; an empty mirror says not copied yet, never 0. The shipped
+  // seam answers nothing only while the daemon serves no mirror.
+  public static let copyMadeHeading = "Your copy"
+  public static let notCopiedYet = "not copied yet"
+
+  // D-UI-216: CopyProgress while the index catches up: the same two numbers
+  // the search coverage line shows (D-UI-204), so the two never disagree.
+  public static func searchHas(_ indexed: String, of eligible: String) -> String {
+    "History is readable now. Search has \(indexed) of \(eligible)."
+  }
+
+  // D-UI-217: the reply banner names the iMessage handle status serves
+  // (D-F7-1), raw as chat.db stores it; none served, the plain words.
+  // Never from Contacts. Retires D-UI-20.
+  public enum ReplyingNumber: Sendable {
+    case omitted
+    case fromStatus
+  }
+  public static let replyingNumber: ReplyingNumber = .fromStatus
+  public static let replyingBanner = "Replying on iMessage"
+  public static func replying(as handle: String?) -> String {
+    guard replyingNumber == .fromStatus, let handle, !handle.isEmpty else { return replyingBanner }
+    return replyingBanner + " as " + handle
+  }
+
+  // D-UI-218: status is re-read every 5 s while a window is visible and
+  // paused while none is, with no spinner.
+  public static let statusPollMilliseconds = 5_000
 }

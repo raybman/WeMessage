@@ -477,6 +477,8 @@ struct ShellView: View {
   /// v2 S4l, board 16: the OS layer reads what this window pushes.
   @State private var hub = OSLayerHub.shared
   @Environment(\.colorScheme) private var scheme
+  /// v2 F7e: the status poll pauses while the window is in the background.
+  @Environment(\.scenePhase) private var scenePhase
   /// 12.I: the first thread after onboarding. The rail has words until its
   /// first tile click, and the coach row sits under the panes until its
   /// first keypress (D-UI-70, D-UI-74).
@@ -567,6 +569,10 @@ struct ShellView: View {
     // frame, never a mid-transition one (H-S1).
     .transaction { if TestHooks.isUITest { $0.disablesAnimations = true } }
     .task { model.start() }
+    // v2 F7e (D-UI-218): status every 5 s while the window is visible; the
+    // task ends with the view.
+    .task { await model.statusPoll(sleeper: TaskSleeper()) }
+    .onChange(of: scenePhase, initial: true) { _, phase in model.windowVisible = phase != .background }
     // Board 16: the extra, the Dock and the main menu read one snapshot,
     // and their commands reach this model through the hub.
     .onAppear { model.bindOSLayer(hub) }

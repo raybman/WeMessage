@@ -20,6 +20,11 @@
  * This module READS chat.db and WRITES only through the CAS port. Its deps
  * carry no send port at all and must never gain one (arch row).
  *
+ * v2 F6e: a FILE draft (its body is empty) is matched by the transfer
+ * name of an outbound attachment row instead, through findOutboundFile.
+ * Text is never consulted for a file: an empty-text match would take any
+ * row at all as proof.
+ *
  * Known edge, accepted: the match is exact text in the same chat since the
  * first attempt. If the human typed the identical text by hand in Messages
  * after a failure, that row is taken as the draft's. The alternative is a
@@ -43,7 +48,10 @@ export const LATE_VERIFY_ACTOR: Actor = {
 
 export interface LateVerifyDeps {
   store: Store;
-  reader: Pick<ChatDbReader, 'resolveChat' | 'findOutboundMessage'>;
+  reader: Pick<
+    ChatDbReader,
+    'resolveChat' | 'findOutboundMessage' | 'findOutboundFile'
+  >;
   clock: Clock;
 }
 
@@ -60,9 +68,23 @@ export type LateVerifyResult =
  * dispatcher guard so the two can never disagree about what "landed" means.
  */
 export async function findLanded(
-  reader: Pick<ChatDbReader, 'findOutboundMessage'>,
-  input: { chatGuid: ChatGuid; body: string; ledger: SendLedgerView },
+  reader: Pick<ChatDbReader, 'findOutboundMessage' | 'findOutboundFile'>,
+  input: {
+    chatGuid: ChatGuid;
+    body: string;
+    ledger: SendLedgerView;
+    /** v2 F6e: the transfer name of a file draft; null for text. */
+    fileName: string | null;
+  },
 ): Promise<MessageGuid | null> {
+  if (input.fileName !== null) {
+    const file = await reader.findOutboundFile({
+      chatGuid: input.chatGuid,
+      transferName: input.fileName,
+      sinceIso: input.ledger.startedAt,
+    });
+    return file === null ? null : file.guid;
+  }
   const found = await reader.findOutboundMessage({
     chatGuid: input.chatGuid,
     text: input.body,
@@ -103,6 +125,7 @@ export async function verifyLate(
     chatGuid: resolved.chatGuid,
     body: draft.body,
     ledger,
+    fileName: store.getDraftFile(draftId)?.name ?? null,
   });
   if (guid === null) return { outcome: 'not-found' };
 

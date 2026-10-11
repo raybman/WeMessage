@@ -776,7 +776,9 @@ function sendBackendCallSites(): string[] {
     for (const name of carriers) {
       if (name === '') continue;
       const call = new RegExp(
-        `\\b${name.replace(/\$/g, '\\$')}\\s*\\.\\s*send\\s*\\(`,
+        // v2 F6e: `.sendFile(` reaches the backend too, and so does the
+        // `!`/`?.` spelling of either call.
+        `\\b${name.replace(/\$/g, '\\$')}\\s*\\.\\s*send(?:File)?\\s*!?\\s*(?:\\?\\.\\s*)?\\(`,
         'g',
       );
       const lines = src.split('\n');
@@ -1744,9 +1746,12 @@ describe('s7 Scenario 13: the surface did not move', () => {
      * s10 Slice 3 moved it again (the pre-gate service resolve), same count.
      * v2 A0p moved it again (the parked auto-approval requeue), same count.
      * v2 F6d moved it again (the file-draft hash check above it), same count.
+     * v2 F6e widened the search to `.sendFile(` and found the file half of
+     * the same send: two lines, one ternary, still only the dispatcher.
      */
     expect(sendBackendCallSites()).toEqual([
-      'packages/core/src/sending/dispatcher.ts:579',
+      'packages/core/src/sending/dispatcher.ts:580',
+      'packages/core/src/sending/dispatcher.ts:582',
     ]);
   });
 

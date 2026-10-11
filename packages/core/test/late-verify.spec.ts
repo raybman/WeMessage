@@ -77,6 +77,9 @@ function rig(opts: {
   found?: { guid: string } | null;
   /** 'raced': another writer moved the draft first. 'broken': the write itself failed. */
   casThrows?: 'raced' | 'broken';
+  /** v2 F6e: the draft carries this file; findOutboundFile answers fileFound. */
+  file?: { name: string } | null;
+  fileFound?: { guid: string } | null;
 }): Rig {
   const calls: string[] = [];
   const audits: Rig['audits'] = [];
@@ -98,6 +101,7 @@ function rig(opts: {
       calls.push(`getSendLedger:${id}`);
       return ledger;
     },
+    getDraftFile: () => opts.file ?? null,
     applyDraftTransition: (input: {
       id: string;
       from: string;
@@ -123,7 +127,10 @@ function rig(opts: {
       return { seq: audits.length, hash: '0'.repeat(64) };
     },
   } as unknown as Store;
-  const reader: Pick<ChatDbReader, 'resolveChat' | 'findOutboundMessage'> = {
+  const reader: Pick<
+    ChatDbReader,
+    'resolveChat' | 'findOutboundMessage' | 'findOutboundFile'
+  > = {
     resolveChat: (handle) => {
       calls.push(`resolveChat:${handle}`);
       return Promise.resolve(
@@ -140,6 +147,10 @@ function rig(opts: {
       calls.push('findOutboundMessage');
       lookups.push(q);
       return Promise.resolve(opts.found ?? null);
+    },
+    findOutboundFile: (q) => {
+      calls.push(`findOutboundFile:${q.transferName}:${q.sinceIso}`);
+      return Promise.resolve(opts.fileFound ?? null);
     },
   };
   return { deps: { store, reader, clock }, calls, audits, lookups };
@@ -284,5 +295,31 @@ describe('s10 Sl2: verifyLate', () => {
   it('the deps type has no backend slot (reads only, by construction)', () => {
     const r = rig({ draft: failedDraft(UNVERIFIED) });
     expect(Object.keys(r.deps).sort()).toEqual(['clock', 'reader', 'store']);
+  });
+});
+
+describe('v2 F6e: verifyLate for a file draft', () => {
+  it('looks for the transfer name from the first attempt, never for text', async () => {
+    const r = rig({
+      draft: failedDraft(UNVERIFIED, { body: '', originalBody: '' }),
+      file: { name: 'grey.png' },
+      found: { guid: 'ANY-TEXT-ROW' },
+      fileFound: { guid: 'FILE-LATE' },
+    });
+    const out = await verifyLate(r.deps, 'D1');
+    expect(out).toEqual({ outcome: 'sent', sentMessageGuid: 'FILE-LATE' });
+    expect(r.calls).toContain(`findOutboundFile:grey.png:${STARTED}`);
+    expect(r.calls).not.toContain('findOutboundMessage');
+  });
+
+  it('a file that never landed stays not-found even when a text row exists', async () => {
+    const r = rig({
+      draft: failedDraft(UNVERIFIED, { body: '', originalBody: '' }),
+      file: { name: 'grey.png' },
+      found: { guid: 'ANY-TEXT-ROW' },
+      fileFound: null,
+    });
+    expect(await verifyLate(r.deps, 'D1')).toEqual({ outcome: 'not-found' });
+    expect(r.calls).not.toContain('findOutboundMessage');
   });
 });

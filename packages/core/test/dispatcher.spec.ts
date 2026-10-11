@@ -29,6 +29,7 @@ import type {
   SendBackend,
   SendOutcome,
   SendLedgerView,
+  StagedFile,
   Store,
 } from '@wemessage/core';
 import {
@@ -105,6 +106,9 @@ function makeStore(cfg: {
    * reads its service FIRST for an 'any;-;' chat (amendment 6). Default null.
    */
   inbound?: Message | null;
+  /** v2 F6e: the file this draft carries and the hash its approval bound. */
+  file?: StagedFile | null;
+  approvalFile?: string | null;
 }): Store {
   const settings = cfg.settings ?? {};
   return {
@@ -230,8 +234,8 @@ function makeStore(cfg: {
     insertStagedFile: (f) => f,
     getStagedFile: () => null,
     bindDraftFile: () => undefined,
-    getDraftFile: () => null,
-    getApprovalFile: () => null,
+    getDraftFile: () => cfg.file ?? null,
+    getApprovalFile: () => cfg.approvalFile ?? null,
     sweepStaged: () => [],
     latestApproveApproval: () => null,
     listGraceElapsed: () => [],
@@ -299,6 +303,9 @@ function makeReader(cfg: {
   resolveChatThrows?: boolean;
   /** Sequence of results returned across successive poll calls; last value repeats past its end. */
   findOutboundQueue?: ({ guid: string } | null)[];
+  /** v2 F6e: what findOutboundFile answers, and every query it was asked. */
+  findFileResult?: { guid: string } | null;
+  fileLookups?: { chatGuid: string; transferName: string; sinceIso: string }[];
 }): ChatDbReader {
   let pollIndex = 0;
   return {
@@ -335,9 +342,10 @@ function makeReader(cfg: {
       return Promise.resolve({ turns: [], nextBefore: null });
     },
     // v2 F6: a file send's verification; no text send ever reaches it.
-    findOutboundFile: () => {
+    findOutboundFile: (q) => {
       cfg.calls.push('findOutboundFile');
-      return Promise.resolve(null);
+      cfg.fileLookups?.push(q);
+      return Promise.resolve(cfg.findFileResult ?? null);
     },
   };
 }
@@ -355,6 +363,11 @@ function makeBackend(cfg: {
       return new Promise((resolve) =>
         setTimeout(() => resolve(cfg.result), cfg.delayMs),
       );
+    },
+    // v2 F6e: the file half. Recorded, never mixed up with a text send.
+    sendFile: (input) => {
+      cfg.calls.push(`sendFile:${input.file.path}|${input.file.name}`);
+      return Promise.resolve(cfg.result);
     },
   };
 }
@@ -1919,5 +1932,199 @@ describe('s10 Sl3: send-moment service for any;-; chats', () => {
       }),
       backendCalls,
     );
+  });
+});
+
+/**
+ * v2 F6e: a file draft goes to `backend.sendFile` and is verified by the
+ * transfer name of the attachment row it lands, never by text. A file
+ * draft's body is empty, and an empty text match would take any row with
+ * no text as proof the file was sent.
+ *
+ * Teeth:
+ *  TF1. verify a file draft through findOutboundMessage (body text) -> the
+ *       textVerifyNeverUsedForFile row goes red.
+ *  TF2. call backend.send for a file draft -> the sendFile row goes red.
+ */
+describe('v2 F6e: file send and verify by transfer name', () => {
+  const SHA = 'a'.repeat(64);
+  const FILE: StagedFile = {
+    sha256: SHA,
+    name: 'grey.png',
+    mime: 'image/png',
+    bytes: 42,
+    stagedAt: NOW,
+    removedAt: null,
+  };
+  const OUTBOX_PATH = `/outbox/${SHA}/grey.png`;
+  const RESOLVED = {
+    chatGuid: 'iMessage;-;+15551234567',
+    service: 'imessage' as const,
+    isGroup: false,
+  };
+
+  function fileDeps(opts: {
+    calls: string[];
+    backendCalls: string[];
+    auditEvents?: AuditEvent[];
+    found: { guid: string } | null;
+    /** What findOutboundMessage would say: a text row that must be ignored. */
+    textFound?: { guid: string } | null;
+    ledger?: SendLedgerView | null;
+    fileLookups?: {
+      chatGuid: string;
+      transferName: string;
+      sinceIso: string;
+    }[];
+    result?: SendOutcome;
+  }): DispatchApprovedDeps {
+    return baseDeps({
+      store: makeStore({
+        draft: makeDraft({ id: 'D1', body: '', originalBody: '' }),
+        approval: makeApproval({ id: 'A1', draftId: 'D1' }),
+        settings: ALLOW_SETTINGS,
+        calls: opts.calls,
+        auditEvents: opts.auditEvents ?? [],
+        file: FILE,
+        approvalFile: SHA,
+        ledger: opts.ledger ?? null,
+      }),
+      reader: makeReader({
+        resolveChatResult: RESOLVED,
+        calls: opts.calls,
+        findOutboundQueue: [opts.textFound ?? { guid: 'TEXT-ROW' }],
+        findFileResult: opts.found,
+        ...(opts.fileLookups === undefined
+          ? {}
+          : { fileLookups: opts.fileLookups }),
+      }),
+      backend: makeBackend({
+        result: opts.result ?? { accepted: true },
+        calls: opts.backendCalls,
+      }),
+      outbox: {
+        rehash: () => Promise.resolve({ path: OUTBOX_PATH, sha256: SHA }),
+      },
+    });
+  }
+
+  it('fileSendVerifiesByTransferName', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const auditEvents: AuditEvent[] = [];
+    const fileLookups: {
+      chatGuid: string;
+      transferName: string;
+      sinceIso: string;
+    }[] = [];
+    const deps = fileDeps({
+      calls,
+      backendCalls,
+      auditEvents,
+      found: { guid: 'FILE-ROW' },
+      fileLookups,
+    });
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({ outcome: 'sent', sentMessageGuid: 'FILE-ROW' });
+    // The outbox path goes to sendFile; the name is what verify looks for.
+    expect(backendCalls).toEqual([`sendFile:${OUTBOX_PATH}|grey.png`]);
+    expect(fileLookups).toEqual([
+      { chatGuid: RESOLVED.chatGuid, transferName: 'grey.png', sinceIso: NOW },
+    ]);
+    // Attempted before the send, sent after the verify: the text order.
+    const order = calls.filter(
+      (c) => c.startsWith('beginSendAttempt') || c.startsWith('markDraftSent'),
+    );
+    expect(order).toEqual(['beginSendAttempt:D1', 'markDraftSent:D1']);
+    expect(auditEvents.map((e) => e.type)).toEqual([
+      'send.attempted',
+      'draft.sent',
+    ]);
+  });
+
+  it('textVerifyNeverUsedForFile', async () => {
+    // The file never lands; a text row (any row, the body is empty) does.
+    // Taking it as proof would mark a file "sent" that Messages never wrote.
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = fileDeps({
+      calls,
+      backendCalls,
+      found: null,
+      textFound: { guid: 'TEXT-ROW' },
+    });
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({ code: 'unverified' }),
+    });
+    expect(calls).not.toContain('findOutboundMessage');
+    expect(
+      calls.filter((c) => c === 'findOutboundFile').length,
+    ).toBeGreaterThan(1);
+    expect(backendCalls).toEqual([`sendFile:${OUTBOX_PATH}|grey.png`]);
+  });
+
+  it('an open ledger for a file draft looks for the FILE, and a landed one is never re-sent', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = fileDeps({
+      calls,
+      backendCalls,
+      found: { guid: 'LATE-FILE' },
+      ledger: {
+        attempt: 1,
+        startedAt: '2026-09-01T11:59:00.000Z',
+        verifiedGuid: null,
+      },
+    });
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({ outcome: 'sent', sentMessageGuid: 'LATE-FILE' });
+    expect(backendCalls).toEqual([]);
+    expect(calls).not.toContain('findOutboundMessage');
+  });
+
+  it('a refused file send fails with the backend code and is not verified', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = fileDeps({
+      calls,
+      backendCalls,
+      found: { guid: 'NEVER' },
+      result: {
+        accepted: false,
+        errorCode: 'messages-not-running',
+        detail: 'x',
+      },
+    });
+    const result = await dispatchApproved(deps, 'D1', 'A1');
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({ code: 'messages-not-running' }),
+    });
+    expect(calls).not.toContain('findOutboundFile');
+  });
+
+  it('a backend without sendFile fails honestly and never falls back to send', async () => {
+    const calls: string[] = [];
+    const backendCalls: string[] = [];
+    const deps = fileDeps({ calls, backendCalls, found: { guid: 'X' } });
+    const textOnly: SendBackend = {
+      isAvailable: () => Promise.resolve(true),
+      send: (input) => {
+        backendCalls.push(`send:${input.body}`);
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const result = await dispatchApproved(
+      { ...deps, backend: textOnly },
+      'D1',
+      'A1',
+    );
+    expect(result).toEqual({
+      outcome: 'failed',
+      error: expect.objectContaining({ code: 'backend-error' }),
+    });
+    expect(backendCalls).toEqual([]);
   });
 });

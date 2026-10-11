@@ -20,13 +20,25 @@ import type {
   ChatDbReader,
   Clock,
   SendBackend,
+  SendFileInput,
   SendInput,
   SendOutcome,
 } from '@wemessage/core';
 
 export interface LoopbackSendBackend extends SendBackend {
-  /** Total `send()` invocations so far (checkpoint rows 3/4 assert 0). */
+  /**
+   * Total backend invocations so far, `send()` and `sendFile()` together
+   * (checkpoint rows 3/4 and the F6d refusal rows assert 0: "never reached
+   * the backend" has to cover the file half too).
+   */
   callCount(): number;
+  /** v2 F6e: all inputs `sendFile()` was called with, in call order. */
+  fileCalls(): SendFileInput[];
+  /** v2 F6e: the guid of the attachment row the last `sendFile()` landed. */
+  lastFileGuid(): string | null;
+  /** v2 F6e: `sendFile()` still accepts but stops writing rows. */
+  sabotageFiles(): void;
+  sendFile(input: SendFileInput): Promise<SendOutcome>;
   /** All inputs `send()` was called with, in call order. */
   calls(): SendInput[];
   /** After calling this, `send()` still accepts but stops writing rows. */
@@ -59,6 +71,9 @@ export function createLoopbackSendBackend(
   opts: LoopbackOptions = {},
 ): LoopbackSendBackend {
   const seen: SendInput[] = [];
+  const seenFiles: SendFileInput[] = [];
+  let lastFile: string | null = null;
+  let filesSabotaged = false;
   let sabotaged = false;
   const doomed = new Set<string>();
 
@@ -76,7 +91,26 @@ export function createLoopbackSendBackend(
       }
       return Promise.resolve({ accepted: true });
     },
-    callCount: () => seen.length,
+    // v2 F6e: lands an outbound attachment-only row carrying the transfer
+    // name, which the real `findOutboundFile` SQL then discovers. The path
+    // is recorded and never read: the loopback has no Messages to hand it to.
+    sendFile(input: SendFileInput): Promise<SendOutcome> {
+      seenFiles.push(input);
+      if (!filesSabotaged) {
+        lastFile = fixture.appendOutboundFile({
+          chatGuid: input.chatGuid,
+          transferName: input.file.name,
+          atIso: clock.now(),
+        }).guid;
+      }
+      return Promise.resolve({ accepted: true });
+    },
+    callCount: () => seen.length + seenFiles.length,
+    fileCalls: () => [...seenFiles],
+    lastFileGuid: () => lastFile,
+    sabotageFiles: () => {
+      filesSabotaged = true;
+    },
     calls: () => [...seen],
     sabotage: () => {
       sabotaged = true;

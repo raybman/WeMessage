@@ -274,7 +274,7 @@ describe('v2 F6d: staging streams, hashes, caps and sniffs', () => {
     const png = syntheticPng(6, 6);
     expect((await stage(h, png)).statusCode).toBe(200);
     h.clockCtl.advance(STAGE_KEEP_MS);
-    // Bound and sent (F6d: the send fails, which ends the draft).
+    // Bound and sent (since F6e the send verifies, which ends the draft).
     const send = await h.server.app.inject({
       method: 'POST',
       url: '/v1/send',

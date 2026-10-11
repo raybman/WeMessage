@@ -5,9 +5,9 @@
  *
  * Every byte is generated here (syntheticPng). The loopback backend counts
  * its calls, which is how "never reaches the backend" is proved rather than
- * assumed. F6d has no file send yet (F6e), so an agreeing file draft fails
- * 'backend-error' with no backend call; what these rows pin is that a
- * disagreeing one fails EARLIER, as a mismatch, before anything else.
+ * assumed. Since F6e an agreeing file draft is sent (one `sendFile`) and
+ * verified by transfer name; what these rows pin is that a disagreeing one
+ * fails EARLIER, as a mismatch, before anything reaches the backend.
  */
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -86,10 +86,10 @@ describe('v2 F6d: approval binds the file by hash', () => {
     expect(h.store.getApproval(approvalId!)?.action).toBe('approve');
     expect(h.store.getApprovalFile(approvalId!)).toBe(sha(png));
     expect(h.store.getDraftFile(sent.draftId)?.sha256).toBe(sha(png));
-    // F6d: the file send itself is F6e; an agreeing draft gets that far.
-    expect(sent.outcome).toBe('failed');
-    expect(sent.error?.code).toBe('backend-error');
-    expect(h.backend.callCount()).toBe(0);
+    // F6e: an agreeing draft is sent, once, as a file.
+    expect(sent.outcome).toBe('sent');
+    expect(h.backend.callCount()).toBe(1);
+    expect(h.backend.fileCalls()).toHaveLength(1);
 
     // Atomic: an approval whose hash cannot be written writes neither.
     const draft: Draft = {
@@ -184,9 +184,12 @@ describe('v2 F6d: approval binds the file by hash', () => {
     const h = await on();
     const png = syntheticPng(8, 8);
     const { stageId } = await stage(h, png);
+    // Accepted but never landed: the draft is failed 'unverified', and
+    // the retry's late verify finds nothing, so a real retry follows.
+    h.backend.sabotageFiles();
     const first = await sendFile(h, stageId);
-    // F6d: an agreeing draft fails at the not-yet-wired send.
-    expect(first.error?.code).toBe('backend-error');
+    expect(first.error?.code).toBe('unverified');
+    expect(h.backend.callCount()).toBe(1);
 
     // The bytes change between the failure and the retry.
     writeFileSync(
@@ -209,7 +212,8 @@ describe('v2 F6d: approval binds the file by hash', () => {
     expect((failed[1] as { error: { code: string } }).error.code).toBe(
       'attachment-mismatch',
     );
-    expect(h.backend.callCount()).toBe(0);
+    // The changed bytes never reached the backend: still the one call.
+    expect(h.backend.callCount()).toBe(1);
   });
 
   it('a file draft retry is refused while attachments are off', async () => {

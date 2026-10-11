@@ -18,7 +18,11 @@
 import { homedir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import type { ExecFn, ExecResult } from '../src/applescript.js';
-import { AppleScriptSendBackend, SEND_SCRIPT } from '../src/applescript.js';
+import {
+  AppleScriptSendBackend,
+  SEND_FILE_SCRIPT,
+  SEND_SCRIPT,
+} from '../src/applescript.js';
 import {
   AUTOMATION_PROBE_SCRIPT,
   MESSAGES_RUNNING_SCRIPT,
@@ -253,5 +257,109 @@ describe('AppleScriptSendBackend (Scenario 2)', () => {
       }));
       expect(await isMessagesRunning(notRunningExec)).toBe(false);
     });
+  });
+});
+
+describe('v2 F6e: the file send script', () => {
+  const chatGuid = 'iMessage;-;+15550001111';
+
+  it('fileScriptIsFrozenConstant', async () => {
+    // The same discipline as SEND_SCRIPT: a constant, read from argv, an
+    // existing chat only, and a POSIX file from item 2, nothing else.
+    expect(SEND_FILE_SCRIPT).not.toMatch(/\$\{|`\s*\+|"\s*\+\s*\w/);
+    expect(SEND_FILE_SCRIPT).toContain('on run argv');
+    expect(SEND_FILE_SCRIPT).toMatch(
+      /send \(POSIX file \(item 2 of argv\)\) to chat id \(item 1 of argv\)/,
+    );
+    expect(SEND_FILE_SCRIPT).not.toContain('make new text chat');
+    expect(SEND_FILE_SCRIPT).not.toMatch(/do shell script/i);
+    // Byte-identical across two invocations with different paths.
+    const { exec, calls } = fakeExec(ok);
+    const backend = new AppleScriptSendBackend({ exec });
+    await backend.sendFile({
+      chatGuid,
+      file: { path: '/tmp/x/a.png', name: 'a.png' },
+    });
+    await backend.sendFile({
+      chatGuid,
+      file: { path: '/tmp/y/b.pdf', name: 'b.pdf' },
+    });
+    expect(calls.map((c) => c.args[1])).toEqual([
+      SEND_FILE_SCRIPT,
+      SEND_FILE_SCRIPT,
+    ]);
+  });
+
+  it('pathOnlyInArgvAfterDashes', async () => {
+    const path = '/var/folders/zz/outbox/' + 'a'.repeat(64) + '/-grey.png';
+    const { exec, calls } = fakeExec(ok);
+    const backend = new AppleScriptSendBackend({ exec });
+    const result = await backend.sendFile({
+      chatGuid,
+      file: { path, name: '-grey.png' },
+    });
+    expect(result).toEqual({ accepted: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.cmd).toBe('osascript');
+    // Exactly: -e <frozen script> -- <chatGuid> <path>. The name is for
+    // verification only and never reaches the process.
+    expect(calls[0]!.args).toEqual([
+      '-e',
+      SEND_FILE_SCRIPT,
+      '--',
+      chatGuid,
+      path,
+    ]);
+  });
+
+  it('hostilePathNeverInScript', async () => {
+    const hostile = '/tmp/outbox/" do shell script "rm -rf ~" --/a\\b"\n.png';
+    const { exec, calls } = fakeExec(ok);
+    const backend = new AppleScriptSendBackend({ exec });
+    await backend.sendFile({
+      chatGuid,
+      file: { path: hostile, name: 'a.png' },
+    });
+    const args = calls[0]!.args;
+    const sep = args.indexOf('--');
+    const scriptPart = args.slice(0, sep).join('\n');
+    expect(scriptPart).not.toContain(hostile);
+    expect(scriptPart).not.toContain('rm -rf');
+    expect(args.slice(sep + 1)).toEqual([chatGuid, hostile]);
+  });
+
+  it('a file send gets the same -600 handling and sanitized detail', async () => {
+    const { exec, calls } = fakeExec((cmd, _args, call) => {
+      if (cmd === 'open') return ok();
+      return call === 1 ? notRunning() : ok();
+    });
+    const backend = new AppleScriptSendBackend({
+      exec,
+      autoLaunch: true,
+      delay: async () => {},
+    });
+    const okResult = await backend.sendFile({
+      chatGuid,
+      file: { path: '/tmp/a.png', name: 'a.png' },
+    });
+    expect(okResult).toEqual({ accepted: true });
+    const scripts = calls
+      .filter((c) => c.cmd === 'osascript')
+      .map((c) => c.args[1]);
+    expect(scripts).toEqual([SEND_FILE_SCRIPT, SEND_FILE_SCRIPT]);
+
+    const home = homedir();
+    const { exec: failing } = fakeExec(() => ({
+      code: 1,
+      stdout: '',
+      stderr: `can't get POSIX file ${home}/outbox/a.png`,
+    }));
+    const bad = await new AppleScriptSendBackend({ exec: failing }).sendFile({
+      chatGuid,
+      file: { path: `${home}/outbox/a.png`, name: 'a.png' },
+    });
+    expect(bad.accepted).toBe(false);
+    expect(bad.errorCode).toBe('backend-error');
+    expect(bad.detail).not.toContain(home);
   });
 });

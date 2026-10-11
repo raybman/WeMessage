@@ -15,7 +15,12 @@
  * `execFile`-backed implementation.
  */
 import { homedir } from 'node:os';
-import type { SendBackend, SendInput, SendOutcome } from '@wemessage/core';
+import type {
+  SendBackend,
+  SendFileInput,
+  SendInput,
+  SendOutcome,
+} from '@wemessage/core';
 import { isMessagesRunning, probeAutomation } from './probes.js';
 
 export interface ExecResult {
@@ -49,6 +54,20 @@ export const SEND_SCRIPT = [
   'on run argv',
   '  tell application "Messages"',
   '    send (item 2 of argv) to chat id (item 1 of argv)',
+  '  end tell',
+  'end run',
+].join('\n');
+
+/**
+ * v2 F6e: the file twin of SEND_SCRIPT, frozen the same way. The outbox
+ * path is item 2 of argv and becomes a file reference only inside the
+ * script (`POSIX file`), so a path containing quotes or AppleScript is
+ * inert text. Same existing-chat-only target as SEND_SCRIPT.
+ */
+export const SEND_FILE_SCRIPT = [
+  'on run argv',
+  '  tell application "Messages"',
+  '    send (POSIX file (item 2 of argv)) to chat id (item 1 of argv)',
   '  end tell',
   'end run',
 ].join('\n');
@@ -89,20 +108,35 @@ export class AppleScriptSendBackend implements SendBackend {
     return isMessagesRunning(this.exec);
   }
 
-  private runSend(input: SendInput): Promise<ExecResult> {
-    // argv AFTER `--`: osascript stops flag parsing there, so a body that
-    // happens to start with `-` is never mistaken for an osascript flag.
-    return this.exec('osascript', [
-      '-e',
-      SEND_SCRIPT,
-      '--',
-      input.chatGuid,
-      input.body,
-    ]);
+  private runScript(
+    script: string,
+    chatGuid: string,
+    payload: string,
+  ): Promise<ExecResult> {
+    // argv AFTER `--`: osascript stops flag parsing there, so a body (or a
+    // file path) that happens to start with `-` is never mistaken for an
+    // osascript flag.
+    return this.exec('osascript', ['-e', script, '--', chatGuid, payload]);
   }
 
   async send(input: SendInput): Promise<SendOutcome> {
-    const first = await this.runSend(input);
+    return this.deliver(() =>
+      this.runScript(SEND_SCRIPT, input.chatGuid, input.body),
+    );
+  }
+
+  /**
+   * v2 F6e: send one outbox file. Only the path reaches osascript; the
+   * name is for the dispatcher's verify. The same -600 handling as text.
+   */
+  async sendFile(input: SendFileInput): Promise<SendOutcome> {
+    return this.deliver(() =>
+      this.runScript(SEND_FILE_SCRIPT, input.chatGuid, input.file.path),
+    );
+  }
+
+  private async deliver(run: () => Promise<ExecResult>): Promise<SendOutcome> {
+    const first = await run();
     if (first.code === 0) return { accepted: true };
 
     if (!isMessagesNotRunningError(first)) {
@@ -124,7 +158,7 @@ export class AppleScriptSendBackend implements SendBackend {
     // auto-launch flow: launch Messages, wait, retry exactly once.
     await this.exec('open', ['-a', 'Messages']);
     await this.delayFn(LAUNCH_WAIT_MS);
-    const retry = await this.runSend(input);
+    const retry = await run();
     if (retry.code === 0) return { accepted: true };
     return {
       accepted: false,

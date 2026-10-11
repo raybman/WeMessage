@@ -29,7 +29,6 @@ import type { AuditEvent } from '../audit/events.js';
 import type {
   Actor,
   Autonomy,
-  ChatGuid,
   DraftError,
   GateDenyReason,
   IsoUtc,
@@ -120,20 +119,20 @@ export type DispatchOutcome =
 const VERIFY_BUDGET_MS = 10_000;
 const INITIAL_INTERVAL_MS = 250;
 
+/**
+ * v2 F6e: the loop takes the lookup, so a text draft polls
+ * findOutboundMessage by body and a file draft polls findOutboundFile by
+ * transfer name, and neither can fall through to the other.
+ */
 async function verifyPoll(
-  reader: Pick<ChatDbReader, 'findOutboundMessage'>,
+  find: () => Promise<{ guid: MessageGuid } | null>,
   clock: Clock,
   delay: (ms: number) => Promise<void>,
-  input: { chatGuid: ChatGuid; body: string; sendStartedAt: IsoUtc },
 ): Promise<{ verified: true; guid: MessageGuid } | { verified: false }> {
   const startMs = clock.nowMs();
   let interval = INITIAL_INTERVAL_MS;
   for (;;) {
-    const found = await reader.findOutboundMessage({
-      chatGuid: input.chatGuid,
-      text: input.body,
-      sinceIso: input.sendStartedAt,
-    });
+    const found = await find();
     if (found !== null) return { verified: true, guid: found.guid };
     const elapsed = clock.nowMs() - startMs;
     const remaining = VERIFY_BUDGET_MS - elapsed;
@@ -490,6 +489,7 @@ export async function dispatchApproved(
     // attempt. A swapped outbox file is a mismatch; a deleted one is
     // missing. Neither is retried into a send of something else.
     const file = store.getDraftFile(draftId);
+    let outgoingFile: { path: string; name: string } | null = null;
     if (file !== null) {
       const approved = store.getApprovalFile(approvalId);
       if (approved === null || approved !== file.sha256) {
@@ -525,12 +525,9 @@ export async function dispatchApproved(
           at: clock.now(),
         });
       }
-      // The file send itself, and its verify by transfer name, are v2 F6e.
-      return fail(store, clock, actor, draftId, {
-        code: 'backend-error',
-        message: 'file sends are not wired in this build',
-        at: clock.now(),
-      });
+      // v2 F6e: the path is the one just hashed; the name is the transfer
+      // name Messages will write, which is what verify looks for.
+      outgoingFile = { path: onDisk.path, name: file.name };
     }
 
     // s10 Slice 2: no blind re-send. An open ledger (attempted, never
@@ -544,6 +541,7 @@ export async function dispatchApproved(
         chatGuid: resolved.chatGuid,
         body: draft.body,
         ledger,
+        fileName: outgoingFile?.name ?? null,
       });
       if (landed !== null) {
         applyDraftTransition({
@@ -576,10 +574,12 @@ export async function dispatchApproved(
     });
 
     const sendStartedAt = clock.now();
-    const sendResult = await backend.send({
-      chatGuid: resolved.chatGuid,
-      body: draft.body,
-    });
+    const chatGuid = resolved.chatGuid;
+    const sendResult =
+      outgoingFile === null
+        ? await backend.send({ chatGuid, body: draft.body })
+        : // Checked above: a file draft never reaches here without sendFile.
+          await backend.sendFile!({ chatGuid, file: outgoingFile });
     if (!sendResult.accepted) {
       return fail(store, clock, actor, draftId, {
         code: sendResult.errorCode ?? 'backend-error',
@@ -588,11 +588,24 @@ export async function dispatchApproved(
       });
     }
 
-    const verified = await verifyPoll(reader, clock, delay, {
-      chatGuid: resolved.chatGuid,
-      body: draft.body,
-      sendStartedAt,
-    });
+    const sentFile = outgoingFile;
+    const verified = await verifyPoll(
+      sentFile === null
+        ? () =>
+            reader.findOutboundMessage({
+              chatGuid,
+              text: draft.body,
+              sinceIso: sendStartedAt,
+            })
+        : () =>
+            reader.findOutboundFile({
+              chatGuid,
+              transferName: sentFile.name,
+              sinceIso: sendStartedAt,
+            }),
+      clock,
+      delay,
+    );
     if (!verified.verified) {
       return fail(store, clock, actor, draftId, {
         code: 'unverified',

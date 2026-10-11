@@ -20,6 +20,7 @@ import type {
   ChannelSource,
   ChatDbReader,
   Clock,
+  DispatchOutbox,
   Draft,
   LateVerifyResult,
   SendBackend,
@@ -68,7 +69,9 @@ import {
 import { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
 import {
   registerAttachmentRoutes,
+  registerStageRoute,
   type AttachmentRouteDeps,
+  type StageRouteDeps,
 } from './routes/attachments.js';
 import type { SupervisionDeps } from './connection.js';
 import { registerSseRoute, type SseTimer } from './routes/events-sse.js';
@@ -129,6 +132,8 @@ export interface DaemonOptions {
     delay: (ms: number) => Promise<void>;
     doctorProbes: DoctorProbes;
     sink?: AuditSink;
+    /** v2 F6d: where a file draft's bytes are re-hashed from at send time. */
+    outbox?: DispatchOutbox;
   };
   /**
    * s3-execution Scenario 9: when provided, registers `POST /v1/disconnect`
@@ -233,6 +238,12 @@ export interface DaemonOptions {
    * the closure.
    */
   attachments?: AttachmentRouteDeps;
+
+  /**
+   * v2 F6d: when provided, registers `POST /v1/attachments/staged`, the
+   * operator's file into the outbox. Off (409) until `send.attachments`.
+   */
+  stage?: StageRouteDeps;
 
   /**
    * s7 Scenario 3: the SSE keepalive seam (C-5). Tests hand in a timer they
@@ -505,6 +516,7 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
       doctorProbes: opts.send.doctorProbes,
       sink,
       supervisor: supervision.supervisor,
+      ...(opts.send.outbox !== undefined ? { outbox: opts.send.outbox } : {}),
     });
   }
 
@@ -666,6 +678,12 @@ export async function buildServer(opts: DaemonOptions): Promise<DaemonServer> {
     // v2 F6b: route ratchet #32. Operator bearer only: an adapter token is
     // refused by the hook above, so agents never reach a file's bytes.
     registerAttachmentRoutes(app, opts.attachments);
+  }
+
+  if (opts.stage) {
+    // v2 F6d: route ratchet #33. Operator bearer only, like every route but
+    // health and the adapter socket: agents cannot attach (D-F6-4).
+    await registerStageRoute(app, opts.stage);
   }
 
   if (opts.connection && sink) {

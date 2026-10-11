@@ -973,8 +973,9 @@ describe('s6 Sc11 row 11: the transport surface grew by exactly two routes', () 
     // `PUT /v1/threads/:guid/state`, 76.
     // v2 F2b (#30) added `GET /v1/search` and its twin, 78. v2 F2c (#31)
     // added `GET /v1/threads/:guid/years` and its twin, 80. v2 F6b (#32)
-    // added `GET /v1/attachments/:id` and its twin, 82.
-    expect(ROUTE_TABLE).toHaveLength(82);
+    // added `GET /v1/attachments/:id` and its twin, 82. v2 F6d (#33)
+    // added `POST /v1/attachments/staged`, 83.
+    expect(ROUTE_TABLE).toHaveLength(83);
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/pause');
     expect(ROUTE_TABLE).toContain('POST /v1/toggles/global-mode');
   });

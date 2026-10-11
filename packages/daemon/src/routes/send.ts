@@ -35,6 +35,7 @@ import {
   type ChatDbReader,
   type Clock,
   type DispatchGateDenied,
+  type DispatchOutbox,
   type Draft,
   type SendBackend,
   type Store,
@@ -42,6 +43,7 @@ import {
 import type { AuditSink } from '../audit-sink.js';
 import { runDoctor, type DoctorProbes } from '../doctor.js';
 import type { Supervisor } from '../launchd/contract.js';
+import { attachmentsEnabled, STAGE_ID } from '../attachments/outbox.js';
 
 /**
  * s3-execution Scenario 11 (§2.2.3 row 2, "send capability lost mid-run"):
@@ -73,15 +75,34 @@ export interface SendRouteDeps {
    * worse than no field at all.
    */
   supervisor: Supervisor;
+  /**
+   * v2 F6d: the outbox the dispatcher re-hashes a file draft's bytes from.
+   * Absent, a file draft fails 'attachment-missing' and nothing is sent.
+   */
+  outbox?: DispatchOutbox;
 }
 
 /** F-22: the reserved, permanently-disabled adapter row humans send under. */
 const HUMAN_ADAPTER_ID = 'human';
 
-const sendBody = z.strictObject({
-  chatGuid: z.string().min(1),
-  body: z.string().min(1),
-});
+/**
+ * v2 F6d: text OR one staged file, never both and never neither (D-F6-3).
+ * One strict object with both fields optional and a refinement that wants
+ * exactly one, rather than a `z.union`: the contract ratchet requires every
+ * request schema to be a closed object at its root (`type: object`,
+ * `additionalProperties: false`), and a union publishes as a bare `anyOf`.
+ * `{chatGuid, body, file}` and `{chatGuid}` are both a 400. A caption is a
+ * second, text, send.
+ */
+const sendBody = z
+  .strictObject({
+    chatGuid: z.string().min(1),
+    body: z.string().min(1).optional(),
+    file: z.string().regex(STAGE_ID).optional(),
+  })
+  .refine((b) => (b.body === undefined) !== (b.file === undefined), {
+    message: 'exactly one of body or file',
+  });
 
 export function registerSendRoutes(
   app: FastifyInstance,
@@ -110,7 +131,19 @@ export function registerSendRoutes(
         detail: { issues: parsed.error.issues },
       });
     }
-    const { chatGuid, body } = parsed.data;
+    const { chatGuid } = parsed.data;
+    const file = parsed.data.file ?? null;
+    const body = parsed.data.body ?? '';
+    if (file !== null) {
+      // D-F6-1: off until one real file send has been verified by hand.
+      if (!attachmentsEnabled(store)) {
+        return reply.code(409).send({ error: 'attachments-unproven' });
+      }
+      const staged = store.getStagedFile(file);
+      if (staged === null || staged.removedAt !== null) {
+        return reply.code(404).send({ error: 'stage-not-found' });
+      }
+    }
     const handle = parseChatGuid(chatGuid).handle;
     const actor = humanApiActor();
     const mintedAt = clock.now();
@@ -129,7 +162,14 @@ export function registerSendRoutes(
       expiresAt: mintedAt, // moot: dispatched synchronously below, never sits pending
       createdAt: mintedAt,
     };
-    store.insertDraft(draft);
+    if (file === null) {
+      store.insertDraft(draft);
+    } else {
+      // The draft and its file in one transaction: a file draft (empty
+      // body) never exists without the hash it carries. The only caller
+      // (arch row): agents cannot attach (D-F6-4).
+      store.bindDraftFile(draft, file, mintedAt);
+    }
     sink.append({ type: 'draft.created', draftId: draft.id, draft }, actor);
     sink.broadcast({
       event: 'draft.created',
@@ -169,6 +209,7 @@ export function registerSendRoutes(
         clock,
         delay,
         backendName,
+        ...(deps.outbox !== undefined ? { outbox: deps.outbox } : {}),
         emit: (event) => {
           gateDenial = event;
         },

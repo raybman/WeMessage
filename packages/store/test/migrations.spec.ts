@@ -136,6 +136,11 @@ const EXPECTED_COLUMNS: Record<string, string[]> = {
   message_fts_idx: ['segid', 'term', 'pgno'],
   // The stable doc-id map: FTS rowid = doc_id, which VACUUM cannot renumber.
   search_doc: ['doc_id', 'guid'],
+  // v2 F6d: 0004_attachments.sql. Staged outbound files, the one file a
+  // draft carries, and the hash an approval authorised.
+  staged_files: ['sha256', 'name', 'mime', 'bytes', 'staged_at', 'removed_at'],
+  draft_files: ['draft_id', 'sha256', 'bound_at'],
+  approval_files: ['approval_id', 'sha256'],
 };
 
 describe('store migrations (§2.3 schema)', () => {
@@ -255,6 +260,10 @@ describe('store migrations (§2.3 schema)', () => {
         { id: '0001_init.sql', applied_at: '2026-09-01T12:00:00.000Z' },
         { id: '0002_thread_state.sql', applied_at: '2026-09-01T12:00:00.000Z' },
         { id: '0003_search.sql', applied_at: '2026-09-01T12:00:00.000Z' },
+        {
+          id: '0004_attachments.sql',
+          applied_at: '2026-09-01T12:00:00.000Z',
+        },
       ]);
     } finally {
       reopened.close();
@@ -266,6 +275,7 @@ describe('store migrations (§2.3 schema)', () => {
       .prepare('SELECT applied_at FROM _migrations')
       .all() as Array<{ applied_at: string }>;
     expect(applied.map((r) => r.applied_at)).toEqual([
+      '2026-09-01T12:00:00.000Z',
       '2026-09-01T12:00:00.000Z',
       '2026-09-01T12:00:00.000Z',
       '2026-09-01T12:00:00.000Z',
@@ -335,6 +345,11 @@ describe('store migrations (§2.3 schema)', () => {
       readdirSync(migrations)
         .filter((f) => f.endsWith('.sql'))
         .sort(),
-    ).toEqual(['0001_init.sql', '0002_thread_state.sql', '0003_search.sql']);
+    ).toEqual([
+      '0001_init.sql',
+      '0002_thread_state.sql',
+      '0003_search.sql',
+      '0004_attachments.sql',
+    ]);
   });
 });

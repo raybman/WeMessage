@@ -1701,7 +1701,8 @@ describe('s7 Scenario 13: the surface did not move', () => {
     // v2 F2b (#30) added `GET /v1/search` and its twin: 78, no event.
     // v2 F2c (#31) added `GET /v1/threads/:guid/years` and its twin: 80.
     // v2 F6b (#32) added `GET /v1/attachments/:id` and its twin: 82, no event.
-    expect(ROUTE_TABLE).toHaveLength(82);
+    // v2 F6d (#33) added `POST /v1/attachments/staged`: 83, no event.
+    expect(ROUTE_TABLE).toHaveLength(83);
     expect(WS_EVENT_VOCABULARY).toHaveLength(22);
     expect(EMITTED_WS_EVENTS).toHaveLength(22);
     expect(UNEMITTED_WS_EVENTS).toHaveLength(0);
@@ -1742,9 +1743,10 @@ describe('s7 Scenario 13: the surface did not move', () => {
      * sit above it), not the count: still one site, still the dispatcher.
      * s10 Slice 3 moved it again (the pre-gate service resolve), same count.
      * v2 A0p moved it again (the parked auto-approval requeue), same count.
+     * v2 F6d moved it again (the file-draft hash check above it), same count.
      */
     expect(sendBackendCallSites()).toEqual([
-      'packages/core/src/sending/dispatcher.ts:515',
+      'packages/core/src/sending/dispatcher.ts:579',
     ]);
   });
 

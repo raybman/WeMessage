@@ -342,6 +342,7 @@ struct ContractTests {
       .createRule(RuleInput(name: "Minimal", matcher: .contact(["+15551234567"]), adapterId: "echo")),
       .createSchedule(ScheduleInput(name: "Work", timezone: "America/Los_Angeles", windows: [window], enabled: true)),
       .send(to: "+15551234567", body: "on my way"),
+      .sendFile(to: "+15551234567", stageId: String(repeating: "a", count: 64)),
       .setGlobalMode(.draftOnly),
       .setKillSwitch(on: true, circuit: true),
       .setKillSwitch(on: false, circuit: nil),

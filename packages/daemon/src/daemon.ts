@@ -60,6 +60,7 @@ import { createInboundDispatch } from './adapters/dispatch.js';
 import type { AdapterTransportHandle } from './adapters/transport.js';
 import type { AgentRequests } from './adapters/submit.js';
 import { createScheduler } from './scheduler.js';
+import { createOutbox } from './attachments/outbox.js';
 import {
   composeStatus,
   createStatusFacts,
@@ -175,6 +176,11 @@ export interface StartDaemonOptions {
    * a folder under its temp root, never the real one.
    */
   attachmentsRoot?: string;
+  /**
+   * v2 F6d: the outbox staged files wait in (D-F6-7). Absent means
+   * `<configDir>/outbox`, inside the daemon's own Application Support.
+   */
+  outboxDir?: string;
 }
 
 const realDelay = (ms: number): Promise<void> =>
@@ -624,6 +630,12 @@ export async function startDaemon(
     ownHandle: () => sendReaderHandle.ownHandle(),
     readerOpen: () => sendReaderHandle.isOpen(),
   });
+  // v2 F6d: one outbox for the stage route, POST /v1/send and the tick.
+  const outbox = createOutbox({
+    dir: options.outboxDir ?? join(options.configDir, 'outbox'),
+    store,
+    clock: options.clock,
+  });
   const server = await buildServer({
     configDir: options.configDir,
     autonomy,
@@ -653,7 +665,10 @@ export async function startDaemon(
       delay: options.delay ?? realDelay,
       doctorProbes: options.doctorProbes,
       sink,
+      outbox,
     },
+    // v2 F6d: the operator's file into the outbox, off until proven.
+    stage: { outbox, store },
     // s9 Sc4: stated once for the whole server (see `supervision` on the
     // server options), so the doctor and the disconnect engine cannot
     // disagree about who is running us.
@@ -772,6 +787,7 @@ export async function startDaemon(
         clock: options.clock,
         delay: options.delay ?? realDelay,
         autonomy,
+        outbox,
         emit: (event: DispatchGateDenied) => {
           for (const socket of sockets) {
             socket.send(
@@ -822,9 +838,20 @@ export async function startDaemon(
     store,
     bootLog,
     recovery,
-    tick: () => {
+    tick: async () => {
       indexStep();
-      return scheduler.tick();
+      await scheduler.tick();
+      // v2 F6d: housekeeping. Unbound stages go after 24 h, bound ones 24 h
+      // after their draft ends; the rows stay, marked removed.
+      try {
+        await outbox.sweep();
+      } catch (err) {
+        options.onError?.(
+          err instanceof Error
+            ? err
+            : new Error(`outbox sweep: ${String(err)}`),
+        );
+      }
     },
     statusRecounts: () => statusFacts.recounts(),
     stop: async () => {

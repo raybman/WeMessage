@@ -711,3 +711,75 @@ export interface ChatDbReader {
     sinceIso: IsoUtc;
   }): Promise<{ guid: MessageGuid } | null>;
 }
+
+/**
+ * v2 F6d: one file the operator staged for sending, named by the sha256 of
+ * its bytes. `mime` is what the daemon sniffed from the first bytes, never
+ * what the client claimed. `removedAt` is set once housekeeping deleted the
+ * bytes from the outbox; the row stays so a sent draft still names its file.
+ */
+export interface StagedFile {
+  sha256: string;
+  name: string;
+  mime: string;
+  bytes: number;
+  stagedAt: IsoUtc;
+  removedAt: IsoUtc | null;
+}
+
+/**
+ * v2 F6 body extension: the input of a FILE send. `path` is the outbox
+ * file's absolute path and travels to the backend as an argument only,
+ * never inside a script; `name` is the transfer name verification looks for.
+ */
+export interface SendFileInput {
+  chatGuid: ChatGuid;
+  file: { path: string; name: string };
+}
+
+/**
+ * v2 F6, added by declaration merging so this file only grows. Optional:
+ * a backend that cannot send files leaves it out, and a file draft
+ * dispatched to it fails honestly instead of sending anything else.
+ */
+export interface SendBackend {
+  sendFile?(input: SendFileInput): Promise<SendOutcome>;
+}
+
+/**
+ * v2 F6d, the staging and content-bound approval half of the Store, merged
+ * the same way.
+ */
+export interface Store {
+  /**
+   * Record a staged file. Staging the same bytes again refreshes
+   * `stagedAt` and clears `removedAt`; the first name is kept.
+   */
+  insertStagedFile(f: StagedFile): StagedFile;
+  getStagedFile(sha256: string): StagedFile | null;
+  /**
+   * Insert `draft` and its one file row in ONE transaction, so a file
+   * draft never exists without its file (its body is empty: a draft
+   * without the row would be an empty text send). Throws, writing
+   * nothing, when the hash was never staged or its bytes were removed.
+   * Only `POST /v1/send` calls this (D-F6-4: agents cannot attach).
+   */
+  bindDraftFile(draft: Draft, sha256: string, at: IsoUtc): void;
+  /** The file a draft carries, or null for a text draft. */
+  getDraftFile(draftId: Ulid): StagedFile | null;
+  /**
+   * The hash an approval authorised, or null. Written by `insertApproval`
+   * itself, inside the same transaction as the approval row, whenever an
+   * 'approve' row is inserted for a draft that carries a file. Every
+   * approve path (approve, bulk, retry, /v1/send) binds by construction,
+   * so no route can forget to.
+   */
+  getApprovalFile(approvalId: Ulid): string | null;
+  /**
+   * Housekeeping. Marks removed, and returns the hashes whose bytes the
+   * caller should now delete: stages never bound to a draft and staged at
+   * or before `now - unboundMs`, and stages whose every draft is terminal
+   * and has been since `now - terminalMs` or earlier.
+   */
+  sweepStaged(now: IsoUtc, unboundMs: number, terminalMs: number): string[];
+}

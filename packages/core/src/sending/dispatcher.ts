@@ -50,6 +50,7 @@ import type {
   ChatDbReader,
   Clock,
   SendBackend,
+  StagedFile,
   Store,
 } from '../ports/index.js';
 
@@ -84,6 +85,18 @@ export interface DispatchApprovedDeps {
    * approvals are untouched.
    */
   autonomy?: Autonomy;
+  /**
+   * v2 F6d: the outbox. For a FILE draft, re-reads the staged bytes now and
+   * returns their path and sha256, or null when they are gone. Absent, a
+   * file draft fails 'attachment-missing' and nothing is sent: the hash is
+   * never taken on trust from the database.
+   */
+  outbox?: DispatchOutbox;
+}
+
+/** v2 F6d: see `DispatchApprovedDeps.outbox`. */
+export interface DispatchOutbox {
+  rehash(file: StagedFile): Promise<{ path: string; sha256: string } | null>;
 }
 
 export type DispatchOutcome =
@@ -465,6 +478,57 @@ export async function dispatchApproved(
       return fail(store, clock, actor, draftId, {
         code: 'group-send-disabled',
         message: 'group sends are not supported (S3)',
+        at: clock.now(),
+      });
+    }
+
+    // v2 F6d: the content-bound approval. A file draft is sent only when
+    // the hash its approval authorised, the hash the draft carries and the
+    // hash of the outbox bytes as they are on disk RIGHT NOW all agree.
+    // Checked inside the mutex, after every policy check and before the
+    // ledger, so a refusal here never reaches the backend or burns an
+    // attempt. A swapped outbox file is a mismatch; a deleted one is
+    // missing. Neither is retried into a send of something else.
+    const file = store.getDraftFile(draftId);
+    if (file !== null) {
+      const approved = store.getApprovalFile(approvalId);
+      if (approved === null || approved !== file.sha256) {
+        return fail(store, clock, actor, draftId, {
+          code: 'attachment-mismatch',
+          message:
+            'the approval does not authorise the file this draft carries',
+          at: clock.now(),
+        });
+      }
+      const onDisk =
+        deps.outbox === undefined || file.removedAt !== null
+          ? null
+          : await deps.outbox.rehash(file);
+      if (onDisk === null) {
+        return fail(store, clock, actor, draftId, {
+          code: 'attachment-missing',
+          message: 'the staged file is no longer in the outbox',
+          at: clock.now(),
+        });
+      }
+      if (onDisk.sha256 !== file.sha256) {
+        return fail(store, clock, actor, draftId, {
+          code: 'attachment-mismatch',
+          message: 'the outbox file changed after it was approved',
+          at: clock.now(),
+        });
+      }
+      if (backend.sendFile === undefined) {
+        return fail(store, clock, actor, draftId, {
+          code: 'backend-error',
+          message: 'this send backend cannot send files',
+          at: clock.now(),
+        });
+      }
+      // The file send itself, and its verify by transfer name, are v2 F6e.
+      return fail(store, clock, actor, draftId, {
+        code: 'backend-error',
+        message: 'file sends are not wired in this build',
         at: clock.now(),
       });
     }

@@ -415,8 +415,9 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // minted #30 for `GET /v1/search` (+ HEAD twin): 76 -> 78, no event.
     // v2 F2c minted #31 for `GET /v1/threads/:guid/years` (+ HEAD twin):
     // 78 -> 80, no event. v2 F6b minted #32 for `GET /v1/attachments/:id`
-    // (+ HEAD twin): 80 -> 82, no event.
-    expect(ROUTE_TABLE.length).toBe(82);
+    // (+ HEAD twin): 80 -> 82, no event. v2 F6d minted #33 for
+    // `POST /v1/attachments/staged`: 82 -> 83, no event.
+    expect(ROUTE_TABLE.length).toBe(83);
     expect(WS_EVENT_VOCABULARY.length).toBe(22);
     expect(GATEWAY_EVENT_NAMES.length).toBe(22);
     expect(EMITTED_WS_EVENTS.length).toBe(22);
@@ -430,7 +431,7 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     expect(Object.keys(FRAME_SPECS).length).toBe(9);
   });
 
-  it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30), v2 F2c (#31) and v2 F6b (#32), and #33 was never minted', () => {
+  it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30), v2 F2c (#31), v2 F6b (#32) and v2 F6d (#33), and #34 was never minted', () => {
     // S9 itself minted nothing, which is what this row was written to prove.
     // s10 Slice 2 minted #25 for the PORT allowlist (late verification reads
     // chat.db), not for the wire, and says so in the ratchet file itself.
@@ -440,11 +441,12 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // v2 F3 minted #29 for the thread-state pair and `thread.state`. v2 F2b
     // minted #30 for `GET /v1/search`. v2 F2c minted #31 for
     // `GET /v1/threads/:guid/years`. v2 F6b minted #32 for
-    // `GET /v1/attachments/:id`. #33 is the next tooth.
+    // `GET /v1/attachments/:id`. v2 F6d minted #33 for
+    // `POST /v1/attachments/staged`. #34 is the next tooth.
     const text = read(RATCHET);
     const seen = deliberateUpdates(text);
-    expect(Math.max(...seen)).toBe(32);
-    expect(seen).not.toContain(33);
+    expect(Math.max(...seen)).toBe(33);
+    expect(seen).not.toContain(34);
     expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
     expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
     expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
@@ -453,9 +455,10 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     expect(text).toMatch(/#30 deliberate \(v2 F2b\)/);
     expect(text).toMatch(/#31 deliberate \(v2 F2c\)/);
     expect(text).toMatch(/#32 deliberate \(v2 F6b\)/);
+    expect(text).toMatch(/#33 deliberate \(v2 F6d\)/);
   });
 
-  it('TEETH: a planted #33 in a temp copy is caught by this same extractor', () => {
+  it('TEETH: a planted #34 in a temp copy is caught by this same extractor', () => {
     /*
      * The row above is an absence, and an absence proves nothing unless the
      * thing looking for it can see a presence. So a real copy of the real
@@ -468,12 +471,12 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     const planted = join(dir, 'transport-surface.snapshot.ts');
     writeFileSync(
       planted,
-      `${read(RATCHET)}\n// #33 deliberate (s9 Scenario 15): a new route.\n`,
+      `${read(RATCHET)}\n// #34 deliberate (s9 Scenario 15): a new route.\n`,
       'utf8',
     );
     const seen = deliberateUpdates(readFileSync(planted, 'utf8'));
-    expect(seen).toContain(33);
-    expect(Math.max(...seen)).toBe(33);
+    expect(seen).toContain(34);
+    expect(Math.max(...seen)).toBe(34);
   });
 
   it('the guard that runs on every `pnpm test` is still in the tree', () => {
@@ -482,7 +485,7 @@ describe('s9 Sc15 row 3: S9 shipped the product, it did not extend the wire', ()
     // every assertion above true and worthless the next day.
     const arch = read('test/arch.spec.ts');
     expect(arch).toContain('row 12: the ratchet reads #24');
-    expect(arch).toContain('expect(ROUTE_TABLE.length).toBe(82)');
+    expect(arch).toContain('expect(ROUTE_TABLE.length).toBe(83)');
   });
 });
 
@@ -980,6 +983,8 @@ describe('s9 Sc15 row 7: the seams are byte-clean, and the audit union only grew
     'packages/store/migrations/0002_thread_state.sql',
     // v2 F2a: the search index over the mirror (contentless FTS5 + doc map).
     'packages/store/migrations/0003_search.sql',
+    // v2 F6d: staged outbound files and the content-bound approval.
+    'packages/store/migrations/0004_attachments.sql',
   ];
 
   it('the migrations directory gained no file a plan did not name', () => {

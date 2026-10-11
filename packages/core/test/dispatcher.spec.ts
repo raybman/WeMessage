@@ -226,6 +226,13 @@ function makeStore(cfg: {
       return cfg.ledger ?? null;
     },
     listRecentUnverified: () => [],
+    // v2 F6d: staged files. A text draft carries none.
+    insertStagedFile: (f) => f,
+    getStagedFile: () => null,
+    bindDraftFile: () => undefined,
+    getDraftFile: () => null,
+    getApprovalFile: () => null,
+    sweepStaged: () => [],
     latestApproveApproval: () => null,
     listGraceElapsed: () => [],
     listExpiredPending: () => [],

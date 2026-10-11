@@ -92,6 +92,8 @@ describe('0003_search on a 0002 store with a mirror (v2 F2a)', () => {
         { id: '0001_init.sql', applied_at: SEEDED_AT },
         { id: '0002_thread_state.sql', applied_at: SEEDED_AT },
         { id: '0003_search.sql', applied_at: OPENED_AT },
+        // v2 F6d: this build also ships 0004, applied in the same open.
+        { id: '0004_attachments.sql', applied_at: OPENED_AT },
       ]);
 
       // Every mirror row is intact.
@@ -151,7 +153,7 @@ describe('0003_search on a 0002 store with a mirror (v2 F2a)', () => {
     try {
       expect(
         again.db.prepare('SELECT COUNT(*) AS n FROM _migrations').get(),
-      ).toEqual({ n: 3 });
+      ).toEqual({ n: 4 }); // v2 F6d: and 0004
       expect(again.searchCoverage().indexed).toBe(2);
     } finally {
       again.close();

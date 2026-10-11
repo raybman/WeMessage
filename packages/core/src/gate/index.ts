@@ -69,6 +69,14 @@ export const SETTING_UNDO_GRACE_SECONDS = 'send.undoGraceSeconds';
  * to read; like the grace key it is not a gate deny rule.
  */
 export const SETTING_RETRY_AS_SMS = 'send.retryAsSms';
+/**
+ * v2 F6d (D-F6-1): whether the operator's own file sends are switched on.
+ * Off until one real file send has been verified by hand; while off both
+ * staging and a file send are a 409 `attachments-unproven`. Not a gate deny
+ * rule (text sends never read it); minted here so every settings key is a
+ * core constant.
+ */
+export const SETTING_SEND_ATTACHMENTS = 'send.attachments';
 
 function parseBool(raw: string | null, fallback: boolean): boolean {
   if (raw === '1') return true;

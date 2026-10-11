@@ -81,6 +81,7 @@ import {
   type SettingValue,
   type Store,
 } from '@wemessage/core';
+import { SETTING_SEND_ATTACHMENTS } from '../attachments/outbox.js';
 
 /** Everything in this file reads; only `routes/settings.ts` writes. */
 export type SettingReader = Pick<Store, 'getSetting' | 'getSettingVersion'>;
@@ -182,6 +183,16 @@ const SPECS: readonly SettingSpec[] = [
     // an absent key would be indistinguishable from a key we forgot to send.
     read: (store) => readGateSettings(store).pausedUntil ?? null,
     fallback: () => null,
+  },
+  {
+    key: SETTING_SEND_ATTACHMENTS,
+    type: 'bool',
+    readOnly: false,
+    // v2 F6d (D-F6-1): off until one real file send on the operator's own
+    // Mac has been verified. While off, staging and file sends are both a
+    // 409 `attachments-unproven`. Turning it on is the operator's act.
+    read: (store) => boolOf(store.getSetting(SETTING_SEND_ATTACHMENTS)),
+    fallback: () => false,
   },
   {
     key: SETTING_AUTO_GRACE_SECONDS,

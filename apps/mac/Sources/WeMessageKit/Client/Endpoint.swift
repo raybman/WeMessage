@@ -48,6 +48,9 @@ public enum Endpoint: Sendable {
   case createRule(RuleInput)
   case createSchedule(ScheduleInput)
   case send(to: String, body: String)
+  /// v2 F6d: the operator's own file send, by the stage id the daemon minted
+  /// (the sha256 of the bytes). Off (409) until `send.attachments`.
+  case sendFile(to: String, stageId: String)
   case setGlobalMode(GlobalMode)
   case setKillSwitch(on: Bool, circuit: Bool?)
   case pause(until: String)
@@ -86,7 +89,7 @@ public enum Endpoint: Sendable {
     case .deleteContactPolicy, .deleteAdapter, .deleteRule, .deleteSchedule:
       return "DELETE"
     case .connect, .resume, .createAdapter, .disconnect, .bulkDrafts, .approveDraft, .rejectDraft, .createDraft,
-      .testRule, .createRule, .createSchedule, .send, .setGlobalMode, .setKillSwitch, .pause, .recallDraft,
+      .testRule, .createRule, .createSchedule, .send, .sendFile, .setGlobalMode, .setKillSwitch, .pause, .recallDraft,
       .retryDraft, .redraftDraft, .rotateAdapterToken:
       return "POST"
     }
@@ -132,7 +135,7 @@ public enum Endpoint: Sendable {
     case .search: return "/v1/search"
     case .attachmentBytes: return "/v1/attachments/:id"
     case .disconnect: return "/v1/disconnect"
-    case .send: return "/v1/send"
+    case .send, .sendFile: return "/v1/send"
     case .setGlobalMode: return "/v1/toggles/global-mode"
     case .setKillSwitch: return "/v1/toggles/kill-switch"
     case .events: return Defaults.ssePath
@@ -270,6 +273,8 @@ public enum Endpoint: Sendable {
       return input.json
     case .send(let to, let body):
       return .object(["chatGuid": .string("iMessage;-;" + to), "body": .string(body)])
+    case .sendFile(let to, let stageId):
+      return .object(["chatGuid": .string("iMessage;-;" + to), "file": .string(stageId)])
     case .setGlobalMode(let mode):
       return .object(["mode": .string(mode.rawValue)])
     case .setKillSwitch(let on, let circuit):

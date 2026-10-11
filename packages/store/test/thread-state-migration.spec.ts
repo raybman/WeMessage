@@ -83,6 +83,8 @@ describe('0002_thread_state on a 0001-only store (v2 F3a)', () => {
         { id: '0002_thread_state.sql', applied_at: OPENED_AT },
         // v2 F2a: this build also ships 0003, applied in the same open.
         { id: '0003_search.sql', applied_at: OPENED_AT },
+        // v2 F6d: and 0004.
+        { id: '0004_attachments.sql', applied_at: OPENED_AT },
       ]);
 
       // The new table is there and empty: rows are lazy, nothing backfills.
@@ -121,7 +123,7 @@ describe('0002_thread_state on a 0001-only store (v2 F3a)', () => {
     try {
       expect(
         again.db.prepare('SELECT COUNT(*) AS n FROM _migrations').get(),
-      ).toEqual({ n: 3 });
+      ).toEqual({ n: 4 }); // v2 F6d: and 0004
       expect(again.getThreadState('any;-;+15550100001')?.act).toBe('done');
     } finally {
       again.close();

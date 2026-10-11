@@ -69,7 +69,11 @@ import {
   type Message,
   type Rule,
 } from '@wemessage/core';
-import { createInboundDispatch, toGatewayEvent } from '@wemessage/daemon';
+import {
+  attachmentsEnabled,
+  createInboundDispatch,
+  toGatewayEvent,
+} from '@wemessage/daemon';
 import {
   auditEvents,
   boot,
@@ -576,15 +580,16 @@ describe('s7 Sc4 row 9: the cap the route wrote is the cap the gate reads', () =
  * --------------------------------------------------------------------- */
 
 describe('s7 Sc4 row 10: the transport surface', () => {
-  it('pins GET, HEAD and PATCH in the route table (#22; 82 rows since #32)', async () => {
+  it('pins GET, HEAD and PATCH in the route table (#22; 83 rows since #33)', async () => {
     // 67 at #22. v2 A1 (#26) added `GET /v1/threads` and its twin, v2 A2
     // (#27) `GET /v1/threads/:guid/messages` and v2 F5 (#28)
     // `GET /v1/threads/by-handle/:handle`, each with its twin. v2 F3 (#29)
     // `GET /v1/threads/state`, its twin and `PUT /v1/threads/:guid/state`.
     // v2 F2b (#30) `GET /v1/search` and its twin. v2 F2c (#31)
     // `GET /v1/threads/:guid/years` and v2 F6b (#32)
-    // `GET /v1/attachments/:id`, each with its twin.
-    expect(ROUTE_TABLE).toHaveLength(82);
+    // `GET /v1/attachments/:id`, each with its twin. v2 F6d (#33)
+    // `POST /v1/attachments/staged`.
+    expect(ROUTE_TABLE).toHaveLength(83);
     expect(ROUTE_TABLE).toContain('GET /v1/settings');
     expect(ROUTE_TABLE).toContain('HEAD /v1/settings');
     expect(ROUTE_TABLE).toContain('PATCH /v1/settings');
@@ -690,6 +695,8 @@ describe('s7 Sc4 row 12: every writable key reaches the code that reads it', () 
       'send.circuitOpenMinutes': 29,
       'send.loopConsecutiveAutoMax': 4,
       'send.loopDuplicateLookback': 6,
+      // v2 F6d (D-F6-1): the one writable bool that ships off.
+      'send.attachments': true,
     };
     // Every writable key in the fixture is exercised — a new one cannot be
     // added without this row noticing it was never proved to reach anything.
@@ -719,6 +726,8 @@ describe('s7 Sc4 row 12: every writable key reaches the code that reads it', () 
       duplicateLookback: 6,
     });
     expect(readAutoGraceSeconds(h.store)).toBe(30);
+    // The reader the stage, send and retry routes all consult.
+    expect(attachmentsEnabled(h.store)).toBe(true);
 
     // One audit row and one broadcast per key, in key order, and every audit
     // row was durable before the first frame left (§1.8).
@@ -768,13 +777,19 @@ describe('s7 Sc4 row 14: C-8 — no schema moved', () => {
       .prepare('SELECT type, name FROM sqlite_master WHERE sql IS NOT NULL')
       .all() as { type: string; name: string }[];
     // v2 F2's 0003 added exactly three indexes, all over the message mirror
-    // for search; none is over settings, and a fourth is still red here.
+    // for search; none is over settings. v2 F6d's 0004 added exactly one,
+    // over draft_files.sha256 for the outbox sweep; a fifth is still red here.
     expect(
       declared
         .filter((o) => o.type === 'index')
         .map((o) => o.name)
         .sort(),
-    ).toEqual(['inbound_chat_sent', 'inbound_rowid_src', 'inbound_sent']);
+    ).toEqual([
+      'draft_files_sha',
+      'inbound_chat_sent',
+      'inbound_rowid_src',
+      'inbound_sent',
+    ]);
     expect(
       declared.filter((o) => /setting/iu.test(o.name)).map((o) => o.name),
     ).toEqual(['settings']);

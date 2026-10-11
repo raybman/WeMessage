@@ -367,6 +367,13 @@ describe('§1.5 port interfaces — all seven exported from core', () => {
       // s10 Slice 2: late verification's two reads.
       getSendLedger: () => null,
       listRecentUnverified: () => [],
+      // v2 F6d: staged files. A text draft carries none.
+      insertStagedFile: (f) => f,
+      getStagedFile: () => null,
+      bindDraftFile: () => undefined,
+      getDraftFile: () => null,
+      getApprovalFile: () => null,
+      sweepStaged: () => [],
       latestApproveApproval: () => null,
       listGraceElapsed: () => [],
       listExpiredPending: () => [],

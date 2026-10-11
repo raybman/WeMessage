@@ -49,8 +49,25 @@ export { registerSearchRoutes, type SearchRouteDeps } from './routes/search.js';
 export {
   ATTACHMENT_ID,
   registerAttachmentRoutes,
+  registerStageRoute,
+  STAGE_PATH,
   type AttachmentRouteDeps,
+  type StageRouteDeps,
 } from './routes/attachments.js';
+// v2 F6d: the outbox, and the switch that keeps it shut until proven.
+export {
+  attachmentsEnabled,
+  createOutbox,
+  pathOf,
+  safeStageName,
+  SETTING_SEND_ATTACHMENTS,
+  STAGE_ID,
+  STAGE_KEEP_MS,
+  STAGE_MAX_BYTES,
+  type Outbox,
+  type OutboxDeps,
+  type StageResult,
+} from './attachments/outbox.js';
 export {
   parseRange,
   resolveAttachment,

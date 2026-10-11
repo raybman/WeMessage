@@ -3854,8 +3854,9 @@ describe('S8 extensions (s8-execution Scenario 17: the checkpoint, and the slice
     // one conversation's turns by year; no event, no frame, no importer.
     // 82 since v2 F6b (#32): `GET /v1/attachments/:id` and its twin, one
     // attachment's bytes from the Attachments folder; no event, no frame,
-    // no port importer.
-    expect(ROUTE_TABLE.length).toBe(82);
+    // no port importer. 83 since v2 F6d (#33): `POST /v1/attachments/staged`,
+    // the operator's file into the outbox; no event, no frame, no importer.
+    expect(ROUTE_TABLE.length).toBe(83);
     expect(new Set(ROUTE_TABLE).size).toBe(ROUTE_TABLE.length);
     expect(ROUTE_TABLE.filter((r) => !/^[A-Z]+ \//.test(r))).toEqual([]);
 
@@ -5808,7 +5809,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       return [...new Set(out)].sort((a, b) => a - b);
     }
 
-    it('the S8-close counts are unchanged, except the route table (#26, #27, #28, #29, #30, #31, #32) and thread.state (#29)', () => {
+    it('the S8-close counts are unchanged, except the route table (#26, #27, #28, #29, #30, #31, #32, #33) and thread.state (#29)', () => {
       // 67 at S8 close. v2 A1 minted #26 for `GET /v1/threads` (+ HEAD
       // twin), the conversations list the v2 messenger opens on: 67 -> 69.
       // v2 A2 minted #27 for `GET /v1/threads/:guid/messages` (+ HEAD
@@ -5823,8 +5824,9 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // (+ HEAD twin): 76 -> 78, and nothing else moved. v2 F2c minted #31
       // for `GET /v1/threads/:guid/years` (+ HEAD twin): 78 -> 80, and
       // nothing else moved. v2 F6b minted #32 for `GET /v1/attachments/:id`
-      // (+ HEAD twin): 80 -> 82, and nothing else moved.
-      expect(ROUTE_TABLE.length).toBe(82);
+      // (+ HEAD twin): 80 -> 82, and nothing else moved. v2 F6d minted #33
+      // for `POST /v1/attachments/staged`: 82 -> 83, and nothing else moved.
+      expect(ROUTE_TABLE.length).toBe(83);
       expect(WS_EVENT_VOCABULARY.length).toBe(22);
       expect(GATEWAY_EVENT_NAMES.length).toBe(22);
       expect(EMITTED_WS_EVENTS.length).toBe(22);
@@ -5838,7 +5840,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(Object.keys(FRAME_SPECS).length).toBe(9);
     });
 
-    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30), v2 F2c (#31) and v2 F6b (#32), and #33 was never minted', () => {
+    it('S9 closed at #24; later updates are s10 Slice 2 (#25), v2 A1 (#26), v2 A2 (#27), v2 F5 (#28), v2 F3 (#29), v2 F2b (#30), v2 F2c (#31), v2 F6b (#32) and v2 F6d (#33), and #34 was never minted', () => {
       // S9 itself minted nothing, which is what this row was written to
       // prove. s10 Slice 2 minted #25 for the PORT allowlist (late
       // verification reads chat.db), not for the wire. v2 A1 minted #26 for
@@ -5849,11 +5851,12 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       // #29 for the thread-state pair and the `thread.state` event. v2 F2b
       // minted #30 for `GET /v1/search`. v2 F2c minted #31 for
       // `GET /v1/threads/:guid/years`. v2 F6b minted #32 for
-      // `GET /v1/attachments/:id`. #33 is the next tooth.
+      // `GET /v1/attachments/:id`. v2 F6d minted #33 for
+      // `POST /v1/attachments/staged`. #34 is the next tooth.
       const text = s9Read(RATCHET);
       const seen = deliberateUpdates(text);
-      expect(Math.max(...seen)).toBe(32);
-      expect(seen).not.toContain(33);
+      expect(Math.max(...seen)).toBe(33);
+      expect(seen).not.toContain(34);
       expect(text).toMatch(/#25 deliberate \(s10 Slice 2\), port allowlist/);
       expect(text).toMatch(/#26 deliberate \(v2 A1\)/);
       expect(text).toMatch(/#27 deliberate \(v2 A2\)/);
@@ -5862,6 +5865,7 @@ describe('S9 extensions (s9-execution Scenario 1: the ship era)', () => {
       expect(text).toMatch(/#30 deliberate \(v2 F2b\)/);
       expect(text).toMatch(/#31 deliberate \(v2 F2c\)/);
       expect(text).toMatch(/#32 deliberate \(v2 F6b\)/);
+      expect(text).toMatch(/#33 deliberate \(v2 F6d\)/);
     });
 
     it('the extractor is not vacuous: it finds numbers, and it finds #25', () => {
@@ -8371,5 +8375,89 @@ describe('v2 F3: thread state rides a new table, never a changed one', () => {
       ]),
     ).toEqual([['message_fts', 'message_fts, rank']]);
     expect(sql).not.toMatch(/\bSELECT\b/i);
+  });
+});
+
+/**
+ * v2 F6d: agents cannot attach (D-F6-4). A file reaches a draft through one
+ * door, `POST /v1/send {file}`, which only the operator's token reaches;
+ * nothing an agent sends can name a staged file, and nothing but that route
+ * binds one to a draft.
+ */
+describe('v2 F6d: agents cannot attach', () => {
+  const FILE_KEYS = /^(file|files|stageId|stage|attachment|attachments)$/i;
+
+  it('no file or stageId in the adapter submit schema', () => {
+    const code = codeOf(archRead('packages/daemon/src/adapters/submit.ts'));
+    expect(code).not.toMatch(
+      /\b(file|files|stageId|attachment|attachments)\s*\??\s*:|['"](file|files|stageId|attachment|attachments)['"]/,
+    );
+  });
+
+  it('no file or stageId in any agent-to-gateway frame schema', () => {
+    const agentFrames = [
+      'hello',
+      'draft.submit',
+      'draft.delta',
+      'proactive.propose',
+      'pong',
+    ];
+    const offenders: string[] = [];
+    const walk = (node: unknown, at: string): void => {
+      if (Array.isArray(node)) {
+        node.forEach((n, i) => walk(n, `${at}[${i}]`));
+        return;
+      }
+      if (node === null || typeof node !== 'object') return;
+      for (const [k, v] of Object.entries(node)) {
+        if (k === 'properties' && v !== null && typeof v === 'object') {
+          for (const prop of Object.keys(v)) {
+            if (FILE_KEYS.test(prop)) offenders.push(`${at}.${prop}`);
+          }
+        }
+        walk(v, `${at}.${k}`);
+      }
+    };
+    for (const name of agentFrames) {
+      const rel = `packages/protocol/src/schemas/${name}.json`;
+      expect(existsSync(join(repoRoot, rel)), rel).toBe(true);
+      walk(JSON.parse(archRead(rel)), name);
+    }
+    expect(offenders).toEqual([]);
+    // The list above is every agent-to-gateway frame there is.
+    const specs = Object.entries(FRAME_SPECS).filter(
+      ([, s]) => s.direction === 'agent->gateway',
+    );
+    expect(specs.map(([k]) => k).sort()).toEqual([...agentFrames].sort());
+    // And the frame specs the guards enforce name no file key either.
+    expect(
+      specs.flatMap(([k, s]) =>
+        [...s.required, ...s.optional]
+          .filter((key) => FILE_KEYS.test(key))
+          .map((key) => `${k}.${key}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it('bindDraftFile is called only from routes/send.ts', () => {
+    const callers: string[] = [];
+    for (const root of ['packages', 'apps', 'tools']) {
+      for (const rel of archFiles(root)) {
+        if (rel.includes('/test/') || rel.includes('/dist/')) continue;
+        if (/\.bindDraftFile\s*\(/.test(codeOf(archRead(rel))))
+          callers.push(rel);
+      }
+    }
+    expect(callers).toEqual(['packages/daemon/src/routes/send.ts']);
+  });
+
+  it('0004 creates exactly the three attachment tables and alters none', () => {
+    const sql = archRead(
+      'packages/store/migrations/0004_attachments.sql',
+    ).replace(/--[^\n]*/g, '');
+    expect(
+      [...sql.matchAll(/CREATE\s+TABLE\s+(\w+)/gi)].map((m) => m[1]),
+    ).toEqual(['staged_files', 'draft_files', 'approval_files']);
+    expect(sql).not.toMatch(/\b(ALTER|DROP|UPDATE|DELETE|INSERT)\b/i);
   });
 });

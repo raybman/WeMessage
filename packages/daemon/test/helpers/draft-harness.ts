@@ -38,11 +38,13 @@ import {
   buildServer,
   composeStatus,
   createAuditSink,
+  createOutbox,
   createScheduler,
   createStatusFacts,
   readConnectionState,
   type AttachmentRouteDeps,
   type DaemonServer,
+  type Outbox,
   type Scheduler,
   type SearchRouteDeps,
   type SseTimer,
@@ -122,6 +124,8 @@ export interface Harness {
   broadcasts: Array<{ frame: unknown; auditAtBroadcast: string[] }>;
   clockCtl: ClockCtl;
   headers: { authorization: string };
+  /** v2 F6d: the outbox, when `opts.outbox` asked for one. */
+  outbox: Outbox | null;
 }
 
 export interface BootOptions {
@@ -210,6 +214,13 @@ export interface BootOptions {
    * filesystem that moves a file between the check and the open.
    */
   attachments?: { home: string } & Partial<AttachmentRouteDeps>;
+  /**
+   * v2 F6d: an outbox at `<dir>/outbox`, composed as `daemon.ts` composes
+   * it: `POST /v1/attachments/staged` is registered, and the same outbox is
+   * handed to `POST /v1/send` and to the dispatcher the scheduler runs.
+   * `maxBytes` lowers the cap so a suite can prove the refusal cheaply.
+   */
+  outbox?: true | { maxBytes?: number };
 }
 
 /** v2 F7c: the mirror path a harness status reports. */
@@ -314,8 +325,22 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
           };
         })();
 
+  const outbox: Outbox | null =
+    opts.outbox === undefined
+      ? null
+      : createOutbox({
+          dir: join(dir, 'outbox'),
+          store,
+          clock: clockCtl.clock,
+          ...(opts.outbox === true || opts.outbox.maxBytes === undefined
+            ? {}
+            : { maxBytes: opts.outbox.maxBytes }),
+        });
+  const outboxOpt: { outbox?: Outbox } = outbox === null ? {} : { outbox };
+
   const server = await buildServer({
     ...autonomyOpt,
+    ...(outbox === null ? {} : { stage: { outbox, store } }),
     ...statusOpt,
     configDir: dir,
     drafts: { store, clock: clockCtl.clock, sink, lateVerify },
@@ -407,6 +432,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
               messagesRunning: async () => true,
             },
             sink,
+            ...outboxOpt,
           },
         }
       : {}),
@@ -436,6 +462,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
         clock: clockCtl.clock,
         delay,
         backendName: 'loopback',
+        ...outboxOpt,
         emit: () => {},
       },
       draftId,
@@ -477,6 +504,7 @@ export async function boot(opts: BootOptions = {}): Promise<Harness> {
     broadcasts,
     clockCtl,
     headers: { authorization: `Bearer ${server.token}` },
+    outbox,
   };
 }
 

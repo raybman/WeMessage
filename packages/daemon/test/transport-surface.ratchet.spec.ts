@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import {
   buildServer,
+  createOutbox,
   type DaemonServer,
   type DoctorProbes,
 } from '@wemessage/daemon';
@@ -177,6 +178,12 @@ describe('transport-surface ratchet (INV-3, F-17)', () => {
             'attachmentFile must not be called: route-table test only',
           );
         },
+      },
+      // v2 F6d (#33): the stage route is real reachable surface. Its outbox
+      // sits in this test's temp dir and is never written to.
+      stage: {
+        store,
+        outbox: createOutbox({ dir: join(dir, 'outbox'), store, clock }),
       },
       send: {
         store,

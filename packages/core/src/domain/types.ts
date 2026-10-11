@@ -66,6 +66,10 @@ export interface DraftError { code:
   // §2.4.1) parks a draft the backend never saw — none of the seven
   // pre-existing literals describes that. message carries the
   // GateDenyReason verbatim, e.g. "gate denied: kill-switch".
+  // v2 F6d, additive the same way: a file draft whose approval hash, draft
+  // hash and on-disk outbox hash do not all agree (mismatch), or whose
+  // outbox bytes are gone (missing). The backend never saw either.
+  | 'attachment-mismatch' | 'attachment-missing'
   | 'gate-denied';
   message: string; at: IsoUtc;
 }

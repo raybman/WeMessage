@@ -37,6 +37,7 @@ import type {
   ScheduleWindow,
   SendingDraft,
   SendLedgerView,
+  StagedFile,
   Store,
   ThreadStateRecord,
   ThreadStateWrite,
@@ -1645,15 +1646,29 @@ export class SqliteStore implements Store {
   }
 
   insertApproval(approval: Approval): void {
-    this.#insertApproval.run(
-      approval.id,
-      approval.draftId,
-      approval.action,
-      JSON.stringify(approval.actor),
-      approval.batchId ?? null,
-      approval.editedBody ?? null,
-      approval.at,
-    );
+    // v2 F6d: one transaction, so an approve of a file draft never exists
+    // without the hash it authorised (and a failed binding writes neither).
+    this.db.transaction(() => {
+      this.#insertApproval.run(
+        approval.id,
+        approval.draftId,
+        approval.action,
+        JSON.stringify(approval.actor),
+        approval.batchId ?? null,
+        approval.editedBody ?? null,
+        approval.at,
+      );
+      if (approval.action !== 'approve') return;
+      const bound = this.db
+        .prepare('SELECT sha256 FROM draft_files WHERE draft_id = ?')
+        .get(approval.draftId) as { sha256: string } | undefined;
+      if (bound === undefined) return;
+      this.db
+        .prepare(
+          'INSERT INTO approval_files (approval_id, sha256) VALUES (?, ?)',
+        )
+        .run(approval.id, bound.sha256);
+    })();
   }
 
   getApproval(id: Ulid): Approval | null {
@@ -2153,9 +2168,109 @@ export class SqliteStore implements Store {
     return row ? row.version : -1;
   }
 
+  // --- v2 F6d: staged files and the content-bound approval ---
+
+  insertStagedFile(f: StagedFile): StagedFile {
+    this.db
+      .prepare(
+        'INSERT INTO staged_files (sha256, name, mime, bytes, staged_at, ' +
+          'removed_at) VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT(sha256) DO ' +
+          'UPDATE SET staged_at = excluded.staged_at, removed_at = NULL',
+      )
+      .run(f.sha256, f.name, f.mime, f.bytes, f.stagedAt);
+    return this.getStagedFile(f.sha256) as StagedFile;
+  }
+
+  getStagedFile(sha256: string): StagedFile | null {
+    const row = this.db
+      .prepare('SELECT * FROM staged_files WHERE sha256 = ?')
+      .get(sha256) as StagedFileRow | undefined;
+    return row ? stagedFromRow(row) : null;
+  }
+
+  bindDraftFile(draft: Draft, sha256: string, at: IsoUtc): void {
+    this.db.transaction(() => {
+      const staged = this.getStagedFile(sha256);
+      if (staged === null || staged.removedAt !== null) {
+        throw new Error(`bindDraftFile: ${sha256} is not staged`);
+      }
+      this.insertDraft(draft);
+      this.db
+        .prepare(
+          'INSERT INTO draft_files (draft_id, sha256, bound_at) VALUES (?, ?, ?)',
+        )
+        .run(draft.id, sha256, at);
+    })();
+  }
+
+  getDraftFile(draftId: Ulid): StagedFile | null {
+    const row = this.db
+      .prepare(
+        'SELECT s.* FROM draft_files d JOIN staged_files s ' +
+          'ON s.sha256 = d.sha256 WHERE d.draft_id = ?',
+      )
+      .get(draftId) as StagedFileRow | undefined;
+    return row ? stagedFromRow(row) : null;
+  }
+
+  getApprovalFile(approvalId: Ulid): string | null {
+    const row = this.db
+      .prepare('SELECT sha256 FROM approval_files WHERE approval_id = ?')
+      .get(approvalId) as { sha256: string } | undefined;
+    return row ? row.sha256 : null;
+  }
+
+  sweepStaged(now: IsoUtc, unboundMs: number, terminalMs: number): string[] {
+    const nowMs = Date.parse(now);
+    const unboundBefore = new Date(nowMs - unboundMs).toISOString();
+    const terminalBefore = new Date(nowMs - terminalMs).toISOString();
+    return this.db.transaction((): string[] => {
+      const rows = this.db
+        .prepare(
+          'SELECT s.sha256 FROM staged_files s WHERE s.removed_at IS NULL AND (' +
+            '(NOT EXISTS (SELECT 1 FROM draft_files d WHERE d.sha256 = s.sha256) ' +
+            'AND s.staged_at <= ?) OR ' +
+            '(EXISTS (SELECT 1 FROM draft_files d WHERE d.sha256 = s.sha256) ' +
+            'AND NOT EXISTS (SELECT 1 FROM draft_files d JOIN drafts r ' +
+            'ON r.id = d.draft_id WHERE d.sha256 = s.sha256 AND (r.state ' +
+            "NOT IN ('sent','rejected','expired','superseded','recalled','failed') " +
+            'OR r.state_changed_at > ?)) AND s.staged_at <= ?)) ' +
+            'ORDER BY s.sha256',
+        )
+        .all(unboundBefore, terminalBefore, terminalBefore) as Array<{
+        sha256: string;
+      }>;
+      const mark = this.db.prepare(
+        'UPDATE staged_files SET removed_at = ? WHERE sha256 = ?',
+      );
+      for (const r of rows) mark.run(now, r.sha256);
+      return rows.map((r) => r.sha256);
+    })();
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+interface StagedFileRow {
+  sha256: string;
+  name: string;
+  mime: string;
+  bytes: number;
+  staged_at: string;
+  removed_at: string | null;
+}
+
+function stagedFromRow(row: StagedFileRow): StagedFile {
+  return {
+    sha256: row.sha256,
+    name: row.name,
+    mime: row.mime,
+    bytes: row.bytes,
+    stagedAt: row.staged_at,
+    removedAt: row.removed_at,
+  };
 }
 
 function serializeMatcherColumn(rule: Rule): string {

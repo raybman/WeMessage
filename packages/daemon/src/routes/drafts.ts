@@ -52,6 +52,7 @@ import type { DraftSummary } from '@wemessage/protocol';
 import type { AuditSink } from '../audit-sink.js';
 import type { DraftFeedbackTap } from '../adapters/feedback.js';
 import { readUndoGraceSeconds } from '../settings/schema.js';
+import { attachmentsEnabled } from '../attachments/outbox.js';
 
 /** Outcome of one draft-level operation, shared by the single and bulk paths. */
 type ApplyResult =
@@ -332,6 +333,20 @@ export function registerDraftRoutes(
           from: draft.state,
           requested: 'approve',
         },
+      };
+    }
+
+    // v2 F6d: a file draft's approval authorises the file's hash, and its
+    // empty body is not text an operator can rewrite into a message. A
+    // caption is its own text send (D-F6-3).
+    if (
+      opts.editedBody !== undefined &&
+      store.getDraftFile(draft.id) !== null
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        body: { error: 'file-draft-not-editable' },
       };
     }
 
@@ -839,6 +854,13 @@ export function registerDraftRoutes(
       // tells an operator why. Moving the draft first would be worse
       // still: it would show a retry that looked like it worked right up
       // until the next tick failed it again.
+      // v2 F6d: a file draft re-sends only while attachments are on. The
+      // approval below re-binds the hash (insertApproval writes it), and
+      // the dispatcher re-checks it against the bytes on disk.
+      if (store.getDraftFile(draft.id) !== null && !attachmentsEnabled(store)) {
+        return reply.code(409).send({ error: 'attachments-unproven' });
+      }
+
       const attempts = store.sendAttemptCount(draft.id);
       if (attempts >= RETRY_CEILING) {
         return reply.code(409).send({ error: 'retry-limit', attempts });
@@ -913,6 +935,12 @@ export function registerDraftRoutes(
           error: 'illegal-redraft',
           from: source.state,
         });
+      }
+      // v2 F6d: a redraft copies text. A file draft has none, and its file
+      // is bound only by POST /v1/send, so it is staged and sent again from
+      // there rather than reborn here as an empty text draft.
+      if (store.getDraftFile(source.id) !== null) {
+        return reply.code(409).send({ error: 'file-draft-not-editable' });
       }
 
       const at = clock.now();

@@ -467,14 +467,20 @@ describe('s6 Sc8 row 1: the consecutive-auto streak', () => {
     // decided the walk was too slow and reached for schema instead of for
     // the bound. v2 F2's 0003 added exactly three, all over the message
     // mirror for search and none over drafts or approvals, so the row pins
-    // that exact list: a fourth index, or any index on what this walk reads,
-    // is still red here.
+    // that exact list. v2 F6d's 0004 added one more, over
+    // draft_files.sha256 (the outbox sweep's join, not drafts or approvals):
+    // a fifth index, or any index on what this walk reads, is still red here.
     expect(
       declared
         .filter((o) => o.type === 'index')
         .map((o) => o.name)
         .sort(),
-    ).toEqual(['inbound_chat_sent', 'inbound_rowid_src', 'inbound_sent']);
+    ).toEqual([
+      'draft_files_sha',
+      'inbound_chat_sent',
+      'inbound_rowid_src',
+      'inbound_sent',
+    ]);
     // And nothing exists to HOLD a streak, a lookback or a send history.
     expect(
       declared.filter((o) => /loop|streak|consecutive|history/iu.test(o.name)),

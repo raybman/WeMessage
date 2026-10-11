@@ -11,6 +11,13 @@
         "readOnly": true,
         "use": "POST /v1/toggles/pause"
       },
+      "send.attachments": {
+        "value": false,
+        "default": false,
+        "version": -1,
+        "type": "bool",
+        "readOnly": false
+      },
       "send.autoGraceSeconds": {
         "value": 10,
         "default": 10,

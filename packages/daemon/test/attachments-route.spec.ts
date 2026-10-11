@@ -506,7 +506,8 @@ describe('v2 F6b: sniff and range, as units', () => {
 
 describe('v2 F6b: the surface (route ratchet #32)', () => {
   it('pins GET and its HEAD twin', () => {
-    expect(ROUTE_TABLE).toHaveLength(82);
+    // 83 since v2 F6d (#33) added `POST /v1/attachments/staged`.
+    expect(ROUTE_TABLE).toHaveLength(83);
     expect(ROUTE_TABLE).toContain('GET /v1/attachments/:id');
     expect(ROUTE_TABLE).toContain('HEAD /v1/attachments/:id');
   });

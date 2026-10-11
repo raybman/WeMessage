@@ -5,6 +5,11 @@
     "use": "POST /v1/toggles/pause",
     "default": null
   },
+  "send.attachments": {
+    "type": "bool",
+    "readOnly": false,
+    "default": false
+  },
   "send.autoGraceSeconds": {
     "type": "int",
     "readOnly": false,

@@ -284,6 +284,21 @@ export const ROUTE_TABLE: readonly string[] = [
   //
   // NO port importer moves: the row reaches `routes/attachments.ts` as a
   // closure from `daemon.ts`, so PORT_IMPORTER_ALLOWLIST stays at 16.
+  //
+  // #33 deliberate (v2 F6d): `POST /v1/attachments/staged`, the operator's
+  // file into the daemon's outbox, 82 -> 83.
+  //   1 route, no HEAD twin (a POST has none); 82 + 1 = 83.
+  // Behind the operator bearer (an adapter token is a 401), so no agent can
+  // stage (D-F6-4). A 409 `attachments-unproven` while `send.attachments`
+  // is off (D-F6-1). The raw body streams to disk while it is hashed, is
+  // capped at 100 MB (413) and sniffed against its declared type (415). No
+  // audit row and no broadcast: staging is not a send; the file's send,
+  // through `POST /v1/send {chatGuid, file}`, is the audited act.
+  //
+  // NO WS event moves and NO frame moves.
+  //
+  // NO port importer moves: the route reaches the store and the outbox, never
+  // a send backend or chat.db, so PORT_IMPORTER_ALLOWLIST stays at 16.
   'DELETE /v1/adapters/:id',
   'DELETE /v1/contacts/:handle',
   'DELETE /v1/rules/:id',
@@ -348,6 +363,7 @@ export const ROUTE_TABLE: readonly string[] = [
   'PATCH /v1/settings',
   'POST /v1/adapters',
   'POST /v1/adapters/:id/token',
+  'POST /v1/attachments/staged',
   'POST /v1/connect',
   'POST /v1/disconnect',
   'POST /v1/drafts',
@@ -647,6 +663,11 @@ export const PORT_IMPORTER_ALLOWLIST: readonly string[] = [
  * `GET /v1/attachments/:id` (v2 F6b) reads its `:id` raw and checks its shape
  * by hand (`ATTACHMENT_ID`): any id it does not know, malformed or not, is
  * the same 404 `unknown-attachment`, so there is no params schema to pin.
+ *
+ * `POST /v1/attachments/staged` (v2 F6d) takes the file's raw bytes as its
+ * body, not JSON: its inputs are the Content-Type and `X-WeMessage-Name`
+ * headers and the byte stream, checked by hand (sniff, cap, safe name), so
+ * there is no zod body to pin.
  */
 export const NO_BODY_ROUTES: readonly string[] = [
   'DELETE /v1/adapters/:id',
@@ -674,6 +695,7 @@ export const NO_BODY_ROUTES: readonly string[] = [
   'GET /v1/threads/by-handle/:handle',
   'GET /v1/threads/state',
   'POST /v1/adapters/:id/token',
+  'POST /v1/attachments/staged',
   'POST /v1/connect',
   'POST /v1/drafts/:id/recall',
   'POST /v1/drafts/:id/redraft',

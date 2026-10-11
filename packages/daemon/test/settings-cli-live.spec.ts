@@ -224,8 +224,9 @@ describe('wemessage settings get (row 4)', () => {
     const expected = (wire.json() as { settings: Record<string, unknown> })
       .settings;
     expect(JSON.parse(res.stdout)).toEqual(expected);
-    // 15 keys, 11 writable and 4 read-only (Sc 4's closed list).
-    expect(Object.keys(expected)).toHaveLength(15);
+    // 16 keys, 12 writable and 4 read-only (Sc 4's closed list, plus
+    // v2 F6d's `send.attachments`).
+    expect(Object.keys(expected)).toHaveLength(16);
   }, 20_000);
 
   it('never prints token material of any kind', async () => {

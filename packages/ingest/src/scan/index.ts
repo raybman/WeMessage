@@ -14,7 +14,7 @@ import {
   type ChatDbReaderOptions,
   type IngestChatDbReader,
 } from '../chatdb/index.js';
-import type { DecodeFailedSignal } from '../normalize/index.js';
+import { isoToAppleNs, type DecodeFailedSignal } from '../normalize/index.js';
 
 /** settings key for the mutation-sweep ns watermark (S2 Scenario 8). */
 export const MUTATION_WATERMARK_KEY = 'ingest.mutationWatermarkNs';
@@ -22,6 +22,19 @@ export const MUTATION_WATERMARK_KEY = 'ingest.mutationWatermarkNs';
 const BUSY_BACKOFF_START_MS = 50;
 const BUSY_BACKOFF_CAP_MS = 2000;
 const DEFAULT_MAX_BUSY_RETRIES = 10;
+
+/**
+ * v2 F8a: how far before the PREVIOUS scan the steady-state mutation sweep
+ * looks for sent messages. Messages allows edits for 15 minutes and unsends
+ * for 2; seven days covers late delivery, clock skew and a sleeping Mac with
+ * room to spare, and still turns a whole-table walk into an index range.
+ */
+const MUTATION_SENT_WINDOW_NS = 7n * 24n * 3600n * 1_000_000_000n;
+
+/** Let queued I/O (HTTP requests, timers) run between heavy burst steps. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 export interface ScanLoopOptions {
   chatDbPath: string;
@@ -67,7 +80,15 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
   const maxBusyRetries = options.maxBusyRetries ?? DEFAULT_MAX_BUSY_RETRIES;
 
   async function burst(): Promise<Message[]> {
-    const lastRowid = options.store.getCursor()?.lastRowid ?? 0;
+    const previous = options.store.getCursor();
+    const lastRowid = previous?.lastRowid ?? 0;
+    // v2 F8a: no cursor means a first run, which sweeps the whole table once.
+    const sentAfterNs =
+      previous === null
+        ? undefined
+        : (
+            isoToAppleNs(previous.lastScanAt) - MUTATION_SENT_WINDOW_NS
+          ).toString();
     const readerOptions: ChatDbReaderOptions = {
       clock: options.clock,
       ...(options.onDecodeFailed !== undefined
@@ -98,9 +119,10 @@ export function createScanLoop(options: ScanLoopOptions): ScanLoop {
       // Step 2 (Scenario 8): mutation sweep. Same burst, same reader, same
       // busy/backoff envelope as the ROWID pass above.
       if (options.onMutation !== undefined) {
+        await yieldToEventLoop();
         const sinceNs = options.store.getSetting(MUTATION_WATERMARK_KEY) ?? '0';
         const sinceNsBig = BigInt(sinceNs);
-        const mutated = await reader.readMutatedSince(sinceNs);
+        const mutated = await reader.readMutatedSince(sinceNs, sentAfterNs);
         let maxNs = sinceNsBig;
         for (const { message, mutationNs } of mutated) {
           // Rows that arrived ALREADY mutated were just delivered (post-

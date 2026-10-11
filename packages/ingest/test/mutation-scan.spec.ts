@@ -22,9 +22,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createChatDb, type ChatDbFixture } from '@wemessage/fixtures';
+import {
+  appleEpochNs,
+  createChatDb,
+  type ChatDbFixture,
+} from '@wemessage/fixtures';
 import { openStore, type SqliteStore } from '@wemessage/store';
 import {
+  MUTATION_STATEMENTS,
   createChatDbReader,
   createScanLoop,
   type ScanLoop,
@@ -337,5 +342,125 @@ describe('mutation sweep (S2 Scenario 8 — resolves S1 deviation #2)', () => {
         .prepare('UPDATE message SET text = ? WHERE guid = ?')
         .run('tamper', guids[0]!),
     ).toThrow(/readonly|attempt to write/i);
+  });
+});
+
+/**
+ * v2 F8a: the steady-state sweep must not read the whole message table.
+ * date_edited/date_retracted carry no index, so on a real ten-year chat.db
+ * the unbounded sweep walked ~565k rows on every 3s burst and pinned the
+ * daemon's event loop. After the first burst the loop bounds the sweep to
+ * messages SENT after (previous scan - 7 days), which rides message_idx_date.
+ */
+describe('mutation sweep window (v2 F8a)', () => {
+  const WINDOW_NS = 7n * 24n * 3600n * 1_000_000_000n;
+
+  it('EXPLAIN: the windowed sweep searches message_idx_date, never SCAN m', () => {
+    const c = ctx();
+    const db = c.fixture.db;
+    const plan = (sql: string, params: unknown[]): string[] =>
+      (
+        db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as {
+          detail: string;
+        }[]
+      ).map((r) => r.detail);
+    const windowed = plan(MUTATION_STATEMENTS.windowed, [1n, 0n, 0n]);
+    expect(
+      windowed.filter((d) => /\bSCAN (m|message)\b/.test(d)),
+      windowed.join(' | '),
+    ).toEqual([]);
+    expect(windowed.join(' | ')).toMatch(/message_idx_date/);
+
+    // On a real ten-year chat.db (with Apple's sqlite_stat1 and its wide
+    // message rows) the planner prefers walking message in ROWID order to
+    // skip the sort, a full SCAN m that the small fixture cannot reproduce.
+    // Measured on 2026-10-11 against 564,693 rows: plain `ORDER BY m.ROWID`
+    // gives SCAN m; the unary plus gives SEARCH m USING INDEX
+    // message_idx_date. So the plus is pinned structurally.
+    expect(MUTATION_STATEMENTS.windowed).toMatch(/ORDER BY \+m\.ROWID ASC/);
+    expect(MUTATION_STATEMENTS.windowed).toMatch(
+      /CROSS JOIN chat_message_join cmj/,
+    );
+
+    // The unbounded sweep is the one-time first-run path: it walks a whole
+    // table (message or chat_message_join, whichever the planner drives).
+    expect(plan(MUTATION_STATEMENTS.full, [0n, 0n]).join(' | ')).toMatch(
+      /\bSCAN (m|cmj)\b/,
+    );
+  });
+
+  it('first burst (no cursor) sweeps the whole table; later bursts pass the window', async () => {
+    const c = ctx();
+    const calls: (string | undefined)[] = [];
+    const scanner = createScanLoop({
+      chatDbPath: c.fixture.path,
+      store: c.store,
+      clock: fakeClock,
+      onMessage: () => {},
+      onMutation: () => {},
+      openReader: (path, opts) => {
+        const real = createChatDbReader(path, opts);
+        return {
+          ...real,
+          close: () => real.close(),
+          readSince: (rowid) => real.readSince(rowid),
+          readMutatedSince: (sinceNs, sentAfterNs) => {
+            calls.push(sentAfterNs);
+            return real.readMutatedSince(sinceNs, sentAfterNs);
+          },
+        };
+      },
+    });
+    c.fixture.addMessageBurst(3, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'hello',
+      startAt: '2026-01-02T00:00:00Z',
+    });
+    await scanner.scanOnce();
+    await scanner.scanOnce();
+    const expected = (appleEpochNs(FIXED_NOW) - WINDOW_NS).toString();
+    expect(calls).toEqual([undefined, expected]);
+  });
+
+  it('an edit to a message sent inside the window is swept; one sent long before is not', async () => {
+    const c = ctx();
+    const [old] = c.fixture.addMessageBurst(1, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'ancient',
+      startAt: '2025-06-01T00:00:00Z',
+    });
+    const [recent] = c.fixture.addMessageBurst(1, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'recent',
+      startAt: '2026-01-02T00:00:00Z',
+    });
+    await c.scanner.scanOnce(); // first burst: full sweep, cursor written
+    c.fixture.editMessage(old!.guid, 'v2', { at: '2026-01-05T11:00:00Z' });
+    c.fixture.editMessage(recent!.guid, 'v2', { at: '2026-01-05T11:00:00Z' });
+    await c.scanner.scanOnce();
+    expect(c.mutations.map((m) => m.guid)).toEqual([recent!.guid]);
+  });
+
+  it('the window anchors on the PREVIOUS scan, so a month offline still sees its edits', async () => {
+    const c = ctx();
+    const [old] = c.fixture.addMessageBurst(1, {
+      chatId: c.chatId,
+      handleId: c.handleId,
+      text: 'sent before the laptop slept',
+      startAt: '2025-06-01T00:00:00Z',
+    });
+    await c.scanner.scanOnce();
+    // The daemon last scanned on 2025-06-02, then the Mac was off for months.
+    const cursor = c.store.getCursor();
+    c.store.setCursor({
+      lastRowid: cursor!.lastRowid,
+      lastScanAt: '2025-06-02T00:00:00.000Z',
+    });
+    c.fixture.editMessage(old!.guid, 'v2', { at: '2026-01-05T11:00:00Z' });
+    await c.scanner.scanOnce();
+    expect(c.mutations.map((m) => m.guid)).toEqual([old!.guid]);
   });
 });

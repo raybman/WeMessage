@@ -177,6 +177,9 @@ CREATE INDEX chat_message_join_idx_message_date_id_chat_id
   ON chat_message_join (chat_id, message_date, message_id);
 CREATE INDEX message_attachment_join_idx_message_id
   ON message_attachment_join (message_id);
+CREATE INDEX message_idx_date ON message (date);
+CREATE INDEX chat_message_join_idx_message_id_only
+  ON chat_message_join (message_id);
 `;
 
 export interface AddMessageOptions {

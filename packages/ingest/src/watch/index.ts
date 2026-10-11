@@ -152,7 +152,10 @@ export function createWatchTrigger(options: WatchTriggerOptions): WatchTrigger {
         inFlight = false;
         if (pending && started) {
           pending = false;
-          kick();
+          // v2 F8a: queue the trailing re-scan behind pending I/O instead of
+          // chaining it on the microtask queue, so HTTP requests that arrived
+          // during a burst are answered before the next one starts.
+          setImmediate(kick);
         }
       });
   };

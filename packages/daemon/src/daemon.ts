@@ -300,7 +300,8 @@ function createReaderHandle(factory: () => IngestChatDbReader): {
   return {
     reader: {
       readSince: (lastRowid) => live().readSince(lastRowid),
-      readMutatedSince: (sinceNs) => live().readMutatedSince(sinceNs),
+      readMutatedSince: (sinceNs, sentAfterNs) =>
+        live().readMutatedSince(sinceNs, sentAfterNs),
       resolveChat: (handle) => live().resolveChat(handle),
       findOutboundMessage: (q) => live().findOutboundMessage(q),
       // v2 F6: a file send's verification; gated upstream like a text send.

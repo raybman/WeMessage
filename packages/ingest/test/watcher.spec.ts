@@ -101,6 +101,35 @@ describe('watch trigger (Scenario 10, §2.2.1 / §1.3.8 / F-9)', () => {
     trigger.stop();
   });
 
+  it('v2 F8a: the trailing re-scan waits for queued I/O instead of chaining on microtasks', async () => {
+    const watcher = fakeWatcher();
+    const resolvers: (() => void)[] = [];
+    const scan = vi.fn(
+      () =>
+        new Promise<unknown[]>((resolve) => resolvers.push(() => resolve([]))),
+    );
+    const trigger = createWatchTrigger({
+      chatDbPath: '/fixture/chat.db',
+      scan,
+      watcher,
+      clock: fakeClock,
+    });
+    trigger.start();
+    watcher.fire();
+    watcher.fire(); // coalesced into one trailing re-scan
+    await settle();
+    expect(scan).toHaveBeenCalledTimes(1);
+    resolvers[0]?.();
+    // Drain microtasks only: a chained kick() would already have started.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(scan).toHaveBeenCalledTimes(1);
+    await settle(); // the macrotask turn: now it runs
+    expect(scan).toHaveBeenCalledTimes(2);
+    resolvers[1]?.();
+    await settle();
+    trigger.stop();
+  });
+
   it('coalesces N rapid wal events: one in-flight scan + one trailing re-scan, no pile-up', async () => {
     const watcher = fakeWatcher();
     const resolvers: (() => void)[] = [];

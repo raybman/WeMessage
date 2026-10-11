@@ -19,6 +19,7 @@ export {
 } from './normalize/index.js';
 export {
   CHAT_PAGE_STATEMENTS,
+  MUTATION_STATEMENTS,
   createChatDbReader,
   type ChatDbOpenMode,
   type ChatDbReaderOptions,

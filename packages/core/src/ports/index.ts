@@ -553,8 +553,17 @@ export interface ChatDbReader {
    * (S2 Scenario 8; §1.3.8). `sinceNs` and `mutationNs` are Apple-epoch ns
    * as DECIMAL STRINGS: real values (~8e17) exceed 2^53, so a number here
    * silently conflates adjacent mutations.
+   *
+   * v2 F8a: `sentAfterNs`, when given, limits the sweep to messages SENT
+   * after it (Apple-epoch ns, decimal string). Messages allows an edit for
+   * 15 minutes and an unsend for 2, so the scan loop passes the previous
+   * scan time minus a generous margin and the read rides chat.db's date
+   * index instead of walking every row. Omitted means the whole table.
    */
-  readMutatedSince(sinceNs: string): Promise<MutatedMessage[]>;
+  readMutatedSince(
+    sinceNs: string,
+    sentAfterNs?: string,
+  ): Promise<MutatedMessage[]>;
   /**
    * S3 §1.5 body extension (Scenario 3): resolve a handle to an existing
    * conversation via chat_handle_join, availability-only (never mints a

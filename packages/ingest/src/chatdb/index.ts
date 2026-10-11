@@ -165,6 +165,32 @@ const MUTATIONS_SQL = `${MESSAGE_SELECT_SQL}
   ORDER BY m.ROWID ASC
 `;
 
+/**
+ * v2 F8a: the steady-state sweep. date_edited and date_retracted carry no
+ * index in chat.db, so the unbounded sweep above reads every message row
+ * (887 MB on a real ten-year history) on every scan burst. Messages only
+ * lets a message be edited for 15 minutes and unsent for 2, so a mutation
+ * seen after the last scan belongs to a message SENT shortly before it:
+ * the caller bounds `m.date` and the walk rides message_idx_date. The unary
+ * plus on the ORDER BY stops the planner preferring a ROWID-order full scan
+ * to satisfy the sort (it otherwise does, even with the date bound). CROSS
+ * JOIN pins message as the outer loop: without chat.db's sqlite_stat1 the
+ * planner would otherwise walk all of chat_message_join instead.
+ */
+const MUTATIONS_WINDOWED_SQL = `${MESSAGE_SELECT_SQL.replace(
+  'JOIN chat_message_join cmj',
+  'CROSS JOIN chat_message_join cmj',
+)}
+  WHERE m.date > ? AND (m.date_edited > ? OR m.date_retracted > ?)
+  ORDER BY +m.ROWID ASC
+`;
+
+/** The two mutation sweeps, by name. Exported so a spec can EXPLAIN them. */
+export const MUTATION_STATEMENTS = {
+  full: MUTATIONS_SQL,
+  windowed: MUTATIONS_WINDOWED_SQL,
+} as const;
+
 const ATTACHMENTS_SQL = `
   SELECT
     a.filename      AS path,
@@ -911,6 +937,8 @@ export function createChatDbReader(
   messagesStmt.safeIntegers(true); // Apple-epoch ns exceed 2^53
   const mutationsStmt = db.prepare(MUTATIONS_SQL);
   mutationsStmt.safeIntegers(true);
+  const mutationsWindowedStmt = db.prepare(MUTATIONS_WINDOWED_SQL);
+  mutationsWindowedStmt.safeIntegers(true);
   const attachmentsStmt = db.prepare(ATTACHMENTS_SQL);
   attachmentsStmt.safeIntegers(true);
   const resolveCandidatesStmt = db.prepare(RESOLVE_CANDIDATES_SQL);
@@ -994,11 +1022,18 @@ export function createChatDbReader(
       return Promise.resolve(rows.map(toMessage));
     },
 
-    readMutatedSince(sinceNs: string): Promise<MutatedMessage[]> {
+    readMutatedSince(
+      sinceNs: string,
+      sentAfterNs?: string,
+    ): Promise<MutatedMessage[]> {
       // Decimal-string watermark -> BigInt bind: Number(sinceNs) would
       // truncate past 2^53 and conflate 1ns-apart mutations (Scenario 8).
       const bound = BigInt(sinceNs);
-      const rows = mutationsStmt.all(bound, bound) as DbMessageRow[];
+      const rows = (
+        sentAfterNs === undefined
+          ? mutationsStmt.all(bound, bound)
+          : mutationsWindowedStmt.all(BigInt(sentAfterNs), bound, bound)
+      ) as DbMessageRow[];
       return Promise.resolve(
         rows.map((r) => {
           const edited = r.dateEdited ?? 0n;

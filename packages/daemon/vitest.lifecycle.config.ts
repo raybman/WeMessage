@@ -5,12 +5,12 @@ import { defineConfig } from 'vitest/config';
  *
  * `test/launchd-lifecycle.spec.ts` installs a REAL LaunchAgent, waits for the
  * service manager to report it running, and then talks to the daemon that
- * agent started. The plist runs that daemon as `ProcessType: 'Background'`:
- * low CPU priority and throttled I/O, on purpose, because that is what the
- * product ships. Run alone, the row settles in five to seven seconds against
+ * agent started. That daemon is a real launchd job (v2 F8e: `ProcessType:
+ * 'Standard'`, formerly 'Background'), scheduled by Darwin alongside every
+ * other process on the machine. Run alone, the row settles in five to seven seconds against
  * ceilings of 25s and 20s. Run inside the full parallel suite, those ceilings
  * stop describing the daemon and start describing how long Darwin will starve
- * a background-class process behind N test workers plus one `tsc` per
+ * that process behind N test workers plus one `tsc` per
  * project. That number is not a property of this code, so it is not encoded
  * here: the observed failure was `timed out after 20000ms waiting for the
  * daemon to serve /v1/health`, with the service manager itself having already

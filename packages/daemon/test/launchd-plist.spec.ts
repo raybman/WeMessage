@@ -220,7 +220,7 @@ describe('s9 Sc3 row 2: the key set is closed and the values are §1.7', () => {
     expect(p['KeepAlive']).toBe(true);
     expect(p['RunAtLoad']).toBe(true);
     expect(p['LimitLoadToSessionType']).toBe('Aqua');
-    expect(p['ProcessType']).toBe('Background');
+    expect(p['ProcessType']).toBe('Standard');
     expect(p['ThrottleInterval']).toBe(10);
     expect(p['StandardOutPath']).toBe(s.stdoutPath);
     expect(p['StandardErrorPath']).toBe(s.stderrPath);

@@ -208,7 +208,13 @@ export function launchAgentPlistObject(spec: LaunchAgentSpec): PlistDict {
     KeepAlive: true,
     Label: spec.label,
     LimitLoadToSessionType: 'Aqua',
-    ProcessType: 'Background',
+    // v2 F8e: Standard, not Background. Background pins the daemon to the
+    // efficiency cores with throttled I/O; it then served the GUI's
+    // conversations list 4-5x slower than the same query in a normal
+    // process (120-150ms vs 28ms, 0.3s+ under load, 9.5s cold). The daemon
+    // is event-driven and idle between requests, so Standard costs nothing
+    // at rest and answers the person waiting at the window at full speed.
+    ProcessType: 'Standard',
     ProgramArguments: [...spec.programArguments],
     RunAtLoad: true,
     StandardErrorPath: spec.stderrPath,

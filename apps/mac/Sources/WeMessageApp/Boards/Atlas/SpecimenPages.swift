@@ -71,7 +71,7 @@ struct AtlasPage: View {
   private var anatomy: some View {
     columns {
       lead(
-        "The only direction cue is fill: **outbound is solid ink, inbound is outlined.** No colour carries meaning. One sender's run groups at 4 pt and squares its inner corner; a new sender restarts the run and prints the time again."
+        "The only direction cue is fill: **outbound is solid blue, inbound is outlined paper** (in a thread, frosted glass). Blue marks direction, never state. One sender's run groups at 4 pt and squares its inner corner; a new sender restarts the run and prints the time again."
       )
       note(1, "Max bubble width is 64% of the message pane, never a fixed width, so a wide window cannot make unreadable lines.")
       note(2, "Corner radius 17 pt, squaring to 5 pt on a run's inner corner.")

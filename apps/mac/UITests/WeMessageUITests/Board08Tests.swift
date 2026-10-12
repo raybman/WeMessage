@@ -84,10 +84,10 @@ final class Board08Tests: XCTestCase {
       XCTAssertTrue(label(app, ID.bubblePrefix + "atlas-a4").hasPrefix("Sent, "), "a4: \(label(app, ID.bubblePrefix + "atlas-a4"))")
       XCTAssertTrue(element(app, ID.deliveryPrefix + "atlas-a4").exists, "a4: no delivery state")
       XCTAssertFalse(element(app, ID.deliveryPrefix + "atlas-a3").exists, "a3: a second delivery row")
-      let outbound = ProvisionalUI.outboundFill == .ink ? AtlasPalette.ink(dark: dark) : NoGreen.tintRGB
-      assertMode(app, ID.bubblePrefix + "atlas-a4", is: outbound, "outbound centre")
+      assertMode(app, ID.bubblePrefix + "atlas-a4", is: AtlasPalette.outbound(dark: dark), "outbound centre")
+      // The sheet's cards are paper, so a frosted inbound keeps layer1 here.
       let inbound =
-        ProvisionalUI.inboundFill == .layer1Outlined ? AtlasPalette.layer1(dark: dark) : AtlasPalette.layer2(dark: dark)
+        ProvisionalUI.inboundFill == .layer2Solid ? AtlasPalette.layer2(dark: dark) : AtlasPalette.layer1(dark: dark)
       assertMode(app, ID.bubblePrefix + "atlas-a1", is: inbound, "inbound centre")
     case "reactions":
       for n in 0..<3 {
@@ -159,8 +159,9 @@ final class Board08Tests: XCTestCase {
     guard let hit = pixels(app, id) else { return XCTFail("sms: \(id) has no pixels") }
     let (px, rect) = hit
     let ink = AtlasPalette.ink(dark: dark)
+    let sent = AtlasPalette.outbound(dark: dark)
     if let mode = AtlasPalette.mode(px, rect.insetBy(dx: 2, dy: 2)) {
-      XCTAssertTrue(AtlasPalette.near(mode, ink), "sms: \(id) is \(mode), not filled ink")
+      XCTAssertTrue(AtlasPalette.near(mode, sent), "sms: \(id) is \(mode), not the sent fill \(sent)")
     }
     let inset = 20 * CGFloat(px.width) / app.windows.firstMatch.frame.width
     let rows = (0..<4).map { dy in

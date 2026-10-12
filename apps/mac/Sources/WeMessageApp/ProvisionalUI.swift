@@ -165,7 +165,7 @@ public enum ProvisionalUI {
 
   // D-UI-13: the Appearance pane's sentence about frost.
   public static let appearanceSentence =
-    "Frost sits on the window behind the panes. Reduce Transparency turns it off; the opaque rendering is the one we designed first. Bubbles and text fields are always opaque."
+    "Frost sits on the window behind the panes. Received bubbles let it through; sent bubbles and text fields are always opaque. Reduce Transparency turns it off; the opaque rendering is the one we designed first."
 
   // D-UI-14: perceptual-hash snapshot goldens (S4n).
   public enum PerceptualGoldens: Sendable {
@@ -291,14 +291,20 @@ public enum ProvisionalUI {
   // D-UI-27: the outbound bubble's fill. Fill is the only direction cue
   // (wireframe .row.out .bub). The wireframe fills with ink; plan 3.2 names
   // outbound = tint. White 13 pt text on the tint is 3.65:1, under the
-  // audit's 4.5:1, so the default is ink, as drawn (the D-UI-25 precedent).
+  // audit's 4.5:1, so the default was ink, as drawn (the D-UI-25 precedent).
+  // v2 F10 (Eric, Oct 12 2026: "make them whatever color our mockups were"):
+  // the G2 glass mockups fill with the tint and white text, so the default
+  // is the tint, shaded to clear the audit (Tokens.outboundShaded, 4.73:1).
+  // The bare tint is one line away and fails the audit at 3.65:1.
   public enum OutboundFill: Sendable {
-    /// Ink fill, paper text, as drawn.
+    /// Ink fill, paper text, as the wireframe draws it.
     case ink
-    /// Tint fill, white text (plan 3.2; fails AA at 13 pt).
+    /// Tint fill, white text (plan 3.2, the G2 mockups; fails AA at 13 pt).
     case tint
+    /// The tint shaded to 0.86 over black, white text: 4.73:1.
+    case tintShaded
   }
-  public static let outboundFill: OutboundFill = .ink
+  public static let outboundFill: OutboundFill = .tintShaded
 
   // D-UI-28: an outbound bubble in an SMS chat. Wireframe 02.D draws it 2 pt
   // dashed and unfilled with the transport in words ("fill is reserved for
@@ -432,13 +438,18 @@ public enum ProvisionalUI {
   public static let emojiOnlyScale: Double = 2.6
 
   // D-UI-41: the inbound fill. Plan 1.4 says layer-2 solid; 08.A and board
-  // 02 draw paper with a 1 pt ink rule. Board 02 already ships the rule, so
-  // the atlas matches it until the decision lands.
+  // 02 draw paper with a 1 pt ink rule. v2 F10 (Eric, Oct 12 2026): the G2
+  // mockups draw a received bubble as white over the frost with no rule
+  // (Tokens.InboundFrost). Only a thread bubble with frost behind it takes
+  // the glass; with Reduce Transparency, and on the atlas's paper cards, it
+  // keeps paper and the rule, the opaque rendering.
   public enum InboundFill: Sendable {
     case layer1Outlined
     case layer2Solid
+    /// White over the frost in a thread, no rule; layer1 outlined elsewhere.
+    case frosted
   }
-  public static let inboundFill: InboundFill = .layer1Outlined
+  public static let inboundFill: InboundFill = .frosted
 
   // D-UI-42: the specimen sheet's page marker (08.A..08.J, one page each
   // at the pinned window size). The wireframe is one long scroll and has no

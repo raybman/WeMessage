@@ -364,19 +364,11 @@ struct StateBubble: View {
 
   private var filled: Bool { border == .filled }
 
-  private var fill: Color {
-    switch ProvisionalUI.outboundFill {
-    case .ink: Tokens.color(palette.ink)
-    case .tint: Tokens.color(Tokens.outbound)
-    }
-  }
+  private var fill: Color { Tokens.color(Tokens.outboundBubble(ProvisionalUI.outboundFill, palette: palette).fill) }
 
   private var textColor: Color {
     guard filled else { return Tokens.color(palette.ink) }
-    switch ProvisionalUI.outboundFill {
-    case .ink: return Tokens.color(palette.layer1)
-    case .tint: return .white
-    }
+    return Tokens.color(Tokens.outboundBubble(ProvisionalUI.outboundFill, palette: palette).text)
   }
 
   var body: some View {

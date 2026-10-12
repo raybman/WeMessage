@@ -215,10 +215,12 @@ struct BubbleView: View {
   var style: Style = .thread
   /// The zone the times print in (the sheet pins UTC, as its golden does).
   var zone: TimeZone = .current
+  @Environment(\.behindFrost) private var behindFrost
 
   private var turn: MessageTurn { bubble.turn }
   private var outbound: Bool { turn.direction == .outbound }
-  private var look: BubbleLook { BubbleLook(turn: turn, sms: sms, style: style) }
+  private var look: BubbleLook { BubbleLook(turn: turn, sms: sms, style: style, behindFrost: behindFrost) }
+  private var dark: Bool { palette == Tokens.palette(dark: true) }
   /// D-UI-39: one message that went over SMS in an iMessage chat. v2 F4:
   /// RCS takes the same rail with its own tag (D-UI-199). In an SMS chat
   /// the stamp already says the transport, so no turn is railed there.
@@ -248,20 +250,17 @@ struct BubbleView: View {
 
   private var fill: Color {
     switch look.fill {
-    case .ink: Tokens.color(palette.ink)
-    case .tint: Tokens.color(Tokens.outbound)
+    case .ink, .tint, .tintShaded: Tokens.color(Tokens.outboundBubble(ProvisionalUI.outboundFill, palette: palette).fill)
     case .layer1: Tokens.color(palette.layer1)
     case .layer2: Tokens.color(palette.layer2)
+    case .frosted: Tokens.color(Tokens.InboundFrost.wash(dark: dark))
     }
   }
 
   private var textColor: Color {
     if turn.isUnsent { return Tokens.color(palette.inkDim) }
     guard filled else { return Tokens.color(palette.ink) }
-    switch ProvisionalUI.outboundFill {
-    case .ink: return Tokens.color(palette.layer1)
-    case .tint: return .white
-    }
+    return Tokens.color(Tokens.outboundBubble(ProvisionalUI.outboundFill, palette: palette).text)
   }
 
   /// The small print inside a bubble: dimmed text on a filled bubble,
@@ -405,7 +404,7 @@ struct BubbleView: View {
       ZStack(alignment: .leading) {
         if !filled { shape.strokeBorder(Tokens.color(palette.ink), lineWidth: 1) }
         Rectangle()
-          .fill(filled ? Tokens.color(palette.layer1) : Tokens.color(palette.ink))
+          .fill(filled ? textColor : Tokens.color(palette.ink))
           .frame(width: 2)
           .padding(.vertical, 8)
           .padding(.leading, 5)
@@ -444,7 +443,9 @@ struct BubbleView: View {
       .padding(4)
       .background(RoundedRectangle(cornerRadius: 10).fill(fill))
       .overlay {
-        if !filled { RoundedRectangle(cornerRadius: 10).strokeBorder(Tokens.color(palette.ink), lineWidth: 1) }
+        if !filled && look.fill != .frosted {
+          RoundedRectangle(cornerRadius: 10).strokeBorder(Tokens.color(palette.ink), lineWidth: 1)
+        }
       }
     default:
       Hug(maxWidth: max(0, maxWidth - 2 * TranscriptLayout.horizontalPadding)) { facts }
@@ -576,7 +577,9 @@ struct BubbleView: View {
 /// inbound) and the rule round it (02.C, 02.D, 08.G, 08.I, D-UI-39).
 struct BubbleLook: Equatable {
   enum Fill: Equatable {
-    case ink, tint, layer1, layer2
+    case ink, tint, tintShaded, layer1, layer2
+    /// v2 F10: white over the window frost (Tokens.InboundFrost).
+    case frosted
   }
 
   enum Rule: Equatable {
@@ -602,7 +605,10 @@ struct BubbleLook: Equatable {
   let fill: Fill
   let rule: Rule
 
-  init(turn: MessageTurn, sms: Bool, style: BubbleView.Style) {
+  /// `behindFrost`: the window frost is behind the bubble (not Reduce
+  /// Transparency). Only a thread bubble takes the D-UI-41 glass; the
+  /// atlas draws its specimens on paper cards.
+  init(turn: MessageTurn, sms: Bool, style: BubbleView.Style, behindFrost: Bool = false) {
     let outbound = turn.direction == .outbound
     let failed = turn.delivery?.isFailure == true
     let placeholder: Bool
@@ -612,14 +618,22 @@ struct BubbleLook: Equatable {
     default: placeholder = turn.isUnsent
     }
     filled = outbound && !turn.isUnsent && !failed && !(sms && ProvisionalUI.smsOutbound == .dashedUnfilled)
+    let glass = ProvisionalUI.inboundFill == .frosted && style == .thread && behindFrost
     if filled {
-      fill = ProvisionalUI.outboundFill == .ink ? .ink : .tint
+      switch ProvisionalUI.outboundFill {
+      case .ink: fill = .ink
+      case .tint: fill = .tint
+      case .tintShaded: fill = .tintShaded
+      }
     } else if !outbound && !placeholder && ProvisionalUI.inboundFill == .layer2Solid {
       fill = .layer2
+    } else if !outbound && !placeholder && glass {
+      fill = .frosted
     } else {
       fill = .layer1
     }
-    let inbound: Rule = !outbound && ProvisionalUI.inboundFill == .layer1Outlined ? .outline : .none
+    let outlined = ProvisionalUI.inboundFill == .layer1Outlined || (ProvisionalUI.inboundFill == .frosted && !glass)
+    let inbound: Rule = !outbound && outlined ? .outline : .none
     switch style {
     case .thread:
       if turn.isUnsent {

@@ -901,6 +901,9 @@ struct AppHygieneTests {
         #expect(fromTests.count == 3 && fromTests == fromTokens, "\(name) \(side): \(fromTests) vs \(fromTokens)")
       }
     }
+    let shadedTests = try triple(#"\boutboundShaded: RGB = \("# + hex + #"\)"#, in: palette)
+    let shadedTokens = try triple(#"static let outboundShaded = RGB\("# + hex + #"\)"#, in: tokens)
+    #expect(shadedTests.count == 3 && shadedTests == shadedTokens, "outboundShaded: \(shadedTests) vs \(shadedTokens)")
   }
 
   // MARK: S4h

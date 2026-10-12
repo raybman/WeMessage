@@ -16,8 +16,38 @@ public enum Tokens {
   /// Board 02 (plan 3.2): the outbound bubble's fill when D-UI-27 picks
   /// the tint, the draft outline, and the SMS rail D-UI-28 can pick.
   public static let outbound = tint
+  /// v2 F10 (Eric, Oct 12 2026: "make them whatever color our mockups
+  /// were"): the G2 mockups fill a sent bubble with the tint and white text.
+  /// White 13 pt text on the bare tint is 3.65:1, under the audit's 4.5:1,
+  /// so the bubble paints the tint shaded: the tint at 0.86 over black
+  /// (TokensTests holds that), the same hue, white text at 4.73:1.
+  public static let outboundShaded = RGB(0x09, 0x72, 0xDB)
+  /// The words on a tint-filled bubble.
+  public static let onTint = RGB(0xFF, 0xFF, 0xFF)
   public static let draftOutline = tint
   public static func smsRail(dark: Bool) -> RGB { palette(dark: dark).inkDim }
+
+  /// A sent bubble's fill and words, as D-UI-27 picks them.
+  public static func outboundBubble(_ choice: ProvisionalUI.OutboundFill, palette: Palette) -> (fill: RGB, text: RGB) {
+    switch choice {
+    case .ink: (palette.ink, palette.layer1)
+    case .tint: (outbound, onTint)
+    case .tintShaded: (outboundShaded, onTint)
+    }
+  }
+
+  /// v2 F10: a received bubble in a thread, as the G2 mockups draw it: white
+  /// over the window frost, no rule. Only where frost is behind it; with
+  /// Reduce Transparency, and on the atlas's paper cards, it is layer1 with
+  /// the 1 pt ink rule (D-UI-41's opaque rendering). Light is the mockup's
+  /// .72; dark is .09, not the mockup's .13, which put inkDim at 6.4:1 over
+  /// the runner's measured dark frost, under the house 7:1 (TokensTests T8).
+  public enum InboundFrost {
+    public static let light = Wash(rgb: RGB(0xFF, 0xFF, 0xFF), alpha: 0.72)
+    public static let dark = Wash(rgb: RGB(0xFF, 0xFF, 0xFF), alpha: 0.09)
+
+    public static func wash(dark: Bool) -> Wash { dark ? InboundFrost.dark : light }
+  }
 
   public enum Dark {
     public static let ink = RGB(0xF5, 0xF5, 0xF7)
@@ -181,7 +211,8 @@ public enum Tokens {
   public static var all: [RGB] {
     let dark = palette(dark: true)
     let light = palette(dark: false)
-    return [tint, danger, outbound, draftOutline, smsRail(dark: true), smsRail(dark: false)]
+    return [tint, danger, outbound, outboundShaded, onTint, draftOutline, smsRail(dark: true), smsRail(dark: false)]
+      + [InboundFrost.light.rgb, InboundFrost.dark.rgb]
       + [dark.ink, dark.inkDim, dark.layer0, dark.layer1, dark.layer2]
       + [light.ink, light.inkDim, light.layer0, light.layer1, light.layer2]
       + [Frost.tintLight, Frost.tintDark]

@@ -31,6 +31,9 @@ struct FrostBackground: ViewModifier {
     let fill = Fill.decide(reduceTransparency: mirror.reduceTransparency)
     let wash = Fill.washAlpha(fill, dark: scheme == .dark)
     content
+      // v2 F10: a received bubble lets the frost through only when there is
+      // frost behind it (BubbleLook).
+      .environment(\.behindFrost, fill != .layer0)
       // Neither the clearing view nor the fill is content: hidden from the
       // accessibility tree (run 37571025343's audit flagged a window-sized
       // group with no description).
@@ -47,6 +50,20 @@ struct FrostBackground: ViewModifier {
         }
         .accessibilityHidden(true)
       }
+  }
+}
+
+private struct BehindFrostKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  /// True under the window frost; false with Reduce Transparency, where the
+  /// app paints layer0, and outside the frost modifier. (A key by hand:
+  /// SwiftPM builds without the SwiftUI macro plugin, so no @Entry.)
+  var behindFrost: Bool {
+    get { self[BehindFrostKey.self] }
+    set { self[BehindFrostKey.self] = newValue }
   }
 }
 

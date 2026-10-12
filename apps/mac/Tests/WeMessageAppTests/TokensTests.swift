@@ -163,6 +163,41 @@ struct TokensTests {
     #expect(Tokens.Hairline.dark.alpha == 0.09)
   }
 
+  @Test("T8 bubbles (v2 F10): the sent fill is the tint shaded, same hue, white at 4.5:1 or better; received glass keeps ink and inkDim at 7:1 over the frost")
+  func bubbleContrast() {
+    let black = Tokens.RGB(0, 0, 0)
+    #expect(Tokens.outboundShaded == Tokens.composite(Tokens.tint, alpha: 0.86, over: black))
+    #expect(abs(Tokens.outboundShaded.hue - Tokens.tint.hue) < 1, "shaded hue \(Tokens.outboundShaded.hue)")
+    #expect(Tokens.contrast(Tokens.onTint, Tokens.outboundShaded) >= 4.5)
+    #expect(Tokens.contrast(Tokens.onTint, Tokens.tint) < 4.5, "the bare tint passes now: drop the shade")
+    for dark in [false, true] {
+      let p = Tokens.palette(dark: dark)
+      let shaded = Tokens.outboundBubble(.tintShaded, palette: p)
+      #expect(shaded.fill == Tokens.outboundShaded && shaded.text == Tokens.onTint)
+      let ink = Tokens.outboundBubble(.ink, palette: p)
+      #expect(ink.fill == p.ink && ink.text == p.layer1)
+      #expect(Tokens.outboundBubble(.tint, palette: p).fill == Tokens.tint)
+    }
+    // The glass over every frost the snapshots know: the modelled composite
+    // at both backdrop stops, and what the runner measured (light washed
+    // ultra-thin, dark bare at 40).
+    let ultraThinLight = Tokens.RGB(206, 206, 206)
+    let washedLight = Tokens.composite(Tokens.Light.layer0, alpha: ProvisionalUI.frostLightWashAlpha, over: ultraThinLight)
+    for dark in [false, true] {
+      let p = Tokens.palette(dark: dark)
+      let (top, bottom) = Tokens.Backdrop.stops(dark: dark)
+      var unders = [top, bottom].map { Tokens.Frost.composite(dark: dark, over: $0) }
+      unders.append(dark ? Tokens.RGB(40, 40, 40) : washedLight)
+      let wash = Tokens.InboundFrost.wash(dark: dark)
+      for under in unders {
+        let glass = Tokens.composite(wash.rgb, alpha: wash.alpha, over: under)
+        #expect(Tokens.contrast(p.ink, glass) >= 7, "dark=\(dark) ink on glass \(glass)")
+        #expect(Tokens.contrast(p.inkDim, glass) >= 7, "dark=\(dark) inkDim on glass \(glass) over \(under)")
+        #expect(glass != under, "dark=\(dark) the glass is invisible over \(under)")
+      }
+    }
+  }
+
   /// v2 S7b: the UI test target cannot compile Tokens.swift (it needs
   /// WeMessageKit), so BoardSweep.swift restates the two opaque hairline
   /// values. This row reads them back from the file and holds them to the

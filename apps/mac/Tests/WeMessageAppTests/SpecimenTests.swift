@@ -8,7 +8,7 @@ import WeMessageKit
 /// golden, each specimen's fill and rule are what the UI probes measure,
 /// and the sheet's words are fixed. The rule and fill rows are the local
 /// teeth for the CI-only pixel probes: an SMS bubble is never dashed, an
-/// inbound bubble is never filled, a sent outbound bubble is ink.
+/// inbound bubble is never filled, a sent outbound bubble is the shaded tint.
 @Suite("Specimen")
 struct SpecimenTests {
   static func content() throws -> SpecimenContent { try FixtureCatalogue.specimens() }
@@ -50,17 +50,36 @@ struct SpecimenTests {
     }
     #expect(seen >= 1)
     let i1 = try Self.look("atlas-i1")
-    #expect(i1.filled && i1.fill == .ink)
+    #expect(i1.filled && i1.fill == .tintShaded)
   }
 
-  @Test("D-UI-27 and D-UI-41: a sent outbound bubble is ink; an inbound one is paper with an ink outline")
+  @Test("D-UI-27 and D-UI-41: a sent outbound bubble is the shaded tint; an inbound one is paper with an ink outline on the sheet")
   func fills() throws {
     let a4 = try Self.look("atlas-a4")
-    #expect(a4.filled && a4.fill == .ink && a4.rule == .none)
+    #expect(a4.filled && a4.fill == .tintShaded && a4.rule == .none)
     for guid in ["atlas-a1", "atlas-a2", "atlas-b1", "atlas-c1", "atlas-h1"] {
-      let look = try Self.look(guid)
-      #expect(!look.filled && look.fill == .layer1 && look.rule == .outline, "\(guid): \(look)")
+      // The sheet's cards are paper: no glass even with frost behind them.
+      for frost in [false, true] {
+        let look = BubbleLook(turn: try Self.turn(guid), sms: false, style: .specimen, behindFrost: frost)
+        #expect(!look.filled && look.fill == .layer1 && look.rule == .outline, "\(guid) frost \(frost): \(look)")
+      }
     }
+  }
+
+  @Test("v2 F10, D-UI-41: a received thread bubble is frosted glass with no rule over the frost, paper and the rule without it")
+  func inboundGlass() throws {
+    for guid in ["atlas-a1", "atlas-a2", "atlas-b1", "atlas-c1", "atlas-h1"] {
+      let turn = try Self.turn(guid)
+      let glass = BubbleLook(turn: turn, sms: false, style: .thread, behindFrost: true)
+      #expect(!glass.filled && glass.fill == .frosted && glass.rule == .none, "\(guid): \(glass)")
+      let opaque = BubbleLook(turn: turn, sms: false, style: .thread, behindFrost: false)
+      #expect(!opaque.filled && opaque.fill == .layer1 && opaque.rule == .outline, "\(guid): \(opaque)")
+    }
+    // Sent stays opaque blue over the frost; a placeholder never turns to glass.
+    let a4 = BubbleLook(turn: try Self.turn("atlas-a4"), sms: false, style: .thread, behindFrost: true)
+    #expect(a4.filled && a4.fill == .tintShaded && a4.rule == .none)
+    let unsent = BubbleLook(turn: try Self.turn("atlas-b8"), sms: false, style: .thread, behindFrost: true)
+    #expect(unsent.fill != .frosted)
   }
 
   @Test("08.F and 08.G: expired, unsupported and unsent are placeholders, not delivered is dotted, an effect is a double rule")

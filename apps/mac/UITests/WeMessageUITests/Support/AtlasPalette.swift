@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 
 /// The token triples board 08's pixel probes compare against: Tokens.Light
-/// and Tokens.Dark's ink, layer1 and layer2, written here too because the
+/// and Tokens.Dark's ink, layer1 and layer2, and Tokens.outboundShaded, written here too because the
 /// UI test bundle cannot import the app. AppHygieneTests H-S4-4c holds
 /// every triple equal to Tokens.swift.
 enum AtlasPalette {
@@ -14,10 +14,21 @@ enum AtlasPalette {
   static let layer1Dark: RGB = (0x2C, 0x2C, 0x2E)
   static let layer2Light: RGB = (0xF0, 0xF0, 0xF5)
   static let layer2Dark: RGB = (0x3A, 0x3A, 0x3C)
+  /// Tokens.outboundShaded: a sent bubble's fill under D-UI-27's default.
+  static let outboundShaded: RGB = (0x09, 0x72, 0xDB)
 
   static func ink(dark: Bool) -> RGB { dark ? inkDark : inkLight }
   static func layer1(dark: Bool) -> RGB { dark ? layer1Dark : layer1Light }
   static func layer2(dark: Bool) -> RGB { dark ? layer2Dark : layer2Light }
+
+  /// A sent bubble's fill as D-UI-27 picks it.
+  static func outbound(dark: Bool) -> RGB {
+    switch ProvisionalUI.outboundFill {
+    case .ink: ink(dark: dark)
+    case .tint: NoGreen.tintRGB
+    case .tintShaded: outboundShaded
+    }
+  }
 
   /// Every channel within `tolerance` of the token.
   static func near(_ a: RGB, _ b: RGB, tolerance: Int = 6) -> Bool {

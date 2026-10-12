@@ -100,5 +100,12 @@ struct AccessibilityMirrorTests {
     #expect(FrostBackground.Fill.decide(reduceTransparency: true) == .layer0)
     #expect(FrostBackground.Fill.decide(reduceTransparency: false) == .material(ProvisionalUI.frostMaterial))
     #expect(ProvisionalUI.frostMaterial == .ultraThin)
+    // The light wash (v2 F9): over the material in light only, never in
+    // dark, never over the opaque layer0 fill.
+    let material = FrostBackground.Fill.material(.ultraThin)
+    #expect(FrostBackground.Fill.washAlpha(material, dark: false) == ProvisionalUI.frostLightWashAlpha)
+    #expect(FrostBackground.Fill.washAlpha(material, dark: true) == 0)
+    #expect(FrostBackground.Fill.washAlpha(.layer0, dark: false) == 0)
+    #expect(ProvisionalUI.frostLightWashAlpha > 0 && ProvisionalUI.frostLightWashAlpha < 0.5)
   }
 }

@@ -491,6 +491,7 @@ struct AppHygieneTests {
     let material = sections[21] ?? ""
     #expect(material.contains("public static let frostMaterial: FrostMaterial = .ultraThin"))
     #expect(material.contains("containerBackground"), "D-UI-21 does not say where the material is applied")
+    #expect(material.contains("public static let frostLightWashAlpha = "), "D-UI-21 holds no light wash")
     // Foundation only: the UI test bundle compiles this file too.
     #expect(try Self.imports(provisional) == ["Foundation"])
 

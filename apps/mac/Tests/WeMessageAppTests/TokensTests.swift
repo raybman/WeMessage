@@ -142,6 +142,13 @@ struct TokensTests {
     let measuredDark = Tokens.RGB(40, 40, 40)
     #expect(Tokens.contrast(Tokens.Light.inkDim, measuredLight) >= 7)
     #expect(Tokens.contrast(Tokens.Dark.inkDim, measuredDark) >= 7)
+    // v2 F9: bare .ultraThinMaterial measured 205.7 light (run 38180272113,
+    // 6.9:1, under the bar) and 40 dark. Light gets the D-UI-21 layer0 wash;
+    // the composite clears 7:1, the dark bare material already does.
+    let ultraThinLight = Tokens.RGB(206, 206, 206)
+    #expect(Tokens.contrast(Tokens.Light.inkDim, ultraThinLight) < 7, "bare ultra-thin light: the wash is no longer needed")
+    let washed = Tokens.composite(Tokens.Light.layer0, alpha: ProvisionalUI.frostLightWashAlpha, over: ultraThinLight)
+    #expect(Tokens.contrast(Tokens.Light.inkDim, washed) >= 7, "washed ultra-thin light \(washed)")
     // Hairlines: the opaque stand-in is the translucent hairline composited
     // over layer0, within one step per channel.
     for dark in [false, true] {

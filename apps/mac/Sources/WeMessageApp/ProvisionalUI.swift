@@ -227,6 +227,13 @@ public enum ProvisionalUI {
     case hudWindow
   }
   public static let frostMaterial: FrostMaterial = .ultraThin
+  // Light appearance only: a layer0 wash at this alpha over the ultra-thin
+  // material. Bare ultra-thin over the light backdrop measured 205.7 grey
+  // (ci-swift run 38180272113), inkDim 6.9:1 and under the light-luminance
+  // guards; the wash lifts it to about 219.5 (7.9:1) while the frost still
+  // transmits more of what is behind than regular did (about 7.4 vs 6.5).
+  // Dark keeps the bare material: it measured 9.7:1 already.
+  public static let frostLightWashAlpha = 0.35
 
   // D-UI-22: where the dated title counter shows. Board 01's frames draw no
   // counter; 06.C says it "appears" in Triage; the S4 plan puts "title and

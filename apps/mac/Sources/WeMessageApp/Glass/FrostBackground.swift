@@ -14,26 +14,36 @@ struct FrostBackground: ViewModifier {
     static func decide(reduceTransparency: Bool) -> Fill {
       reduceTransparency ? .layer0 : .material(ProvisionalUI.frostMaterial)
     }
+
+    /// The layer0 wash drawn over the material: light only (D-UI-21), never
+    /// over the opaque layer0 fill.
+    static func washAlpha(_ fill: Fill, dark: Bool) -> Double {
+      guard case .material = fill, !dark else { return 0 }
+      return ProvisionalUI.frostLightWashAlpha
+    }
   }
 
   let mirror: AccessibilityMirror
   let palette: Tokens.Palette
+  @Environment(\.colorScheme) private var scheme
 
   func body(content: Content) -> some View {
     let fill = Fill.decide(reduceTransparency: mirror.reduceTransparency)
+    let wash = Fill.washAlpha(fill, dark: scheme == .dark)
     content
       // Neither the clearing view nor the fill is content: hidden from the
       // accessibility tree (run 37571025343's audit flagged a window-sized
       // group with no description).
       .background(ClearWindow().accessibilityHidden(true))
       .containerBackground(for: .window) {
-        Group {
+        ZStack {
           switch fill {
           case .layer0: Rectangle().fill(Tokens.color(palette.layer0))
           case .material(.regular): Rectangle().fill(.regularMaterial)
           case .material(.ultraThin): Rectangle().fill(.ultraThinMaterial)
           case .material(.hudWindow): BehindWindowEffect(material: .hudWindow)
           }
+          if wash > 0 { Rectangle().fill(Tokens.color(palette.layer0).opacity(wash)) }
         }
         .accessibilityHidden(true)
       }

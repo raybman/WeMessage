@@ -36,6 +36,18 @@ public enum Tokens {
     }
   }
 
+  /// How strongly a sent bubble's small print (delivery line, reply quote,
+  /// "Edited") draws its words. On ink, 0.8 still clears AA by a wide margin.
+  /// On the blue, white is already near the floor (4.73:1 on the shade,
+  /// 3.65:1 on the bare tint), and 0.8 of it measured 3.60:1 in the Board 08
+  /// audit, so the small print stays full strength and size carries the rank.
+  public static func outboundSecondaryAlpha(_ choice: ProvisionalUI.OutboundFill) -> Double {
+    switch choice {
+    case .ink: 0.8
+    case .tint, .tintShaded: 1.0
+    }
+  }
+
   /// v2 F10: a received bubble in a thread, as the G2 mockups draw it: white
   /// over the window frost, no rule. Only where frost is behind it; with
   /// Reduce Transparency, and on the atlas's paper cards, it is layer1 with

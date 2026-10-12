@@ -263,9 +263,13 @@ struct BubbleView: View {
     return Tokens.color(Tokens.outboundBubble(ProvisionalUI.outboundFill, palette: palette).text)
   }
 
-  /// The small print inside a bubble: dimmed text on a filled bubble,
-  /// inkDim on paper.
-  private var secondary: Color { filled ? textColor.opacity(0.8) : Tokens.color(palette.inkDim) }
+  /// The small print inside a bubble: the bubble's words at
+  /// Tokens.outboundSecondaryAlpha on a filled bubble (full strength on the
+  /// blue), inkDim on paper.
+  private var secondary: Color {
+    filled
+      ? textColor.opacity(Tokens.outboundSecondaryAlpha(ProvisionalUI.outboundFill)) : Tokens.color(palette.inkDim)
+  }
 
   /// What the bubble says.
   private var words: String {

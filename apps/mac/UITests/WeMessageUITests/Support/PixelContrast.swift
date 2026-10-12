@@ -47,7 +47,14 @@ enum PixelContrast {
   }
 
   /// Background is the most common colour; ink is the colour farthest from
-  /// it in luminance. inkPixels counts pixels within 1% of the ink's ratio.
+  /// it in luminance. inkPixels counts the pixels that themselves clear the
+  /// floor against the background. It used to count pixels within 1% of the
+  /// darkest one, which held on flat paper but not over the window frost:
+  /// the material's grain spreads a glyph's core across many near-identical
+  /// colours, so a "9:14" measured 8.86:1 on Board 15 (runs 38263316451 and
+  /// 38269899103) yet found 1 pixel in that band. Anti-aliasing only mixes
+  /// ink toward the background, so a pixel clearing the floor proves the ink
+  /// does; four of them still keep one stray pixel from vouching for a label.
   static func measure(_ image: CGImage) -> Measurement? {
     let width = image.width
     let height = image.height
@@ -85,7 +92,7 @@ enum PixelContrast {
       ratios[key] = r
       if r > best.ratio { best = (key, r) }
     }
-    let inkPixels = ratios.filter { $0.value >= best.ratio * 0.99 }.reduce(0) { $0 + counts[$1.key, default: 0] }
+    let inkPixels = ratios.filter { $0.value >= PixelContrast.floor }.reduce(0) { $0 + counts[$1.key, default: 0] }
     return Measurement(background: bg, ink: split(best.key), ratio: best.ratio, inkPixels: inkPixels)
   }
 }

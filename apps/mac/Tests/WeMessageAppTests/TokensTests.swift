@@ -198,6 +198,22 @@ struct TokensTests {
     }
   }
 
+  @Test("T9 a sent bubble's small print (delivery line, reply quote) clears 4.5:1 on its own fill")
+  func bubbleSmallPrint() {
+    for dark in [false, true] {
+      let p = Tokens.palette(dark: dark)
+      for choice in [ProvisionalUI.OutboundFill.ink, .tintShaded, ProvisionalUI.outboundFill] {
+        let b = Tokens.outboundBubble(choice, palette: p)
+        let small = Tokens.composite(b.text, alpha: Tokens.outboundSecondaryAlpha(choice), over: b.fill)
+        #expect(Tokens.contrast(small, b.fill) >= 4.5, "dark=\(dark) \(choice) small print \(small) on \(b.fill)")
+      }
+      // Why the blue keeps it at full strength: 0.8 of white on the shade is
+      // what the Board 08 audit flagged (3.60:1).
+      let dimmed = Tokens.composite(Tokens.onTint, alpha: 0.8, over: Tokens.outboundShaded)
+      #expect(Tokens.contrast(dimmed, Tokens.outboundShaded) < 4.5)
+    }
+  }
+
   /// v2 S7b: the UI test target cannot compile Tokens.swift (it needs
   /// WeMessageKit), so BoardSweep.swift restates the two opaque hairline
   /// values. This row reads them back from the file and holds them to the

@@ -117,6 +117,14 @@ struct BrandTests {
     let bar = AppHygieneTests.block("TitleBar", in: try Repo.text(AppHygieneTests.appDir + "/Boards/Shell/TitleBar.swift"))
     #expect(bar.contains("BrandLockup(palette:"))
     #expect(bar.contains("TitleSearchField(model: model"))
+    // The field must be offered the gap: a field below its spacers in
+    // priority collapses to the magnifier at every width.
+    let fieldLine = try #require(bar.components(separatedBy: "\n").firstIndex { $0.contains("TitleSearchField(model: model") })
+    let lines = bar.components(separatedBy: "\n")
+    #expect(lines[fieldLine + 1].trimmingCharacters(in: .whitespaces).hasPrefix("Spacer"), "the search field yields to its spacers")
+    #expect(lines[fieldLine - 1].contains("Spacer(minLength: 0).layoutPriority(-1)"))
+    #expect(lines[fieldLine + 1].contains("Spacer(minLength: 0).layoutPriority(-1)"))
+    #expect(field.contains("field(width: Self.compactWidth, hint: Self.shortHint)"))
     let shell = try Repo.text(AppHygieneTests.appDir + "/ShellView.swift")
     #expect(shell.contains(".background(TitleWash(mirror: mirror, dark: dark))"))
   }

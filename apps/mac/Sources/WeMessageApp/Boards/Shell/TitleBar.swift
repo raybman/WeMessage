@@ -38,10 +38,13 @@ struct TitleBar: View {
         .lineLimit(1)
         .fixedSize()
         .accessibilityIdentifier(ShellID.title)
-      Spacer(minLength: 0)
+      // The spacers yield first, so the field is offered the whole gap and
+      // ViewThatFits picks the widest step that fits; the spacers centre it
+      // in what is left. (Field at -1 let the spacers eat the gap, and it
+      // fell to the bare magnifier at every width: sweep run 38367575787.)
+      Spacer(minLength: 0).layoutPriority(-1)
       TitleSearchField(model: model, palette: palette)
-        .layoutPriority(-1)
-      Spacer(minLength: 0)
+      Spacer(minLength: 0).layoutPriority(-1)
       if showsCounter, let sentence = model.counterSentence {
         TitleCounter(counter: model.board.counter(model.scope), channel: model.counterChannel, palette: palette)
           .accessibilityLabel(sentence)

@@ -77,12 +77,17 @@ struct TitleSearchField: View {
   let palette: Tokens.Palette
 
   static let hint = "Search people and messages"
+  static let shortHint = "Search"
   static let maxWidth: CGFloat = 420
+  /// Widest first; the last field step keeps the word and the keys at the
+  /// default 1024 pt window, and only a narrower bar drops to the magnifier.
+  static let widths: [CGFloat] = [maxWidth, 300, 230]
+  static let compactWidth: CGFloat = 150
 
-  private func field(width: CGFloat) -> some View {
+  private func field(width: CGFloat, hint: String = Self.hint) -> some View {
     HStack(spacing: 6) {
       Image(systemName: "magnifyingglass").font(.system(size: 11, weight: .medium))
-      Text(Self.hint).font(.system(size: 12)).lineLimit(1)
+      Text(hint).font(.system(size: 12)).lineLimit(1)
       Spacer(minLength: 8)
       Text("\u{21E7}\u{2318}F").font(.system(size: 10, weight: .medium, design: .monospaced))
     }
@@ -107,9 +112,10 @@ struct TitleSearchField: View {
       model.openSearch()
     } label: {
       ViewThatFits(in: .horizontal) {
-        field(width: Self.maxWidth)
-        field(width: 300)
-        field(width: 230)
+        field(width: Self.widths[0])
+        field(width: Self.widths[1])
+        field(width: Self.widths[2])
+        field(width: Self.compactWidth, hint: Self.shortHint)
         icon
       }
       .contentShape(Rectangle())

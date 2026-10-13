@@ -20,6 +20,7 @@ import { createRealDoctorProbes } from './doctor.js';
 import { realServiceManagerRun } from './launchd/launchctl.js';
 import { DAEMON_ERROR_SPECS, isDaemonError } from './errors.js';
 import { acquireInstanceLock, staleReclaimEvent } from './lock.js';
+import { hostPidFrom, watchHost } from './host-watch.js';
 
 // Real execFile-backed ExecFn (s3-execution Scenario 7): deliberately
 // generic (cmd/args are caller-supplied) so this file names no specific
@@ -287,6 +288,26 @@ const shutdown = async (): Promise<void> => {
 };
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
+
+/*
+ * v2 F12: under the Swift host, a host that dies without signalling us
+ * (SIGKILL, crash) must not leave this process holding the lock and the
+ * port. See host-watch.ts. Started after `shutdown` exists, for the same
+ * reason the signal handlers are: never announce a stop path we can't take.
+ */
+const hostPid = hostPidFrom(process.env);
+if (hostPid !== null) {
+  watchHost({
+    hostPid,
+    parentPid: () => process.ppid,
+    onHostGone: () => {
+      console.error(
+        `wemessage daemon: host ${String(hostPid)} is gone; shutting down`,
+      );
+      void shutdown();
+    },
+  });
+}
 
 if (daemon.server.token === null) {
   console.error(

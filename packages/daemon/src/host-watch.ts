@@ -4,7 +4,7 @@
  * Under the Swift host (`WeMessageDaemonHost`) launchd's job is the HOST,
  * not this process. The host forwards TERM/INT/HUP and reaps us, so an
  * orderly stop is already handled. What it cannot handle is its own death:
- * a SIGKILL to the host (a `launchctl kickstart -k`, a crash, the OOM
+ * a SIGKILL to the host (a forced job restart, a crash, the OOM
  * killer) leaves this process reparented to pid 1, still holding the
  * instance lock and the port. launchd then starts a fresh host, whose node
  * refuses with "already running", and KeepAlive turns that into a loop.

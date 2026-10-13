@@ -38,7 +38,7 @@ describe('hostPidFrom', () => {
     ).toBe(4242);
     expect(hostPidFrom({ WEMESSAGE_HOST_PID: '4242' })).toBeNull();
     expect(
-      hostPidFrom({ WEMESSAGE_HOST: 'electron', WEMESSAGE_HOST_PID: '4242' }),
+      hostPidFrom({ WEMESSAGE_HOST: 'node', WEMESSAGE_HOST_PID: '4242' }),
     ).toBeNull();
   });
 

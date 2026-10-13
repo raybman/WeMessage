@@ -113,8 +113,8 @@ struct TitleSearchField: View {
     } label: {
       ViewThatFits(in: .horizontal) {
         field(width: Self.widths[0])
-        field(width: Self.widths[1])
-        field(width: Self.widths[2])
+        field(width: Self.widths[1], hint: Self.shortHint)
+        field(width: Self.widths[2], hint: Self.shortHint)
         field(width: Self.compactWidth, hint: Self.shortHint)
         icon
       }

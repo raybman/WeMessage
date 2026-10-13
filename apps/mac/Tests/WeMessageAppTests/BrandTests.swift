@@ -125,6 +125,10 @@ struct BrandTests {
     #expect(lines[fieldLine - 1].contains("Spacer(minLength: 0).layoutPriority(-1)"))
     #expect(lines[fieldLine + 1].contains("Spacer(minLength: 0).layoutPriority(-1)"))
     #expect(field.contains("field(width: Self.compactWidth, hint: Self.shortHint)"))
+    // The long hint only fits the widest step; narrower steps truncated it
+    // to "Search people and mess..." (sweep-03, run 38371633485).
+    #expect(field.contains("field(width: Self.widths[1], hint: Self.shortHint)"))
+    #expect(field.contains("field(width: Self.widths[2], hint: Self.shortHint)"))
     let shell = try Repo.text(AppHygieneTests.appDir + "/ShellView.swift")
     #expect(shell.contains(".background(TitleWash(mirror: mirror, dark: dark))"))
   }

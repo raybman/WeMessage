@@ -61,6 +61,24 @@ public enum Tokens {
     public static func wash(dark: Bool) -> Wash { dark ? InboundFrost.dark : light }
   }
 
+  /// v2 F11 (Eric, Oct 12 2026: "I like B"): the title bar's brand. The
+  /// mark is the tint (site/logo/mark.svg), the bar carries a tint wash that
+  /// fades out by 55% of its width, and the wordmark's "We" is the house blue
+  /// at the shade that clears 3:1 (large bold text) over that wash: the
+  /// shaded tint in light (the bare tint is 2.69:1 there), the tint in dark
+  /// (the shade is 2.71:1 there). No new blue (TokensTests T10).
+  public enum Brand {
+    public static let mark = tint
+    public static let markStroke = Wash(rgb: onTint, alpha: 0.96)
+    public static let washLight = Wash(rgb: tint, alpha: 0.14)
+    public static let washDark = Wash(rgb: tint, alpha: 0.22)
+    /// Where the wash reaches clear, as a fraction of the bar's width.
+    public static let washEnd = 0.55
+
+    public static func wash(dark: Bool) -> Wash { dark ? washDark : washLight }
+    public static func we(dark: Bool) -> RGB { dark ? tint : outboundShaded }
+  }
+
   public enum Dark {
     public static let ink = RGB(0xF5, 0xF5, 0xF7)
     public static let inkDim = RGB(0xD1, 0xD1, 0xD6)

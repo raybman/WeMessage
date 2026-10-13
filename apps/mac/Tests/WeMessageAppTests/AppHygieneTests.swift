@@ -33,7 +33,7 @@ struct AppHygieneTests {
     "wemessage.rail.whatsapp", "wemessage.rail.linkedin", "wemessage.rail.email", "wemessage.sidebar",
     "wemessage.lens", "wemessage.sidebar.empty", "wemessage.connection", "wemessage.content.empty",
     // v2 S4c, board 01.
-    "wemessage.title", "wemessage.title.counter", "wemessage.lens.recent", "wemessage.lens.needsyou",
+    "wemessage.title", "wemessage.title.counter", "wemessage.title.brand", "wemessage.title.search", "wemessage.lens.recent", "wemessage.lens.needsyou",
     "wemessage.lens.triage", "wemessage.kill.chip", "wemessage.content", "wemessage.inspector",
     "wemessage.inspector.toggle",
     // v2 S4d, board 02.

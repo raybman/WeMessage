@@ -22,6 +22,8 @@ enum ID {
   // v2 S4c, board 01.
   static let title = "wemessage.title"
   static let titleCounter = "wemessage.title.counter"
+  static let titleBrand = "wemessage.title.brand"
+  static let titleSearch = "wemessage.title.search"
   static let lensRecent = "wemessage.lens.recent"
   static let lensNeedsYou = "wemessage.lens.needsyou"
   static let lensTriage = "wemessage.lens.triage"

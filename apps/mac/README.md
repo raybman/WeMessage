@@ -136,6 +136,8 @@ equal):
 - `wemessage.title`: the title bar's scope title
 - `wemessage.title.counter`: the dated counter; its value is the sentence
   ("N left as of hh:mm:ss", "Clear hh:mm:ss", or cannot say with the reason)
+- `wemessage.title.brand`: the mark and wordmark after the traffic lights, labelled WeMessage
+- `wemessage.title.search`: the search field in the title bar; pressing it opens search (as shift-cmd-F)
 - `wemessage.lens`: the lens group in the title bar
 - `wemessage.lens.recent`: the Recent segment
 - `wemessage.lens.needsyou`: the Needs You segment; its value is the count, or

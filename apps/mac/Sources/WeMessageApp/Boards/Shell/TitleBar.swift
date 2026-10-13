@@ -2,12 +2,14 @@ import SwiftUI
 import WeMessageKit
 
 /// Board 01's title bar (wireframe 01.B): the 78 pt band the traffic lights
-/// keep, the scope's title, the dated counter (D-UI-22), the lens segments
+/// keep, the brand lockup and the search field (v2 F11, header B), the
+/// scope's title, the dated counter (D-UI-22), the lens segments
 /// with the Needs You count, the Triage button and the kill chip at the
 /// trailing edge. Transparent over the window frost, like every pane.
 struct TitleBar: View {
   @Bindable var model: ShellModel
   let palette: Tokens.Palette
+  @Environment(\.colorScheme) private var scheme
 
   /// The leading band the hidden title bar leaves to the traffic lights.
   static let lightsReserve: CGFloat = 78
@@ -28,12 +30,17 @@ struct TitleBar: View {
   var body: some View {
     HStack(spacing: 16) {
       Color.clear.frame(width: Self.lightsReserve - 16, height: 1).accessibilityHidden(true)
+      // v2 F11 (header B): the brand lockup, then the scope's title.
+      BrandLockup(palette: palette, dark: scheme == .dark)
       Text(title)
         .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(Tokens.color(palette.ink))
         .lineLimit(1)
         .fixedSize()
         .accessibilityIdentifier(ShellID.title)
+      Spacer(minLength: 0)
+      TitleSearchField(model: model, palette: palette)
+        .layoutPriority(-1)
       Spacer(minLength: 0)
       if showsCounter, let sentence = model.counterSentence {
         TitleCounter(counter: model.board.counter(model.scope), channel: model.counterChannel, palette: palette)
@@ -138,10 +145,7 @@ struct LensPicker: View {
         segment(.recent, Text("Recent"))
           .accessibilityIdentifier(ShellID.lensRecent)
         Rectangle().fill(rule).frame(width: 1).accessibilityHidden(true)
-        segment(
-          .needsYou,
-          count.map { Text("Needs You \(Text(String($0)).fontWeight(.bold))") } ?? Text("Needs You")
-        )
+        segment(.needsYou, Text("Needs You"), badge: count)
         .accessibilityValue(count.map(String.init) ?? "")
         .accessibilityIdentifier(ShellID.lensNeedsYou)
       }
@@ -176,13 +180,27 @@ struct LensPicker: View {
     .accessibilityIdentifier(ShellID.lens)
   }
 
-  private func segment(_ lens: ShellModel.Lens, _ text: Text) -> some View {
+  /// v2 F11: a count rides in a badge, the shaded tint under white bold
+  /// (4.73:1), so "4 need you" reads from across the room whichever lens
+  /// is on. Zero draws no badge.
+  private func segment(_ lens: ShellModel.Lens, _ text: Text, badge: Int? = nil) -> some View {
     Button {
       model.choose(lens)
     } label: {
-      text
-        .font(.system(size: 10, weight: .medium))
-        .foregroundColor(label(on(lens)))
+      HStack(spacing: 5) {
+        text
+          .font(.system(size: 10, weight: .medium))
+          .foregroundColor(label(on(lens)))
+        if let badge, badge > 0 {
+          Text(String(badge))
+            .font(.system(size: 10, weight: .bold))
+            .monospacedDigit()
+            .foregroundColor(Tokens.color(Tokens.onTint))
+            .padding(.horizontal, 5)
+            .frame(minWidth: 16, minHeight: 15)
+            .background(Capsule().fill(Tokens.color(Tokens.outboundShaded)))
+        }
+      }
         .lineLimit(1)
         .fixedSize()
         .padding(.vertical, 6)

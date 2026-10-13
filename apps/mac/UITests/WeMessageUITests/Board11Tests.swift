@@ -70,6 +70,29 @@ final class Board11Tests: XCTestCase {
     try await QueueUI.assertJournal("board 11 indexing")
   }
 
+  /// v2 F11, header B: the title bar carries the WeMessage lockup and a
+  /// search field; pressing the field opens the same search shift-cmd-F
+  /// does. One light launch. Shot: board-01-header-b-light.png.
+  @MainActor
+  func testHeaderBSearchFieldLight() async throws {
+    try await FakeDaemon.scenario("search")
+    let app = UITestApp.make(appearance: "light", reduceTransparency: false)
+    app.launch()
+    defer { app.terminate() }
+    XCTAssertTrue(UITestApp.shellElement(app).waitForExistence(timeout: UITestApp.timeout), "the shell never appeared")
+    let brand = QueueUI.element(app, ID.titleBrand)
+    XCTAssertTrue(brand.waitForExistence(timeout: UITestApp.timeout), "no brand lockup in the title bar")
+    XCTAssertEqual(QueueUI.label(app, ID.titleBrand), "WeMessage")
+    let field = QueueUI.element(app, ID.titleSearch)
+    XCTAssertTrue(field.waitForExistence(timeout: UITestApp.timeout), "no search field in the title bar")
+    XCTAssertFalse(QueueUI.element(app, ID.search).exists, "search is open before the field is pressed")
+    QueueUI.settle()
+    glance(app, name: "board-01-header-b-light.png")
+    field.click()
+    XCTAssertTrue(QueueUI.element(app, ID.search).waitForExistence(timeout: UITestApp.timeout), "the title search field opened no search")
+    try await QueueUI.assertJournal("header B search field")
+  }
+
   @MainActor
   private func results(_ app: XCUIApplication) -> Int {
     QueueUI.count(app, containing: ID.searchResultPrefix)

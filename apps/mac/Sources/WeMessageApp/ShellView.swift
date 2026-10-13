@@ -15,6 +15,9 @@ enum ShellID {
   static let connection = "wemessage.connection"
   static let title = "wemessage.title"
   static let titleCounter = "wemessage.title.counter"
+  /// v2 F11, header B: the brand lockup and the search field.
+  static let titleBrand = "wemessage.title.brand"
+  static let titleSearch = "wemessage.title.search"
   static let lens = "wemessage.lens"
   static let lensRecent = "wemessage.lens.recent"
   static let lensNeedsYou = "wemessage.lens.needsyou"
@@ -545,6 +548,7 @@ struct ShellView: View {
       .padding(.top, Self.titleBand + 0.5)
       VStack(spacing: 0) {
         TitleBar(model: model, palette: palette)
+          .background(TitleWash(mirror: mirror, dark: dark))
         Hairline(mirror: mirror, palette: palette, dark: dark, horizontal: true)
       }
       if model.freshnessPinned || model.freshnessHover {

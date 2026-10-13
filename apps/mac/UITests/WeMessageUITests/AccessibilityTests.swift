@@ -231,8 +231,8 @@ final class AccessibilityTests: XCTestCase {
     // puts the 52pt title band above the rail, so Tab walks the title bar
     // first (lens, then the kill chip) and then the rail. Record every stop
     // so a wrong order reads as the path it took. Nothing outside the rail,
-    // the lens and the chip may take a stop: rows and the content pane
-    // stay out of the loop.
+    // the title search field (v2 F11), the lens and the chip may take a
+    // stop: rows and the content pane stay out of the loop.
     let lensStops = [ID.lens, ID.lensRecent, ID.lensNeedsYou, ID.lensTriage]
     var path: [String] = []
     var firstLens: Int?
@@ -254,8 +254,11 @@ final class AccessibilityTests: XCTestCase {
     if let lens = firstLens, let chip = chipAt {
       XCTAssertLessThan(lens, chip, "the kill chip came before the lens; stops: \(path)")
     }
-    let allowed = Set(Self.railIDs + lensStops + [ID.killChip, ""])
-    XCTAssertEqual(path.filter { !allowed.contains($0) }, [], "Tab stopped outside the rail, lens and chip; stops: \(path)")
+    let allowed = Set(Self.railIDs + lensStops + [ID.titleSearch, ID.killChip, ""])
+    XCTAssertEqual(path.filter { !allowed.contains($0) }, [], "Tab stopped outside the rail, search field, lens and chip; stops: \(path)")
+    if let search = path.firstIndex(of: ID.titleSearch), let lens = firstLens {
+      XCTAssertLessThan(search, lens, "the search field sits before the lens in the bar; stops: \(path)")
+    }
 
     // cmd-T selects Triage.
     app.typeKey("t", modifierFlags: .command)

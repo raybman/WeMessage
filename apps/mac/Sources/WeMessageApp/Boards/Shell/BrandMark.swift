@@ -59,7 +59,10 @@ struct BrandLockup: View {
         .lineLimit(1)
         .fixedSize()
     }
+    // One element, read as text: ignored alone a stack is role Other, which
+    // the audit fails as "Unknown role" (run 38367575787).
     .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(.isStaticText)
     .accessibilityLabel("WeMessage")
     .accessibilityIdentifier(ShellID.titleBrand)
   }

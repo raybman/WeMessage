@@ -113,6 +113,7 @@ struct BrandTests {
     let lockup = AppHygieneTests.block("BrandLockup", in: brand)
     #expect(lockup.contains(#".accessibilityLabel("WeMessage")"#))
     #expect(lockup.contains(".accessibilityIdentifier(ShellID.titleBrand)"))
+    #expect(lockup.contains(".accessibilityAddTraits(.isStaticText)"), "an ignored stack with no role audits as Unknown role")
     let bar = AppHygieneTests.block("TitleBar", in: try Repo.text(AppHygieneTests.appDir + "/Boards/Shell/TitleBar.swift"))
     #expect(bar.contains("BrandLockup(palette:"))
     #expect(bar.contains("TitleSearchField(model: model"))
